@@ -89,7 +89,13 @@ jobs:
         run: git diff -- Pines.xcodeproj project.yml || true
 
       - name: Resolve package dependencies
-        run: xcodebuild -resolvePackageDependencies -project Pines.xcodeproj -scheme Pines
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project Pines.xcodeproj \
+            -scheme Pines \
+            -skipMacroValidation \
+            -skipPackagePluginValidation
 
       - name: Build iOS app without signing
         run: |
@@ -100,6 +106,8 @@ jobs:
             -scheme Pines \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
             build | tee build/xcodebuild.log
 

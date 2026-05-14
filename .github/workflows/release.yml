@@ -103,6 +103,8 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath build/Pines.xcarchive \
             -derivedDataPath build/DerivedData \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
             archive | tee build/archive.log
 
