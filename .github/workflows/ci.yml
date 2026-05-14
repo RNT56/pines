@@ -80,6 +80,11 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Ensure iOS platform is installed
+        run: |
+          xcodebuild -downloadPlatform iOS
+          xcodebuild -showsdks
+
       - name: Report generated project drift
         run: git diff -- Pines.xcodeproj project.yml || true
 

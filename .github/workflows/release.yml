@@ -79,6 +79,11 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Ensure iOS platform is installed
+        run: |
+          xcodebuild -downloadPlatform iOS
+          xcodebuild -showsdks
+
       - name: Public repo hygiene
         run: bash scripts/ci/check-public-hygiene.sh
 
