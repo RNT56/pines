@@ -51,16 +51,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 26 when available
+      - name: Select Xcode with iPhoneOS SDK
         run: |
-          if [ -d /Applications/Xcode_26.5.0.app ]; then
-            sudo xcode-select -s /Applications/Xcode_26.5.0.app
-          elif [ -d /Applications/Xcode_26.4.0.app ]; then
-            sudo xcode-select -s /Applications/Xcode_26.4.0.app
-          elif [ -d /Applications/Xcode_26.0.app ]; then
-            sudo xcode-select -s /Applications/Xcode_26.0.app
+          selected=""
+          for xcode in /Applications/Xcode*.app; do
+            [ -d "$xcode" ] || continue
+            sudo xcode-select -s "$xcode"
+            if xcodebuild -showsdks | grep -q 'iphoneos'; then
+              selected="$xcode"
+              break
+            fi
+          done
+          if [ -z "$selected" ]; then
+            echo "No installed Xcode with an iPhoneOS SDK was found." >&2
+            exit 1
           fi
+          echo "Selected $selected"
           xcodebuild -version
+          xcodebuild -showsdks
 
       - name: Install XcodeGen
         run: |
@@ -81,6 +89,7 @@ jobs:
       - name: Build iOS app without signing
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild \
             -project Pines.xcodeproj \
             -scheme Pines \
