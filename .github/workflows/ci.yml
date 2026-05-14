@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift-core:
+    name: Swift core checks
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print tool versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Public repo hygiene
+        run: bash scripts/ci/check-public-hygiene.sh
+
+      - name: Build Swift package
+        run: swift build
+
+      - name: Run core verification
+        run: swift run PinesCoreTestRunner
+
+  xcode-project:
+    name: Xcode project build
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26 when available
+        run: |
+          if [ -d /Applications/Xcode_26.5.0.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.5.0.app
+          elif [ -d /Applications/Xcode_26.4.0.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.4.0.app
+          elif [ -d /Applications/Xcode_26.0.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.0.app
+          fi
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Check generated project drift
+        run: git diff --exit-code -- Pines.xcodeproj project.yml
+
+      - name: Resolve package dependencies
+        run: xcodebuild -resolvePackageDependencies -project Pines.xcodeproj -scheme Pines
+
+      - name: Build iOS app without signing
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Pines.xcodeproj \
+            -scheme Pines \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tee build/xcodebuild.log
+
+      - name: Upload Xcode build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 14
