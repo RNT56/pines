@@ -1,0 +1,74 @@
+name: Pines
+options:
+  bundleIdPrefix: com.schtack
+  deploymentTarget:
+    iOS: "26.0"
+  minimumXcodeGenVersion: "2.44.1"
+packages:
+  PinesCore:
+    path: .
+  MLXSwift:
+    url: https://github.com/ml-explore/mlx-swift
+    from: 0.31.0
+  MLXSwiftLM:
+    url: https://github.com/ml-explore/mlx-swift-lm
+    from: 3.31.3
+  SwiftHuggingFace:
+    url: https://github.com/huggingface/swift-huggingface.git
+    from: 0.9.0
+  SwiftTransformers:
+    url: https://github.com/huggingface/swift-transformers
+    from: 1.3.0
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  Pines:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Pines
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.schtack.pines
+        PRODUCT_NAME: pines
+        INFOPLIST_FILE: Pines/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: Pines/Pines.entitlements
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - package: PinesCore
+        product: PinesCore
+      - package: MLXSwift
+        product: MLX
+      - package: MLXSwift
+        product: MLXNN
+      - package: MLXSwiftLM
+        product: MLXLLM
+      - package: MLXSwiftLM
+        product: MLXVLM
+      - package: MLXSwiftLM
+        product: MLXEmbedders
+      - package: MLXSwiftLM
+        product: MLXLMCommon
+      - package: MLXSwiftLM
+        product: MLXHuggingFace
+      - package: SwiftHuggingFace
+        product: HuggingFace
+      - package: SwiftTransformers
+        product: Tokenizers
+schemes:
+  Pines:
+    build:
+      targets:
+        Pines: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true

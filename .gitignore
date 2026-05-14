@@ -1,0 +1,28 @@
+# Xcode
+DerivedData/
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+*.xcscmblueprint
+xcuserdata/
+
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Local secrets and environment
+.env
+.env.*
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+
+# Logs and temporary files
+*.log
+tmp/
+Temp/

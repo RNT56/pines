@@ -1,0 +1,77 @@
+# Design System
+
+The app uses a single environment-driven design system in `PinesDesignSystem.swift`. Screens should not hard-code palette, spacing, material, or motion choices. They should consume `\.pinesTheme`.
+
+## Theme Templates
+
+The current templates are:
+
+- `Evergreen`: default local-first look with pine green, glass cyan, and calm surfaces.
+- `Graphite`: dense professional workspace with neutral contrast.
+- `Aurora`: cooler research surface with brighter blue/violet accents.
+- `Paper`: warmer reading and vault-focused layout.
+
+## Interface Modes
+
+Each template supports:
+
+- `System`
+- `Light`
+- `Dark`
+
+The selected mode is applied through `preferredColorScheme`, while the resolved theme is injected through the SwiftUI environment.
+
+## Covered Style Surface
+
+`PinesTheme` controls:
+
+- semantic colors
+- typography
+- spacing
+- radii
+- strokes
+- shadows
+- materials
+- motion curves
+- panel styling
+- empty states
+- metric pills
+- boot mark
+- theme preview cards
+
+This means new screens should be visually complete by default if they use the provided components and environment values.
+
+## Usage
+
+Read the theme from the environment:
+
+```swift
+@Environment(\.pinesTheme) private var theme
+```
+
+Use semantic values:
+
+```swift
+Text("Models")
+    .font(theme.typography.title)
+    .foregroundStyle(theme.colors.primaryText)
+    .padding(theme.spacing.large)
+    .background(theme.colors.surface)
+```
+
+Use shared modifiers:
+
+```swift
+content
+    .pinesPanel()
+    .pinesAppBackground()
+```
+
+## Rules
+
+- Do not introduce feature-local color palettes.
+- Do not hard-code light/dark colors in views.
+- Keep cards at 8 pt radius unless the theme radius changes.
+- Use semantic colors for states: success, warning, danger, info, accent.
+- Respect Reduce Motion when adding custom animation.
+- Keep dense operational screens scannable; avoid marketing-style hero layouts.
