@@ -82,8 +82,18 @@ jobs:
 
       - name: Ensure iOS platform is installed
         run: |
-          xcodebuild -downloadPlatform iOS
+          if xcodebuild -showsdks | grep -q 'iphoneos'; then
+            echo "iPhoneOS SDK is already available."
+            exit 0
+          fi
+          if ! xcodebuild -downloadPlatform iOS; then
+            echo "::warning::xcodebuild could not download the iOS platform on this runner."
+          fi
           xcodebuild -showsdks
+          if ! xcodebuild -showsdks | grep -q 'iphoneos'; then
+            echo "No iPhoneOS SDK is available after platform setup." >&2
+            exit 1
+          fi
 
       - name: Report generated project drift
         run: git diff -- Pines.xcodeproj project.yml || true
