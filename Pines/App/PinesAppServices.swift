@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 import PinesCore
 
-final class PinesAppServices {
+final class PinesAppServices: @unchecked Sendable {
     let secretStore: any SecretStore
     let modelCatalog: HuggingFaceModelCatalogService
     let preflightClassifier: ModelPreflightClassifier
