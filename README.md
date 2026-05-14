@@ -1,4 +1,8 @@
-# pines
+<p align="center">
+  <img src="Pines/Assets.xcassets/AppIcon.appiconset/Icon-1024.png" alt="pines logo" width="144" height="144">
+</p>
+
+<h1 align="center">pines</h1>
 
 `pines` is an iOS 26-only, local-first AI workbench scaffolded for MLX Swift inference.
 
