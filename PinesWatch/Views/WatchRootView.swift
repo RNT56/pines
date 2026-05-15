@@ -21,6 +21,13 @@ struct WatchRootView: View {
                     }
                 }
 
+                Section("Diagnostics") {
+                    WatchDiagnosticRow(title: "Runtime", value: model.phoneStatus.runtimeReady ? "Ready" : "Open iPhone")
+                    WatchDiagnosticRow(title: "Reachable", value: model.phoneStatus.reachable ? "Yes" : "No")
+                    WatchDiagnosticRow(title: "Paired", value: model.phoneStatus.paired ? "Yes" : "No")
+                    WatchDiagnosticRow(title: "Installed", value: model.phoneStatus.watchAppInstalled ? "Yes" : "No")
+                }
+
                 if !model.pendingRequests.isEmpty {
                     Section("Pending") {
                         ForEach(model.pendingRequests) { request in
@@ -98,6 +105,22 @@ struct WatchRootView: View {
                 )
             }
         }
+    }
+}
+
+private struct WatchDiagnosticRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
+        .font(.caption2)
     }
 }
 

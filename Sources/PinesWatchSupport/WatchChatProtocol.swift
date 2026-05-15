@@ -122,7 +122,7 @@ public enum WatchChatCodec {
     }
 }
 
-public enum WatchChatProtocolError: LocalizedError, Sendable {
+public enum WatchChatProtocolError: LocalizedError, Equatable, Sendable {
     case missingEnvelope
     case missingPayload
     case unsupportedVersion(Int)

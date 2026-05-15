@@ -14,6 +14,11 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     @Published var isWorking = false
     @Published var pendingRequestCount = 0
     @Published private(set) var pendingRequests: [PendingWatchRequest] = []
+    @Published private(set) var phoneStatus = WatchPhoneStatus(
+        reachable: false,
+        runtimeReady: false,
+        summary: "Connecting"
+    )
 
     let quickReplies = [
         "Continue",
@@ -150,6 +155,9 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
         Task { @MainActor in
             self.isReachable = isReachable
             self.statusText = statusText
+            if isReachable {
+                self.retryQueuedPendingRequests()
+            }
         }
     }
 
@@ -160,6 +168,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
             self.statusText = isReachable ? "Connected" : "Open Pines on iPhone"
             if isReachable {
                 self.refresh()
+                self.retryQueuedPendingRequests()
             }
         }
     }
@@ -299,6 +308,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
             switch envelope.kind {
             case .phoneStatus:
                 let status = try WatchChatCodec.decode(WatchPhoneStatus.self, from: envelope)
+                phoneStatus = status
                 isReachable = status.reachable
                 statusText = status.summary
             case .snapshot:
@@ -344,6 +354,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
         selectedConversationID = snapshot.selectedConversationID
         messages = snapshot.messages
         activeRunID = snapshot.activeRunID
+        phoneStatus = snapshot.status
         isReachable = snapshot.status.reachable
         statusText = snapshot.status.summary
         isWorking = snapshot.activeRunID != nil
@@ -410,6 +421,14 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
         guard let index = pendingRequests.firstIndex(where: { $0.requestID == requestID }) else { return }
         pendingRequests[index].isQueued = true
         savePendingRequests()
+    }
+
+    private func retryQueuedPendingRequests() {
+        let queued = pendingRequests.filter(\.isQueued)
+        guard !queued.isEmpty else { return }
+        for request in queued {
+            retryPendingRequest(request)
+        }
     }
 
     private func completePendingRequest(_ requestID: UUID) {
