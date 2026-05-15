@@ -333,13 +333,14 @@ struct WatchChatOrchestrator {
     }
 
     private func defaultModelID() async throws -> ModelID? {
+        let installs = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
+        let installedTextModels = installs.filter { $0.state == .installed && $0.modalities.contains(.text) }
         if let settings = try? await services.settingsRepository?.loadSettings(),
-           let modelID = settings.defaultModelID {
+           let modelID = settings.defaultModelID,
+           installedTextModels.contains(where: { $0.modelID == modelID }) {
             return modelID
         }
-        let installs = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
-        return installs.first { $0.state == .installed && $0.modalities.contains(.text) }?.modelID
-            ?? installs.first { $0.modalities.contains(.text) }?.modelID
+        return installedTextModels.first?.modelID
     }
 
     private func selectProvider(conversationID: UUID) async throws -> ProviderSelection {
@@ -347,13 +348,11 @@ struct WatchChatOrchestrator {
         let conversations = try await services.conversationRepository?.listConversations() ?? []
         let configuredModelID = settings?.defaultModelID
             ?? conversations.first { $0.id == conversationID }?.defaultModelID
-        let modelID = if let configuredModelID {
-            configuredModelID
-        } else if let installedModelID = try await defaultModelID() {
-            installedModelID
-        } else {
-            ModelID(rawValue: "mlx-community/Llama-3.2-1B-Instruct-4bit")
-        }
+        let installs = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
+        let installedTextModels = installs.filter { $0.state == .installed && $0.modalities.contains(.text) }
+        let localInstall = configuredModelID
+            .flatMap { modelID in installedTextModels.first { $0.modelID == modelID } }
+            ?? installedTextModels.first
         let cloudProviders = try await services.cloudProviderRepository?.listProviders() ?? []
         let cloudCandidate = cloudProviders
             .first { $0.enabledForAgents }
@@ -374,19 +373,26 @@ struct WatchChatOrchestrator {
 
         switch route.destination {
         case .local:
+            guard let localInstall else {
+                throw WatchChatError.unavailable("Download and select a local text model before starting local chat.")
+            }
+            try await services.mlxRuntime.load(localInstall)
             return ProviderSelection(
                 provider: services.mlxRuntime,
                 providerID: services.mlxRuntime.localProviderID,
-                modelID: modelID
+                modelID: localInstall.modelID
             )
         case let .cloud(providerID):
             guard let cloudCandidate else {
                 throw WatchChatError.unavailable("No enabled cloud provider is configured for agents.")
             }
+            guard let cloudModelID = cloudCandidate.0.defaultModelID ?? localInstall?.modelID else {
+                throw WatchChatError.unavailable("Configure a default model for the selected cloud provider.")
+            }
             return ProviderSelection(
                 provider: cloudCandidate.1,
                 providerID: providerID,
-                modelID: cloudCandidate.0.defaultModelID ?? modelID
+                modelID: cloudModelID
             )
         case let .denied(reason):
             throw reason

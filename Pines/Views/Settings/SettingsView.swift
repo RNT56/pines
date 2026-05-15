@@ -20,8 +20,9 @@ struct SettingsView: View {
             List(selection: $selectedSectionID) {
                 Section("Settings") {
                     ForEach(appModel.settingsSections) { section in
-                        SettingsSectionRow(section: section, isSelected: selectedSectionID == section.id)
-                            .tag(section.id)
+                        NavigationLink(value: section.id) {
+                            SettingsSectionRow(section: section, isSelected: selectedSectionID == section.id)
+                        }
                     }
                 }
             }

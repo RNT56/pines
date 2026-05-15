@@ -524,7 +524,7 @@ struct PinesBootMarkView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
-            PinesAmbientBackground()
+            PinesAmbientBackground(animates: true)
             Rectangle()
                 .fill(theme.colors.glassSurface)
         }
@@ -1045,6 +1045,7 @@ struct PinesProgressBar: View {
 struct PinesAmbientBackground: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var animates = false
     @State private var drift = false
 
     var body: some View {
@@ -1055,7 +1056,7 @@ struct PinesAmbientBackground: View {
 
                 ambientLines(size: proxy.size)
                     .stroke(theme.colors.accent.opacity(theme.ambient.lineOpacity), lineWidth: theme.stroke.hairline)
-                    .offset(x: reduceMotion ? 0 : (drift ? theme.ambient.drift : -theme.ambient.drift * 0.4))
+                    .offset(x: lineOffset)
 
                 Image("PinesMark")
                     .resizable()
@@ -1076,7 +1077,7 @@ struct PinesAmbientBackground: View {
             }
             .clipped()
             .onAppear {
-                guard !reduceMotion else { return }
+                guard animates, !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
                     drift = true
                 }
@@ -1084,6 +1085,11 @@ struct PinesAmbientBackground: View {
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private var lineOffset: CGFloat {
+        guard animates, !reduceMotion else { return 0 }
+        return drift ? theme.ambient.drift : -theme.ambient.drift * 0.4
     }
 
     private func ambientLines(size: CGSize) -> Path {

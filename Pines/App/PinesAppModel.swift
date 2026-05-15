@@ -39,6 +39,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private var mcpSamplingRequestCountByServer: [MCPServerID: Int] = [:]
     private var isShowingModelDiscoveryResults = false
 
+    private func setIfChanged<Value: Equatable>(
+        _ keyPath: ReferenceWritableKeyPath<PinesAppModel, Value>,
+        _ value: Value
+    ) {
+        guard self[keyPath: keyPath] != value else { return }
+        self[keyPath: keyPath] = value
+    }
+
     var modelSuggestions: [String] {
         Array(
             models
@@ -93,14 +101,21 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         do {
             if let settingsRepository = services.settingsRepository {
                 let settings = try await settingsRepository.loadSettings()
-                executionMode = settings.executionMode
-                storeConfiguration = settings.storeConfiguration
-                defaultModelID = settings.defaultModelID
-                selectedThemeTemplate = PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate
-                interfaceMode = PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode
+                setIfChanged(\.executionMode, settings.executionMode)
+                setIfChanged(\.storeConfiguration, settings.storeConfiguration)
+                setIfChanged(\.defaultModelID, settings.defaultModelID)
+                setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
+                setIfChanged(\.interfaceMode, PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode)
             }
 
             try await refreshModelPreviews(services: services)
+            if defaultModelID.flatMap(installedModel(for:)) == nil {
+                let normalizedDefault = preferredInstalledTextModel()?.modelID
+                if defaultModelID != normalizedDefault {
+                    defaultModelID = normalizedDefault
+                    await saveSettings(services: services)
+                }
+            }
 
             if let conversationRepository = services.conversationRepository {
                 let conversations = try await conversationRepository.listConversations()
@@ -110,33 +125,33 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     let messages = try await conversationRepository.messages(in: conversation.id)
                     previews.append(Self.threadPreview(from: conversation, messages: messages))
                 }
-                threads = previews
+                setIfChanged(\.threads, previews)
             }
 
             if let vaultRepository = services.vaultRepository {
-                vaultItems = try await vaultRepository.listDocuments().map(Self.vaultPreview(from:))
+                setIfChanged(\.vaultItems, try await vaultRepository.listDocuments().map(Self.vaultPreview(from:)))
             }
 
             if let auditRepository = services.auditRepository {
-                auditEvents = try await auditRepository.list(category: nil, limit: 30)
+                setIfChanged(\.auditEvents, try await auditRepository.list(category: nil, limit: 30))
             }
 
             if let cloudProviderRepository = services.cloudProviderRepository {
-                cloudProviders = try await cloudProviderRepository.listProviders()
+                setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
             }
 
             if let mcpServerRepository = services.mcpServerRepository {
-                mcpServers = try await mcpServerRepository.listMCPServers()
-                mcpTools = try await mcpServerRepository.listMCPTools(serverID: nil)
-                mcpResources = try await mcpServerRepository.listMCPResources(serverID: nil)
-                mcpResourceTemplates = try await mcpServerRepository.listMCPResourceTemplates(serverID: nil)
-                mcpPrompts = try await mcpServerRepository.listMCPPrompts(serverID: nil)
+                setIfChanged(\.mcpServers, try await mcpServerRepository.listMCPServers())
+                setIfChanged(\.mcpTools, try await mcpServerRepository.listMCPTools(serverID: nil))
+                setIfChanged(\.mcpResources, try await mcpServerRepository.listMCPResources(serverID: nil))
+                setIfChanged(\.mcpResourceTemplates, try await mcpServerRepository.listMCPResourceTemplates(serverID: nil))
+                setIfChanged(\.mcpPrompts, try await mcpServerRepository.listMCPPrompts(serverID: nil))
             }
 
             await refreshCredentialStatuses(services: services)
-            serviceError = nil
+            setIfChanged(\.serviceError, nil)
         } catch {
-            serviceError = error.localizedDescription
+            setIfChanged(\.serviceError, error.localizedDescription)
         }
     }
 
@@ -146,15 +161,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 serviceError = "Conversation repository is unavailable."
                 return nil
             }
-            let modelID = defaultModelID
-                ?? models.first(where: { $0.install.state == .installed })?.install.modelID
-                ?? models.first?.install.modelID
+            let modelID = preferredInstalledTextModel()?.modelID
             let conversation = try await repository.createConversation(title: "New chat", defaultModelID: modelID)
             await refreshAll(services: services)
             emitHaptic(.primaryAction)
             return conversation.id
         } catch {
-            serviceError = error.localizedDescription
+            setIfChanged(\.serviceError, error.localizedDescription)
             emitHaptic(.runFailed)
             return nil
         }
@@ -203,11 +216,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 return
             }
 
-            let modelID = defaultModelID
-                ?? threads.first(where: { $0.id == conversationID })?.modelID
-                ?? models.first(where: { $0.install.state == .installed })?.install.modelID
-                ?? models.first?.install.modelID
-                ?? ModelID(rawValue: "mlx-community/Llama-3.2-1B-Instruct-4bit")
+            let localInstall = preferredInstalledTextModel(for: conversationID)
             let availableTools = await services.toolRegistry.listSpecs()
             let cloudCandidate = cloudProviders
                 .first { $0.enabledForAgents }
@@ -229,17 +238,26 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             let selectedModelID: ModelID
             switch route.destination {
             case .local:
+                guard let localInstall else {
+                    serviceError = "Download and select a local text model before starting local chat."
+                    return
+                }
+                try await services.mlxRuntime.load(localInstall)
                 selectedProvider = services.mlxRuntime
                 selectedProviderID = services.mlxRuntime.localProviderID
-                selectedModelID = modelID
+                selectedModelID = localInstall.modelID
             case let .cloud(providerID):
                 guard let cloudCandidate else {
                     serviceError = "No enabled cloud provider is configured for agents."
                     return
                 }
+                guard let cloudModelID = cloudCandidate.0.defaultModelID ?? localInstall?.modelID else {
+                    serviceError = "Configure a default model for the selected cloud provider."
+                    return
+                }
                 selectedProvider = cloudCandidate.1
                 selectedProviderID = providerID
-                selectedModelID = cloudCandidate.0.defaultModelID ?? modelID
+                selectedModelID = cloudModelID
             case let .denied(reason):
                 serviceError = "\(reason)"
                 return
@@ -441,12 +459,33 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return messages
     }
 
+    private func preferredInstalledTextModel(for conversationID: UUID? = nil) -> ModelInstall? {
+        let installedTextModels = models
+            .map(\.install)
+            .filter { install in
+                install.state == .installed && install.modalities.contains(.text)
+            }
+
+        let preferredIDs = [
+            defaultModelID,
+            conversationID.flatMap { id in threads.first { $0.id == id }?.modelID },
+        ].compactMap { $0 }
+
+        for modelID in preferredIDs {
+            if let install = installedTextModels.first(where: { $0.modelID == modelID }) {
+                return install
+            }
+        }
+
+        return installedTextModels.first
+    }
+
     func saveSettings(services: PinesAppServices) async {
         do {
             let snapshot = AppSettingsSnapshot(
                 executionMode: executionMode,
                 storeConfiguration: storeConfiguration,
-                defaultModelID: defaultModelID ?? models.first(where: { $0.install.state == .installed })?.install.modelID,
+                defaultModelID: defaultModelID ?? preferredInstalledTextModel()?.modelID,
                 embeddingModelID: models.first(where: { $0.install.modalities.contains(.embeddings) })?.install.modelID,
                 requireToolApproval: true,
                 braveSearchEnabled: braveSearchCredentialStatus.hasPrefix("Configured"),
@@ -463,20 +502,28 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     func installModel(repository: String, services: PinesAppServices) async {
         do {
             guard let lifecycle = services.modelLifecycleService else {
-                serviceError = "Model lifecycle service is unavailable."
+                setIfChanged(\.serviceError, "Model lifecycle service is unavailable.")
                 return
             }
             try await lifecycle.install(repository: repository)
+            if defaultModelID == nil {
+                let installs = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
+                if let installed = installs.first(where: { $0.repository.caseInsensitiveCompare(repository) == .orderedSame && $0.state == .installed }),
+                   installed.modalities.contains(.text) {
+                    setIfChanged(\.defaultModelID, installed.modelID)
+                    await saveSettings(services: services)
+                }
+            }
             if !isShowingModelDiscoveryResults {
                 try await refreshModelPreviews(services: services)
             }
         } catch InferenceError.cancelled {
-            serviceError = nil
+            setIfChanged(\.serviceError, nil)
             if !isShowingModelDiscoveryResults {
                 try? await refreshModelPreviews(services: services)
             }
         } catch {
-            serviceError = error.localizedDescription
+            setIfChanged(\.serviceError, error.localizedDescription)
             if !isShowingModelDiscoveryResults {
                 try? await refreshModelPreviews(services: services)
             }
@@ -486,24 +533,24 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     func deleteModel(repository: String, services: PinesAppServices) async {
         do {
             guard let lifecycle = services.modelLifecycleService else {
-                serviceError = "Model lifecycle service is unavailable."
+                setIfChanged(\.serviceError, "Model lifecycle service is unavailable.")
                 return
             }
             try await lifecycle.delete(repository: repository)
             if defaultModelID?.rawValue.lowercased() == repository.lowercased() {
-                defaultModelID = nil
+                setIfChanged(\.defaultModelID, nil)
                 await saveSettings(services: services)
             }
             if !isShowingModelDiscoveryResults {
                 try await refreshModelPreviews(services: services)
             }
         } catch InferenceError.cancelled {
-            serviceError = nil
+            setIfChanged(\.serviceError, nil)
             if !isShowingModelDiscoveryResults {
                 try? await refreshModelPreviews(services: services)
             }
         } catch {
-            serviceError = error.localizedDescription
+            setIfChanged(\.serviceError, error.localizedDescription)
             if !isShowingModelDiscoveryResults {
                 try? await refreshModelPreviews(services: services)
             }
@@ -513,7 +560,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     func cancelModelDownload(repository: String, services: PinesAppServices) async {
         do {
             guard let lifecycle = services.modelLifecycleService else {
-                serviceError = "Model lifecycle service is unavailable."
+                setIfChanged(\.serviceError, "Model lifecycle service is unavailable.")
                 return
             }
             try await lifecycle.cancelDownload(repository: repository)
@@ -521,12 +568,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 try await refreshModelPreviews(services: services)
             }
         } catch InferenceError.cancelled {
-            serviceError = nil
+            setIfChanged(\.serviceError, nil)
             if !isShowingModelDiscoveryResults {
                 try? await refreshModelPreviews(services: services)
             }
         } catch {
-            serviceError = error.localizedDescription
+            setIfChanged(\.serviceError, error.localizedDescription)
             if !isShowingModelDiscoveryResults {
                 try? await refreshModelPreviews(services: services)
             }
@@ -534,7 +581,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     }
 
     func selectDefaultModel(_ model: PinesModelPreview, services: PinesAppServices) async {
-        defaultModelID = model.install.modelID
+        guard model.install.state == .installed else {
+            setIfChanged(\.serviceError, "Download the model before selecting it as the default.")
+            return
+        }
+        setIfChanged(\.defaultModelID, model.install.modelID)
         await saveSettings(services: services)
     }
 
@@ -545,8 +596,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         installState: ModelInstallState? = nil,
         services: PinesAppServices
     ) async {
-        isSearchingModels = true
-        modelSearchError = nil
+        setIfChanged(\.isSearchingModels, true)
+        setIfChanged(\.modelSearchError, nil)
         do {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty, task == nil, verification == nil, installState == nil {
@@ -574,14 +625,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         download: downloadByRepository[install.repository.lowercased()]
                     )
                 }
-                models = previews
+                setIfChanged(\.models, previews)
             }
-            isSearchingModels = false
-            serviceError = nil
+            setIfChanged(\.isSearchingModels, false)
+            setIfChanged(\.serviceError, nil)
         } catch {
-            isSearchingModels = false
-            modelSearchError = error.localizedDescription
-            serviceError = error.localizedDescription
+            setIfChanged(\.isSearchingModels, false)
+            setIfChanged(\.modelSearchError, error.localizedDescription)
+            setIfChanged(\.serviceError, error.localizedDescription)
         }
     }
 
@@ -607,9 +658,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             if let index = models.firstIndex(where: { $0.install.repository.caseInsensitiveCompare(repository) == .orderedSame }) {
                 models[index] = preview
             }
-            modelSearchError = nil
+            setIfChanged(\.modelSearchError, nil)
         } catch {
-            modelSearchError = error.localizedDescription
+            setIfChanged(\.modelSearchError, error.localizedDescription)
         }
     }
 
@@ -982,7 +1033,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     await MainActor.run {
                         guard let self else { return }
                         if self.isShowingModelDiscoveryResults {
-                            self.models = self.models.map { preview in
+                            self.setIfChanged(\.models, self.models.map { preview in
                                 let key = preview.install.repository.lowercased()
                                 if let install = installByRepository[key] {
                                     return Self.modelPreview(
@@ -1002,15 +1053,15 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                                     runtime: services.mlxRuntime,
                                     download: downloadByRepository[key]
                                 )
-                            }
+                            })
                         } else {
-                            self.models = installs.map { install in
+                            self.setIfChanged(\.models, installs.map { install in
                                 Self.modelPreview(
                                     from: install,
                                     runtime: services.mlxRuntime,
                                     download: downloadByRepository[install.repository.lowercased()]
                                 )
-                            }
+                            })
                         }
                     }
                 }
@@ -1022,15 +1073,15 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 for await downloads in downloadRepository.observeDownloads() {
                     await MainActor.run {
                         guard let self else { return }
-                        self.modelDownloads = downloads
+                        self.setIfChanged(\.modelDownloads, downloads)
                         let downloadByRepository = Self.latestDownloadByRepository(downloads)
-                        self.models = self.models.map { preview in
+                        self.setIfChanged(\.models, self.models.map { preview in
                             Self.modelPreview(
                                 from: preview.install,
                                 runtime: services.mlxRuntime,
                                 download: downloadByRepository[preview.install.repository.lowercased()]
                             )
-                        }
+                        })
                     }
                 }
             }
@@ -1040,14 +1091,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             Task { [weak self] in
                 for await settings in settingsRepository.observeSettings() {
                     await MainActor.run {
-                        self?.defaultModelID = settings.defaultModelID
-                        self?.executionMode = settings.executionMode
-                        self?.storeConfiguration = settings.storeConfiguration
+                        self?.setIfChanged(\.defaultModelID, settings.defaultModelID)
+                        self?.setIfChanged(\.executionMode, settings.executionMode)
+                        self?.setIfChanged(\.storeConfiguration, settings.storeConfiguration)
                         if let theme = PinesThemeTemplate(rawValue: settings.themeTemplate) {
-                            self?.selectedThemeTemplate = theme
+                            self?.setIfChanged(\.selectedThemeTemplate, theme)
                         }
                         if let mode = PinesInterfaceMode(rawValue: settings.interfaceMode) {
-                            self?.interfaceMode = mode
+                            self?.setIfChanged(\.interfaceMode, mode)
                         }
                     }
                 }
@@ -1067,7 +1118,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         previews.append(preview)
                     }
                     await MainActor.run {
-                        self?.threads = previews
+                        self?.setIfChanged(\.threads, previews)
                     }
                 }
             }
@@ -1077,7 +1128,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             Task { [weak self] in
                 for await documents in vaultRepository.observeDocuments() {
                     await MainActor.run {
-                        self?.vaultItems = documents.map(Self.vaultPreview(from:))
+                        self?.setIfChanged(\.vaultItems, documents.map(Self.vaultPreview(from:)))
                     }
                 }
             }
@@ -1087,7 +1138,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             Task { [weak self] in
                 for await events in auditRepository.observeRecent(limit: 30) {
                     await MainActor.run {
-                        self?.auditEvents = events
+                        self?.setIfChanged(\.auditEvents, events)
                     }
                 }
             }
@@ -1097,7 +1148,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             Task { [weak self] in
                 for await providers in cloudProviderRepository.observeProviders() {
                     await MainActor.run {
-                        self?.cloudProviders = providers
+                        self?.setIfChanged(\.cloudProviders, providers)
                     }
                 }
             }
@@ -1107,28 +1158,28 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             Task { [weak self] in
                 for await servers in mcpServerRepository.observeMCPServers() {
                     await MainActor.run {
-                        self?.mcpServers = servers
+                        self?.setIfChanged(\.mcpServers, servers)
                     }
                 }
             }
             Task { [weak self] in
                 for await tools in mcpServerRepository.observeMCPTools() {
                     await MainActor.run {
-                        self?.mcpTools = tools
+                        self?.setIfChanged(\.mcpTools, tools)
                     }
                 }
             }
             Task { [weak self] in
                 for await resources in mcpServerRepository.observeMCPResources() {
                     await MainActor.run {
-                        self?.mcpResources = resources
+                        self?.setIfChanged(\.mcpResources, resources)
                     }
                 }
             }
             Task { [weak self] in
                 for await prompts in mcpServerRepository.observeMCPPrompts() {
                     await MainActor.run {
-                        self?.mcpPrompts = prompts
+                        self?.setIfChanged(\.mcpPrompts, prompts)
                     }
                 }
             }
@@ -1233,36 +1284,36 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         let requiresVision = messages.contains { message in
             message.attachments.contains { $0.kind == .image }
         }
-        let localModelID = rankedLocalModelID(for: request, requiresVision: requiresVision)
-            ?? defaultModelID
-            ?? models.first(where: { $0.install.state == .installed })?.install.modelID
-            ?? models.first?.install.modelID
-            ?? ModelID(rawValue: "mlx-community/Llama-3.2-1B-Instruct-4bit")
         let sampling = ChatSampling(
             maxTokens: request.maxTokens ?? 512,
             temperature: Float(request.temperature ?? 0.6)
         )
-        let localChatRequest = ChatRequest(
-            modelID: localModelID,
-            messages: messages,
-            sampling: sampling,
-            allowsTools: !tools.isEmpty,
-            availableTools: tools
-        )
 
-        if let result = try? await runMCPSampling(localChatRequest, provider: services.mlxRuntime, modelID: localModelID) {
-            let returnApproved = await requestMCPSamplingResultApproval(result, serverID: server.id)
-            await auditMCPSampling(
-                server: server,
-                summary: returnApproved ? "Returned MCP sampling result to \(server.displayName)" : "Blocked MCP sampling result for \(server.displayName)",
-                request: request,
-                result: result,
-                services: services
+        if let localModelID = rankedLocalModelID(for: request, requiresVision: requiresVision),
+           let localInstall = installedModel(for: localModelID) {
+            try await services.mlxRuntime.load(localInstall)
+            let localChatRequest = ChatRequest(
+                modelID: localModelID,
+                messages: messages,
+                sampling: sampling,
+                allowsTools: !tools.isEmpty,
+                availableTools: tools
             )
-            guard returnApproved else {
-                throw AgentError.permissionDenied("MCP sampling result was not approved for return.")
+
+            if let result = try? await runMCPSampling(localChatRequest, provider: services.mlxRuntime, modelID: localModelID) {
+                let returnApproved = await requestMCPSamplingResultApproval(result, serverID: server.id)
+                await auditMCPSampling(
+                    server: server,
+                    summary: returnApproved ? "Returned MCP sampling result to \(server.displayName)" : "Blocked MCP sampling result for \(server.displayName)",
+                    request: request,
+                    result: result,
+                    services: services
+                )
+                guard returnApproved else {
+                    throw AgentError.permissionDenied("MCP sampling result was not approved for return.")
+                }
+                return result
             }
-            return result
         }
 
         guard server.byokSamplingEnabled,
@@ -1270,7 +1321,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         else {
             throw InferenceError.providerUnavailable(services.mlxRuntime.localProviderID)
         }
-        let cloudModelID = cloudProvider.defaultModelID ?? localModelID
+        guard let cloudModelID = cloudProvider.defaultModelID else {
+            throw InferenceError.invalidRequest("The selected cloud provider does not define a default model.")
+        }
         let cloudChatRequest = ChatRequest(
             modelID: cloudModelID,
             messages: messages,
@@ -1311,6 +1364,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return candidates.max { left, right in
             samplingModelScore(install: left, preference: preference) < samplingModelScore(install: right, preference: preference)
         }?.modelID
+    }
+
+    private func installedModel(for modelID: ModelID) -> ModelInstall? {
+        models
+            .map(\.install)
+            .first { install in
+                install.modelID == modelID && install.state == .installed
+            }
     }
 
     private func rankedCloudProvider(for request: MCPSamplingRequest, requiresVision: Bool, requiresTools: Bool) -> CloudProviderConfiguration? {
@@ -1604,26 +1665,26 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     }
 
     private func refreshCredentialStatuses(services: PinesAppServices) async {
-        huggingFaceCredentialStatus = (try? await services.huggingFaceCredentialService.readToken())?.isEmpty == false
+        setIfChanged(\.huggingFaceCredentialStatus, (try? await services.huggingFaceCredentialService.readToken())?.isEmpty == false
             ? "Configured"
-            : "Not configured"
-        braveSearchCredentialStatus = (try? await services.secretStore.read(
+            : "Not configured")
+        setIfChanged(\.braveSearchCredentialStatus, (try? await services.secretStore.read(
             service: BraveSearchTool.keychainService,
             account: BraveSearchTool.keychainAccount
-        ))?.isEmpty == false ? "Configured" : "Not configured"
+        ))?.isEmpty == false ? "Configured" : "Not configured")
     }
 
     private func refreshModelPreviews(services: PinesAppServices) async throws {
         let downloads = try await services.modelDownloadRepository?.listDownloads() ?? []
-        modelDownloads = downloads
+        setIfChanged(\.modelDownloads, downloads)
 
         guard let modelRepository = services.modelInstallRepository else {
-            models = []
+            setIfChanged(\.models, [])
             return
         }
 
         let downloadByRepository = Self.latestDownloadByRepository(downloads)
-        models = try await modelRepository
+        let previews = try await modelRepository
             .listInstalledAndCuratedModels()
             .map { install in
                 Self.modelPreview(
@@ -1632,6 +1693,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     download: downloadByRepository[install.repository.lowercased()]
                 )
             }
+        setIfChanged(\.models, previews)
     }
 
     private static func threadPreview(from record: ConversationRecord, messages: [ChatMessage]) -> PinesThreadPreview {
@@ -1639,8 +1701,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return PinesThreadPreview(
             id: record.id,
             title: record.title,
-            modelName: record.defaultModelID?.rawValue.components(separatedBy: "/").last ?? "Local model",
-            modelID: record.defaultModelID ?? ModelID(rawValue: "mlx-community/Llama-3.2-1B-Instruct-4bit"),
+            modelName: record.defaultModelID?.rawValue.components(separatedBy: "/").last ?? "No model selected",
+            modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
             lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
             messages: messages,
             status: record.archived ? .archived : .local,

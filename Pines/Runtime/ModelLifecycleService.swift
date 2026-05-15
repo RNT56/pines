@@ -160,13 +160,32 @@ struct ModelLifecycleService: Sendable {
         try Task.checkCancellation()
         try Self.validateAvailableDiskSpace(for: result.estimatedBytes)
 
+        let files = input.files.filter(Self.shouldDownload)
+        var resolvedFileSizes = Dictionary(
+            uniqueKeysWithValues: files.compactMap { file -> (String, Int64)? in
+                guard let size = file.size, size > 0 else { return nil }
+                return (file.path, size)
+            }
+        )
+        for file in files where resolvedFileSizes[file.path] == nil {
+            if let size = try? await Self.remoteFileSize(
+                repository: repository,
+                revision: revision,
+                file: file,
+                accessToken: accessToken
+            ) {
+                resolvedFileSizes[file.path] = size
+            }
+        }
+        let totalBytes = Self.totalDownloadBytes(for: files, fileSizes: resolvedFileSizes)
+            ?? (result.estimatedBytes > 0 ? result.estimatedBytes : nil)
         let downloadID = UUID()
         var progress = ModelDownloadProgress(
             id: downloadID,
             repository: repository,
             revision: revision,
             status: .queued,
-            totalBytes: result.estimatedBytes
+            totalBytes: totalBytes
         )
         try await downloadRepository.upsertDownload(progress)
 
@@ -194,7 +213,6 @@ struct ModelLifecycleService: Sendable {
         try await installRepository.upsertInstall(install)
 
         do {
-            let files = input.files.filter(Self.shouldDownload)
             var received: Int64 = 0
             var lastProgressWrite = Date.distantPast
 
@@ -216,17 +234,22 @@ struct ModelLifecycleService: Sendable {
                     continue
                 }
 
-                received += Self.partialByteCount(for: destination)
                 try await Self.downloadFile(
                     repository: repository,
                     revision: revision,
                     file: file,
                     destination: destination,
                     accessToken: accessToken
-                ) { bytes in
+                ) { bytes, expectedFileSize in
                     try Task.checkCancellation()
                     received += bytes
                     progress.bytesReceived = received
+                    if let expectedFileSize {
+                        resolvedFileSizes[file.path] = expectedFileSize
+                        if let inferredTotal = Self.totalDownloadBytes(for: files, fileSizes: resolvedFileSizes) {
+                            progress.totalBytes = inferredTotal
+                        }
+                    }
                     let now = Date()
                     guard now.timeIntervalSince(lastProgressWrite) > 0.4 else { return }
                     lastProgressWrite = now
@@ -391,7 +414,7 @@ struct ModelLifecycleService: Sendable {
         file: ModelFileInfo,
         destination: URL,
         accessToken: String?,
-        progress: (Int64) async throws -> Void
+        progress: (Int64, Int64?) async throws -> Void
     ) async throws {
         let encodedRepository = repository
             .split(separator: "/")
@@ -418,6 +441,9 @@ struct ModelLifecycleService: Sendable {
         if offset > 0, http.statusCode == 200 {
             try? FileManager.default.removeItem(at: partial)
         }
+        let resumedBytes = http.statusCode == 206 ? offset : 0
+        let expectedFileSize = Self.expectedFileSize(from: response, http: http, offset: offset, declaredSize: file.size)
+        try await progress(resumedBytes, expectedFileSize)
 
         if !FileManager.default.fileExists(atPath: partial.path) {
             FileManager.default.createFile(atPath: partial.path, contents: nil)
@@ -433,20 +459,47 @@ struct ModelLifecycleService: Sendable {
             buffer.append(byte)
             if buffer.count >= 64 * 1024 {
                 try handle.write(contentsOf: buffer)
-                try await progress(Int64(buffer.count))
+                try await progress(Int64(buffer.count), expectedFileSize)
                 buffer.removeAll(keepingCapacity: true)
             }
         }
         if !buffer.isEmpty {
             try Task.checkCancellation()
             try handle.write(contentsOf: buffer)
-            try await progress(Int64(buffer.count))
+            try await progress(Int64(buffer.count), expectedFileSize)
         }
 
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
         }
         try FileManager.default.moveItem(at: partial, to: destination)
+    }
+
+    private static func remoteFileSize(
+        repository: String,
+        revision: String,
+        file: ModelFileInfo,
+        accessToken: String?
+    ) async throws -> Int64? {
+        let encodedRepository = repository
+            .split(separator: "/")
+            .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+            .joined(separator: "/")
+        guard let url = URL(string: "https://huggingface.co/\(encodedRepository)/resolve/\(revision)/\(encodedPath(file.path))") else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        if let accessToken = accessToken?.trimmingCharacters(in: .whitespacesAndNewlines), !accessToken.isEmpty {
+            request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (_, http) = try await URLSession.shared.data(for: request)
+        guard (200 ..< 300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return Self.expectedFileSize(from: http, http: http, offset: 0, declaredSize: file.size)
     }
 
     private static func removeStagingDirectory(for repository: String) throws {
@@ -458,13 +511,39 @@ struct ModelLifecycleService: Sendable {
         }
     }
 
-    private static func partialByteCount(for destination: URL) -> Int64 {
-        let partial = destination.appendingPathExtension("part")
-        return byteCount(for: partial)
+    private static func totalDownloadBytes(for files: [ModelFileInfo], fileSizes: [String: Int64]) -> Int64? {
+        guard !files.isEmpty else { return nil }
+        var total: Int64 = 0
+        for file in files {
+            guard let size = fileSizes[file.path], size > 0 else {
+                return nil
+            }
+            total += size
+        }
+        return total
     }
 
     private static func byteCount(for url: URL) -> Int64 {
         (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+    }
+
+    private static func expectedFileSize(
+        from response: URLResponse,
+        http: HTTPURLResponse,
+        offset: Int64,
+        declaredSize: Int64?
+    ) -> Int64? {
+        if let declaredSize, declaredSize > 0 {
+            return declaredSize
+        }
+        if let contentRange = http.value(forHTTPHeaderField: "Content-Range"),
+           let total = contentRange.split(separator: "/").last,
+           let parsed = Int64(total),
+           parsed > 0 {
+            return parsed
+        }
+        guard response.expectedContentLength > 0 else { return nil }
+        return http.statusCode == 206 ? offset + response.expectedContentLength : response.expectedContentLength
     }
 
     private static func isUsableDownloadedFile(_ file: ModelFileInfo, at destination: URL) throws -> Bool {

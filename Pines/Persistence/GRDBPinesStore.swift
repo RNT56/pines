@@ -1473,14 +1473,18 @@ actor GRDBPinesStore:
         Set(rawValue.split(separator: ",").compactMap { ModelModality(rawValue: String($0)) })
     }
 
-    nonisolated private func pollingStream<Value: Sendable>(
+    nonisolated private func pollingStream<Value: Sendable & Equatable>(
         _ load: @escaping @Sendable () async throws -> Value
     ) -> AsyncStream<Value> {
         AsyncStream { continuation in
             let task = Task {
+                var lastValue: Value?
                 while !Task.isCancelled {
                     if let value = try? await load() {
-                        continuation.yield(value)
+                        if lastValue != value {
+                            lastValue = value
+                            continuation.yield(value)
+                        }
                     }
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                 }

@@ -464,44 +464,119 @@ private struct ModelDetailView: View {
 
     private var actionsCard: some View {
         PinesCardSection("Actions", subtitle: "Install, select, or remove this model.", systemImage: "bolt.circle") {
-            PinesAdaptiveButtonRow {
-                Button {
-                    haptics.play(.primaryAction)
-                    Task { await appModel.installModel(repository: model.install.repository, services: services) }
-                } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
-                }
-                .pinesButtonStyle(.primary)
-                .disabled(model.install.state == .installed || model.hasActiveDownload || model.status == .unsupported)
+            VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                HStack(spacing: theme.spacing.medium) {
+                    PinesStatusIndicator(
+                        color: model.status.tint(in: theme),
+                        isActive: model.hasActiveDownload,
+                        size: 10
+                    )
 
-                Button(role: .destructive) {
-                    haptics.play(.destructiveAction)
-                    Task { await appModel.cancelModelDownload(repository: model.install.repository, services: services) }
-                } label: {
-                    Label("Cancel", systemImage: "stop.circle")
-                }
-                .pinesButtonStyle(.secondary)
-                .disabled(!model.hasActiveDownload)
+                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                        Text(actionStatusTitle)
+                            .font(theme.typography.headline)
+                            .pinesFittingText()
 
-                Button {
-                    haptics.play(.primaryAction)
-                    Task { await appModel.selectDefaultModel(model, services: services) }
-                } label: {
-                    Label("Use", systemImage: "checkmark.circle")
+                        Text(actionStatusDetail)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.86)
+                    }
+
+                    Spacer(minLength: theme.spacing.small)
+
+                    Text(model.install.state.title)
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(model.status.tint(in: theme))
+                        .padding(.horizontal, theme.spacing.small)
+                        .frame(minHeight: theme.dashboard.chipHeight)
+                        .background(model.status.tint(in: theme).opacity(0.12), in: Capsule())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
                 }
-                .pinesButtonStyle(.secondary)
-                .disabled(model.install.state != .installed)
+                .pinesSurface(.inset, padding: theme.spacing.small)
+
+                if let progress = model.downloadProgress, progress.isActive {
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        PinesProgressBar(value: progress.fractionCompleted, tint: model.status.tint(in: theme))
+                            .animation(theme.motion.progressUpdate, value: progress.fractionCompleted)
+
+                        Text(progress.progressLabel)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
+                }
+
+                if model.hasActiveDownload {
+                    Button(role: .destructive) {
+                        haptics.play(.destructiveAction)
+                        Task { await appModel.cancelModelDownload(repository: model.install.repository, services: services) }
+                    } label: {
+                        Label("Cancel download", systemImage: "stop.circle")
+                    }
+                    .pinesButtonStyle(.destructive, fillWidth: true)
+                } else {
+                    HStack(spacing: theme.spacing.small) {
+                        Button {
+                            haptics.play(.primaryAction)
+                            Task { await appModel.installModel(repository: model.install.repository, services: services) }
+                        } label: {
+                            Label("Download", systemImage: "arrow.down.circle")
+                        }
+                        .pinesButtonStyle(.primary, fillWidth: true)
+                        .disabled(model.install.state == .installed || model.status == .unsupported)
+
+                        Button {
+                            haptics.play(.primaryAction)
+                            Task { await appModel.selectDefaultModel(model, services: services) }
+                        } label: {
+                            Label(isDefaultModel ? "Default" : "Use", systemImage: isDefaultModel ? "checkmark.seal.fill" : "checkmark.circle")
+                        }
+                        .pinesButtonStyle(.secondary, fillWidth: true)
+                        .disabled(model.install.state != .installed || isDefaultModel)
+                    }
+                }
 
                 Button(role: .destructive) {
                     haptics.play(.destructiveAction)
                     Task { await appModel.deleteModel(repository: model.install.repository, services: services) }
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label(model.hasActiveDownload ? "Remove download" : "Delete model", systemImage: "trash")
                 }
-                .pinesButtonStyle(.destructive)
+                .pinesButtonStyle(.destructive, fillWidth: true)
                 .disabled(!model.canDeleteModel)
             }
         }
+    }
+
+    private var isDefaultModel: Bool {
+        appModel.defaultModelID == model.install.modelID
+    }
+
+    private var actionStatusTitle: String {
+        if model.hasActiveDownload {
+            return model.downloadProgress?.status.title ?? "Downloading"
+        }
+        if isDefaultModel {
+            return "Default model"
+        }
+        return model.status.title
+    }
+
+    private var actionStatusDetail: String {
+        if let progress = model.downloadProgress, progress.isActive {
+            return [progress.currentFile, progress.progressLabel].compactMap(\.self).joined(separator: " - ")
+        }
+        if model.status == .unsupported {
+            return "This model is not compatible with the current runtime profile."
+        }
+        if model.install.state == .installed {
+            return isDefaultModel ? "Pines will use this model for new local chat sessions." : "Installed locally and ready to use."
+        }
+        return "Available from Hugging Face and ready to download when compatible."
     }
 
     private var readinessCard: some View {

@@ -242,7 +242,7 @@ private struct ChatRunState: View {
 
     var body: some View {
         HStack(spacing: theme.spacing.medium) {
-            PinesStatusIndicator(color: theme.colors.accent, isActive: true, size: 10)
+            PinesStatusIndicator(color: theme.colors.accent, isActive: false, size: 10)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Runtime standby")
