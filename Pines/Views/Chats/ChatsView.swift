@@ -129,6 +129,7 @@ private struct ChatTranscriptView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(thread.title)
+        .scrollDismissesKeyboard(.interactively)
         .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .toolbar {
@@ -360,14 +361,14 @@ private struct ChatComposerBar: View {
                 .font(theme.typography.body)
                 .foregroundStyle(theme.colors.primaryText)
                 .padding(.vertical, theme.spacing.xsmall)
+                .submitLabel(.send)
+                .onSubmit {
+                    guard appModel.activeRunID == nil else { return }
+                    sendDraft()
+                }
 
             Button {
-                let pending = draft
-                draft = ""
-                withAnimation(theme.motion.copySuccess) {
-                    didCommitSend.toggle()
-                }
-                appModel.startSending(pending, in: threadID, services: services)
+                sendDraft()
             } label: {
                 Image(systemName: appModel.activeRunID == nil ? "arrow.up" : "stop.fill")
                     .symbolEffect(.bounce, options: .nonRepeating, value: didCommitSend)
@@ -397,8 +398,31 @@ private struct ChatComposerBar: View {
             RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
                 .strokeBorder(isFocused ? theme.colors.focusRing : Color.clear, lineWidth: isFocused ? theme.stroke.selected : 0)
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+
+                Button {
+                    haptics.play(.navigationSelected)
+                    isFocused = false
+                } label: {
+                    Label("Dismiss Keyboard", systemImage: "keyboard.chevron.compact.down")
+                }
+            }
+        }
         .animation(theme.motion.fast, value: isFocused)
         .animation(theme.motion.fast, value: draft.isEmpty)
+    }
+
+    private func sendDraft() {
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let pending = draft
+        draft = ""
+        isFocused = false
+        withAnimation(theme.motion.copySuccess) {
+            didCommitSend.toggle()
+        }
+        appModel.startSending(pending, in: threadID, services: services)
     }
 
     private func seedPromptArguments(_ prompt: MCPPromptRecord) {

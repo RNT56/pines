@@ -17,6 +17,8 @@ struct PinesRootView: View {
     @State private var watchSessionService: PhoneWatchSessionService?
     @State private var selectedTab: PinesTab = .chats
     @State private var showsBootMark = true
+    @State private var didStartBootstrap = false
+    @State private var isBootstrapping = false
 
     private var theme: PinesTheme {
         PinesTheme.resolve(
@@ -43,6 +45,10 @@ struct PinesRootView: View {
         }
         .preferredColorScheme(appModel.interfaceMode.colorScheme)
         .task {
+            guard !didStartBootstrap, !isBootstrapping else { return }
+            isBootstrapping = true
+            defer { isBootstrapping = false }
+
             await services.bootstrap()
             #if canImport(WatchConnectivity)
             let watchSessionService = PhoneWatchSessionService(services: services)
@@ -55,6 +61,7 @@ struct PinesRootView: View {
                 showsBootMark = false
             }
             haptics.play(.appReady)
+            didStartBootstrap = true
         }
         .onChange(of: appModel.hapticSignal) { _, signal in
             guard let signal else { return }

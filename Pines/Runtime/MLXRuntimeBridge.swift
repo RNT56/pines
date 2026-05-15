@@ -327,16 +327,22 @@ private actor MLXRuntimeState {
         }
 
         let profile = activeProfile
-        let latestUser = request.messages.last { $0.role == .user }
-        let prompt = Self.prompt(from: request.messages)
+        guard let latestUserIndex = request.messages.lastIndex(where: { $0.role == .user }) else {
+            throw InferenceError.invalidRequest("A local chat request requires a user message.")
+        }
+        let latestUser = request.messages[latestUserIndex]
+        let latestPrompt = latestUser.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !latestPrompt.isEmpty else {
+            throw InferenceError.invalidRequest("A local chat request requires a non-empty user message.")
+        }
         let instructions = request.messages
             .filter { $0.role == .system }
             .map(\.content)
             .joined(separator: "\n\n")
-        let imageURLs = latestUser?.attachments.compactMap { attachment -> URL? in
+        let imageURLs = latestUser.attachments.compactMap { attachment -> URL? in
             guard attachment.kind == .image, let localURL = attachment.localURL else { return nil }
             return localURL
-        } ?? []
+        }
         let parameters = Self.generateParameters(from: request, profile: profile, install: activeInstall)
         let toolSpecs = request.allowsTools ? Self.mlxToolSpecs(from: request.availableTools) : nil
 
@@ -344,15 +350,17 @@ private actor MLXRuntimeState {
             let task = Task {
                 do {
                     let images = imageURLs.map(UserInput.Image.url)
+                    let history = Self.chatHistory(from: request.messages[..<latestUserIndex])
                     let session = ChatSession(
                         container,
                         instructions: instructions.isEmpty ? nil : instructions,
+                        history: history,
                         generateParameters: parameters,
                         tools: toolSpecs
                     )
                     var tokenCount = 0
 
-                    for try await item in session.streamDetails(to: prompt, images: images, videos: []) {
+                    for try await item in session.streamDetails(to: latestPrompt, images: images, videos: []) {
                         guard !Task.isCancelled else { throw InferenceError.cancelled }
                         switch item {
                         case let .chunk(text):
@@ -494,6 +502,39 @@ private actor MLXRuntimeState {
     private static func mlxToolSpecs(from tools: [AnyToolSpec]) -> [MLXLMCommon.ToolSpec]? {
         let schemas = tools.map { $0.openAIFunctionToolObject() }
         return schemas.isEmpty ? nil : schemas
+    }
+
+    private static func chatHistory(from messages: ArraySlice<ChatMessage>) -> [Chat.Message] {
+        let maxCharacters = 24_000
+        var selected = [Chat.Message]()
+        var remaining = maxCharacters
+
+        for message in messages.reversed() {
+            let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty, message.role != .system else { continue }
+            guard remaining > 0 else { break }
+
+            let clippedContent: String
+            if content.count <= remaining {
+                clippedContent = content
+            } else {
+                clippedContent = String(content.suffix(remaining))
+            }
+            remaining -= clippedContent.count
+
+            switch message.role {
+            case .assistant:
+                selected.append(.assistant(clippedContent))
+            case .tool:
+                selected.append(.tool(clippedContent))
+            case .user:
+                selected.append(.user(clippedContent))
+            case .system:
+                break
+            }
+        }
+
+        return selected.reversed()
     }
 
     private static func finishReason(from reason: GenerateStopReason) -> InferenceFinishReason {

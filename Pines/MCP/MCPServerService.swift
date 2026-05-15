@@ -1,18 +1,21 @@
 import Foundation
 import PinesCore
 
-struct MCPServerService {
+struct MCPServerService: Sendable {
     let repository: any MCPServerRepository
     let toolRegistry: ToolRegistry
     let secretStore: any SecretStore
     let auditRepository: (any AuditEventRepository)?
 
+    private static let watchTasks = MCPServerWatchTaskRegistry()
+
     typealias SamplingHandler = @Sendable (_ request: MCPSamplingRequest, _ server: MCPServerConfiguration) async throws -> MCPSamplingResult
 
     func start(samplingHandler: SamplingHandler? = nil) async {
         let servers = (try? await repository.listMCPServers()) ?? []
+        await Self.watchTasks.stopServers(excluding: Set(servers.filter(\.enabled).map(\.id)))
         for server in servers where server.enabled {
-            Task {
+            await Self.watchTasks.start(serverID: server.id) {
                 try? await refresh(server)
                 await watchEvents(for: server, samplingHandler: samplingHandler)
             }
@@ -34,11 +37,13 @@ struct MCPServerService {
         if server.enabled {
             try await refresh(server)
         } else {
+            await Self.watchTasks.stop(serverID: server.id)
             try await unregisterTools(serverID: server.id)
         }
     }
 
     func deleteServer(_ server: MCPServerConfiguration) async throws {
+        await Self.watchTasks.stop(serverID: server.id)
         try await unregisterTools(serverID: server.id)
         try await secretStore.delete(service: server.keychainService, account: server.keychainAccount)
         try await secretStore.delete(service: server.keychainService, account: "\(server.keychainAccount).access_token")
@@ -273,5 +278,36 @@ struct MCPServerService {
 
     private static func networkDomains(for server: MCPServerConfiguration) -> [String] {
         server.endpointURL.host(percentEncoded: false).map { [$0] } ?? []
+    }
+}
+
+private actor MCPServerWatchTaskRegistry {
+    private var tasks: [MCPServerID: (token: UUID, task: Task<Void, Never>)] = [:]
+
+    func start(serverID: MCPServerID, operation: @escaping @Sendable () async -> Void) {
+        tasks[serverID]?.task.cancel()
+
+        let token = UUID()
+        let task = Task.detached(priority: .background) {
+            await operation()
+            await self.removeFinished(serverID: serverID, token: token)
+        }
+        tasks[serverID] = (token, task)
+    }
+
+    func stop(serverID: MCPServerID) {
+        tasks.removeValue(forKey: serverID)?.task.cancel()
+    }
+
+    func stopServers(excluding activeServerIDs: Set<MCPServerID>) {
+        let staleServerIDs = tasks.keys.filter { !activeServerIDs.contains($0) }
+        for serverID in staleServerIDs {
+            stop(serverID: serverID)
+        }
+    }
+
+    private func removeFinished(serverID: MCPServerID, token: UUID) {
+        guard tasks[serverID]?.token == token else { return }
+        tasks[serverID] = nil
     }
 }

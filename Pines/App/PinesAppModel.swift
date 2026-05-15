@@ -32,6 +32,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var defaultModelID: ModelID?
     @Published var huggingFaceCredentialStatus = "Not configured"
     @Published var braveSearchCredentialStatus = "Not configured"
+    private var didBootstrap = false
+    private var isBootstrapping = false
+    private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
     private var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
     private var samplingContinuation: CheckedContinuation<Bool, Never>?
@@ -85,7 +88,23 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         self.cloudProviders = cloudProviders
     }
 
+    deinit {
+        currentRunTask?.cancel()
+        repositoryObservationTasks.forEach { $0.cancel() }
+        approvalContinuation?.resume(returning: .denied)
+        samplingContinuation?.resume(returning: false)
+        samplingResultContinuation?.resume(returning: false)
+    }
+
     func bootstrap(services: PinesAppServices) async {
+        guard !didBootstrap else {
+            await refreshAll(services: services)
+            return
+        }
+        guard !isBootstrapping else { return }
+        isBootstrapping = true
+        defer { isBootstrapping = false }
+
         try? await services.modelLifecycleService?.reconcileInterruptedDownloads()
         await refreshAll(services: services)
         observeRepositories(services: services)
@@ -95,6 +114,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             }
             return try await self.handleMCPSampling(request, server: server, services: services)
         }
+        didBootstrap = true
     }
 
     func refreshAll(services: PinesAppServices) async {
@@ -200,12 +220,18 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private func sendMessage(_ draft: String, in threadID: UUID?, services: PinesAppServices) async {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        var runRepository: (any ConversationRepository)?
+        var assistantMessageID: UUID?
+        var accumulated = ""
+        var tokenCount = 0
+        var failureMessage: String?
 
         do {
             guard let repository = services.conversationRepository else {
                 serviceError = "Conversation repository is unavailable."
                 return
             }
+            runRepository = repository
 
             let conversationID: UUID
             if let threadID {
@@ -270,13 +296,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             try await repository.appendMessage(assistantMessage, status: .streaming, conversationID: conversationID, modelID: selectedModelID, providerID: selectedProviderID)
 
             activeRunID = assistantMessage.id
+            assistantMessageID = assistantMessage.id
             emitHaptic(.runAccepted)
             await refreshAll(services: services)
 
             let messages = try await repository.messages(in: conversationID)
             let vaultContext = await vaultContextMessage(for: trimmed, services: services)
             let mcpContext = await mcpResourceContextMessages(services: services)
-            var requestMessages = messages
+            var requestMessages = messages.filter { $0.id != assistantMessage.id }
             if let vaultContext {
                 requestMessages.insert(vaultContext.message, at: 0)
             }
@@ -310,10 +337,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 }
             )
             let stream = runner.run(session: session, request: request, provider: selectedProvider)
-            var accumulated = ""
-            var tokenCount = 0
             let generationStartedAt = Date()
             var streamHaptics = PinesStreamHapticGate()
+            var didReceiveTerminalEvent = false
 
             for try await event in stream {
                 guard !Task.isCancelled else { throw InferenceError.cancelled }
@@ -324,18 +350,47 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     if let hapticEvent = streamHaptics.event(tokenCount: tokenCount, content: accumulated) {
                         emitHaptic(hapticEvent)
                     }
+                    serviceError = nil
                     try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: .streaming, tokenCount: tokenCount)
                 case let .finish(finish):
+                    didReceiveTerminalEvent = true
                     let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
-                    try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: status, tokenCount: tokenCount)
-                    emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
+                    if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let message = finish.message ?? "The selected model finished without producing output."
+                        failureMessage = message
+                        try await repository.updateMessage(id: assistantMessage.id, content: message, status: .failed, tokenCount: tokenCount)
+                        serviceError = message
+                        emitHaptic(.runFailed)
+                    } else {
+                        try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: status, tokenCount: tokenCount)
+                        serviceError = nil
+                        emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
+                    }
                 case let .failure(failure):
+                    didReceiveTerminalEvent = true
+                    failureMessage = failure.message
                     try await repository.updateMessage(id: assistantMessage.id, content: failure.message, status: .failed, tokenCount: tokenCount)
                     emitHaptic(.runFailed)
                 case let .metrics(metrics):
                     services.runtimeMetrics.recordGenerationMetrics(metrics, modelID: selectedModelID)
                 case .toolCall:
                     emitHaptic(.streamMilestone)
+                }
+                await refreshAll(services: services)
+            }
+
+            if !didReceiveTerminalEvent {
+                let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+                if finalText.isEmpty {
+                    let message = "The inference stream ended before the model produced output."
+                    failureMessage = message
+                    try await repository.updateMessage(id: assistantMessage.id, content: message, status: .failed, tokenCount: tokenCount)
+                    serviceError = message
+                    emitHaptic(.runFailed)
+                } else {
+                    try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: .complete, tokenCount: tokenCount)
+                    serviceError = nil
+                    emitHaptic(.runCompleted)
                 }
                 await refreshAll(services: services)
             }
@@ -349,14 +404,31 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             currentRunTask = nil
             await refreshAll(services: services)
         } catch InferenceError.cancelled {
+            if let runRepository, let assistantMessageID {
+                try? await runRepository.updateMessage(
+                    id: assistantMessageID,
+                    content: accumulated,
+                    status: .cancelled,
+                    tokenCount: tokenCount
+                )
+            }
             activeRunID = nil
             currentRunTask = nil
             emitHaptic(.runCancelled)
             await refreshAll(services: services)
         } catch {
+            let message = failureMessage ?? error.localizedDescription
+            if let runRepository, let assistantMessageID {
+                try? await runRepository.updateMessage(
+                    id: assistantMessageID,
+                    content: accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? message : accumulated,
+                    status: .failed,
+                    tokenCount: tokenCount
+                )
+            }
             activeRunID = nil
             currentRunTask = nil
-            serviceError = error.localizedDescription
+            serviceError = message
             emitHaptic(.runFailed)
             await refreshAll(services: services)
         }
@@ -1024,8 +1096,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     }
 
     private func observeRepositories(services: PinesAppServices) {
+        guard repositoryObservationTasks.isEmpty else { return }
+
         if let modelRepository = services.modelInstallRepository {
-            Task { [weak self] in
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await installs in modelRepository.observeInstalledAndCuratedModels() {
                     let downloads = await MainActor.run { self?.modelDownloads ?? [] }
                     let downloadByRepository = Self.latestDownloadByRepository(downloads)
@@ -1065,11 +1139,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         }
                     }
                 }
-            }
+            })
         }
 
         if let downloadRepository = services.modelDownloadRepository {
-            Task { [weak self] in
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await downloads in downloadRepository.observeDownloads() {
                     await MainActor.run {
                         guard let self else { return }
@@ -1084,11 +1158,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         })
                     }
                 }
-            }
+            })
         }
 
         if let settingsRepository = services.settingsRepository {
-            Task { [weak self] in
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await settings in settingsRepository.observeSettings() {
                     await MainActor.run {
                         self?.setIfChanged(\.defaultModelID, settings.defaultModelID)
@@ -1102,11 +1176,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         }
                     }
                 }
-            }
+            })
         }
 
         if let conversationRepository = services.conversationRepository {
-            Task { [weak self] in
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await conversations in conversationRepository.observeConversations() {
                     var previews = [PinesThreadPreview]()
                     previews.reserveCapacity(conversations.count)
@@ -1121,68 +1195,68 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         self?.setIfChanged(\.threads, previews)
                     }
                 }
-            }
+            })
         }
 
         if let vaultRepository = services.vaultRepository {
-            Task { [weak self] in
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await documents in vaultRepository.observeDocuments() {
                     await MainActor.run {
                         self?.setIfChanged(\.vaultItems, documents.map(Self.vaultPreview(from:)))
                     }
                 }
-            }
+            })
         }
 
         if let auditRepository = services.auditRepository {
-            Task { [weak self] in
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await events in auditRepository.observeRecent(limit: 30) {
                     await MainActor.run {
                         self?.setIfChanged(\.auditEvents, events)
                     }
                 }
-            }
+            })
         }
 
         if let cloudProviderRepository = services.cloudProviderRepository {
-            Task { [weak self] in
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await providers in cloudProviderRepository.observeProviders() {
                     await MainActor.run {
                         self?.setIfChanged(\.cloudProviders, providers)
                     }
                 }
-            }
+            })
         }
 
         if let mcpServerRepository = services.mcpServerRepository {
-            Task { [weak self] in
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await servers in mcpServerRepository.observeMCPServers() {
                     await MainActor.run {
                         self?.setIfChanged(\.mcpServers, servers)
                     }
                 }
-            }
-            Task { [weak self] in
+            })
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await tools in mcpServerRepository.observeMCPTools() {
                     await MainActor.run {
                         self?.setIfChanged(\.mcpTools, tools)
                     }
                 }
-            }
-            Task { [weak self] in
+            })
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await resources in mcpServerRepository.observeMCPResources() {
                     await MainActor.run {
                         self?.setIfChanged(\.mcpResources, resources)
                     }
                 }
-            }
-            Task { [weak self] in
+            })
+            repositoryObservationTasks.append(Task { [weak self] in
                 for await prompts in mcpServerRepository.observeMCPPrompts() {
                     await MainActor.run {
                         self?.setIfChanged(\.mcpPrompts, prompts)
                     }
                 }
-            }
+            })
         }
     }
 

@@ -12,11 +12,18 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
     private var requestRuns: [UUID: UUID] = [:]
     private var requestConversations: [UUID: UUID] = [:]
     private var completedRequests = Set<UUID>()
+    private var completedRequestOrder: [UUID] = []
+    private static let completedRequestLimit = 64
 
     init(services: PinesAppServices, session: WCSession = .default) {
         self.services = services
         self.session = session
         super.init()
+    }
+
+    deinit {
+        runTasks.values.forEach { $0.cancel() }
+        session.delegate = nil
     }
 
     func start() {
@@ -168,7 +175,11 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
             case .cancelRun:
                 let request = try WatchChatCodec.decode(WatchCancelRunRequest.self, from: envelope)
                 runTasks[request.runID]?.cancel()
-                runTasks[request.runID] = nil
+                if let requestID = requestRuns.first(where: { $0.value == request.runID })?.key {
+                    clearRun(runID: request.runID, requestID: requestID)
+                } else {
+                    runTasks[request.runID] = nil
+                }
                 return try WatchChatCodec.message(kind: .cancelRun, requestID: envelope.requestID)
             case .snapshot, .runUpdate, .error:
                 return try errorReply("Unsupported watch-to-phone message: \(envelope.kind.rawValue)", requestID: envelope.requestID)
@@ -201,7 +212,7 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
                     }
 
                     if update.status == .completed || update.status == .failed || update.status == .cancelled {
-                        self.completedRequests.insert(requestID)
+                        self.markRequestCompleted(requestID)
                         let snapshot = try await orchestrator.snapshot(
                             selectedConversationID: update.conversationID,
                             activeRunID: nil
@@ -228,11 +239,30 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
             }
 
             await MainActor.run {
-                self?.runTasks[runID] = nil
-                self?.requestRuns[requestID] = nil
+                self?.clearRun(runID: runID, requestID: requestID)
             }
         }
         runTasks[runID] = task
+    }
+
+    private func markRequestCompleted(_ requestID: UUID) {
+        guard completedRequests.insert(requestID).inserted else { return }
+        completedRequestOrder.append(requestID)
+
+        while completedRequestOrder.count > Self.completedRequestLimit {
+            let evictedRequestID = completedRequestOrder.removeFirst()
+            completedRequests.remove(evictedRequestID)
+            requestRuns[evictedRequestID] = nil
+            requestConversations[evictedRequestID] = nil
+        }
+    }
+
+    private func clearRun(runID: UUID, requestID: UUID) {
+        runTasks[runID] = nil
+        requestRuns[requestID] = nil
+        if !completedRequests.contains(requestID) {
+            requestConversations[requestID] = nil
+        }
     }
 
     private static func shouldDeliver(

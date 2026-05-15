@@ -202,9 +202,14 @@ actor GRDBPinesStore:
 
     func updateMessage(id: UUID, content: String, status: MessageStatus, tokenCount: Int?) async throws {
         try await database.write { db in
+            let updatedAt = Date().timeIntervalSinceReferenceDate
             try db.execute(
                 sql: "UPDATE messages SET content = ?, status = ?, token_count = ? WHERE id = ?",
                 arguments: [content, status.rawValue, tokenCount, id.uuidString]
+            )
+            try db.execute(
+                sql: "UPDATE conversations SET updated_at = ? WHERE id = (SELECT conversation_id FROM messages WHERE id = ?)",
+                arguments: [updatedAt, id.uuidString]
             )
         }
     }
