@@ -34,7 +34,7 @@ enum PinesHapticMode: String, CaseIterable, Identifiable {
         case .standard:
             "Sparse feedback for actions, navigation, and chat state."
         case .expressive:
-            "Adds gentle, throttled texture while assistant messages stream."
+            "Adds gentle, throttled texture while scrolling and assistant messages stream."
         }
     }
 }
@@ -50,6 +50,8 @@ enum PinesHapticEvent: Hashable {
     case firstToken
     case streamPulse
     case streamMilestone
+    case scrollUp
+    case scrollDown
     case toolApprovalNeeded
     case runCompleted
     case runCancelled
@@ -57,7 +59,7 @@ enum PinesHapticEvent: Hashable {
 
     var allowsLowPowerPlayback: Bool {
         switch self {
-        case .streamPulse, .streamMilestone, .firstToken:
+        case .streamPulse, .streamMilestone, .firstToken, .scrollUp, .scrollDown:
             false
         case .appReady,
              .tabChanged,
@@ -114,6 +116,52 @@ struct PinesStreamHapticGate {
         didEmitFirstToken = false
         lastPulseAt = .distantPast
         lastPulseTokenCount = 0
+    }
+}
+
+private enum PinesScrollDirection {
+    case up
+    case down
+}
+
+struct PinesScrollHapticGate {
+    private var lastOffset: CGFloat?
+    private var lastEmittedOffset: CGFloat?
+    private var lastEmittedDirection: PinesScrollDirection?
+    private var lastEmittedAt = Date.distantPast
+
+    mutating func event(offset: CGFloat, now: Date = Date()) -> PinesHapticEvent? {
+        defer { lastOffset = offset }
+
+        guard let previousOffset = lastOffset else {
+            lastEmittedOffset = offset
+            return nil
+        }
+
+        let delta = offset - previousOffset
+        guard abs(delta) > 1.5 else { return nil }
+
+        let direction: PinesScrollDirection = delta > 0 ? .down : .up
+        let emittedOffset = lastEmittedOffset ?? previousOffset
+        let distance = abs(offset - emittedOffset)
+        let directionChanged = lastEmittedDirection != nil && lastEmittedDirection != direction
+        let minimumDistance: CGFloat = directionChanged ? 28 : 84
+        let minimumInterval: TimeInterval = directionChanged ? 0.10 : 0.16
+
+        guard distance >= minimumDistance else { return nil }
+        guard now.timeIntervalSince(lastEmittedAt) >= minimumInterval else { return nil }
+
+        lastEmittedOffset = offset
+        lastEmittedDirection = direction
+        lastEmittedAt = now
+        return direction == .down ? .scrollDown : .scrollUp
+    }
+
+    mutating func reset() {
+        lastOffset = nil
+        lastEmittedOffset = nil
+        lastEmittedDirection = nil
+        lastEmittedAt = .distantPast
     }
 }
 
@@ -179,6 +227,14 @@ final class PinesHaptics: ObservableObject {
                 playCorePulse(intensity: 0.26, sharpness: 0.28)
             } else {
                 impact(.light, intensity: 0.34)
+            }
+        case .scrollUp:
+            if mode == .expressive {
+                playCorePulse(intensity: 0.10, sharpness: 0.16)
+            }
+        case .scrollDown:
+            if mode == .expressive {
+                playCorePulse(intensity: 0.12, sharpness: 0.22)
             }
         case .toolApprovalNeeded:
             warning()
@@ -305,5 +361,32 @@ final class PinesHaptics: ObservableObject {
         #else
         impact(.soft, intensity: CGFloat(intensity))
         #endif
+    }
+}
+
+private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
+    @EnvironmentObject private var haptics: PinesHaptics
+    @State private var gate = PinesScrollHapticGate()
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y
+            } action: { _, newOffset in
+                guard haptics.mode == .expressive else {
+                    gate.reset()
+                    return
+                }
+
+                if let event = gate.event(offset: newOffset) {
+                    haptics.play(event)
+                }
+            }
+    }
+}
+
+extension View {
+    func pinesExpressiveScrollHaptics() -> some View {
+        modifier(PinesExpressiveScrollHapticsModifier())
     }
 }

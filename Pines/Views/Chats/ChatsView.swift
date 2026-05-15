@@ -27,6 +27,7 @@ struct ChatsView: View {
                 }
             }
             .navigationTitle("Chats")
+            .pinesExpressiveScrollHaptics()
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -128,6 +129,7 @@ private struct ChatTranscriptView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(thread.title)
+        .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -158,7 +160,11 @@ private struct ChatTranscriptView: View {
             ChatComposerBar(threadID: thread.id)
                 .padding(.horizontal, theme.spacing.large)
                 .padding(.bottom, theme.spacing.small)
-                .background(.bar)
+                .background {
+                    Rectangle()
+                        .fill(theme.colors.backgroundWash)
+                        .ignoresSafeArea()
+                }
         }
     }
 }
@@ -383,6 +389,7 @@ private struct ChatComposerBar: View {
                     }
                 }
             )
+            .environmentObject(haptics)
             .pinesTheme(theme)
         }
         .pinesSurface(.chrome, padding: theme.spacing.small)
@@ -457,6 +464,7 @@ private struct MCPPromptInvocationSheet: View {
                     }
                 }
             }
+            .pinesExpressiveScrollHaptics()
             .navigationTitle("Use MCP Prompt")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

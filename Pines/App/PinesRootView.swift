@@ -99,6 +99,7 @@ struct PinesRootView: View {
                 deny: { appModel.resolvePendingMCPSampling(false) },
                 approve: { appModel.resolvePendingMCPSampling(true) }
             )
+            .environmentObject(haptics)
             .pinesTheme(theme)
         }
         .sheet(item: Binding(
@@ -114,6 +115,7 @@ struct PinesRootView: View {
                 deny: { appModel.resolvePendingMCPSamplingResultReview(false) },
                 approve: { appModel.resolvePendingMCPSamplingResultReview(true) }
             )
+            .environmentObject(haptics)
             .pinesTheme(theme)
         }
     }
@@ -181,6 +183,7 @@ private struct MCPSamplingApprovalSheet: View {
                     }
                 }
             }
+            .pinesExpressiveScrollHaptics()
             .navigationTitle("MCP Sampling")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -214,6 +217,7 @@ private struct MCPSamplingResultReviewSheet: View {
                         .textSelection(.enabled)
                 }
             }
+            .pinesExpressiveScrollHaptics()
             .navigationTitle("Return Sampling Result")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

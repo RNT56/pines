@@ -29,6 +29,7 @@ struct VaultView: View {
                 }
             }
             .navigationTitle("Vault")
+            .pinesExpressiveScrollHaptics()
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
@@ -162,6 +163,7 @@ private struct VaultDetailView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(item.title)
+        .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .pinesAppBackground()
     }

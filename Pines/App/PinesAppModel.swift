@@ -78,6 +78,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     }
 
     func bootstrap(services: PinesAppServices) async {
+        try? await services.modelLifecycleService?.reconcileInterruptedDownloads()
         await refreshAll(services: services)
         observeRepositories(services: services)
         await services.mcpServerService?.start { [weak self] request, server in
@@ -99,21 +100,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 interfaceMode = PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode
             }
 
-            let downloads = try await services.modelDownloadRepository?.listDownloads() ?? []
-            modelDownloads = downloads
-
-            if let modelRepository = services.modelInstallRepository {
-                let downloadByRepository = Self.latestDownloadByRepository(downloads)
-                models = try await modelRepository
-                    .listInstalledAndCuratedModels()
-                    .map { install in
-                        Self.modelPreview(
-                            from: install,
-                            runtime: services.mlxRuntime,
-                            download: downloadByRepository[install.repository.lowercased()]
-                        )
-                    }
-            }
+            try await refreshModelPreviews(services: services)
 
             if let conversationRepository = services.conversationRepository {
                 let conversations = try await conversationRepository.listConversations()
@@ -481,12 +468,17 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             }
             try await lifecycle.install(repository: repository)
             if !isShowingModelDiscoveryResults {
-                await refreshAll(services: services)
+                try await refreshModelPreviews(services: services)
+            }
+        } catch InferenceError.cancelled {
+            serviceError = nil
+            if !isShowingModelDiscoveryResults {
+                try? await refreshModelPreviews(services: services)
             }
         } catch {
             serviceError = error.localizedDescription
             if !isShowingModelDiscoveryResults {
-                await refreshAll(services: services)
+                try? await refreshModelPreviews(services: services)
             }
         }
     }
@@ -503,12 +495,40 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 await saveSettings(services: services)
             }
             if !isShowingModelDiscoveryResults {
-                await refreshAll(services: services)
+                try await refreshModelPreviews(services: services)
+            }
+        } catch InferenceError.cancelled {
+            serviceError = nil
+            if !isShowingModelDiscoveryResults {
+                try? await refreshModelPreviews(services: services)
             }
         } catch {
             serviceError = error.localizedDescription
             if !isShowingModelDiscoveryResults {
-                await refreshAll(services: services)
+                try? await refreshModelPreviews(services: services)
+            }
+        }
+    }
+
+    func cancelModelDownload(repository: String, services: PinesAppServices) async {
+        do {
+            guard let lifecycle = services.modelLifecycleService else {
+                serviceError = "Model lifecycle service is unavailable."
+                return
+            }
+            try await lifecycle.cancelDownload(repository: repository)
+            if !isShowingModelDiscoveryResults {
+                try await refreshModelPreviews(services: services)
+            }
+        } catch InferenceError.cancelled {
+            serviceError = nil
+            if !isShowingModelDiscoveryResults {
+                try? await refreshModelPreviews(services: services)
+            }
+        } catch {
+            serviceError = error.localizedDescription
+            if !isShowingModelDiscoveryResults {
+                try? await refreshModelPreviews(services: services)
             }
         }
     }
@@ -531,7 +551,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty, task == nil, verification == nil, installState == nil {
                 isShowingModelDiscoveryResults = false
-                await refreshAll(services: services)
+                try await refreshModelPreviews(services: services)
             } else {
                 isShowingModelDiscoveryResults = true
                 let token = try await services.huggingFaceCredentialService.readToken()
@@ -1593,6 +1613,27 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         ))?.isEmpty == false ? "Configured" : "Not configured"
     }
 
+    private func refreshModelPreviews(services: PinesAppServices) async throws {
+        let downloads = try await services.modelDownloadRepository?.listDownloads() ?? []
+        modelDownloads = downloads
+
+        guard let modelRepository = services.modelInstallRepository else {
+            models = []
+            return
+        }
+
+        let downloadByRepository = Self.latestDownloadByRepository(downloads)
+        models = try await modelRepository
+            .listInstalledAndCuratedModels()
+            .map { install in
+                Self.modelPreview(
+                    from: install,
+                    runtime: services.mlxRuntime,
+                    download: downloadByRepository[install.repository.lowercased()]
+                )
+            }
+    }
+
     private static func threadPreview(from record: ConversationRecord, messages: [ChatMessage]) -> PinesThreadPreview {
         let lastMessage = messages.last?.content.trimmingCharacters(in: .whitespacesAndNewlines)
         return PinesThreadPreview(
@@ -1664,7 +1705,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
 
         let readiness: Double
-        if let download {
+        if download?.status == .cancelled {
+            readiness = install.state == .installed ? 1 : 0
+        } else if let download {
             if let total = download.totalBytes, total > 0 {
                 readiness = min(0.98, max(0, Double(download.bytesReceived) / Double(total)))
             } else {

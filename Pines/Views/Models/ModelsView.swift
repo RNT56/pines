@@ -13,11 +13,15 @@ struct ModelsView: View {
     @State private var selectedInstallStateFilter: ModelInstallState?
 
     private var selectedModel: PinesModelPreview? {
-        guard let selectedModelID else {
-            return appModel.models.first
-        }
+        guard let selectedModelID else { return nil }
+        return displayedModels.first { $0.id == selectedModelID }
+    }
 
-        return appModel.models.first { $0.id == selectedModelID }
+    private var displayedModels: [PinesModelPreview] {
+        guard !isDiscovering else { return appModel.models }
+        return appModel.models.filter { model in
+            model.install.state == .installed || model.install.state == .failed || model.hasActiveDownload
+        }
     }
 
     private var searchFingerprint: String {
@@ -40,65 +44,25 @@ struct ModelsView: View {
         if appModel.isSearchingModels {
             return "Searching Hugging Face"
         }
-        return isDiscovering ? "MLX Hub results" : "Recommended models"
+        return isDiscovering ? "MLX Hub results" : "Installed models"
     }
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedModelID) {
-                Section {
-                    ModelFilterControls(
-                        selectedTask: $selectedTaskFilter,
-                        selectedVerification: $selectedVerificationFilter,
-                        selectedInstallState: $selectedInstallStateFilter,
-                        isSearching: appModel.isSearchingModels
-                    )
-                    .listRowInsets(EdgeInsets(top: theme.spacing.small, leading: theme.spacing.medium, bottom: theme.spacing.small, trailing: theme.spacing.medium))
-                    .listRowBackground(Color.clear)
-                }
-
-                Section {
-                    if appModel.isSearchingModels {
-                        ModelListStatusRow(
-                            title: "Searching Hugging Face",
-                            detail: "Checking MLX metadata",
-                            systemImage: "magnifyingglass",
-                            showsProgress: true
-                        )
-                    }
-
-                    if let error = appModel.modelSearchError {
-                        ModelListStatusRow(
-                            title: "Search failed",
-                            detail: error,
-                            systemImage: "exclamationmark.triangle.fill",
-                            tint: theme.colors.warning
-                        )
-                    } else if !appModel.isSearchingModels, appModel.models.isEmpty {
-                        ModelListStatusRow(
-                            title: "No matching MLX models",
-                            detail: "Try a different query or filter",
-                            systemImage: "magnifyingglass"
-                        )
-                    }
-
-                    ForEach(appModel.models) { model in
-                        ModelRow(
-                            model: model,
-                            isDefault: appModel.defaultModelID == model.install.modelID,
-                            isSelected: selectedModelID == model.id
-                        )
-                            .tag(model.id)
-                    }
-                } header: {
-                    ModelResultsHeader(
-                        title: modelSectionTitle,
-                        count: appModel.models.count,
-                        isDiscovering: isDiscovering
-                    )
-                }
-            }
+            ModelSidebarList(
+                selectedModelID: $selectedModelID,
+                selectedTaskFilter: $selectedTaskFilter,
+                selectedVerificationFilter: $selectedVerificationFilter,
+                selectedInstallStateFilter: $selectedInstallStateFilter,
+                models: displayedModels,
+                defaultModelID: appModel.defaultModelID,
+                isSearching: appModel.isSearchingModels,
+                searchError: appModel.modelSearchError,
+                sectionTitle: modelSectionTitle,
+                isDiscovering: isDiscovering
+            )
             .navigationTitle("Models")
+            .pinesExpressiveScrollHaptics()
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
@@ -125,7 +89,20 @@ struct ModelsView: View {
                         Image(systemName: "arrow.down.circle")
                     }
                     .accessibilityLabel("Download model")
-                    .disabled(selectedModel == nil || selectedModel?.install.state == .installed || selectedModel?.install.state == .downloading || selectedModel?.status == .indexing || selectedModel?.status == .unsupported)
+                    .disabled(selectedModel == nil || selectedModel?.install.state == .installed || selectedModel?.hasActiveDownload == true || selectedModel?.status == .unsupported)
+
+                    Button {
+                        if let selectedModel {
+                            haptics.play(.destructiveAction)
+                            Task {
+                                await appModel.cancelModelDownload(repository: selectedModel.install.repository, services: services)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "stop.circle")
+                    }
+                    .accessibilityLabel("Cancel model download")
+                    .disabled(selectedModel?.hasActiveDownload != true)
 
                     Button(role: .destructive) {
                         if let selectedModel {
@@ -138,7 +115,7 @@ struct ModelsView: View {
                         Image(systemName: "trash")
                     }
                     .accessibilityLabel("Delete model")
-                    .disabled(selectedModel == nil || selectedModel?.install.state == .remote || selectedModel?.install.state == .downloading || selectedModel?.status == .indexing)
+                    .disabled(selectedModel == nil || selectedModel?.canDeleteModel != true)
                 }
             }
             .searchable(text: $searchText, prompt: "Search Hugging Face")
@@ -155,15 +132,20 @@ struct ModelsView: View {
                     services: services
                 )
             }
-            .onAppear {
-                selectedModelID = selectedModelID ?? appModel.models.first?.id
-            }
             .onChange(of: selectedModelID) { _, _ in
                 haptics.play(.navigationSelected)
             }
             .onChange(of: appModel.models) { _, models in
-                guard !models.contains(where: { $0.id == selectedModelID }) else { return }
-                selectedModelID = models.first?.id
+                guard let currentSelection = selectedModelID else { return }
+                if !models.contains(where: { $0.id == currentSelection }) || !displayedModels.contains(where: { $0.id == currentSelection }) {
+                    self.selectedModelID = nil
+                }
+            }
+            .onChange(of: searchFingerprint) { _, _ in
+                guard let currentSelection = selectedModelID else { return }
+                if !displayedModels.contains(where: { $0.id == currentSelection }) {
+                    self.selectedModelID = nil
+                }
             }
             .scrollContentBackground(.hidden)
             .background(theme.colors.secondaryBackground)
@@ -179,6 +161,95 @@ struct ModelsView: View {
                     systemImage: "cpu"
                 )
             }
+        }
+    }
+}
+
+private struct ModelSidebarList: View {
+    @Environment(\.pinesTheme) private var theme
+    @Binding var selectedModelID: PinesModelPreview.ID?
+    @Binding var selectedTaskFilter: HubTask?
+    @Binding var selectedVerificationFilter: ModelVerificationState?
+    @Binding var selectedInstallStateFilter: ModelInstallState?
+    let models: [PinesModelPreview]
+    let defaultModelID: ModelID?
+    let isSearching: Bool
+    let searchError: String?
+    let sectionTitle: String
+    let isDiscovering: Bool
+
+    var body: some View {
+        List(selection: $selectedModelID) {
+            Section {
+                ModelFilterControls(
+                    selectedTask: $selectedTaskFilter,
+                    selectedVerification: $selectedVerificationFilter,
+                    selectedInstallState: $selectedInstallStateFilter,
+                    isSearching: isSearching
+                )
+                .listRowInsets(EdgeInsets(top: theme.spacing.small, leading: theme.spacing.medium, bottom: theme.spacing.small, trailing: theme.spacing.medium))
+                .listRowBackground(Color.clear)
+            }
+
+            Section {
+                statusRows
+
+                ModelRows(
+                    models: models,
+                    defaultModelID: defaultModelID,
+                    selectedModelID: selectedModelID
+                )
+            } header: {
+                ModelResultsHeader(
+                    title: sectionTitle,
+                    count: models.count,
+                    isDiscovering: isDiscovering
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusRows: some View {
+        if isSearching {
+            ModelListStatusRow(
+                title: "Searching Hugging Face",
+                detail: "Checking MLX metadata",
+                systemImage: "magnifyingglass",
+                showsProgress: true
+            )
+        }
+
+        if let searchError {
+            ModelListStatusRow(
+                title: "Search failed",
+                detail: searchError,
+                systemImage: "exclamationmark.triangle.fill",
+                tint: theme.colors.warning
+            )
+        } else if !isSearching, models.isEmpty {
+            ModelListStatusRow(
+                title: isDiscovering ? "No matching MLX models" : "No installed models",
+                detail: isDiscovering ? "Try a different query or filter" : "Search Hugging Face to find compatible MLX models",
+                systemImage: "magnifyingglass"
+            )
+        }
+    }
+}
+
+private struct ModelRows: View {
+    let models: [PinesModelPreview]
+    let defaultModelID: ModelID?
+    let selectedModelID: PinesModelPreview.ID?
+
+    var body: some View {
+        ForEach(models) { model in
+            ModelRow(
+                model: model,
+                isDefault: defaultModelID == model.install.modelID,
+                isSelected: selectedModelID == model.id
+            )
+            .tag(model.id)
         }
     }
 }
@@ -356,6 +427,7 @@ private struct ModelDetailView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(model.name)
+        .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .pinesAppBackground()
         .task(id: model.install.repository) {
@@ -400,7 +472,16 @@ private struct ModelDetailView: View {
                     Label("Download", systemImage: "arrow.down.circle")
                 }
                 .pinesButtonStyle(.primary)
-                .disabled(model.install.state == .installed || model.install.state == .downloading || model.status == .indexing || model.status == .unsupported)
+                .disabled(model.install.state == .installed || model.hasActiveDownload || model.status == .unsupported)
+
+                Button(role: .destructive) {
+                    haptics.play(.destructiveAction)
+                    Task { await appModel.cancelModelDownload(repository: model.install.repository, services: services) }
+                } label: {
+                    Label("Cancel", systemImage: "stop.circle")
+                }
+                .pinesButtonStyle(.secondary)
+                .disabled(!model.hasActiveDownload)
 
                 Button {
                     haptics.play(.primaryAction)
@@ -418,7 +499,7 @@ private struct ModelDetailView: View {
                     Label("Delete", systemImage: "trash")
                 }
                 .pinesButtonStyle(.destructive)
-                .disabled(model.install.state == .remote || model.install.state == .downloading || model.status == .indexing)
+                .disabled(!model.canDeleteModel)
             }
         }
     }
@@ -683,6 +764,16 @@ private extension PinesModelStatus {
         case .unsupported:
             theme.colors.tertiaryText
         }
+    }
+}
+
+private extension PinesModelPreview {
+    var hasActiveDownload: Bool {
+        downloadProgress?.isActive == true || install.state == .downloading || status == .indexing
+    }
+
+    var canDeleteModel: Bool {
+        hasActiveDownload || install.state != .remote || downloadProgress != nil
     }
 }
 

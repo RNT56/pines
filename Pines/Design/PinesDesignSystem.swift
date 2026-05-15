@@ -912,7 +912,7 @@ struct PinesButtonStyle: ButtonStyle {
     }
 
     private var minHeight: CGFloat {
-        kind == .icon ? 36 : 38
+        kind == .icon ? 36 : theme.dashboard.actionMinHeight
     }
 
     private var cornerRadius: CGFloat {
@@ -1631,6 +1631,27 @@ private struct PinesAppBackgroundModifier: ViewModifier {
     }
 }
 
+private struct PinesFieldChromeModifier: ViewModifier {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        content
+            .font(theme.typography.body)
+            .foregroundStyle(theme.colors.primaryText)
+            .textFieldStyle(.plain)
+            .lineLimit(1)
+            .minimumScaleFactor(0.86)
+            .padding(.horizontal, theme.spacing.medium)
+            .frame(minHeight: max(46, theme.dashboard.actionMinHeight + 8), alignment: .center)
+            .background(theme.colors.controlFill.opacity(isEnabled ? 1 : 0.58), in: RoundedRectangle(cornerRadius: theme.radius.control + 2, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.radius.control + 2, style: .continuous)
+                    .strokeBorder(theme.colors.controlBorder.opacity(isEnabled ? 1 : 0.6), lineWidth: theme.stroke.hairline)
+            }
+    }
+}
+
 extension View {
     func pinesPanel(padding: CGFloat? = nil) -> some View {
         modifier(PinesSurfaceModifier(kind: .panel, padding: padding))
@@ -1642,6 +1663,10 @@ extension View {
 
     func pinesAppBackground() -> some View {
         modifier(PinesAppBackgroundModifier())
+    }
+
+    func pinesFieldChrome() -> some View {
+        modifier(PinesFieldChromeModifier())
     }
 
     func pinesButtonStyle(_ kind: PinesButtonKind = .secondary, fillWidth: Bool = false) -> some View {

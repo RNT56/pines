@@ -2,7 +2,52 @@ import CryptoKit
 import Foundation
 import PinesCore
 
-struct ModelLifecycleService {
+private actor ModelDownloadTaskCoordinator {
+    private struct ActiveDownload {
+        var id: UUID
+        var task: Task<Void, Error>
+    }
+
+    private var downloads: [String: ActiveDownload] = [:]
+
+    func start(
+        repository: String,
+        id: UUID,
+        operation: @escaping @Sendable () async throws -> Void
+    ) -> Task<Void, Error>? {
+        let key = Self.key(for: repository)
+        guard downloads[key] == nil else { return nil }
+        let task = Task {
+            try await operation()
+        }
+        downloads[key] = ActiveDownload(id: id, task: task)
+        return task
+    }
+
+    func cancel(repository: String) -> Task<Void, Error>? {
+        let task = downloads[Self.key(for: repository)]?.task
+        task?.cancel()
+        return task
+    }
+
+    func hasActiveDownload(for repository: String) -> Bool {
+        downloads[Self.key(for: repository)] != nil
+    }
+
+    func finish(repository: String, id: UUID) {
+        let key = Self.key(for: repository)
+        guard downloads[key]?.id == id else { return }
+        downloads[key] = nil
+    }
+
+    private nonisolated static func key(for repository: String) -> String {
+        repository.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+struct ModelLifecycleService: Sendable {
+    private static let downloadTasks = ModelDownloadTaskCoordinator()
+
     let catalog: HuggingFaceModelCatalogService
     let classifier: ModelPreflightClassifier
     let installRepository: any ModelInstallRepository
@@ -16,26 +61,103 @@ struct ModelLifecycleService {
     }
 
     func install(repository: String, revision: String = "main") async throws {
-        if try await hasActiveDownload(for: repository) {
+        let taskID = UUID()
+        guard let task = await Self.downloadTasks.start(repository: repository, id: taskID, operation: { [self] in
+            try await performInstall(repository: repository, revision: revision)
+        }) else {
             return
         }
+
+        do {
+            try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            await Self.downloadTasks.finish(repository: repository, id: taskID)
+        } catch {
+            await Self.downloadTasks.finish(repository: repository, id: taskID)
+            throw error
+        }
+    }
+
+    func cancelDownload(repository: String) async throws {
+        if let task = await Self.downloadTasks.cancel(repository: repository) {
+            try await markActiveDownloadsCancelled(for: repository)
+            do {
+                try await task.value
+            } catch InferenceError.cancelled {
+                return
+            } catch is CancellationError {
+                return
+            }
+            return
+        }
+
+        let cancelled = try await markActiveDownloadsCancelled(for: repository)
+        guard cancelled else { return }
+        try Self.removeStagingDirectory(for: repository)
+        try await installRepository.deleteInstall(repository: repository)
+        try await auditRepository?.append(
+            AuditEvent(category: .modelDownload, summary: "Cancelled \(repository)", modelID: ModelID(rawValue: repository))
+        )
+    }
+
+    func reconcileInterruptedDownloads() async throws {
+        let downloads = try await downloadRepository.listDownloads()
+        var interruptedRepositories: [String: String] = [:]
+
+        for download in downloads where download.status.isActive {
+            let key = download.repository.lowercased()
+            let hasActiveTask = await Self.downloadTasks.hasActiveDownload(for: download.repository)
+            guard !hasActiveTask else { continue }
+            interruptedRepositories[key] = download.repository
+
+            var cancelled = download
+            cancelled.status = .cancelled
+            cancelled.errorMessage = "Download was interrupted."
+            cancelled.updatedAt = Date()
+            try await downloadRepository.upsertDownload(cancelled)
+        }
+
+        let installs = try await installRepository.listInstalledAndCuratedModels()
+        for install in installs where install.state == .downloading {
+            let key = install.repository.lowercased()
+            let hasActiveTask = await Self.downloadTasks.hasActiveDownload(for: install.repository)
+            guard !hasActiveTask else { continue }
+            interruptedRepositories[key] = install.repository
+        }
+
+        for repository in interruptedRepositories.values {
+            try? Self.removeStagingDirectory(for: repository)
+            try await installRepository.deleteInstall(repository: repository)
+            try await auditRepository?.append(
+                AuditEvent(category: .modelDownload, summary: "Interrupted \(repository)", modelID: ModelID(rawValue: repository))
+            )
+        }
+    }
+
+    private func performInstall(repository: String, revision: String = "main") async throws {
+        try await markInterruptedActiveDownloadsCancelled(for: repository)
         let existingInstalls = try await installRepository.listInstalledAndCuratedModels()
         if let existing = existingInstalls
             .first(where: { $0.repository.caseInsensitiveCompare(repository) == .orderedSame }) {
             switch existing.state {
-            case .installed, .downloading:
+            case .installed:
                 return
-            case .remote, .failed, .unsupported:
+            case .downloading, .remote, .failed, .unsupported:
                 break
             }
         }
 
+        try Task.checkCancellation()
         let accessToken = try await huggingFaceToken()
         let input = try await catalog.preflight(repository: repository, revision: revision, accessToken: accessToken)
         let result = classifier.classify(input)
         guard result.verification != .unsupported else {
             throw InferenceError.unsupportedCapability(result.reasons.joined(separator: "\n"))
         }
+        try Task.checkCancellation()
         try Self.validateAvailableDiskSpace(for: result.estimatedBytes)
 
         let downloadID = UUID()
@@ -77,6 +199,7 @@ struct ModelLifecycleService {
             var lastProgressWrite = Date.distantPast
 
             for file in files {
+                try Task.checkCancellation()
                 progress.status = .downloading
                 progress.currentFile = file.path
                 progress.bytesReceived = received
@@ -101,19 +224,18 @@ struct ModelLifecycleService {
                     destination: destination,
                     accessToken: accessToken
                 ) { bytes in
+                    try Task.checkCancellation()
                     received += bytes
+                    progress.bytesReceived = received
                     let now = Date()
                     guard now.timeIntervalSince(lastProgressWrite) > 0.4 else { return }
                     lastProgressWrite = now
-                    var updatedProgress = progress
-                    updatedProgress.bytesReceived = received
-                    updatedProgress.updatedAt = now
-                    Task {
-                        try? await downloadRepository.upsertDownload(updatedProgress)
-                    }
+                    progress.updatedAt = now
+                    try await downloadRepository.upsertDownload(progress)
                 }
 
                 if let oid = file.oid, oid.count == 64 {
+                    try Task.checkCancellation()
                     progress.status = .verifying
                     progress.checksum = oid
                     progress.updatedAt = Date()
@@ -131,6 +253,7 @@ struct ModelLifecycleService {
             progress.updatedAt = Date()
             try await downloadRepository.upsertDownload(progress)
 
+            try Task.checkCancellation()
             if FileManager.default.fileExists(atPath: finalURL.path) {
                 try FileManager.default.removeItem(at: finalURL)
             }
@@ -147,6 +270,12 @@ struct ModelLifecycleService {
             try await auditRepository?.append(
                 AuditEvent(category: .modelDownload, summary: "Installed \(repository)", modelID: ModelID(rawValue: repository))
             )
+        } catch is CancellationError {
+            try await finalizeCancelledDownload(progress: progress, repository: repository)
+            throw InferenceError.cancelled
+        } catch InferenceError.cancelled {
+            try await finalizeCancelledDownload(progress: progress, repository: repository)
+            throw InferenceError.cancelled
         } catch {
             progress.status = .failed
             progress.errorMessage = error.localizedDescription
@@ -158,8 +287,10 @@ struct ModelLifecycleService {
     }
 
     func delete(repository: String) async throws {
-        if try await hasActiveDownload(for: repository) {
-            throw InferenceError.invalidRequest("Wait for the active model download to finish before deleting \(repository).")
+        let hasRunningDownload = await Self.downloadTasks.hasActiveDownload(for: repository)
+        let hasPersistedActiveDownload = try await hasActiveDownload(for: repository)
+        if hasRunningDownload || hasPersistedActiveDownload {
+            try await cancelDownload(repository: repository)
         }
 
         let directory = try Self.modelsDirectory().appending(path: Self.safeDirectoryName(repository), directoryHint: .isDirectory)
@@ -194,12 +325,56 @@ struct ModelLifecycleService {
     private func hasActiveDownload(for repository: String) async throws -> Bool {
         try await downloadRepository.listDownloads().contains { download in
             guard download.repository.caseInsensitiveCompare(repository) == .orderedSame else { return false }
-            switch download.status {
-            case .queued, .downloading, .verifying, .installing:
-                return true
-            case .installed, .failed, .cancelled:
-                return false
-            }
+            return download.status.isActive
+        }
+    }
+
+    @discardableResult
+    private func markActiveDownloadsCancelled(for repository: String) async throws -> Bool {
+        let downloads = try await downloadRepository.listDownloads()
+        var didCancel = false
+        for download in downloads where download.repository.caseInsensitiveCompare(repository) == .orderedSame && download.status.isActive {
+            didCancel = true
+            var cancelled = download
+            cancelled.status = .cancelled
+            cancelled.errorMessage = nil
+            cancelled.updatedAt = Date()
+            try await downloadRepository.upsertDownload(cancelled)
+        }
+        return didCancel
+    }
+
+    private func markInterruptedActiveDownloadsCancelled(for repository: String) async throws {
+        let downloads = try await downloadRepository.listDownloads()
+        for download in downloads where download.repository.caseInsensitiveCompare(repository) == .orderedSame && download.status.isActive {
+            var cancelled = download
+            cancelled.status = .cancelled
+            cancelled.errorMessage = "Download was interrupted."
+            cancelled.updatedAt = Date()
+            try await downloadRepository.upsertDownload(cancelled)
+        }
+    }
+
+    private func finalizeCancelledDownload(progress: ModelDownloadProgress, repository: String) async throws {
+        var cancelled = progress
+        var cleanupError: Error?
+        do {
+            try Self.removeStagingDirectory(for: repository)
+        } catch {
+            cleanupError = error
+        }
+
+        cancelled.status = .cancelled
+        cancelled.errorMessage = cleanupError?.localizedDescription
+        cancelled.updatedAt = Date()
+        try await downloadRepository.upsertDownload(cancelled)
+        try await installRepository.deleteInstall(repository: repository)
+        try await auditRepository?.append(
+            AuditEvent(category: .modelDownload, summary: "Cancelled \(repository)", modelID: ModelID(rawValue: repository))
+        )
+
+        if let cleanupError {
+            throw cleanupError
         }
     }
 
@@ -216,7 +391,7 @@ struct ModelLifecycleService {
         file: ModelFileInfo,
         destination: URL,
         accessToken: String?,
-        progress: (Int64) -> Void
+        progress: (Int64) async throws -> Void
     ) async throws {
         let encodedRepository = repository
             .split(separator: "/")
@@ -254,22 +429,33 @@ struct ModelLifecycleService {
         var buffer = Data()
         buffer.reserveCapacity(64 * 1024)
         for try await byte in bytes {
+            try Task.checkCancellation()
             buffer.append(byte)
             if buffer.count >= 64 * 1024 {
                 try handle.write(contentsOf: buffer)
-                progress(Int64(buffer.count))
+                try await progress(Int64(buffer.count))
                 buffer.removeAll(keepingCapacity: true)
             }
         }
         if !buffer.isEmpty {
+            try Task.checkCancellation()
             try handle.write(contentsOf: buffer)
-            progress(Int64(buffer.count))
+            try await progress(Int64(buffer.count))
         }
 
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
         }
         try FileManager.default.moveItem(at: partial, to: destination)
+    }
+
+    private static func removeStagingDirectory(for repository: String) throws {
+        let stagingDirectory = try modelsDirectory()
+            .appending(path: "staging", directoryHint: .isDirectory)
+            .appending(path: safeDirectoryName(repository), directoryHint: .isDirectory)
+        if FileManager.default.fileExists(atPath: stagingDirectory.path) {
+            try FileManager.default.removeItem(at: stagingDirectory)
+        }
     }
 
     private static func partialByteCount(for destination: URL) -> Int64 {
@@ -331,7 +517,28 @@ struct ModelLifecycleService {
     }
 
     private static func sha256Hex(url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        while true {
+            try Task.checkCancellation()
+            guard let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty else {
+                break
+            }
+            hasher.update(data: data)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private extension ModelDownloadStatus {
+    var isActive: Bool {
+        switch self {
+        case .queued, .downloading, .verifying, .installing:
+            true
+        case .installed, .failed, .cancelled:
+            false
+        }
     }
 }

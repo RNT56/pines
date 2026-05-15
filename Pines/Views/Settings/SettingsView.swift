@@ -26,6 +26,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .pinesExpressiveScrollHaptics()
             .onAppear {
                 selectedSectionID = selectedSectionID ?? appModel.settingsSections.first?.id
             }
@@ -142,6 +143,7 @@ private struct SettingsDetailView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(section.title)
+        .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .pinesAppBackground()
     }
@@ -271,26 +273,28 @@ private struct SettingsDetailView: View {
             PinesKeyValueGrid(items: [.init("Hub token", appModel.huggingFaceCredentialStatus, systemImage: "checkmark.seal")])
             SecureField("Access token", text: $huggingFaceToken)
                 .textContentType(.password)
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
 
-            PinesAdaptiveButtonRow {
-                Button {
-                    Task {
-                        await appModel.saveHuggingFaceToken(huggingFaceToken, services: services)
-                        huggingFaceToken = ""
+            VStack(spacing: theme.spacing.small) {
+                HStack(spacing: theme.spacing.small) {
+                    Button {
+                        Task {
+                            await appModel.saveHuggingFaceToken(huggingFaceToken, services: services)
+                            huggingFaceToken = ""
+                        }
+                    } label: {
+                        Label("Save", systemImage: "key.fill")
                     }
-                } label: {
-                    Label("Save", systemImage: "key.fill")
-                }
-                .disabled(huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .pinesButtonStyle(.primary)
+                    .disabled(huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .pinesButtonStyle(.primary, fillWidth: true)
 
-                Button {
-                    Task { await appModel.validateHuggingFaceToken(services: services) }
-                } label: {
-                    Label("Validate", systemImage: "checkmark.seal")
+                    Button {
+                        Task { await appModel.validateHuggingFaceToken(services: services) }
+                    } label: {
+                        Label("Validate", systemImage: "checkmark.seal")
+                    }
+                    .pinesButtonStyle(.secondary, fillWidth: true)
                 }
-                .pinesButtonStyle(.secondary)
 
                 Button(role: .destructive) {
                     Task {
@@ -298,9 +302,9 @@ private struct SettingsDetailView: View {
                         huggingFaceToken = ""
                     }
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label("Delete token", systemImage: "trash")
                 }
-                .pinesButtonStyle(.destructive)
+                .pinesButtonStyle(.destructive, fillWidth: true)
             }
         }
     }
@@ -355,39 +359,37 @@ private struct SettingsDetailView: View {
             .onChange(of: providerKind) { _, kind in applyProviderDefaults(kind) }
 
             TextField("Display name", text: $providerName)
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             TextField("Base URL", text: $providerBaseURL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             TextField("Default model", text: $providerModelID)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             SecureField("API key", text: $providerAPIKey)
                 .textContentType(.password)
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             Toggle("Enable for agents", isOn: $providerEnabled)
 
-            PinesAdaptiveButtonRow {
-                Button {
-                    Task {
-                        await appModel.saveCloudProvider(
-                            kind: providerKind,
-                            displayName: providerName,
-                            baseURLString: providerBaseURL,
-                            defaultModelID: providerModelID,
-                            apiKey: providerAPIKey,
-                            enabledForAgents: providerEnabled,
-                            services: services
-                        )
-                        providerAPIKey = ""
-                    }
-                } label: {
-                    Label("Save and validate", systemImage: "key")
+            Button {
+                Task {
+                    await appModel.saveCloudProvider(
+                        kind: providerKind,
+                        displayName: providerName,
+                        baseURLString: providerBaseURL,
+                        defaultModelID: providerModelID,
+                        apiKey: providerAPIKey,
+                        enabledForAgents: providerEnabled,
+                        services: services
+                    )
+                    providerAPIKey = ""
                 }
-                .pinesButtonStyle(.primary)
+            } label: {
+                Label("Save and validate", systemImage: "key")
             }
+            .pinesButtonStyle(.primary, fillWidth: true)
 
             ForEach(appModel.cloudProviders) { provider in
                 providerRow(provider)
@@ -446,9 +448,9 @@ private struct SettingsDetailView: View {
             PinesKeyValueGrid(items: [.init("Brave Search", appModel.braveSearchCredentialStatus, systemImage: "magnifyingglass")])
             SecureField("Brave Search API key", text: $braveSearchKey)
                 .textContentType(.password)
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
 
-            PinesAdaptiveButtonRow {
+            HStack(spacing: theme.spacing.small) {
                 Button {
                     Task {
                         await appModel.saveBraveSearchKey(braveSearchKey, services: services)
@@ -458,7 +460,7 @@ private struct SettingsDetailView: View {
                     Label("Save", systemImage: "magnifyingglass.circle")
                 }
                 .disabled(braveSearchKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .pinesButtonStyle(.primary)
+                .pinesButtonStyle(.primary, fillWidth: true)
 
                 Button(role: .destructive) {
                     Task {
@@ -468,7 +470,7 @@ private struct SettingsDetailView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
-                .pinesButtonStyle(.destructive)
+                .pinesButtonStyle(.destructive, fillWidth: true)
             }
         }
     }
@@ -486,11 +488,11 @@ private struct SettingsDetailView: View {
             }
 
             TextField("Display name", text: $mcpName)
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             TextField("Streamable HTTP endpoint", text: $mcpEndpointURL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             Picker("Authentication", selection: $mcpAuthMode) {
                 ForEach(MCPAuthMode.allCases, id: \.self) { mode in
                     Text(mode.title).tag(mode)
@@ -500,7 +502,7 @@ private struct SettingsDetailView: View {
             if mcpAuthMode == .bearerToken {
                 SecureField("Bearer token", text: $mcpBearerToken)
                     .textContentType(.password)
-                    .textFieldStyle(.roundedBorder)
+                    .pinesFieldChrome()
             }
 
             if mcpAuthMode == .oauthPKCE {
@@ -522,7 +524,7 @@ private struct SettingsDetailView: View {
             Stepper("Sampling requests per session: \(mcpMaxSamplingRequests)", value: $mcpMaxSamplingRequests, in: 0...20)
                 .disabled(!mcpSamplingEnabled)
 
-            PinesAdaptiveButtonRow {
+            HStack(spacing: theme.spacing.small) {
                 Button {
                     Task {
                         await saveMCPServer()
@@ -530,7 +532,7 @@ private struct SettingsDetailView: View {
                 } label: {
                     Label("Save and discover tools", systemImage: "point.3.connected.trianglepath.dotted")
                 }
-                .pinesButtonStyle(.primary)
+                .pinesButtonStyle(.primary, fillWidth: true)
 
                 Button {
                     Task { await discoverOAuth() }
@@ -538,7 +540,7 @@ private struct SettingsDetailView: View {
                     Label("Discover OAuth", systemImage: "sparkle.magnifyingglass")
                 }
                 .disabled(mcpEndpointURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .pinesButtonStyle(.secondary)
+                .pinesButtonStyle(.secondary, fillWidth: true)
             }
         }
     }
@@ -548,23 +550,23 @@ private struct SettingsDetailView: View {
             TextField("Authorization URL", text: $mcpOAuthAuthorizationURL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             TextField("Token URL", text: $mcpOAuthTokenURL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             TextField("Client ID", text: $mcpOAuthClientID)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             TextField("Scopes", text: $mcpOAuthScopes)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
             TextField("Resource", text: $mcpOAuthResource)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
+                .pinesFieldChrome()
         }
     }
 
@@ -628,20 +630,20 @@ private struct SettingsDetailView: View {
             }
 
             if server.authMode == .oauthPKCE {
-                PinesAdaptiveButtonRow {
+                HStack(spacing: theme.spacing.small) {
                     Button {
                         Task { await appModel.connectMCPOAuth(server, services: services) }
                     } label: {
                         Label("Connect OAuth", systemImage: "person.badge.key")
                     }
-                    .pinesButtonStyle(.secondary)
+                    .pinesButtonStyle(.secondary, fillWidth: true)
 
                     Button {
                         Task { await appModel.disconnectMCPOAuth(server, services: services) }
                     } label: {
                         Label("Disconnect OAuth", systemImage: "person.badge.minus")
                     }
-                    .pinesButtonStyle(.secondary)
+                    .pinesButtonStyle(.secondary, fillWidth: true)
                 }
             }
 
@@ -722,9 +724,9 @@ private struct SettingsDetailView: View {
             Text("Tools")
                 .font(theme.typography.headline)
             TextField("Search tools", text: $mcpToolSearch)
-                .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .pinesFieldChrome()
             let tools = filteredMCPTools(for: server)
             if tools.isEmpty {
                 PinesEmptyState(title: "No matching tools", detail: "Refresh discovery or clear the search filter.", systemImage: "wrench.adjustable")
@@ -769,9 +771,9 @@ private struct SettingsDetailView: View {
             }
 
             TextField("Search resources and URI templates", text: $mcpResourceSearch)
-                .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .pinesFieldChrome()
 
             let resources = filteredMCPResources(for: server)
             if resources.isEmpty {
@@ -795,7 +797,7 @@ private struct SettingsDetailView: View {
                     } label: {
                         Label("Preview", systemImage: "doc.text.magnifyingglass")
                     }
-                    .pinesButtonStyle(.secondary)
+                    .pinesButtonStyle(.secondary, fillWidth: true)
 
                     if let preview = mcpResourcePreviews[resource.uri] {
                         Text(preview)
@@ -847,9 +849,9 @@ private struct SettingsDetailView: View {
             }
 
             TextField("Search prompts", text: $mcpPromptSearch)
-                .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .pinesFieldChrome()
             let prompts = filteredMCPPrompts(for: server)
             if prompts.isEmpty {
                 PinesEmptyState(title: "No matching prompts", detail: "Refresh prompts or clear the search filter.", systemImage: "text.bubble")
@@ -871,7 +873,7 @@ private struct SettingsDetailView: View {
                             )
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .textFieldStyle(.roundedBorder)
+                            .pinesFieldChrome()
                         }
                     }
                     Spacer()
