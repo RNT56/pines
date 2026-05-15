@@ -112,6 +112,10 @@ private struct MarkdownBlockView: View {
             }
             .padding(theme.spacing.small)
             .background(theme.colors.quoteBackground, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                    .strokeBorder(theme.colors.separator.opacity(0.75), lineWidth: theme.stroke.hairline)
+            }
 
         case let .unorderedList(items):
             MarkdownListView(ordered: false, startIndex: 1, items: items, depth: depth)
@@ -300,8 +304,19 @@ private struct MarkdownTableView: View {
                 RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
                     .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
             }
+            .background(theme.colors.surface, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
         }
         .scrollIndicators(.visible)
+        .overlay(alignment: .leading) {
+            LinearGradient(colors: [theme.colors.appBackground.opacity(0.95), .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: 18)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .trailing) {
+            LinearGradient(colors: [.clear, theme.colors.appBackground.opacity(0.95)], startPoint: .leading, endPoint: .trailing)
+                .frame(width: 18)
+                .allowsHitTesting(false)
+        }
     }
 
     private func tableCell(_ runs: [MarkdownInlineRun], column: Int, isHeader: Bool) -> some View {
@@ -341,12 +356,15 @@ private struct MarkdownTableView: View {
 
 private struct MarkdownCodeBlockView: View {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @EnvironmentObject private var haptics: PinesHaptics
 
     let language: String?
     let code: String
     var forcedLabel: String?
 
     @State private var isSoftWrapped = false
+    @State private var didCopy = false
     @State private var highlightedCode: HighlightedCode?
 
     private var taskID: SyntaxHighlightTaskID {
@@ -372,14 +390,22 @@ private struct MarkdownCodeBlockView: View {
             HStack(spacing: theme.spacing.small) {
                 Label(displayCode.languageLabel, systemImage: "chevron.left.forwardslash.chevron.right")
                     .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.secondaryText)
+                    .foregroundStyle(theme.colors.primaryText)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.horizontal, theme.spacing.small)
+                    .frame(height: 32)
+                    .background(theme.colors.controlFill, in: Capsule())
 
                 if let reason = displayCode.reason {
                     Text(reason)
-                        .font(theme.typography.caption)
-                        .foregroundStyle(theme.colors.tertiaryText)
+                        .font(theme.typography.caption.weight(.medium))
+                        .foregroundStyle(theme.colors.secondaryText)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .padding(.horizontal, theme.spacing.small)
+                        .frame(height: 32)
+                        .background(theme.colors.inlineCodeBackground, in: Capsule())
                 }
 
                 Spacer(minLength: theme.spacing.small)
@@ -394,11 +420,25 @@ private struct MarkdownCodeBlockView: View {
 
                 Button {
                     copyToPasteboard(code)
+                    haptics.play(.primaryAction)
+                    withAnimation(reduceMotion ? nil : theme.motion.copySuccess) {
+                        didCopy = true
+                    }
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            withAnimation(reduceMotion ? nil : theme.motion.fast) {
+                                didCopy = false
+                            }
+                        }
+                    }
                 } label: {
-                    Image(systemName: "doc.on.doc")
+                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                        .symbolEffect(.bounce, options: .nonRepeating, value: didCopy)
                 }
                 .buttonStyle(MarkdownIconButtonStyle())
-                .accessibilityLabel("Copy code")
+                .accessibilityLabel(didCopy ? "Copied code" : "Copy code")
             }
             .padding(.horizontal, theme.spacing.small)
             .padding(.vertical, theme.spacing.xsmall)
@@ -423,17 +463,23 @@ private struct MarkdownCodeBlockView: View {
                             .frame(minWidth: 1, alignment: .leading)
                     }
                     .scrollIndicators(.visible)
+                    .overlay(alignment: .leading) {
+                        LinearGradient(colors: [theme.colors.codeBackground, .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: 18)
+                            .allowsHitTesting(false)
+                    }
+                    .overlay(alignment: .trailing) {
+                        LinearGradient(colors: [.clear, theme.colors.codeBackground], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: 18)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
             .padding(theme.spacing.small)
             .frame(minHeight: 48)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(theme.colors.codeBackground, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
-                .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
-        }
+        .pinesSurface(.code, padding: 0)
         .task(id: taskID) {
             highlightedCode = nil
             let highlighted = await SyntaxHighlightingService.shared.highlight(

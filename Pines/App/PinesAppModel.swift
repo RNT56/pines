@@ -37,6 +37,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private var samplingContinuation: CheckedContinuation<Bool, Never>?
     private var samplingResultContinuation: CheckedContinuation<Bool, Never>?
     private var mcpSamplingRequestCountByServer: [MCPServerID: Int] = [:]
+    private var isShowingModelDiscoveryResults = false
 
     var modelSuggestions: [String] {
         Array(
@@ -269,13 +270,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
             let messages = try await repository.messages(in: conversationID)
             let vaultContext = await vaultContextMessage(for: trimmed, services: services)
-            let mcpContext = await mcpResourceContextMessage(services: services)
+            let mcpContext = await mcpResourceContextMessages(services: services)
             var requestMessages = messages
             if let vaultContext {
                 requestMessages.insert(vaultContext.message, at: 0)
             }
-            if let mcpContext {
-                requestMessages.insert(mcpContext, at: 0)
+            if !mcpContext.isEmpty {
+                requestMessages.insert(contentsOf: mcpContext, at: 0)
             }
             let request = ChatRequest(
                 modelID: selectedModelID,
@@ -404,27 +405,53 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         )
     }
 
-    private func mcpResourceContextMessage(services: PinesAppServices) async -> ChatMessage? {
+    private func mcpResourceContextMessages(services: PinesAppServices) async -> [ChatMessage] {
         let selected = mcpResources.filter(\.selectedForContext).prefix(4)
-        guard !selected.isEmpty else { return nil }
+        guard !selected.isEmpty else { return [] }
         var sections = [String]()
+        var attachments = [ChatAttachment]()
         for resource in selected {
             guard let contents = try? await services.mcpServerService?.readResource(resource) else {
                 continue
             }
             for content in contents {
-                guard let text = content.text, !text.isEmpty else { continue }
-                sections.append("Resource \(resource.name) (\(resource.uri)):\n\(String(text.prefix(4_000)))")
+                if let text = content.text, !text.isEmpty {
+                    sections.append("Resource \(resource.name) (\(resource.uri)):\n\(String(text.prefix(4_000)))")
+                } else if let blob = content.blob {
+                    do {
+                        let attachment = try Self.mcpAttachment(
+                            fromBase64: blob,
+                            mimeType: content.mimeType,
+                            fileNameHint: resource.uri
+                        )
+                        attachments.append(attachment)
+                        sections.append("Resource \(resource.name) (\(resource.uri)) attached as \(attachment.fileName).")
+                    } catch {
+                        sections.append("Resource \(resource.name) (\(resource.uri)) was not attached: \(error.localizedDescription)")
+                    }
+                }
             }
         }
-        guard !sections.isEmpty else { return nil }
-        return ChatMessage(
-            role: .system,
-            content: """
-            Use this user-selected MCP resource context when relevant. Treat it as external, server-provided context.
-            \(sections.joined(separator: "\n\n"))
-            """
-        )
+        guard !sections.isEmpty || !attachments.isEmpty else { return [] }
+        var messages = [
+            ChatMessage(
+                role: .system,
+                content: """
+                Use this user-selected MCP resource context when relevant. Treat it as external, server-provided context.
+                \(sections.joined(separator: "\n\n"))
+                """
+            )
+        ]
+        if !attachments.isEmpty {
+            messages.append(
+                ChatMessage(
+                    role: .user,
+                    content: "User-selected MCP resource attachments are available for this turn.",
+                    attachments: attachments
+                )
+            )
+        }
+        return messages
     }
 
     func saveSettings(services: PinesAppServices) async {
@@ -453,10 +480,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 return
             }
             try await lifecycle.install(repository: repository)
-            await refreshAll(services: services)
+            if !isShowingModelDiscoveryResults {
+                await refreshAll(services: services)
+            }
         } catch {
             serviceError = error.localizedDescription
-            await refreshAll(services: services)
+            if !isShowingModelDiscoveryResults {
+                await refreshAll(services: services)
+            }
         }
     }
 
@@ -471,10 +502,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 defaultModelID = nil
                 await saveSettings(services: services)
             }
-            await refreshAll(services: services)
+            if !isShowingModelDiscoveryResults {
+                await refreshAll(services: services)
+            }
         } catch {
             serviceError = error.localizedDescription
-            await refreshAll(services: services)
+            if !isShowingModelDiscoveryResults {
+                await refreshAll(services: services)
+            }
         }
     }
 
@@ -495,8 +530,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         do {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty, task == nil, verification == nil, installState == nil {
+                isShowingModelDiscoveryResults = false
                 await refreshAll(services: services)
             } else {
+                isShowingModelDiscoveryResults = true
                 let token = try await services.huggingFaceCredentialService.readToken()
                 let filters = ModelSearchFilters(query: trimmed, task: task, limit: 50)
                 let remoteModels = try await services.modelCatalog.search(filters: filters, accessToken: token)
@@ -809,7 +846,16 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     return String(text.prefix(6_000))
                 }
                 if let blob = content.blob {
-                    return "[Binary resource: \(content.mimeType ?? "application/octet-stream"), \(blob.count) base64 characters]"
+                    do {
+                        let attachment = try Self.mcpAttachment(
+                            fromBase64: blob,
+                            mimeType: content.mimeType,
+                            fileNameHint: resource.uri
+                        )
+                        return "[Attachment: \(attachment.fileName), \(attachment.contentType), \(ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file))]"
+                    } catch {
+                        return "[Blocked binary resource: \(error.localizedDescription)]"
+                    }
                 }
                 return "[Empty resource content]"
             }.joined(separator: "\n\n")
@@ -912,13 +958,39 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 for await installs in modelRepository.observeInstalledAndCuratedModels() {
                     let downloads = await MainActor.run { self?.modelDownloads ?? [] }
                     let downloadByRepository = Self.latestDownloadByRepository(downloads)
+                    let installByRepository = Dictionary(uniqueKeysWithValues: installs.map { ($0.repository.lowercased(), $0) })
                     await MainActor.run {
-                        self?.models = installs.map { install in
-                            Self.modelPreview(
-                                from: install,
-                                runtime: services.mlxRuntime,
-                                download: downloadByRepository[install.repository.lowercased()]
-                            )
+                        guard let self else { return }
+                        if self.isShowingModelDiscoveryResults {
+                            self.models = self.models.map { preview in
+                                let key = preview.install.repository.lowercased()
+                                if let install = installByRepository[key] {
+                                    return Self.modelPreview(
+                                        from: install,
+                                        runtime: services.mlxRuntime,
+                                        download: downloadByRepository[key]
+                                    )
+                                }
+
+                                var remoteInstall = preview.install
+                                if remoteInstall.state != .unsupported {
+                                    remoteInstall.state = .remote
+                                }
+                                remoteInstall.localURL = nil
+                                return Self.modelPreview(
+                                    from: remoteInstall,
+                                    runtime: services.mlxRuntime,
+                                    download: downloadByRepository[key]
+                                )
+                            }
+                        } else {
+                            self.models = installs.map { install in
+                                Self.modelPreview(
+                                    from: install,
+                                    runtime: services.mlxRuntime,
+                                    download: downloadByRepository[install.repository.lowercased()]
+                                )
+                            }
                         }
                     }
                 }
@@ -1107,7 +1179,20 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         guard usedRequests < server.maxSamplingRequestsPerSession else {
             throw InferenceError.invalidRequest("MCP sampling request limit reached for \(server.displayName).")
         }
-        guard await requestMCPSamplingApproval(request) else {
+        await auditMCPSampling(
+            server: server,
+            summary: "MCP sampling requested by \(server.displayName)",
+            request: request,
+            services: services
+        )
+        let approved = await requestMCPSamplingApproval(request)
+        await auditMCPSampling(
+            server: server,
+            summary: approved ? "Approved MCP sampling for \(server.displayName)" : "Denied MCP sampling for \(server.displayName)",
+            request: request,
+            services: services
+        )
+        guard approved else {
             throw AgentError.permissionDenied("MCP sampling request was denied.")
         }
         mcpSamplingRequestCountByServer[server.id, default: 0] += 1
@@ -1117,10 +1202,6 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             systemPrompt: request.systemPrompt,
             editedPrompt: editedPrompt.isEmpty ? nil : editedPrompt
         )
-        let modelID = defaultModelID
-            ?? models.first(where: { $0.install.state == .installed })?.install.modelID
-            ?? models.first?.install.modelID
-            ?? ModelID(rawValue: "mlx-community/Llama-3.2-1B-Instruct-4bit")
         let tools = try request.tools.map {
             try AnyToolSpec(
                 name: $0.name,
@@ -1129,40 +1210,195 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 inputJSONSchema: $0.inputSchema
             )
         }
+        let requiresVision = messages.contains { message in
+            message.attachments.contains { $0.kind == .image }
+        }
+        let localModelID = rankedLocalModelID(for: request, requiresVision: requiresVision)
+            ?? defaultModelID
+            ?? models.first(where: { $0.install.state == .installed })?.install.modelID
+            ?? models.first?.install.modelID
+            ?? ModelID(rawValue: "mlx-community/Llama-3.2-1B-Instruct-4bit")
         let sampling = ChatSampling(
             maxTokens: request.maxTokens ?? 512,
             temperature: Float(request.temperature ?? 0.6)
         )
-        let chatRequest = ChatRequest(
-            modelID: modelID,
+        let localChatRequest = ChatRequest(
+            modelID: localModelID,
             messages: messages,
             sampling: sampling,
             allowsTools: !tools.isEmpty,
             availableTools: tools
         )
 
-        if let result = try? await runMCPSampling(chatRequest, provider: services.mlxRuntime, modelID: modelID) {
-            guard await requestMCPSamplingResultApproval(result, serverID: server.id) else {
+        if let result = try? await runMCPSampling(localChatRequest, provider: services.mlxRuntime, modelID: localModelID) {
+            let returnApproved = await requestMCPSamplingResultApproval(result, serverID: server.id)
+            await auditMCPSampling(
+                server: server,
+                summary: returnApproved ? "Returned MCP sampling result to \(server.displayName)" : "Blocked MCP sampling result for \(server.displayName)",
+                request: request,
+                result: result,
+                services: services
+            )
+            guard returnApproved else {
                 throw AgentError.permissionDenied("MCP sampling result was not approved for return.")
             }
             return result
         }
 
         guard server.byokSamplingEnabled,
-              let cloudProvider = cloudProviders.first(where: { $0.enabledForAgents })
+              let cloudProvider = rankedCloudProvider(for: request, requiresVision: requiresVision, requiresTools: !tools.isEmpty)
         else {
             throw InferenceError.providerUnavailable(services.mlxRuntime.localProviderID)
         }
+        let cloudModelID = cloudProvider.defaultModelID ?? localModelID
+        let cloudChatRequest = ChatRequest(
+            modelID: cloudModelID,
+            messages: messages,
+            sampling: sampling,
+            allowsTools: !tools.isEmpty,
+            availableTools: tools
+        )
         let provider = BYOKCloudInferenceProvider(configuration: cloudProvider, secretStore: services.secretStore)
         let result = try await runMCPSampling(
-            chatRequest,
+            cloudChatRequest,
             provider: provider,
-            modelID: cloudProvider.defaultModelID ?? modelID
+            modelID: cloudModelID
         )
-        guard await requestMCPSamplingResultApproval(result, serverID: server.id) else {
+        let returnApproved = await requestMCPSamplingResultApproval(result, serverID: server.id)
+        await auditMCPSampling(
+            server: server,
+            summary: returnApproved ? "Returned MCP sampling result to \(server.displayName)" : "Blocked MCP sampling result for \(server.displayName)",
+            request: request,
+            result: result,
+            services: services
+        )
+        guard returnApproved else {
             throw AgentError.permissionDenied("MCP sampling result was not approved for return.")
         }
         return result
+    }
+
+    private func rankedLocalModelID(for request: MCPSamplingRequest, requiresVision: Bool) -> ModelID? {
+        let preference = MCPModelPreferenceProfile(json: request.modelPreferences)
+        let candidates = models
+            .map(\.install)
+            .filter { install in
+                install.state == .installed
+                    && install.modalities.contains(.text)
+                    && (!requiresVision || install.modalities.contains(.vision))
+            }
+        guard !candidates.isEmpty else { return nil }
+        return candidates.max { left, right in
+            samplingModelScore(install: left, preference: preference) < samplingModelScore(install: right, preference: preference)
+        }?.modelID
+    }
+
+    private func rankedCloudProvider(for request: MCPSamplingRequest, requiresVision: Bool, requiresTools: Bool) -> CloudProviderConfiguration? {
+        let preference = MCPModelPreferenceProfile(json: request.modelPreferences)
+        let candidates = cloudProviders.filter { provider in
+            provider.enabledForAgents
+                && provider.capabilities.textGeneration
+                && (!requiresVision || provider.capabilities.vision)
+                && (!requiresTools || provider.capabilities.toolCalling)
+        }
+        guard !candidates.isEmpty else { return nil }
+        return candidates.max { left, right in
+            samplingCloudScore(provider: left, preference: preference) < samplingCloudScore(provider: right, preference: preference)
+        }
+    }
+
+    private func samplingModelScore(install: ModelInstall, preference: MCPModelPreferenceProfile) -> Double {
+        let searchable = [
+            install.modelID.rawValue,
+            install.displayName,
+            install.repository,
+            install.modelType ?? "",
+            install.processorClass ?? "",
+        ].joined(separator: " ").lowercased()
+        var score = 10.0
+        for hint in preference.hints {
+            let normalizedHint = hint.lowercased()
+            if searchable == normalizedHint {
+                score += 120
+            } else if searchable.contains(normalizedHint) {
+                score += 60
+            }
+        }
+        if install.modelID == defaultModelID {
+            score += 12
+        }
+        let parameterScale = min(Double(install.parameterCount ?? 0) / 10_000_000_000, 1)
+        let byteScale = min(Double(install.estimatedBytes ?? 0) / 10_000_000_000, 1)
+        score += preference.intelligencePriority * parameterScale * 24
+        score += preference.speedPriority * (1 - max(parameterScale, byteScale)) * 18
+        score += preference.costPriority * (1 - byteScale) * 12
+        return score
+    }
+
+    private func samplingCloudScore(provider: CloudProviderConfiguration, preference: MCPModelPreferenceProfile) -> Double {
+        let searchable = [
+            provider.displayName,
+            provider.kind.rawValue,
+            provider.baseURL.host(percentEncoded: false) ?? "",
+            provider.defaultModelID?.rawValue ?? "",
+        ].joined(separator: " ").lowercased()
+        var score = 5.0
+        for hint in preference.hints {
+            let normalizedHint = hint.lowercased()
+            if searchable == normalizedHint {
+                score += 120
+            } else if searchable.contains(normalizedHint) {
+                score += 60
+            }
+        }
+        score += preference.intelligencePriority * 8
+        score += preference.speedPriority * (provider.kind == .openAICompatible ? 6 : 4)
+        score -= preference.costPriority * 4
+        return score
+    }
+
+    private func auditMCPSampling(
+        server: MCPServerConfiguration,
+        summary: String,
+        request: MCPSamplingRequest,
+        result: MCPSamplingResult? = nil,
+        services: PinesAppServices
+    ) async {
+        let payload = [
+            "server=\(server.id.rawValue)",
+            "messages=\(request.messages.count)",
+            "tools=\(request.tools.count)",
+            "maxTokens=\(request.maxTokens ?? 512)",
+            "includeContext=\(request.includeContext ?? "unspecified")",
+            result.map { "result=\(Self.samplingResultKind($0))" },
+        ].compactMap { $0 }.joined(separator: ", ")
+        try? await services.auditRepository?.append(
+            AuditEvent(
+                category: .consent,
+                summary: summary,
+                redactedPayload: payload,
+                networkDomains: server.endpointURL.host(percentEncoded: false).map { [$0] } ?? []
+            )
+        )
+    }
+
+    private static func samplingResultKind(_ result: MCPSamplingResult) -> String {
+        switch result.content {
+        case .text:
+            return "text"
+        case .toolUse:
+            return "tool_use"
+        case .toolResult:
+            return "tool_result"
+        case .resource:
+            return "resource"
+        case .image:
+            return "image"
+        case .audio:
+            return "audio"
+        case .unknown:
+            return "unknown"
+        }
     }
 
     private func runMCPSampling(
@@ -1215,20 +1451,20 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private static func samplingResultSummary(_ result: MCPSamplingResult) -> String {
         switch result.content {
         case let .text(text):
-            text
+            return text
         case let .toolUse(id, name, _):
-            "Tool use \(id): \(name)"
+            return "Tool use \(id): \(name)"
         case let .toolResult(toolUseID, content):
             let text = (try? textAndAttachments(from: content).text) ?? ""
             return "Tool result \(toolUseID)\n\(text)"
         case let .resource(resource):
-            resource.text ?? "[Resource: \(resource.uri)]"
+            return resource.text ?? "[Resource: \(resource.uri)]"
         case let .image(_, mimeType):
-            "[Image: \(mimeType)]"
+            return "[Image: \(mimeType)]"
         case let .audio(_, mimeType):
-            "[Audio: \(mimeType)]"
+            return "[Audio: \(mimeType)]"
         case .unknown:
-            "[Unsupported sampling result content]"
+            return "[Unsupported sampling result content]"
         }
     }
 
@@ -1249,12 +1485,21 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 if let text = resource.text {
                     parts.append(text)
                 } else if let blob = resource.blob {
-                    parts.append("[Embedded resource: \(resource.uri), \(blob.count) base64 characters]")
+                    let attachment = try mcpAttachment(
+                        fromBase64: blob,
+                        mimeType: resource.mimeType,
+                        fileNameHint: resource.uri
+                    )
+                    attachments.append(attachment)
+                    parts.append("[Embedded resource attachment: \(attachment.fileName), \(attachment.contentType)]")
                 }
             case let .image(data, mimeType):
-                let url = try writeTemporaryMCPBlob(data: data, mimeType: mimeType)
-                attachments.append(ChatAttachment(kind: .image, fileName: url.lastPathComponent, contentType: mimeType, localURL: url, byteCount: (try? Data(contentsOf: url).count) ?? 0))
-                parts.append("[Image: \(mimeType)]")
+                let attachment = try mcpAttachment(fromBase64: data, mimeType: mimeType, fileNameHint: "sampling-image")
+                guard attachment.kind == .image else {
+                    throw InferenceError.unsupportedCapability("MCP image content used unsupported MIME type \(mimeType).")
+                }
+                attachments.append(attachment)
+                parts.append("[Image: \(attachment.contentType)]")
             case .audio:
                 throw InferenceError.unsupportedCapability("Audio sampling content is not supported yet.")
             case let .toolUse(id, name, _):
@@ -1269,14 +1514,73 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return (parts.joined(separator: "\n\n"), attachments)
     }
 
-    private static func writeTemporaryMCPBlob(data: String, mimeType: String) throws -> URL {
+    private static let maxMCPAttachmentBytes = 10 * 1024 * 1024
+
+    private static func mcpAttachment(fromBase64 data: String, mimeType: String?, fileNameHint: String) throws -> ChatAttachment {
         guard let decoded = Data(base64Encoded: data) else {
-            throw InferenceError.invalidRequest("MCP image content was not valid base64.")
+            throw InferenceError.invalidRequest("MCP resource content was not valid base64.")
         }
-        let ext = mimeType == "image/jpeg" ? "jpg" : "png"
-        let url = FileManager.default.temporaryDirectory.appending(path: "mcp-\(UUID().uuidString).\(ext)")
+        guard decoded.count <= maxMCPAttachmentBytes else {
+            throw InferenceError.invalidRequest("MCP resource exceeds the \(ByteCountFormatter.string(fromByteCount: Int64(maxMCPAttachmentBytes), countStyle: .file)) attachment limit.")
+        }
+        let normalizedMimeType = (mimeType ?? "application/octet-stream").lowercased()
+        guard let policy = mcpAttachmentPolicy(for: normalizedMimeType) else {
+            throw InferenceError.unsupportedCapability("MCP resource MIME type \(normalizedMimeType) is not allowed as an attachment.")
+        }
+        let safeName = sanitizedMCPFileName(from: fileNameHint, fallbackExtension: policy.fileExtension)
+        let url = FileManager.default.temporaryDirectory.appending(path: "mcp-\(UUID().uuidString)-\(safeName)")
         try decoded.write(to: url)
-        return url
+        return ChatAttachment(
+            kind: policy.kind,
+            fileName: url.lastPathComponent,
+            contentType: normalizedMimeType,
+            localURL: url,
+            byteCount: decoded.count
+        )
+    }
+
+    private static func mcpAttachmentPolicy(for mimeType: String) -> (kind: AttachmentKind, fileExtension: String)? {
+        switch mimeType {
+        case "image/png":
+            return (.image, "png")
+        case "image/jpeg", "image/jpg":
+            return (.image, "jpg")
+        case "image/webp":
+            return (.image, "webp")
+        case "image/gif":
+            return (.image, "gif")
+        case "application/pdf":
+            return (.document, "pdf")
+        case "text/plain":
+            return (.document, "txt")
+        case "text/markdown", "text/x-markdown":
+            return (.document, "md")
+        case "application/json":
+            return (.document, "json")
+        case "text/csv":
+            return (.document, "csv")
+        default:
+            return nil
+        }
+    }
+
+    private static func sanitizedMCPFileName(from hint: String, fallbackExtension: String) -> String {
+        let candidate = hint
+            .split(separator: "/")
+            .last
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? "resource"
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        let sanitizedScalars = candidate.unicodeScalars.map { allowed.contains($0) ? String($0) : "-" }
+        var name = sanitizedScalars.joined().trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
+        if name.isEmpty {
+            name = "resource"
+        }
+        if !name.lowercased().hasSuffix(".\(fallbackExtension)") {
+            name += ".\(fallbackExtension)"
+        }
+        return String(name.prefix(96))
     }
 
     private func refreshCredentialStatuses(services: PinesAppServices) async {
@@ -1554,6 +1858,45 @@ struct MCPSamplingResultReview: Identifiable, Hashable {
     let summary: String
 }
 
+private struct MCPModelPreferenceProfile: Hashable {
+    var hints: [String]
+    var costPriority: Double
+    var speedPriority: Double
+    var intelligencePriority: Double
+
+    init(json: JSONValue?) {
+        let object = json?.objectValue ?? [:]
+        hints = Self.hints(from: object["hints"])
+        costPriority = Self.priority(from: object["costPriority"])
+        speedPriority = Self.priority(from: object["speedPriority"])
+        intelligencePriority = Self.priority(from: object["intelligencePriority"])
+    }
+
+    private static func hints(from value: JSONValue?) -> [String] {
+        guard case let .array(items)? = value else { return [] }
+        return items.compactMap { item in
+            switch item {
+            case let .string(name):
+                return name
+            case let .object(object):
+                if case let .string(name)? = object["name"] {
+                    return name
+                }
+                return nil
+            default:
+                return nil
+            }
+        }
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    }
+
+    private static func priority(from value: JSONValue?) -> Double {
+        guard case let .number(priority)? = value else { return 0 }
+        return min(max(priority, 0), 1)
+    }
+}
+
 struct PinesModelPreview: Identifiable, Hashable {
     let id: UUID
     let install: ModelInstall
@@ -1799,4 +2142,19 @@ private enum PinesStaticSettings {
         )
     ]
 
+}
+
+private extension CloudProviderConfiguration {
+    var capabilities: ProviderCapabilities {
+        ProviderCapabilities(
+            local: false,
+            streaming: true,
+            textGeneration: true,
+            vision: true,
+            embeddings: false,
+            toolCalling: true,
+            jsonMode: true,
+            maxContextTokens: nil
+        )
+    }
 }

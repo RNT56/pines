@@ -76,6 +76,11 @@ struct PinesTheme {
     var stroke: PinesThemeStroke
     var shadow: PinesThemeShadow
     var motion: PinesThemeMotion
+    var row: PinesThemeRow
+    var card: PinesThemeCard
+    var dashboard: PinesThemeDashboard
+    var ambient: PinesThemeAmbient
+    var chart: PinesThemeChart
 
     static func resolve(
         template: PinesThemeTemplate,
@@ -93,7 +98,12 @@ struct PinesTheme {
             radius: PinesThemeRadius(template: template),
             stroke: PinesThemeStroke(template: template, scheme: scheme),
             shadow: PinesThemeShadow(template: template, scheme: scheme),
-            motion: PinesThemeMotion(template: template)
+            motion: PinesThemeMotion(template: template),
+            row: PinesThemeRow(template: template),
+            card: PinesThemeCard(template: template),
+            dashboard: PinesThemeDashboard(template: template),
+            ambient: PinesThemeAmbient(template: template, scheme: scheme),
+            chart: PinesThemeChart(template: template, scheme: scheme)
         )
     }
 
@@ -338,11 +348,115 @@ struct PinesThemeMotion {
     var fast: Animation
     var standard: Animation
     var emphasized: Animation
+    var selection: Animation
+    var cardInsertion: Animation
+    var copySuccess: Animation
+    var progressUpdate: Animation
 
     init(template: PinesThemeTemplate) {
         fast = .smooth(duration: 0.18)
         standard = .smooth(duration: template == .paper ? 0.28 : 0.24)
         emphasized = .spring(duration: 0.42, bounce: template == .aurora ? 0.28 : 0.18)
+        selection = .smooth(duration: template == .graphite ? 0.14 : 0.18)
+        cardInsertion = .spring(duration: template == .aurora ? 0.48 : 0.40, bounce: template == .aurora ? 0.22 : 0.14)
+        copySuccess = .spring(duration: 0.34, bounce: 0.20)
+        progressUpdate = .smooth(duration: template == .graphite ? 0.16 : 0.24)
+    }
+}
+
+struct PinesThemeRow: Equatable {
+    var minHeight: CGFloat
+    var iconTile: CGFloat
+    var trailingWidth: CGFloat
+    var horizontalPadding: CGFloat
+    var verticalPadding: CGFloat
+
+    init(template: PinesThemeTemplate) {
+        switch template {
+        case .graphite:
+            minHeight = 66; iconTile = 36; trailingWidth = 74; horizontalPadding = 10; verticalPadding = 8
+        case .paper:
+            minHeight = 78; iconTile = 40; trailingWidth = 82; horizontalPadding = 12; verticalPadding = 10
+        case .aurora:
+            minHeight = 74; iconTile = 40; trailingWidth = 82; horizontalPadding = 12; verticalPadding = 10
+        case .evergreen:
+            minHeight = 72; iconTile = 38; trailingWidth = 78; horizontalPadding = 11; verticalPadding = 9
+        }
+    }
+}
+
+struct PinesThemeCard: Equatable {
+    var minHeight: CGFloat
+    var headerIconSize: CGFloat
+    var sectionSpacing: CGFloat
+    var gridMinWidth: CGFloat
+
+    init(template: PinesThemeTemplate) {
+        switch template {
+        case .graphite:
+            minHeight = 96; headerIconSize = 34; sectionSpacing = 12; gridMinWidth = 154
+        case .paper:
+            minHeight = 116; headerIconSize = 40; sectionSpacing = 18; gridMinWidth = 174
+        case .aurora:
+            minHeight = 110; headerIconSize = 40; sectionSpacing = 16; gridMinWidth = 168
+        case .evergreen:
+            minHeight = 104; headerIconSize = 38; sectionSpacing = 14; gridMinWidth = 164
+        }
+    }
+}
+
+struct PinesThemeDashboard: Equatable {
+    var tileMinHeight: CGFloat
+    var tileMinWidth: CGFloat
+    var compactGridMinWidth: CGFloat
+    var wideGridMinWidth: CGFloat
+    var actionMinHeight: CGFloat
+    var chipHeight: CGFloat
+
+    init(template: PinesThemeTemplate) {
+        switch template {
+        case .graphite:
+            tileMinHeight = 86; tileMinWidth = 138; compactGridMinWidth = 132; wideGridMinWidth = 196; actionMinHeight = 38; chipHeight = 28
+        case .paper:
+            tileMinHeight = 108; tileMinWidth = 156; compactGridMinWidth = 150; wideGridMinWidth = 220; actionMinHeight = 42; chipHeight = 30
+        case .aurora:
+            tileMinHeight = 104; tileMinWidth = 150; compactGridMinWidth = 144; wideGridMinWidth = 212; actionMinHeight = 42; chipHeight = 30
+        case .evergreen:
+            tileMinHeight = 98; tileMinWidth = 146; compactGridMinWidth = 140; wideGridMinWidth = 204; actionMinHeight = 40; chipHeight = 29
+        }
+    }
+}
+
+struct PinesThemeAmbient: Equatable {
+    var lineOpacity: Double
+    var glowOpacity: Double
+    var markOpacity: Double
+    var drift: CGFloat
+
+    init(template: PinesThemeTemplate, scheme: ColorScheme) {
+        let dark = scheme == .dark
+        switch template {
+        case .evergreen:
+            lineOpacity = dark ? 0.16 : 0.10; glowOpacity = dark ? 0.18 : 0.10; markOpacity = dark ? 0.10 : 0.07; drift = 10
+        case .graphite:
+            lineOpacity = dark ? 0.20 : 0.11; glowOpacity = dark ? 0.08 : 0.05; markOpacity = dark ? 0.06 : 0.04; drift = 4
+        case .aurora:
+            lineOpacity = dark ? 0.18 : 0.09; glowOpacity = dark ? 0.24 : 0.12; markOpacity = dark ? 0.08 : 0.05; drift = 14
+        case .paper:
+            lineOpacity = dark ? 0.12 : 0.08; glowOpacity = dark ? 0.10 : 0.06; markOpacity = dark ? 0.07 : 0.05; drift = 6
+        }
+    }
+}
+
+struct PinesThemeChart: Equatable {
+    var ringLineWidth: CGFloat
+    var timelineDot: CGFloat
+    var timelineLine: CGFloat
+
+    init(template: PinesThemeTemplate, scheme: ColorScheme) {
+        ringLineWidth = template == .graphite ? 8 : 9
+        timelineDot = template == .paper ? 10 : 9
+        timelineLine = template == .graphite ? 1 : 1.3
     }
 }
 
@@ -409,7 +523,11 @@ struct PinesBootMarkView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.colors.glassSurface)
+        .background {
+            PinesAmbientBackground()
+            Rectangle()
+                .fill(theme.colors.glassSurface)
+        }
         .transition(.opacity.combined(with: reduceMotion ? .identity : .scale(scale: 0.98)))
     }
 }
@@ -496,11 +614,7 @@ struct PinesEmptyState: View {
 
     var body: some View {
         VStack(spacing: theme.spacing.medium) {
-            Image(systemName: systemImage)
-                .font(.system(size: 34, weight: .semibold))
-                .foregroundStyle(theme.colors.accent)
-                .frame(width: 70, height: 70)
-                .background(theme.colors.glassSurface, in: Circle())
+            PinesEmptyIllustration(systemImage: systemImage)
 
             VStack(spacing: theme.spacing.xsmall) {
                 Text(title)
@@ -610,6 +724,7 @@ enum PinesSurfaceKind {
     case inset
     case selected
     case chrome
+    case code
 }
 
 private struct PinesSurfaceModifier: ViewModifier {
@@ -640,6 +755,8 @@ private struct PinesSurfaceModifier: ViewModifier {
         switch kind {
         case .chrome, .glass:
             theme.radius.sheet
+        case .code:
+            theme.radius.control
         default:
             theme.radius.panel
         }
@@ -653,6 +770,8 @@ private struct PinesSurfaceModifier: ViewModifier {
             AnyShapeStyle(theme.colors.elevatedSurface)
         case .inset:
             AnyShapeStyle(theme.colors.controlFill)
+        case .code:
+            AnyShapeStyle(theme.colors.codeBackground)
         case .panel:
             AnyShapeStyle(theme.colors.surface)
         }
@@ -664,6 +783,8 @@ private struct PinesSurfaceModifier: ViewModifier {
             theme.colors.accent.opacity(0.72)
         case .glass, .chrome:
             theme.colors.controlBorder
+        case .code:
+            theme.colors.separator
         case .inset:
             theme.colors.separator.opacity(0.7)
         case .panel, .elevated:
@@ -681,6 +802,8 @@ private struct PinesSurfaceModifier: ViewModifier {
             0.85
         case .glass, .chrome:
             0.70
+        case .code:
+            0.32
         default:
             0.42
         }
@@ -688,7 +811,7 @@ private struct PinesSurfaceModifier: ViewModifier {
 
     private var shadowColor: Color {
         switch kind {
-        case .inset:
+        case .inset, .code:
             Color.clear
         case .selected:
             theme.colors.accent.opacity(theme.colorScheme == .dark ? 0.18 : 0.14)
@@ -703,7 +826,7 @@ private struct PinesSurfaceModifier: ViewModifier {
             theme.shadow.panelRadius * 0.55
         case .glass, .chrome:
             theme.shadow.panelRadius * 0.40
-        case .panel:
+        case .panel, .code:
             theme.shadow.panelRadius * 0.30
         case .inset:
             0
@@ -716,7 +839,7 @@ private struct PinesSurfaceModifier: ViewModifier {
             theme.shadow.panelY * 0.55
         case .glass, .chrome:
             theme.shadow.panelY * 0.35
-        case .panel:
+        case .panel, .code:
             theme.shadow.panelY * 0.25
         case .inset:
             0
@@ -916,6 +1039,586 @@ struct PinesProgressBar: View {
         }
         .frame(height: 7)
         .animation(reduceMotion ? nil : theme.motion.standard, value: clampedValue)
+    }
+}
+
+struct PinesAmbientBackground: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var drift = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Rectangle()
+                    .fill(theme.colors.backgroundWash)
+
+                ambientLines(size: proxy.size)
+                    .stroke(theme.colors.accent.opacity(theme.ambient.lineOpacity), lineWidth: theme.stroke.hairline)
+                    .offset(x: reduceMotion ? 0 : (drift ? theme.ambient.drift : -theme.ambient.drift * 0.4))
+
+                Image("PinesMark")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(theme.colors.accent)
+                    .opacity(theme.ambient.markOpacity)
+                    .frame(width: min(proxy.size.width, proxy.size.height) * 0.46)
+                    .rotationEffect(.degrees(theme.template == .aurora ? -8 : 0))
+                    .offset(x: proxy.size.width * 0.24, y: -proxy.size.height * 0.20)
+                    .accessibilityHidden(true)
+
+                RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
+                    .fill(theme.colors.accent.opacity(theme.ambient.glowOpacity))
+                    .blur(radius: 34)
+                    .frame(width: proxy.size.width * 0.48, height: 20)
+                    .rotationEffect(.degrees(theme.template == .graphite ? 0 : -18))
+                    .offset(x: proxy.size.width * 0.16, y: proxy.size.height * 0.38)
+            }
+            .clipped()
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
+                    drift = true
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func ambientLines(size: CGSize) -> Path {
+        var path = Path()
+        switch theme.template {
+        case .graphite:
+            for index in 0..<6 {
+                let y = CGFloat(index) * max(1, size.height / 5)
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y + 10))
+            }
+        case .paper:
+            for index in 0..<5 {
+                let y = CGFloat(index) * max(1, size.height / 4)
+                path.move(to: CGPoint(x: -20, y: y))
+                path.addCurve(
+                    to: CGPoint(x: size.width + 20, y: y + 14),
+                    control1: CGPoint(x: size.width * 0.32, y: y - 8),
+                    control2: CGPoint(x: size.width * 0.68, y: y + 22)
+                )
+            }
+        case .aurora:
+            path.move(to: CGPoint(x: -20, y: size.height * 0.28))
+            path.addCurve(
+                to: CGPoint(x: size.width + 20, y: size.height * 0.22),
+                control1: CGPoint(x: size.width * 0.28, y: size.height * 0.08),
+                control2: CGPoint(x: size.width * 0.62, y: size.height * 0.46)
+            )
+            path.move(to: CGPoint(x: -20, y: size.height * 0.68))
+            path.addCurve(
+                to: CGPoint(x: size.width + 20, y: size.height * 0.58),
+                control1: CGPoint(x: size.width * 0.30, y: size.height * 0.48),
+                control2: CGPoint(x: size.width * 0.72, y: size.height * 0.78)
+            )
+        case .evergreen:
+            path.move(to: CGPoint(x: size.width * 0.10, y: size.height))
+            path.addCurve(
+                to: CGPoint(x: size.width * 0.84, y: 0),
+                control1: CGPoint(x: size.width * 0.12, y: size.height * 0.55),
+                control2: CGPoint(x: size.width * 0.62, y: size.height * 0.34)
+            )
+        }
+        return path
+    }
+}
+
+struct PinesEmptyIllustration: View {
+    @Environment(\.pinesTheme) private var theme
+    let systemImage: String
+
+    var body: some View {
+        ZStack {
+            PinesAmbientBackground()
+                .clipShape(Circle())
+
+            Circle()
+                .fill(theme.colors.glassSurface)
+                .overlay(Circle().strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline))
+
+            Image(systemName: systemImage)
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(theme.colors.accent)
+                .symbolRenderingMode(.hierarchical)
+        }
+        .frame(width: 84, height: 84)
+        .shadow(color: theme.shadow.panelColor, radius: theme.shadow.panelRadius * 0.45, x: 0, y: theme.shadow.panelY * 0.3)
+    }
+}
+
+struct PinesSidebarRow<Accessory: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    var detail: String?
+    var tint: Color?
+    var isSelected = false
+    var isActive = false
+    @ViewBuilder var accessory: () -> Accessory
+
+    init(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        detail: String? = nil,
+        tint: Color? = nil,
+        isSelected: Bool = false,
+        isActive: Bool = false,
+        @ViewBuilder accessory: @escaping () -> Accessory
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.detail = detail
+        self.tint = tint
+        self.isSelected = isSelected
+        self.isActive = isActive
+        self.accessory = accessory
+    }
+
+    var body: some View {
+        let resolvedTint = tint ?? theme.colors.accent
+        HStack(spacing: theme.spacing.medium) {
+            ZStack {
+                RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                    .fill(isSelected ? resolvedTint.opacity(0.18) : theme.colors.accentSoft)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                            .strokeBorder(resolvedTint.opacity(isSelected ? 0.28 : 0.12), lineWidth: theme.stroke.hairline)
+                    }
+
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(resolvedTint)
+                    .symbolRenderingMode(.hierarchical)
+                    .symbolEffect(.pulse, options: .nonRepeating, value: isActive)
+            }
+            .frame(width: theme.row.iconTile, height: theme.row.iconTile)
+
+            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                HStack(alignment: .firstTextBaseline, spacing: theme.spacing.small) {
+                    Text(title)
+                        .font(theme.typography.headline)
+                        .foregroundStyle(theme.colors.primaryText)
+                        .pinesFittingText()
+
+                    Spacer(minLength: theme.spacing.xsmall)
+
+                    if let detail {
+                        Text(detail)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.tertiaryText)
+                            .frame(maxWidth: theme.row.trailingWidth, alignment: .trailing)
+                            .pinesFittingText()
+                    }
+                }
+
+                Text(subtitle)
+                    .font(theme.typography.callout)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.86)
+            }
+
+            accessory()
+        }
+        .padding(.horizontal, theme.row.horizontalPadding)
+        .padding(.vertical, theme.row.verticalPadding)
+        .frame(minHeight: theme.row.minHeight)
+        .background(isSelected ? theme.colors.sidebarSelection : Color.clear, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Capsule()
+                    .fill(resolvedTint)
+                    .frame(width: 3)
+                    .padding(.vertical, theme.spacing.small)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .animation(reduceMotion ? nil : theme.motion.selection, value: isSelected)
+    }
+}
+
+extension PinesSidebarRow where Accessory == EmptyView {
+    init(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        detail: String? = nil,
+        tint: Color? = nil,
+        isSelected: Bool = false,
+        isActive: Bool = false
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            systemImage: systemImage,
+            detail: detail,
+            tint: tint,
+            isSelected: isSelected,
+            isActive: isActive
+        ) {
+            EmptyView()
+        }
+    }
+}
+
+struct PinesCardSection<Content: View, Footer: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    var subtitle: String?
+    var systemImage: String?
+    var kind: PinesSurfaceKind = .panel
+    @ViewBuilder var content: () -> Content
+    @ViewBuilder var footer: () -> Footer
+
+    init(
+        _ title: String,
+        subtitle: String? = nil,
+        systemImage: String? = nil,
+        kind: PinesSurfaceKind = .panel,
+        @ViewBuilder content: @escaping () -> Content,
+        @ViewBuilder footer: @escaping () -> Footer
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.kind = kind
+        self.content = content
+        self.footer = footer
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.card.sectionSpacing) {
+            HStack(alignment: .top, spacing: theme.spacing.medium) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(theme.colors.accent)
+                        .frame(width: theme.card.headerIconSize, height: theme.card.headerIconSize)
+                        .background(theme.colors.accentSoft, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                }
+
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(title)
+                        .font(theme.typography.section)
+                        .foregroundStyle(theme.colors.primaryText)
+                        .pinesFittingText()
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.86)
+                    }
+                }
+            }
+
+            content()
+
+            footer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: theme.card.minHeight, alignment: .topLeading)
+        .pinesSurface(kind, padding: theme.spacing.medium)
+    }
+}
+
+extension PinesCardSection where Footer == EmptyView {
+    init(
+        _ title: String,
+        subtitle: String? = nil,
+        systemImage: String? = nil,
+        kind: PinesSurfaceKind = .panel,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.init(
+            title,
+            subtitle: subtitle,
+            systemImage: systemImage,
+            kind: kind,
+            content: content
+        ) {
+            EmptyView()
+        }
+    }
+}
+
+struct PinesInfoTile: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let value: String
+    var systemImage: String?
+    var tint: Color?
+    var detail: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack(spacing: theme.spacing.small) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(tint ?? theme.colors.accent)
+                        .frame(width: 28, height: 28)
+                        .background((tint ?? theme.colors.accent).opacity(0.12), in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                }
+
+                Text(title)
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .textCase(.uppercase)
+                    .pinesFittingText()
+            }
+
+            Text(value)
+                .font(theme.typography.headline)
+                .foregroundStyle(theme.colors.primaryText)
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+
+            if let detail {
+                Text(detail)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.86)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: theme.dashboard.tileMinHeight, alignment: .topLeading)
+        .pinesSurface(.inset, padding: theme.spacing.medium)
+    }
+}
+
+struct PinesAdaptiveButtonRow<Content: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
+            content()
+        }
+    }
+}
+
+struct PinesActionBar<Content: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        PinesAdaptiveButtonRow {
+            content()
+        }
+        .padding(theme.spacing.xsmall)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
+                .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+        }
+    }
+}
+
+struct PinesReadinessRing: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let value: Double
+    let title: String
+    let subtitle: String
+    var tint: Color?
+
+    private var clampedValue: Double {
+        min(1, max(0, value))
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(theme.colors.controlFill, lineWidth: theme.chart.ringLineWidth)
+
+            Circle()
+                .trim(from: 0, to: clampedValue)
+                .stroke(
+                    LinearGradient(colors: [tint ?? theme.colors.accent, theme.colors.chartB], startPoint: .topLeading, endPoint: .bottomTrailing),
+                    style: StrokeStyle(lineWidth: theme.chart.ringLineWidth, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .shadow(color: (tint ?? theme.colors.accent).opacity(0.18), radius: 6, x: 0, y: 0)
+
+            VStack(spacing: theme.spacing.xxsmall) {
+                Text("\(Int((clampedValue * 100).rounded()))%")
+                    .font(theme.typography.title)
+                    .foregroundStyle(theme.colors.primaryText)
+                    .contentTransition(.numericText())
+
+                Text(title)
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .pinesFittingText()
+
+                Text(subtitle)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .pinesFittingText()
+            }
+            .padding(theme.spacing.small)
+        }
+        .frame(width: 152, height: 152)
+        .animation(reduceMotion ? nil : theme.motion.progressUpdate, value: clampedValue)
+    }
+}
+
+struct PinesTimelineItem: Identifiable, Hashable {
+    let id = UUID()
+    let title: String
+    let detail: String
+    let systemImage: String
+    let tint: Color
+    let isCurrent: Bool
+
+    init(title: String, detail: String, systemImage: String, tint: Color, isCurrent: Bool = false) {
+        self.title = title
+        self.detail = detail
+        self.systemImage = systemImage
+        self.tint = tint
+        self.isCurrent = isCurrent
+    }
+
+    init(
+        title: String,
+        subtitle: String,
+        detail: String? = nil,
+        date: Date? = nil,
+        systemImage: String = "circle.fill",
+        tint: Color,
+        isCurrent: Bool = false
+    ) {
+        self.title = title
+        self.detail = [subtitle, detail, date?.formatted(date: .abbreviated, time: .shortened)]
+            .compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+            .joined(separator: " - ")
+        self.systemImage = systemImage
+        self.tint = tint
+        self.isCurrent = isCurrent
+    }
+}
+
+struct PinesTimeline: View {
+    @Environment(\.pinesTheme) private var theme
+    let items: [PinesTimelineItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                HStack(alignment: .top, spacing: theme.spacing.small) {
+                    VStack(spacing: 0) {
+                        ZStack {
+                            Circle()
+                                .fill(item.tint.opacity(item.isCurrent ? 0.18 : 0.12))
+                                .frame(width: 28, height: 28)
+
+                            Image(systemName: item.systemImage)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(item.tint)
+                        }
+
+                        if index < items.count - 1 {
+                            Rectangle()
+                                .fill(theme.colors.separator)
+                                .frame(width: theme.chart.timelineLine, height: 28)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                        Text(item.title)
+                            .font(theme.typography.callout.weight(.semibold))
+                            .foregroundStyle(theme.colors.primaryText)
+                            .pinesFittingText()
+
+                        Text(item.detail)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.86)
+                    }
+                    .padding(.top, 4)
+                    Spacer(minLength: theme.spacing.small)
+                }
+                .padding(.vertical, theme.spacing.xxsmall)
+            }
+        }
+    }
+}
+
+struct PinesKeyValueGrid: View {
+    @Environment(\.pinesTheme) private var theme
+
+    struct Item: Hashable {
+        var title: String
+        var value: String
+        var systemImage: String?
+        var copyable: Bool
+
+        init(_ title: String, _ value: String, systemImage: String? = nil, copyable: Bool = false) {
+            self.title = title
+            self.value = value
+            self.systemImage = systemImage
+            self.copyable = copyable
+        }
+    }
+
+    let items: [Item]
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.dashboard.wideGridMinWidth), spacing: theme.spacing.small)], alignment: .leading, spacing: theme.spacing.small) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    HStack(spacing: theme.spacing.xsmall) {
+                        if let systemImage = item.systemImage {
+                            Image(systemName: systemImage)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(theme.colors.accent)
+                                .frame(width: 16, height: 16)
+                        }
+
+                        Text(item.title)
+                            .font(theme.typography.caption.weight(.semibold))
+                            .foregroundStyle(theme.colors.tertiaryText)
+                            .textCase(.uppercase)
+                            .pinesFittingText()
+                    }
+
+                    Text(item.value)
+                        .font(theme.typography.callout)
+                        .foregroundStyle(theme.colors.primaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .contextMenu {
+                            if item.copyable {
+                                Button {
+                                    copyToPasteboard(item.value)
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                }
+                            }
+                        }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .pinesSurface(.inset, padding: theme.spacing.small)
+            }
+        }
     }
 }
 

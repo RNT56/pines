@@ -267,7 +267,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
             generationConfigJSON: generation,
             processorConfigJSON: processor,
             files: info.siblings?.map {
-                ModelFileInfo(path: $0.rfilename, size: $0.size, oid: $0.blobID ?? $0.lfs?.oid)
+                ModelFileInfo(path: $0.rfilename, size: $0.size ?? $0.lfs?.size, oid: $0.blobID ?? $0.lfs?.oid)
             } ?? [],
             tags: info.tags ?? [],
             license: info.cardData?.license

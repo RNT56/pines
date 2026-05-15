@@ -16,6 +16,20 @@ struct ModelLifecycleService {
     }
 
     func install(repository: String, revision: String = "main") async throws {
+        if try await hasActiveDownload(for: repository) {
+            return
+        }
+        let existingInstalls = try await installRepository.listInstalledAndCuratedModels()
+        if let existing = existingInstalls
+            .first(where: { $0.repository.caseInsensitiveCompare(repository) == .orderedSame }) {
+            switch existing.state {
+            case .installed, .downloading:
+                return
+            case .remote, .failed, .unsupported:
+                break
+            }
+        }
+
         let accessToken = try await huggingFaceToken()
         let input = try await catalog.preflight(repository: repository, revision: revision, accessToken: accessToken)
         let result = classifier.classify(input)
@@ -144,9 +158,19 @@ struct ModelLifecycleService {
     }
 
     func delete(repository: String) async throws {
+        if try await hasActiveDownload(for: repository) {
+            throw InferenceError.invalidRequest("Wait for the active model download to finish before deleting \(repository).")
+        }
+
         let directory = try Self.modelsDirectory().appending(path: Self.safeDirectoryName(repository), directoryHint: .isDirectory)
         if FileManager.default.fileExists(atPath: directory.path) {
             try FileManager.default.removeItem(at: directory)
+        }
+        let stagingDirectory = try Self.modelsDirectory()
+            .appending(path: "staging", directoryHint: .isDirectory)
+            .appending(path: Self.safeDirectoryName(repository), directoryHint: .isDirectory)
+        if FileManager.default.fileExists(atPath: stagingDirectory.path) {
+            try FileManager.default.removeItem(at: stagingDirectory)
         }
         try await installRepository.deleteInstall(repository: repository)
         let downloads = try await downloadRepository.listDownloads()
@@ -165,6 +189,18 @@ struct ModelLifecycleService {
             || path.hasSuffix(".model")
             || path.hasSuffix(".txt")
             || path.hasSuffix(".tiktoken")
+    }
+
+    private func hasActiveDownload(for repository: String) async throws -> Bool {
+        try await downloadRepository.listDownloads().contains { download in
+            guard download.repository.caseInsensitiveCompare(repository) == .orderedSame else { return false }
+            switch download.status {
+            case .queued, .downloading, .verifying, .installing:
+                return true
+            case .installed, .failed, .cancelled:
+                return false
+            }
+        }
     }
 
     private func huggingFaceToken() async throws -> String? {

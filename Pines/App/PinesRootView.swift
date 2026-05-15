@@ -1,4 +1,5 @@
 import SwiftUI
+import PinesCore
 
 #if canImport(UIKit)
 import UIKit

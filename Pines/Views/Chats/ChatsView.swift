@@ -21,7 +21,7 @@ struct ChatsView: View {
             List(selection: $selectedThreadID) {
                 Section("Recent") {
                     ForEach(appModel.threads) { thread in
-                        ChatThreadRow(thread: thread)
+                        ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
                             .tag(thread.id)
                     }
                 }
@@ -64,38 +64,26 @@ struct ChatsView: View {
 private struct ChatThreadRow: View {
     @Environment(\.pinesTheme) private var theme
     let thread: PinesThreadPreview
+    let isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(thread.title)
-                    .font(theme.typography.headline)
-                    .lineLimit(1)
-
-                Spacer(minLength: theme.spacing.small)
-
-                Text(thread.updatedLabel)
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.tertiaryText)
-            }
-
-            Text(thread.lastMessage)
-                .font(theme.typography.callout)
-                .foregroundStyle(theme.colors.secondaryText)
-                .lineLimit(2)
-                .minimumScaleFactor(0.9)
-
-            HStack(spacing: theme.spacing.xsmall) {
-                PinesMetricPill(title: thread.status.title, systemImage: "circle.fill", tint: thread.status.tint(in: theme))
-
-                Text(thread.modelName)
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-            }
+        PinesSidebarRow(
+            title: thread.title,
+            subtitle: "\(thread.lastMessage)\n\(thread.modelName)",
+            systemImage: "bubble.left.and.text.bubble.right",
+            detail: thread.updatedLabel,
+            tint: thread.status.tint(in: theme),
+            isSelected: isSelected,
+            isActive: thread.status == .streaming
+        ) {
+            PinesStatusIndicator(
+                color: thread.status.tint(in: theme),
+                isActive: thread.status == .streaming,
+                size: 9
+            )
         }
-        .padding(.vertical, theme.spacing.xsmall)
+        .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
+        .listRowBackground(Color.clear)
     }
 }
 
@@ -103,6 +91,8 @@ private struct ChatTranscriptView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
+    @State private var retrySpin = false
     let thread: PinesThreadPreview
 
     var body: some View {
@@ -150,9 +140,14 @@ private struct ChatTranscriptView: View {
                 .disabled(appModel.activeRunID == nil)
 
                 Button {
+                    haptics.play(.primaryAction)
+                    withAnimation(theme.motion.emphasized) {
+                        retrySpin.toggle()
+                    }
                     appModel.retryLastUserMessage(in: thread, services: services)
                 } label: {
                     Image(systemName: "arrow.clockwise")
+                        .symbolEffect(.rotate, options: .nonRepeating, value: retrySpin)
                 }
                 .accessibilityLabel("Retry")
                 .disabled(appModel.activeRunID != nil || !thread.messages.contains { $0.role == .user })
@@ -321,6 +316,9 @@ private struct ChatComposerBar: View {
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var draft = ""
+    @State private var didCommitSend = false
+    @State private var selectedMCPPrompt: MCPPromptRecord?
+    @State private var mcpPromptArguments: [String: String] = [:]
     @FocusState private var isFocused: Bool
     let threadID: UUID?
 
@@ -338,9 +336,8 @@ private struct ChatComposerBar: View {
                 ForEach(appModel.mcpPrompts) { prompt in
                     Button(prompt.title ?? prompt.name) {
                         haptics.play(.primaryAction)
-                        Task {
-                            await appModel.useMCPPrompt(prompt, services: services)
-                        }
+                        selectedMCPPrompt = prompt
+                        seedPromptArguments(prompt)
                     }
                 }
             } label: {
@@ -361,13 +358,32 @@ private struct ChatComposerBar: View {
             Button {
                 let pending = draft
                 draft = ""
+                withAnimation(theme.motion.copySuccess) {
+                    didCommitSend.toggle()
+                }
                 appModel.startSending(pending, in: threadID, services: services)
             } label: {
                 Image(systemName: appModel.activeRunID == nil ? "arrow.up" : "stop.fill")
+                    .symbolEffect(.bounce, options: .nonRepeating, value: didCommitSend)
             }
             .accessibilityLabel("Send")
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.activeRunID != nil)
             .pinesButtonStyle(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.activeRunID != nil ? .secondary : .primary)
+        }
+        .sheet(item: $selectedMCPPrompt) { prompt in
+            MCPPromptInvocationSheet(
+                prompt: prompt,
+                arguments: $mcpPromptArguments,
+                cancel: { selectedMCPPrompt = nil },
+                invoke: {
+                    let values = promptArguments(for: prompt)
+                    selectedMCPPrompt = nil
+                    Task {
+                        await appModel.useMCPPrompt(prompt, arguments: values, services: services)
+                    }
+                }
+            )
+            .pinesTheme(theme)
         }
         .pinesSurface(.chrome, padding: theme.spacing.small)
         .overlay {
@@ -376,5 +392,80 @@ private struct ChatComposerBar: View {
         }
         .animation(theme.motion.fast, value: isFocused)
         .animation(theme.motion.fast, value: draft.isEmpty)
+    }
+
+    private func seedPromptArguments(_ prompt: MCPPromptRecord) {
+        for argument in prompt.arguments where mcpPromptArguments[promptArgumentKey(prompt: prompt, argument: argument)] == nil {
+            mcpPromptArguments[promptArgumentKey(prompt: prompt, argument: argument)] = ""
+        }
+    }
+
+    private func promptArguments(for prompt: MCPPromptRecord) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: prompt.arguments.map { argument in
+            (argument.name, mcpPromptArguments[promptArgumentKey(prompt: prompt, argument: argument)] ?? "")
+        })
+    }
+
+    private func promptArgumentKey(prompt: MCPPromptRecord, argument: MCPPromptArgument) -> String {
+        "\(prompt.id):\(argument.name)"
+    }
+}
+
+private struct MCPPromptInvocationSheet: View {
+    @Environment(\.pinesTheme) private var theme
+    let prompt: MCPPromptRecord
+    @Binding var arguments: [String: String]
+    let cancel: () -> Void
+    let invoke: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Prompt") {
+                    Text(prompt.title ?? prompt.name)
+                        .font(theme.typography.headline)
+                    if let description = prompt.description {
+                        Text(description)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                    }
+                }
+
+                Section("Arguments") {
+                    if prompt.arguments.isEmpty {
+                        Text("This prompt does not require arguments.")
+                            .foregroundStyle(theme.colors.secondaryText)
+                    } else {
+                        ForEach(prompt.arguments, id: \.name) { argument in
+                            TextField(
+                                argument.required == true ? "\(argument.name) required" : argument.name,
+                                text: Binding(
+                                    get: { arguments["\(prompt.id):\(argument.name)"] ?? "" },
+                                    set: { arguments["\(prompt.id):\(argument.name)"] = $0 }
+                                ),
+                                axis: .vertical
+                            )
+                            .lineLimit(1...4)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            if let description = argument.description {
+                                Text(description)
+                                    .font(theme.typography.caption)
+                                    .foregroundStyle(theme.colors.secondaryText)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Use MCP Prompt")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel, action: cancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Invoke", action: invoke)
+                }
+            }
+        }
     }
 }

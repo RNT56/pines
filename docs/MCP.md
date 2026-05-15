@@ -41,7 +41,15 @@ Server methods used:
 - `notifications/resources/list_changed`
 - `notifications/resources/updated`
 
-Resources are never automatically injected into chat context. Users select resources in Settings. Selected text resources are read through the MCP server and inserted as external context at send time. Settings also supports an explicit read preview. Binary resources are summarized as attachments/placeholders unless the consuming chat path supports that MIME type.
+Resources are never automatically injected into chat context. Users select resources in Settings. Selected text resources are read through the MCP server and inserted as external context at send time. Settings provides a tabbed server detail editor with resource search, template filtering, read preview, attach-to-chat toggles, and subscription toggles when the server supports subscriptions.
+
+Binary/blob resources are decoded only after validation:
+
+- Maximum decoded attachment size is 10 MB.
+- Allowed image MIME types: `image/png`, `image/jpeg`, `image/webp`, `image/gif`.
+- Allowed document MIME types: `application/pdf`, `text/plain`, `text/markdown`, `text/x-markdown`, `application/json`, `text/csv`.
+- Unknown or unsafe binary MIME types are blocked and reported as blocked previews instead of being written to disk.
+- Accepted blobs are written to temporary local files and passed as typed `ChatAttachment` values.
 
 Recommended server behavior:
 
@@ -61,7 +69,7 @@ Server methods used:
 - `prompts/get`
 - `notifications/prompts/list_changed`
 
-Prompts appear in Settings and the chat composer prompt menu. In Settings, prompt arguments are rendered as editable fields before invocation. Pines fetches the prompt, renders its returned messages as chat input, and preserves embedded text and supported image content as local context. Required prompt arguments are checked locally before `prompts/get`; servers should still validate missing or invalid arguments and return JSON-RPC invalid params errors.
+Prompts appear in Settings and the chat composer prompt menu. Both entry points render prompt arguments as editable fields before invocation. Pines fetches the prompt, renders its returned messages as chat input, and preserves embedded text and supported image content as local context. Required prompt arguments are checked locally before `prompts/get`; servers should still validate missing or invalid arguments and return JSON-RPC invalid params errors.
 
 Recommended server behavior:
 
@@ -84,7 +92,11 @@ Execution boundary:
 - BYOK providers may be used only when BYOK sampling is enabled for that server.
 - Global chat execution mode is not used implicitly for sampling.
 
-Pines shows the requesting server, prompt, model preferences, tool count, context intent, and max-token intent before generation. Users can edit the prompt before execution and must review the generated response before it is returned to the MCP server. Audio sampling content is rejected with a JSON-RPC error. Text and image content are converted to Pines chat messages where the selected provider supports them. Sampling tool definitions are forwarded to the provider; the MCP server remains responsible for executing its own tool loop.
+Pines shows the requesting server, prompt, model preferences, tool count, context intent, and max-token intent before generation. Users can edit the prompt before execution and must review the generated response before it is returned to the MCP server. Approval, denial, and return/block decisions are written to the local audit log with prompt bodies and result bodies redacted.
+
+Model selection uses MCP `modelPreferences` where provided. Pines ranks installed local models first using model hints plus cost, speed, and intelligence priorities. If local execution fails and BYOK sampling is enabled, Pines ranks enabled BYOK providers with the same hints and provider capability checks. Global chat execution mode is not used implicitly for sampling.
+
+Audio sampling content is rejected with a JSON-RPC error. Text and image content are converted to Pines chat messages where the selected provider supports them. Sampling tool definitions are forwarded to the provider; the MCP server remains responsible for executing its own tool loop.
 
 Per-server controls:
 

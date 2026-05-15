@@ -23,7 +23,7 @@ struct VaultView: View {
             List(selection: $selectedItemID) {
                 Section("Vault") {
                     ForEach(appModel.vaultItems) { item in
-                        VaultItemRow(item: item)
+                        VaultItemRow(item: item, isSelected: selectedItemID == item.id)
                             .tag(item.id)
                     }
                 }
@@ -83,37 +83,20 @@ struct VaultView: View {
 private struct VaultItemRow: View {
     @Environment(\.pinesTheme) private var theme
     let item: PinesVaultItemPreview
+    let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: theme.spacing.medium) {
-            Image(systemName: item.kind.systemImage)
-                .font(theme.typography.section)
-                .foregroundStyle(theme.colors.accent)
-                .frame(width: 34, height: 34)
-                .background(theme.colors.accentSoft, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
-
-            VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                HStack {
-                    Text(item.title)
-                        .font(theme.typography.headline)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-
-                    Spacer(minLength: theme.spacing.small)
-
-                    Text(item.updatedLabel)
-                        .font(theme.typography.caption)
-                        .foregroundStyle(theme.colors.tertiaryText)
-                }
-
-                Text(item.detail)
-                    .font(theme.typography.callout)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.86)
-            }
-        }
-        .padding(.vertical, theme.spacing.xsmall)
+        PinesSidebarRow(
+            title: item.title,
+            subtitle: item.detail,
+            systemImage: item.kind.systemImage,
+            detail: item.updatedLabel,
+            tint: item.sensitivity == .locked ? theme.colors.warning : theme.colors.accent,
+            isSelected: isSelected,
+            isActive: item.sensitivity == .locked
+        )
+        .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
+        .listRowBackground(Color.clear)
     }
 }
 
