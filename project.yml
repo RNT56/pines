@@ -92,6 +92,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.schtack.pines.watchkitapp
         PRODUCT_NAME: Pines Watch
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.schtack.pines
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WLDMWQ963U
         CURRENT_PROJECT_VERSION: 1
