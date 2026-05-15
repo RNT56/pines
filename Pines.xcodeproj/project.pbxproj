@@ -8,27 +8,39 @@
 
 /* Begin PBXBuildFile section */
 		14C935C0C8E726C774184D06 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FFFEAD9040192EA2246EDAD7 /* PrivacyInfo.xcprivacy */; };
+		1696C482B2BFEADAD7A1744D /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */; };
+		2AA5EBBAD5AC8336B9F3DD0D /* HuggingFaceCredentialService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7C4EBAAC5E84277A718C17 /* HuggingFaceCredentialService.swift */; };
 		2B7347D3CA9E68EB3EBE327E /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 94F08BBEEA508DB04384B5C9 /* MLX */; };
 		39CF2E229241A26056922251 /* ChatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F090D0FF64498C5E03C0CA /* ChatsView.swift */; };
 		4A8B7ADED7E800D30BC296A1 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 2F62656B16557CFACC3CBFF7 /* PinesCore */; };
 		515C28B0B0B103A7A64AB34C /* MLXHuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = CACD83A45D0C6D9B956B643E /* MLXHuggingFace */; };
 		55937CA552490AEA6ED46131 /* PinesDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45C618F4FAB69FDDE0FC788B /* PinesDesignSystem.swift */; };
 		57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */; };
+		5A73B2F9FA959A8D2A6173EF /* BYOKCloudInferenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */; };
 		62BBB7D1AE85A01EA319E717 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 392E0E75023B6010705E840E /* MLXLLM */; };
+		667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */; };
+		69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */; };
+		6F2B60A874B79E3B73C27624 /* CloudProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */; };
 		79BE7BF0C5BD5EE6979AD3B9 /* VaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CFBB6BB9E0574B8AA20150 /* VaultView.swift */; };
 		7C1B3D61D81211AD1F0FBCF7 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */; };
+		8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */; };
 		8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 79248E6D82F6B41C4A99016B /* Tokenizers */; };
 		9C997FA62CFD3FF3DFBA6FC7 /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = 85E4D304B541EE6A90CEFD6F /* MLXEmbedders */; };
 		A23582944454AFA76540B625 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500C1CF070133DCF6885979F /* ModelsView.swift */; };
+		A710B3F4F7869D3FBAC38A93 /* MLXEmbeddingRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6395FE07FF217EF3444678FA /* MLXEmbeddingRuntime.swift */; };
 		B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8627F9808A76C0F0A91729 /* SettingsView.swift */; };
 		B925E264EAB46D0C3EB6B307 /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 97ADD97B0749021A162048FE /* MLXNN */; };
 		BAF84E40F21C59F00422283F /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = D445A834A842FDF08C100D34 /* MLXVLM */; };
 		C01E6498FFFBC564A01F56AB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3777534B3E27910D84F4EA38 /* Assets.xcassets */; };
 		C05BF46FDF47D9D3C4831915 /* PinesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82DE8010D019802F630AAF0B /* PinesApp.swift */; };
+		C3A8E8F1D7ADC06A8E2EBA43 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 7CB37824DF7BF3CFC294142D /* GRDB */; };
 		D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */; };
 		E3A57273D77B9C0AB688FDC5 /* HuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = E24B71D9F4C11C92EA51743C /* HuggingFace */; };
 		E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */; };
+		E96F244C6E13B6BBAD411CE0 /* WKWebViewBrowserRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */; };
+		EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */; };
 		F1BB293494A6B2AA162BD7D9 /* MLXRuntimeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */; };
+		F726DC5360EC760DFADDE5FE /* ModelLifecycleService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */; };
 		FF4D60F77559E9389E312BD7 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */; };
 /* End PBXBuildFile section */
 
@@ -38,15 +50,26 @@
 		385CEF8800BD8942B61831AC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		39CFBB6BB9E0574B8AA20150 /* VaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultView.swift; sourceTree = "<group>"; };
 		3D264ABD70B64B0ADB011C52 /* Pines.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Pines.entitlements; sourceTree = "<group>"; };
+		443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitSyncService.swift; sourceTree = "<group>"; };
 		45C618F4FAB69FDDE0FC788B /* PinesDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesDesignSystem.swift; sourceTree = "<group>"; };
+		48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WKWebViewBrowserRuntime.swift; sourceTree = "<group>"; };
+		4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProviderService.swift; sourceTree = "<group>"; };
 		500C1CF070133DCF6885979F /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
+		5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GRDBPinesStore.swift; sourceTree = "<group>"; };
 		5A8627F9808A76C0F0A91729 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		6395FE07FF217EF3444678FA /* MLXEmbeddingRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXEmbeddingRuntime.swift; sourceTree = "<group>"; };
 		68C1AD2E50491F6BF3AA5FEE /* pines */ = {isa = PBXFileReference; lastKnownFileType = folder; name = pines; path = .; sourceTree = SOURCE_ROOT; };
 		68F090D0FF64498C5E03C0CA /* ChatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatsView.swift; sourceTree = "<group>"; };
+		6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultIngestionService.swift; sourceTree = "<group>"; };
+		6A7C4EBAAC5E84277A718C17 /* HuggingFaceCredentialService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HuggingFaceCredentialService.swift; sourceTree = "<group>"; };
 		77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRootView.swift; sourceTree = "<group>"; };
+		7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BYOKCloudInferenceProvider.swift; sourceTree = "<group>"; };
 		82DE8010D019802F630AAF0B /* PinesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesApp.swift; sourceTree = "<group>"; };
 		92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
+		948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchTool.swift; sourceTree = "<group>"; };
 		9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
+		D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
+		DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelLifecycleService.swift; sourceTree = "<group>"; };
 		DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppServices.swift; sourceTree = "<group>"; };
 		EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXRuntimeBridge.swift; sourceTree = "<group>"; };
 		FFFEAD9040192EA2246EDAD7 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -67,6 +90,7 @@
 				515C28B0B0B103A7A64AB34C /* MLXHuggingFace in Frameworks */,
 				E3A57273D77B9C0AB688FDC5 /* HuggingFace in Frameworks */,
 				8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */,
+				C3A8E8F1D7ADC06A8E2EBA43 /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -80,12 +104,25 @@
 				385CEF8800BD8942B61831AC /* Info.plist */,
 				3D264ABD70B64B0ADB011C52 /* Pines.entitlements */,
 				FFFEAD9040192EA2246EDAD7 /* PrivacyInfo.xcprivacy */,
+				1E2BAD60116D54D01CBBCC09 /* Agents */,
 				D6F63C1D05D9FB3DB7AAF13B /* App */,
+				DD8D69DF1F92243025A4F280 /* Cloud */,
 				CE8D57B3B84489AD378AF98A /* Design */,
+				EF13282535E058B9BD5CA12A /* Persistence */,
 				8216D235A1572028B3065549 /* Runtime */,
+				9617E933B2A1D1595AB3F04D /* Tools */,
+				60540D5B27662B0651C9298F /* Vault */,
 				A622C4E24201419386EE5E3B /* Views */,
 			);
 			path = Pines;
+			sourceTree = "<group>";
+		};
+		1E2BAD60116D54D01CBBCC09 /* Agents */ = {
+			isa = PBXGroup;
+			children = (
+				D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */,
+			);
+			path = Agents;
 			sourceTree = "<group>";
 		};
 		2013D4B5D77D7A24CC0277A5 /* Settings */ = {
@@ -113,6 +150,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		60540D5B27662B0651C9298F /* Vault */ = {
+			isa = PBXGroup;
+			children = (
+				6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */,
+			);
+			path = Vault;
+			sourceTree = "<group>";
+		};
 		7747FF9E51429855562F2EDD /* Chats */ = {
 			isa = PBXGroup;
 			children = (
@@ -132,8 +177,11 @@
 		8216D235A1572028B3065549 /* Runtime */ = {
 			isa = PBXGroup;
 			children = (
+				6A7C4EBAAC5E84277A718C17 /* HuggingFaceCredentialService.swift */,
 				92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */,
+				6395FE07FF217EF3444678FA /* MLXEmbeddingRuntime.swift */,
 				EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */,
+				DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */,
 			);
 			path = Runtime;
 			sourceTree = "<group>";
@@ -144,6 +192,15 @@
 				39CFBB6BB9E0574B8AA20150 /* VaultView.swift */,
 			);
 			path = Vault;
+			sourceTree = "<group>";
+		};
+		9617E933B2A1D1595AB3F04D /* Tools */ = {
+			isa = PBXGroup;
+			children = (
+				948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */,
+				48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */,
+			);
+			path = Tools;
 			sourceTree = "<group>";
 		};
 		A622C4E24201419386EE5E3B /* Views */ = {
@@ -184,6 +241,24 @@
 			path = App;
 			sourceTree = "<group>";
 		};
+		DD8D69DF1F92243025A4F280 /* Cloud */ = {
+			isa = PBXGroup;
+			children = (
+				7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */,
+				443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */,
+				4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */,
+			);
+			path = Cloud;
+			sourceTree = "<group>";
+		};
+		EF13282535E058B9BD5CA12A /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -211,6 +286,7 @@
 				CACD83A45D0C6D9B956B643E /* MLXHuggingFace */,
 				E24B71D9F4C11C92EA51743C /* HuggingFace */,
 				79248E6D82F6B41C4A99016B /* Tokenizers */,
+				7CB37824DF7BF3CFC294142D /* GRDB */,
 			);
 			productName = Pines;
 			productReference = 231A63B8882B7235FD4DD6B7 /* Pines.app */;
@@ -236,6 +312,7 @@
 			mainGroup = 2A9BD4FC032F196C8E0F2D44;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				A8C601DD580DE905FE5FD44D /* XCRemoteSwiftPackageReference "mlx-swift" */,
 				07F5B421DC94F8A3F37BF23E /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				3A77E5092ECF2EA26AC61062 /* XCRemoteSwiftPackageReference "swift-huggingface" */,
@@ -268,9 +345,18 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1696C482B2BFEADAD7A1744D /* AgentRunner.swift in Sources */,
+				5A73B2F9FA959A8D2A6173EF /* BYOKCloudInferenceProvider.swift in Sources */,
+				EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */,
 				39CF2E229241A26056922251 /* ChatsView.swift in Sources */,
+				667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */,
+				6F2B60A874B79E3B73C27624 /* CloudProviderService.swift in Sources */,
+				8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */,
+				2AA5EBBAD5AC8336B9F3DD0D /* HuggingFaceCredentialService.swift in Sources */,
 				FF4D60F77559E9389E312BD7 /* KeychainSecretStore.swift in Sources */,
+				A710B3F4F7869D3FBAC38A93 /* MLXEmbeddingRuntime.swift in Sources */,
 				F1BB293494A6B2AA162BD7D9 /* MLXRuntimeBridge.swift in Sources */,
+				F726DC5360EC760DFADDE5FE /* ModelLifecycleService.swift in Sources */,
 				A23582944454AFA76540B625 /* ModelsView.swift in Sources */,
 				C05BF46FDF47D9D3C4831915 /* PinesApp.swift in Sources */,
 				E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */,
@@ -278,7 +364,9 @@
 				55937CA552490AEA6ED46131 /* PinesDesignSystem.swift in Sources */,
 				57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */,
 				B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */,
+				69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */,
 				79BE7BF0C5BD5EE6979AD3B9 /* VaultView.swift in Sources */,
+				E96F244C6E13B6BBAD411CE0 /* WKWebViewBrowserRuntime.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -513,6 +601,14 @@
 				minimumVersion = 0.31.0;
 			};
 		};
+		ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.10.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -529,6 +625,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0A791BAE7FC59744192EC64B /* XCRemoteSwiftPackageReference "swift-transformers" */;
 			productName = Tokenizers;
+		};
+		7CB37824DF7BF3CFC294142D /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
 		};
 		85E4D304B541EE6A90CEFD6F /* MLXEmbedders */ = {
 			isa = XCSwiftPackageProductDependency;

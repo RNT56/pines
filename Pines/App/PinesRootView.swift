@@ -31,6 +31,7 @@ struct PinesRootView: View {
         .preferredColorScheme(appModel.interfaceMode.colorScheme)
         .task {
             await services.bootstrap()
+            await appModel.bootstrap(services: services)
             try? await Task.sleep(nanoseconds: 720_000_000)
             withAnimation(theme.motion.emphasized) {
                 showsBootMark = false

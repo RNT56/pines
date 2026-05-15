@@ -39,6 +39,34 @@ public struct RemoteModelSummary: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public enum ModelCatalogSort: String, Hashable, Codable, Sendable, CaseIterable {
+    case downloads
+    case likes
+    case updated = "lastModified"
+}
+
+public struct ModelSearchFilters: Hashable, Codable, Sendable {
+    public var query: String
+    public var task: HubTask?
+    public var limit: Int
+    public var sort: ModelCatalogSort
+    public var descending: Bool
+
+    public init(
+        query: String = "",
+        task: HubTask? = nil,
+        limit: Int = 25,
+        sort: ModelCatalogSort = .downloads,
+        descending: Bool = true
+    ) {
+        self.query = query
+        self.task = task
+        self.limit = limit
+        self.sort = sort
+        self.descending = descending
+    }
+}
+
 public struct ModelFileInfo: Hashable, Codable, Sendable {
     public var path: String
     public var size: Int64?
@@ -140,24 +168,32 @@ public struct HuggingFaceModelCatalogService: Sendable {
         self.decoder = decoder
     }
 
-    public func search(query: String, task: HubTask?, limit: Int = 25) async throws -> [RemoteModelSummary] {
+    public func search(query: String, task: HubTask?, limit: Int = 25, accessToken: String? = nil) async throws -> [RemoteModelSummary] {
+        try await search(
+            filters: ModelSearchFilters(query: query, task: task, limit: limit),
+            accessToken: accessToken
+        )
+    }
+
+    public func search(filters: ModelSearchFilters, accessToken: String? = nil) async throws -> [RemoteModelSummary] {
         var components = URLComponents(url: baseURL.appending(path: "/api/models"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "library", value: "mlx"),
-            URLQueryItem(name: "limit", value: String(limit)),
-            URLQueryItem(name: "sort", value: "downloads"),
-            URLQueryItem(name: "direction", value: "-1"),
+            URLQueryItem(name: "limit", value: String(max(1, min(filters.limit, 100)))),
+            URLQueryItem(name: "sort", value: filters.sort.rawValue),
+            URLQueryItem(name: "direction", value: filters.descending ? "-1" : "1"),
         ]
 
-        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        let query = filters.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
             components.queryItems?.append(URLQueryItem(name: "search", value: query))
         }
-        if let task {
+        if let task = filters.task {
             components.queryItems?.append(URLQueryItem(name: "pipeline_tag", value: task.rawValue))
         }
 
         let url = components.url!
-        let (data, response) = try await client.data(for: URLRequest(url: url))
+        let (data, response) = try await client.data(for: authorizedRequest(url: url, accessToken: accessToken))
         guard (200 ..< 300).contains(response.statusCode) else {
             throw URLError(.badServerResponse)
         }
@@ -172,6 +208,61 @@ public struct HuggingFaceModelCatalogService: Sendable {
                 lastModified: dto.lastModified
             )
         }
+    }
+
+    public func preflight(repository: String, revision: String = "main", accessToken: String? = nil) async throws -> ModelPreflightInput {
+        let encodedRepository = repository
+            .split(separator: "/")
+            .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+            .joined(separator: "/")
+        let infoURL = baseURL.appending(path: "/api/models/\(encodedRepository)")
+        let (infoData, infoResponse) = try await client.data(for: authorizedRequest(url: infoURL, accessToken: accessToken))
+        guard (200 ..< 300).contains(infoResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        let info = try decoder.decode(HubModelInfoDTO.self, from: infoData)
+        async let config = optionalFile(repository: encodedRepository, revision: revision, path: "config.json", accessToken: accessToken)
+        async let generation = optionalFile(repository: encodedRepository, revision: revision, path: "generation_config.json", accessToken: accessToken)
+        async let processor = optionalFile(repository: encodedRepository, revision: revision, path: "processor_config.json", accessToken: accessToken)
+
+        return try await ModelPreflightInput(
+            repository: repository,
+            configJSON: config,
+            generationConfigJSON: generation,
+            processorConfigJSON: processor,
+            files: info.siblings?.map {
+                ModelFileInfo(path: $0.rfilename, size: $0.size, oid: $0.blobID ?? $0.lfs?.oid)
+            } ?? [],
+            tags: info.tags ?? [],
+            license: info.cardData?.license
+        )
+    }
+
+    private func optionalFile(repository: String, revision: String, path: String, accessToken: String?) async throws -> Data? {
+        let url = baseURL.appending(path: "/\(repository)/resolve/\(revision)/\(Self.encodedPath(path))")
+        let (data, response) = try await client.data(for: authorizedRequest(url: url, accessToken: accessToken))
+        if response.statusCode == 404 {
+            return nil
+        }
+        guard (200 ..< 300).contains(response.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return data
+    }
+
+    private func authorizedRequest(url: URL, accessToken: String?) -> URLRequest {
+        var request = URLRequest(url: url)
+        if let accessToken = accessToken?.trimmingCharacters(in: .whitespacesAndNewlines), !accessToken.isEmpty {
+            request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    private static func encodedPath(_ path: String) -> String {
+        path.split(separator: "/")
+            .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+            .joined(separator: "/")
     }
 }
 
@@ -193,4 +284,41 @@ private struct HubModelDTO: Decodable {
         case pipelineTag = "pipeline_tag"
         case lastModified = "lastModified"
     }
+}
+
+private struct HubModelInfoDTO: Decodable {
+    var id: String
+    var tags: [String]?
+    var siblings: [HubSiblingDTO]?
+    var cardData: HubCardDataDTO?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "modelId"
+        case tags
+        case siblings
+        case cardData
+    }
+}
+
+private struct HubSiblingDTO: Decodable {
+    var rfilename: String
+    var size: Int64?
+    var blobID: String?
+    var lfs: HubLFSDTO?
+
+    enum CodingKeys: String, CodingKey {
+        case rfilename
+        case size
+        case blobID = "blobId"
+        case lfs
+    }
+}
+
+private struct HubLFSDTO: Decodable {
+    var oid: String?
+    var size: Int64?
+}
+
+private struct HubCardDataDTO: Decodable {
+    var license: String?
 }

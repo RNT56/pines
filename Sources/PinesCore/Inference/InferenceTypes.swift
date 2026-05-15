@@ -196,6 +196,85 @@ public struct TokenDelta: Hashable, Codable, Sendable {
     }
 }
 
+public struct ToolCallDelta: Hashable, Codable, Sendable {
+    public var id: String
+    public var name: String
+    public var argumentsFragment: String
+    public var isComplete: Bool
+
+    public init(
+        id: String,
+        name: String,
+        argumentsFragment: String = "",
+        isComplete: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.argumentsFragment = argumentsFragment
+        self.isComplete = isComplete
+    }
+}
+
+public enum InferenceFinishReason: String, Hashable, Codable, Sendable {
+    case stop
+    case length
+    case cancelled
+    case toolCall
+    case error
+}
+
+public struct InferenceFinish: Hashable, Codable, Sendable {
+    public var reason: InferenceFinishReason
+    public var message: String?
+
+    public init(reason: InferenceFinishReason, message: String? = nil) {
+        self.reason = reason
+        self.message = message
+    }
+}
+
+public struct InferenceMetrics: Hashable, Codable, Sendable {
+    public var promptTokens: Int
+    public var completionTokens: Int
+    public var promptTokensPerSecond: Double?
+    public var completionTokensPerSecond: Double?
+    public var latencyMilliseconds: Int?
+
+    public init(
+        promptTokens: Int = 0,
+        completionTokens: Int = 0,
+        promptTokensPerSecond: Double? = nil,
+        completionTokensPerSecond: Double? = nil,
+        latencyMilliseconds: Int? = nil
+    ) {
+        self.promptTokens = promptTokens
+        self.completionTokens = completionTokens
+        self.promptTokensPerSecond = promptTokensPerSecond
+        self.completionTokensPerSecond = completionTokensPerSecond
+        self.latencyMilliseconds = latencyMilliseconds
+    }
+}
+
+public struct InferenceStreamFailure: Hashable, Codable, Sendable {
+    public var code: String
+    public var message: String
+    public var recoverable: Bool
+
+    public init(code: String, message: String, recoverable: Bool = false) {
+        self.code = code
+        self.message = message
+        self.recoverable = recoverable
+    }
+}
+
+public enum InferenceStreamEvent: Hashable, Codable, Sendable {
+    case token(TokenDelta)
+    case toolCall(ToolCallDelta)
+    case finish(InferenceFinish)
+    case metrics(InferenceMetrics)
+    case failure(InferenceStreamFailure)
+}
+
 public struct EmbeddingRequest: Hashable, Codable, Sendable {
     public var modelID: ModelID
     public var inputs: [String]
@@ -233,6 +312,78 @@ public protocol InferenceProvider: Sendable {
     var id: ProviderID { get }
     var capabilities: ProviderCapabilities { get }
 
+    func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error>
     func stream(_ request: ChatRequest) async throws -> AsyncThrowingStream<TokenDelta, Error>
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult
+}
+
+public extension InferenceProvider {
+    func stream(_ request: ChatRequest) async throws -> AsyncThrowingStream<TokenDelta, Error> {
+        let eventStream = try await streamEvents(request)
+
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await event in eventStream {
+                        switch event {
+                        case let .token(delta):
+                            continuation.yield(delta)
+                        case let .toolCall(delta):
+                            continuation.yield(
+                                TokenDelta(
+                                    kind: .toolCall,
+                                    text: delta.argumentsFragment,
+                                    tokenCount: 0,
+                                    metadata: [
+                                        "id": delta.id,
+                                        "name": delta.name,
+                                        "complete": String(delta.isComplete),
+                                    ]
+                                )
+                            )
+                        case let .finish(finish):
+                            continuation.yield(
+                                TokenDelta(
+                                    kind: .finish,
+                                    text: finish.message ?? "",
+                                    metadata: ["reason": finish.reason.rawValue]
+                                )
+                            )
+                        case let .metrics(metrics):
+                            continuation.yield(
+                                TokenDelta(
+                                    kind: .metrics,
+                                    text: "",
+                                    tokenCount: metrics.completionTokens,
+                                    metadata: [
+                                        "promptTokens": String(metrics.promptTokens),
+                                        "completionTokens": String(metrics.completionTokens),
+                                    ]
+                                )
+                            )
+                        case let .failure(failure):
+                            continuation.yield(
+                                TokenDelta(
+                                    kind: .finish,
+                                    text: failure.message,
+                                    metadata: [
+                                        "reason": InferenceFinishReason.error.rawValue,
+                                        "code": failure.code,
+                                        "recoverable": String(failure.recoverable),
+                                    ]
+                                )
+                            )
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
 }

@@ -98,7 +98,15 @@ public enum PinesArchitecture {
 
 public protocol ConversationRepository: Sendable {
     func listConversations() async throws -> [ConversationRecord]
+    func observeConversations() -> AsyncStream<[ConversationRecord]>
+    func createConversation(title: String, defaultModelID: ModelID?) async throws -> ConversationRecord
+    func updateConversationTitle(_ title: String, conversationID: UUID) async throws
+    func setConversationArchived(_ archived: Bool, conversationID: UUID) async throws
+    func deleteConversation(id: UUID) async throws
     func messages(in conversationID: UUID) async throws -> [ChatMessage]
+    func observeMessages(in conversationID: UUID) -> AsyncStream<[ChatMessage]>
+    func appendMessage(_ message: ChatMessage, status: MessageStatus, conversationID: UUID, modelID: ModelID?, providerID: ProviderID?) async throws
+    func updateMessage(id: UUID, content: String, status: MessageStatus, tokenCount: Int?) async throws
 }
 
 public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {
@@ -128,12 +136,20 @@ public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {
 
 public protocol ModelInstallRepository: Sendable {
     func listInstalledAndCuratedModels() async throws -> [ModelInstall]
+    func observeInstalledAndCuratedModels() -> AsyncStream<[ModelInstall]>
+    func upsertInstall(_ install: ModelInstall) async throws
     func updateInstallState(_ state: ModelInstallState, for repository: String) async throws
+    func deleteInstall(repository: String) async throws
 }
 
 public protocol VaultRepository: Sendable {
     func listDocuments() async throws -> [VaultDocumentRecord]
+    func observeDocuments() -> AsyncStream<[VaultDocumentRecord]>
+    func upsertDocument(_ document: VaultDocumentRecord, localURL: URL?, checksum: String?) async throws
+    func deleteDocument(id: UUID) async throws
     func chunks(documentID: UUID) async throws -> [VaultChunk]
+    func replaceChunks(_ chunks: [VaultChunk], documentID: UUID, embeddingModelID: ModelID?) async throws
+    func search(query: String, embedding: [Float]?, limit: Int) async throws -> [VaultSearchResult]
 }
 
 public struct VaultDocumentRecord: Identifiable, Hashable, Codable, Sendable {
@@ -156,4 +172,30 @@ public struct VaultDocumentRecord: Identifiable, Hashable, Codable, Sendable {
         self.updatedAt = updatedAt
         self.chunkCount = chunkCount
     }
+}
+
+public protocol SettingsRepository: Sendable {
+    func loadSettings() async throws -> AppSettingsSnapshot
+    func observeSettings() -> AsyncStream<AppSettingsSnapshot>
+    func saveSettings(_ settings: AppSettingsSnapshot) async throws
+}
+
+public protocol CloudProviderRepository: Sendable {
+    func listProviders() async throws -> [CloudProviderConfiguration]
+    func observeProviders() -> AsyncStream<[CloudProviderConfiguration]>
+    func upsertProvider(_ provider: CloudProviderConfiguration) async throws
+    func deleteProvider(id: ProviderID) async throws
+}
+
+public protocol ModelDownloadRepository: Sendable {
+    func listDownloads() async throws -> [ModelDownloadProgress]
+    func observeDownloads() -> AsyncStream<[ModelDownloadProgress]>
+    func upsertDownload(_ progress: ModelDownloadProgress) async throws
+    func deleteDownload(id: UUID) async throws
+}
+
+public protocol AuditEventRepository: Sendable {
+    func append(_ event: AuditEvent) async throws
+    func list(category: AuditCategory?, limit: Int) async throws -> [AuditEvent]
+    func observeRecent(limit: Int) -> AsyncStream<[AuditEvent]>
 }

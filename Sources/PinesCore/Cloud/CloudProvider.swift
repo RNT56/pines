@@ -13,6 +13,10 @@ public struct CloudProviderConfiguration: Identifiable, Hashable, Codable, Senda
     public var kind: CloudProviderKind
     public var displayName: String
     public var baseURL: URL
+    public var defaultModelID: ModelID?
+    public var validationStatus: ProviderValidationStatus
+    public var lastValidationError: String?
+    public var extraHeadersJSON: String?
     public var keychainService: String
     public var keychainAccount: String
     public var enabledForAgents: Bool
@@ -23,6 +27,10 @@ public struct CloudProviderConfiguration: Identifiable, Hashable, Codable, Senda
         kind: CloudProviderKind,
         displayName: String,
         baseURL: URL,
+        defaultModelID: ModelID? = nil,
+        validationStatus: ProviderValidationStatus = .unvalidated,
+        lastValidationError: String? = nil,
+        extraHeadersJSON: String? = nil,
         keychainService: String = "com.schtack.pines.cloud",
         keychainAccount: String,
         enabledForAgents: Bool = false,
@@ -32,6 +40,10 @@ public struct CloudProviderConfiguration: Identifiable, Hashable, Codable, Senda
         self.kind = kind
         self.displayName = displayName
         self.baseURL = baseURL
+        self.defaultModelID = defaultModelID
+        self.validationStatus = validationStatus
+        self.lastValidationError = lastValidationError
+        self.extraHeadersJSON = extraHeadersJSON
         self.keychainService = keychainService
         self.keychainAccount = keychainAccount
         self.enabledForAgents = enabledForAgents

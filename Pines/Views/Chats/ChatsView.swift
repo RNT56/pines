@@ -3,6 +3,7 @@ import PinesCore
 
 struct ChatsView: View {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @State private var selectedThreadID: PinesThreadPreview.ID?
 
@@ -28,6 +29,9 @@ struct ChatsView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
+                        Task {
+                            selectedThreadID = await appModel.createChat(services: services)
+                        }
                     } label: {
                         Image(systemName: "square.and.pencil")
                     }
@@ -91,6 +95,8 @@ private struct ChatThreadRow: View {
 
 private struct ChatTranscriptView: View {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
     let thread: PinesThreadPreview
 
     var body: some View {
@@ -112,6 +118,13 @@ private struct ChatTranscriptView: View {
 
                     ChatRunState(request: thread.request)
                 }
+
+                if let serviceError = appModel.serviceError {
+                    Text(serviceError)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.danger)
+                        .pinesPanel()
+                }
             }
             .padding(theme.spacing.large)
             .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .leading)
@@ -119,9 +132,28 @@ private struct ChatTranscriptView: View {
         }
         .navigationTitle(thread.title)
         .pinesInlineNavigationTitle()
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    appModel.stopCurrentRun()
+                } label: {
+                    Image(systemName: "stop.circle")
+                }
+                .accessibilityLabel("Stop")
+                .disabled(appModel.activeRunID == nil)
+
+                Button {
+                    appModel.retryLastUserMessage(in: thread, services: services)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .accessibilityLabel("Retry")
+                .disabled(appModel.activeRunID != nil || !thread.messages.contains { $0.role == .user })
+            }
+        }
         .pinesAppBackground()
         .safeAreaInset(edge: .bottom) {
-            ChatComposerBar()
+            ChatComposerBar(threadID: thread.id)
                 .padding(.horizontal, theme.spacing.large)
                 .padding(.bottom, theme.spacing.small)
                 .background(.bar)
@@ -212,7 +244,10 @@ private extension ChatRole {
 
 private struct ChatComposerBar: View {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
     @State private var draft = ""
+    let threadID: UUID?
 
     var body: some View {
         HStack(spacing: theme.spacing.small) {
@@ -227,12 +262,16 @@ private struct ChatComposerBar: View {
                 .textFieldStyle(.plain)
 
             Button {
+                let pending = draft
+                draft = ""
+                appModel.startSending(pending, in: threadID, services: services)
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.title3)
                     .foregroundStyle(theme.colors.accent)
             }
             .accessibilityLabel("Send")
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.activeRunID != nil)
         }
         .padding(theme.spacing.small)
         .background(theme.colors.glassSurface, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))

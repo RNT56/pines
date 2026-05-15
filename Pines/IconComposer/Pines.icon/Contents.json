@@ -1,0 +1,25 @@
+{
+  "info": {
+    "author": "com.schtack.pines",
+    "version": 1
+  },
+  "properties": {
+    "canvas": {
+      "height": 1024,
+      "width": 1024
+    },
+    "displayName": "Pines"
+  },
+  "layers": [
+    {
+      "filename": "Background.svg",
+      "name": "Background",
+      "opacity": 1
+    },
+    {
+      "filename": "Mark.svg",
+      "name": "Pines Mark",
+      "opacity": 1
+    }
+  ]
+}
