@@ -70,7 +70,7 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
         baseURL: URL,
         apiKey: String,
         request: ChatRequest,
-        toolsJSON: [[String: String]] = []
+        toolsJSON: [[String: any Sendable]] = []
     ) throws -> URLRequest {
         let url = baseURL.appending(path: "/v1/chat/completions")
         var urlRequest = URLRequest(url: url)
@@ -93,10 +93,29 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
         if let maxTokens = request.sampling.maxTokens {
             body["max_tokens"] = maxTokens
         }
-        if !toolsJSON.isEmpty {
-            body["tools"] = toolsJSON
+        let advertisedTools = !toolsJSON.isEmpty
+            ? toolsJSON
+            : (request.allowsTools ? request.availableTools.map { $0.openAIFunctionToolObject() } : [])
+        if !advertisedTools.isEmpty {
+            body["tools"] = advertisedTools.map(Self.jsonSerializable)
+            body["tool_choice"] = "auto"
         }
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
         return urlRequest
+    }
+
+    private static func jsonSerializable(_ dictionary: [String: any Sendable]) -> [String: Any] {
+        dictionary.mapValues { jsonSerializable($0) }
+    }
+
+    private static func jsonSerializable(_ value: Any) -> Any {
+        switch value {
+        case let dictionary as [String: any Sendable]:
+            return jsonSerializable(dictionary)
+        case let array as [any Sendable]:
+            return array.map { jsonSerializable($0) }
+        default:
+            return value
+        }
     }
 }

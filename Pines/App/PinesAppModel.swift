@@ -3,7 +3,7 @@ import SwiftUI
 import PinesCore
 
 @MainActor
-final class PinesAppModel: ObservableObject {
+final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var threads: [PinesThreadPreview]
     @Published var models: [PinesModelPreview]
     @Published var vaultItems: [PinesVaultItemPreview]
@@ -16,6 +16,9 @@ final class PinesAppModel: ObservableObject {
     @Published var activeRunID: UUID?
     @Published var auditEvents: [AuditEvent]
     @Published var cloudProviders: [CloudProviderConfiguration]
+    @Published var mcpServers: [MCPServerConfiguration] = []
+    @Published var mcpTools: [MCPToolRecord] = []
+    @Published var pendingToolApproval: ToolApprovalRequest?
     @Published var modelDownloads: [ModelDownloadProgress] = []
     @Published var isSearchingModels = false
     @Published var modelSearchError: String?
@@ -23,6 +26,7 @@ final class PinesAppModel: ObservableObject {
     @Published var huggingFaceCredentialStatus = "Not configured"
     @Published var braveSearchCredentialStatus = "Not configured"
     private var currentRunTask: Task<Void, Never>?
+    private var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
 
     var modelSuggestions: [String] {
         Array(
@@ -117,6 +121,11 @@ final class PinesAppModel: ObservableObject {
                 cloudProviders = try await cloudProviderRepository.listProviders()
             }
 
+            if let mcpServerRepository = services.mcpServerRepository {
+                mcpServers = try await mcpServerRepository.listMCPServers()
+                mcpTools = try await mcpServerRepository.listMCPTools(serverID: nil)
+            }
+
             await refreshCredentialStatuses(services: services)
             serviceError = nil
         } catch {
@@ -153,6 +162,7 @@ final class PinesAppModel: ObservableObject {
         currentRunTask?.cancel()
         currentRunTask = nil
         activeRunID = nil
+        resolvePendingToolApproval(.denied)
     }
 
     func retryLastUserMessage(in thread: PinesThreadPreview, services: PinesAppServices) {
@@ -184,20 +194,88 @@ final class PinesAppModel: ObservableObject {
                 ?? models.first(where: { $0.install.state == .installed })?.install.modelID
                 ?? models.first?.install.modelID
                 ?? ModelID(rawValue: "mlx-community/Llama-3.2-1B-Instruct-4bit")
+            let availableTools = await services.toolRegistry.listSpecs()
+            let cloudCandidate = cloudProviders
+                .first { $0.enabledForAgents }
+                .map { configuration in
+                    (
+                        configuration,
+                        BYOKCloudInferenceProvider(configuration: configuration, secretStore: services.secretStore)
+                    )
+                }
+            let route = services.executionRouter.routeChat(
+                mode: executionMode,
+                local: (services.mlxRuntime.localProviderID, services.mlxRuntime.capabilities),
+                cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
+                requiresVision: false,
+                requiresTools: !availableTools.isEmpty
+            )
+            let selectedProvider: any InferenceProvider
+            let selectedProviderID: ProviderID
+            let selectedModelID: ModelID
+            switch route.destination {
+            case .local:
+                selectedProvider = services.mlxRuntime
+                selectedProviderID = services.mlxRuntime.localProviderID
+                selectedModelID = modelID
+            case let .cloud(providerID):
+                guard let cloudCandidate else {
+                    serviceError = "No enabled cloud provider is configured for agents."
+                    return
+                }
+                selectedProvider = cloudCandidate.1
+                selectedProviderID = providerID
+                selectedModelID = cloudCandidate.0.defaultModelID ?? modelID
+            case let .denied(reason):
+                serviceError = "\(reason)"
+                return
+            }
+
             let userMessage = ChatMessage(role: .user, content: trimmed)
-            try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: modelID, providerID: nil)
+            try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: selectedModelID, providerID: nil)
 
             let assistantMessage = ChatMessage(role: .assistant, content: "")
-            try await repository.appendMessage(assistantMessage, status: .streaming, conversationID: conversationID, modelID: modelID, providerID: services.mlxRuntime.localProviderID)
+            try await repository.appendMessage(assistantMessage, status: .streaming, conversationID: conversationID, modelID: selectedModelID, providerID: selectedProviderID)
 
             activeRunID = assistantMessage.id
             await refreshAll(services: services)
 
             let messages = try await repository.messages(in: conversationID)
-            let request = ChatRequest(modelID: modelID, messages: messages, allowsTools: true)
-            let stream = try await services.mlxRuntime.streamEvents(request)
+            let vaultContext = await vaultContextMessage(for: trimmed, services: services)
+            var requestMessages = messages
+            if let vaultContext {
+                requestMessages.insert(vaultContext.message, at: 0)
+            }
+            let request = ChatRequest(
+                modelID: selectedModelID,
+                messages: requestMessages,
+                allowsTools: !availableTools.isEmpty,
+                availableTools: availableTools,
+                vaultContextIDs: vaultContext?.documentIDs ?? []
+            )
+            let settings = try? await services.settingsRepository?.loadSettings()
+            let session = AgentSession(
+                title: "Chat",
+                policy: AgentPolicy(
+                    executionMode: settings?.executionMode ?? executionMode,
+                    requiresConsentForNetwork: false,
+                    requiresConsentForBrowser: false,
+                    allowsCloudContext: selectedProviderID != services.mlxRuntime.localProviderID
+                ),
+                providerID: selectedProviderID
+            )
+            let runner = AgentRunner(
+                toolRegistry: services.toolRegistry,
+                policyGate: services.toolPolicyGate,
+                auditRepository: services.auditRepository,
+                approvalHandler: { [weak self] request in
+                    await self?.requestToolApproval(request) ?? .denied
+                }
+            )
+            let stream = runner.run(session: session, request: request, provider: selectedProvider)
             var accumulated = ""
             var tokenCount = 0
+            let generationStartedAt = Date()
 
             for try await event in stream {
                 guard !Task.isCancelled else { throw InferenceError.cancelled }
@@ -211,12 +289,19 @@ final class PinesAppModel: ObservableObject {
                     try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: status, tokenCount: tokenCount)
                 case let .failure(failure):
                     try await repository.updateMessage(id: assistantMessage.id, content: failure.message, status: .failed, tokenCount: tokenCount)
-                case .metrics, .toolCall:
+                case let .metrics(metrics):
+                    services.runtimeMetrics.recordGenerationMetrics(metrics, modelID: selectedModelID)
+                case .toolCall:
                     break
                 }
                 await refreshAll(services: services)
             }
 
+            services.runtimeMetrics.recordGenerationFinished(
+                modelID: selectedModelID,
+                outputTokens: tokenCount,
+                elapsedSeconds: Date().timeIntervalSince(generationStartedAt)
+            )
             activeRunID = nil
             currentRunTask = nil
             await refreshAll(services: services)
@@ -226,6 +311,54 @@ final class PinesAppModel: ObservableObject {
             serviceError = error.localizedDescription
             await refreshAll(services: services)
         }
+    }
+
+    private func vaultContextMessage(
+        for query: String,
+        services: PinesAppServices
+    ) async -> (message: ChatMessage, documentIDs: [UUID])? {
+        guard let vaultRepository = services.vaultRepository,
+              let settings = try? await services.settingsRepository?.loadSettings(),
+              let embeddingModelID = settings.embeddingModelID,
+              let embeddingResult = try? await services.mlxRuntime.embed(
+                  EmbeddingRequest(modelID: embeddingModelID, inputs: [query])
+              ),
+              let queryEmbedding = embeddingResult.vectors.first
+        else {
+            return nil
+        }
+
+        let startedAt = Date()
+        guard let results = try? await vaultRepository.search(
+            query: query,
+            embedding: queryEmbedding,
+            embeddingModelID: embeddingModelID,
+            limit: 4
+        ) else {
+            return nil
+        }
+        services.runtimeMetrics.recordVaultRetrieval(
+            resultCount: results.count,
+            elapsedSeconds: Date().timeIntervalSince(startedAt)
+        )
+        guard !results.isEmpty else {
+            return nil
+        }
+
+        let context = results.enumerated().map { index, result in
+            "[\(index + 1)] \(result.document.title): \(result.snippet)"
+        }.joined(separator: "\n")
+        let documentIDs = results.map(\.document.id).uniqued()
+        return (
+            ChatMessage(
+                role: .system,
+                content: """
+                Use this private local vault context when it is relevant. Cite entries by bracket number.
+                \(context)
+                """
+            ),
+            documentIDs
+        )
     }
 
     func saveSettings(services: PinesAppServices) async {
@@ -428,6 +561,145 @@ final class PinesAppModel: ObservableObject {
         }
     }
 
+    func saveMCPServer(
+        existingID: MCPServerID? = nil,
+        displayName: String,
+        endpointURLString: String,
+        authMode: MCPAuthMode,
+        bearerToken: String,
+        oauthAuthorizationURLString: String,
+        oauthTokenURLString: String,
+        oauthClientID: String,
+        oauthScopes: String,
+        oauthResource: String,
+        enabled: Bool,
+        allowInsecureLocalHTTP: Bool,
+        services: PinesAppServices
+    ) async {
+        do {
+            guard let service = services.mcpServerService else {
+                serviceError = "MCP server service is unavailable."
+                return
+            }
+            guard let endpointURL = URL(string: endpointURLString), endpointURL.scheme != nil else {
+                serviceError = "MCP endpoint URL is invalid."
+                return
+            }
+            let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let serverID = existingID ?? MCPServerID(rawValue: MCPNameSanitizer.serverSlug(displayName: trimmedName, fallback: endpointURL.host(percentEncoded: false) ?? "mcp"))
+            let server = MCPServerConfiguration(
+                id: serverID,
+                displayName: trimmedName.isEmpty ? serverID.rawValue : trimmedName,
+                endpointURL: endpointURL,
+                authMode: authMode,
+                enabled: enabled,
+                allowInsecureLocalHTTP: allowInsecureLocalHTTP,
+                keychainAccount: serverID.rawValue,
+                oauthAuthorizationURL: URL(string: oauthAuthorizationURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+                oauthTokenURL: URL(string: oauthTokenURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+                oauthClientID: oauthClientID.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                oauthScopes: oauthScopes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                oauthResource: oauthResource.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            )
+            try await service.saveServer(server, bearerToken: bearerToken.isEmpty ? nil : bearerToken)
+            await refreshAll(services: services)
+        } catch {
+            serviceError = error.localizedDescription
+            await refreshAll(services: services)
+        }
+    }
+
+    func discoverMCPOAuth(
+        endpointURLString: String,
+        allowInsecureLocalHTTP: Bool,
+        services: PinesAppServices
+    ) async -> MCPDiscoveredOAuthConfiguration? {
+        do {
+            guard let endpointURL = URL(string: endpointURLString), endpointURL.scheme != nil else {
+                serviceError = "MCP endpoint URL is invalid."
+                return nil
+            }
+            let temporary = MCPServerConfiguration(
+                id: "oauth-discovery",
+                displayName: "OAuth discovery",
+                endpointURL: endpointURL,
+                authMode: .oauthPKCE,
+                enabled: false,
+                allowInsecureLocalHTTP: allowInsecureLocalHTTP,
+                keychainAccount: "oauth-discovery"
+            )
+            let discovery = try await MCPOAuthService(
+                secretStore: services.secretStore,
+                auditRepository: services.auditRepository
+            ).discover(server: temporary)
+            serviceError = nil
+            return discovery
+        } catch {
+            serviceError = error.localizedDescription
+            return nil
+        }
+    }
+
+    func refreshMCPServer(_ server: MCPServerConfiguration, services: PinesAppServices) async {
+        do {
+            guard let service = services.mcpServerService else {
+                serviceError = "MCP server service is unavailable."
+                return
+            }
+            try await service.refresh(server)
+            await refreshAll(services: services)
+        } catch {
+            serviceError = error.localizedDescription
+            await refreshAll(services: services)
+        }
+    }
+
+    func deleteMCPServer(_ server: MCPServerConfiguration, services: PinesAppServices) async {
+        do {
+            guard let service = services.mcpServerService else {
+                serviceError = "MCP server service is unavailable."
+                return
+            }
+            try await service.deleteServer(server)
+            await refreshAll(services: services)
+        } catch {
+            serviceError = error.localizedDescription
+            await refreshAll(services: services)
+        }
+    }
+
+    func setMCPToolEnabled(_ tool: MCPToolRecord, enabled: Bool, services: PinesAppServices) async {
+        do {
+            guard let service = services.mcpServerService else {
+                serviceError = "MCP server service is unavailable."
+                return
+            }
+            try await service.setToolEnabled(serverID: tool.serverID, namespacedName: tool.namespacedName, enabled: enabled)
+            await refreshAll(services: services)
+        } catch {
+            serviceError = error.localizedDescription
+            await refreshAll(services: services)
+        }
+    }
+
+    func connectMCPOAuth(_ server: MCPServerConfiguration, services: PinesAppServices) async {
+        do {
+            try await MCPOAuthService(secretStore: services.secretStore, auditRepository: services.auditRepository).connect(server: server)
+            await refreshMCPServer(server, services: services)
+        } catch {
+            serviceError = error.localizedDescription
+        }
+    }
+
+    func disconnectMCPOAuth(_ server: MCPServerConfiguration, services: PinesAppServices) async {
+        do {
+            try await MCPOAuthService(secretStore: services.secretStore, auditRepository: services.auditRepository).disconnect(server: server)
+            await refreshAll(services: services)
+        } catch {
+            serviceError = error.localizedDescription
+        }
+    }
+
     func saveHuggingFaceToken(_ token: String, services: PinesAppServices) async {
         do {
             try await services.huggingFaceCredentialService.saveToken(token)
@@ -581,6 +853,36 @@ final class PinesAppModel: ObservableObject {
                 }
             }
         }
+
+        if let mcpServerRepository = services.mcpServerRepository {
+            Task { [weak self] in
+                for await servers in mcpServerRepository.observeMCPServers() {
+                    await MainActor.run {
+                        self?.mcpServers = servers
+                    }
+                }
+            }
+            Task { [weak self] in
+                for await tools in mcpServerRepository.observeMCPTools() {
+                    await MainActor.run {
+                        self?.mcpTools = tools
+                    }
+                }
+            }
+        }
+    }
+
+    func requestToolApproval(_ request: ToolApprovalRequest) async -> ToolApprovalStatus {
+        pendingToolApproval = request
+        return await withCheckedContinuation { continuation in
+            approvalContinuation = continuation
+        }
+    }
+
+    func resolvePendingToolApproval(_ status: ToolApprovalStatus) {
+        pendingToolApproval = nil
+        approvalContinuation?.resume(returning: status)
+        approvalContinuation = nil
     }
 
     private func refreshCredentialStatuses(services: PinesAppServices) async {
@@ -731,10 +1033,16 @@ final class PinesAppModel: ObservableObject {
     }
 }
 
-private extension Array where Element == String {
-    func uniqued() -> [String] {
-        var seen = Set<String>()
+private extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
         return filter { seen.insert($0).inserted }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

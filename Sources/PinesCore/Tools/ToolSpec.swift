@@ -12,7 +12,7 @@ public enum ToolValueType: String, Codable, CaseIterable, Sendable {
     case string
 }
 
-public struct ToolParameterSpec: Codable, Equatable, Sendable {
+public struct ToolParameterSpec: Codable, Equatable, Hashable, Sendable {
     public let type: ToolValueType
     public let description: String?
 
@@ -22,7 +22,7 @@ public struct ToolParameterSpec: Codable, Equatable, Sendable {
     }
 }
 
-public struct ToolIOSchema: Codable, Equatable, Sendable {
+public struct ToolIOSchema: Codable, Equatable, Hashable, Sendable {
     public let type: ToolValueType
     public let properties: [String: ToolParameterSpec]
     public let required: [String]
@@ -101,12 +101,16 @@ public enum NetworkPolicy: Codable, Equatable, Sendable {
     }
 }
 
-public struct AnyToolSpec: Codable, Equatable, Sendable {
+extension NetworkPolicy: Hashable {}
+
+public struct AnyToolSpec: Codable, Equatable, Hashable, Sendable {
     public let name: String
     public let version: String
     public let description: String
     public let inputSchema: ToolIOSchema
     public let outputSchema: ToolIOSchema
+    public let inputJSONSchema: JSONValue?
+    public let outputJSONSchema: JSONValue?
     public let permissions: Set<ToolPermission>
     public let sideEffect: SideEffectLevel
     public let networkPolicy: NetworkPolicy
@@ -121,6 +125,8 @@ public struct AnyToolSpec: Codable, Equatable, Sendable {
         description = spec.description
         inputSchema = spec.inputSchema
         outputSchema = spec.outputSchema
+        inputJSONSchema = nil
+        outputJSONSchema = nil
         permissions = spec.permissions
         sideEffect = spec.sideEffect
         networkPolicy = spec.networkPolicy
@@ -128,6 +134,162 @@ public struct AnyToolSpec: Codable, Equatable, Sendable {
         explanationRequired = spec.explanationRequired
         inputType = spec.inputTypeName
         outputType = spec.outputTypeName
+    }
+
+    public init(
+        name: String,
+        version: String = "1.0.0",
+        description: String,
+        inputJSONSchema: JSONValue,
+        outputJSONSchema: JSONValue? = nil,
+        permissions: Set<ToolPermission> = [],
+        sideEffect: SideEffectLevel = .none,
+        networkPolicy: NetworkPolicy = .noNetwork,
+        timeoutSeconds: Int = 30,
+        explanationRequired: Bool = true,
+        inputType: String = "JSON",
+        outputType: String = "JSON"
+    ) throws {
+        self.name = try ToolSpec<EmptyToolInput, EmptyToolOutput>.validatedNameForErasure(name)
+        self.version = version
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDescription.isEmpty else {
+            throw ToolSpecError.emptyDescription
+        }
+        self.description = trimmedDescription
+        self.inputSchema = Self.toolIOSchema(from: inputJSONSchema)
+        self.outputSchema = Self.toolIOSchema(from: outputJSONSchema ?? JSONValue.objectSchema())
+        self.inputJSONSchema = inputJSONSchema
+        self.outputJSONSchema = outputJSONSchema
+        self.permissions = permissions
+        self.sideEffect = sideEffect
+        self.networkPolicy = networkPolicy
+        self.timeoutSeconds = timeoutSeconds
+        self.explanationRequired = explanationRequired
+        self.inputType = inputType
+        self.outputType = outputType
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case version
+        case description
+        case inputSchema
+        case outputSchema
+        case inputJSONSchema
+        case outputJSONSchema
+        case permissions
+        case sideEffect
+        case networkPolicy
+        case timeoutSeconds
+        case explanationRequired
+        case inputType
+        case outputType
+    }
+
+    private static func toolIOSchema(from schema: JSONValue) -> ToolIOSchema {
+        guard let object = schema.objectValue else {
+            return ToolIOSchema()
+        }
+        let type = (object["type"]?.stringValue).flatMap(ToolValueType.init(rawValue:)) ?? .object
+        let required: [String]
+        if case let .array(values)? = object["required"] {
+            required = values.compactMap(\.stringValue)
+        } else {
+            required = []
+        }
+        var properties = [String: ToolParameterSpec]()
+        if case let .object(propertyObjects)? = object["properties"] {
+            for (name, value) in propertyObjects {
+                guard let parameter = value.objectValue else { continue }
+                let propertyType = (parameter["type"]?.stringValue).flatMap(ToolValueType.init(rawValue:)) ?? .string
+                properties[name] = ToolParameterSpec(type: propertyType, description: parameter["description"]?.stringValue)
+            }
+        }
+        return ToolIOSchema(type: type, properties: properties, required: required)
+    }
+}
+
+private struct EmptyToolInput: ToolInput {}
+private struct EmptyToolOutput: ToolOutput {}
+
+public extension JSONValue {
+    var stringValue: String? {
+        if case let .string(value) = self {
+            return value
+        }
+        return nil
+    }
+}
+
+public extension ToolParameterSpec {
+    func jsonSchemaObject() -> [String: any Sendable] {
+        var object: [String: any Sendable] = ["type": type.rawValue]
+        if let description {
+            object["description"] = description
+        }
+        return object
+    }
+}
+
+public extension ToolIOSchema {
+    var jsonValue: JSONValue {
+        var propertiesObject = [String: JSONValue]()
+        for (name, spec) in properties {
+            var object: [String: JSONValue] = ["type": .string(spec.type.rawValue)]
+            if let description = spec.description {
+                object["description"] = .string(description)
+            }
+            propertiesObject[name] = .object(object)
+        }
+
+        return .object([
+            "type": .string(type.rawValue),
+            "properties": .object(propertiesObject),
+            "required": .array(required.map(JSONValue.string)),
+        ])
+    }
+
+    func jsonSchemaObject() -> [String: any Sendable] {
+        var propertiesObject = [String: any Sendable]()
+        for (name, spec) in properties {
+            propertiesObject[name] = spec.jsonSchemaObject()
+        }
+
+        return [
+            "type": type.rawValue,
+            "properties": propertiesObject,
+            "required": required,
+        ]
+    }
+}
+
+public extension AnyToolSpec {
+    func openAIFunctionToolObject() -> [String: any Sendable] {
+        [
+            "type": "function",
+            "function": [
+                "name": name,
+                "description": description,
+                "parameters": (inputJSONSchema ?? inputSchema.jsonValue).anySendable,
+            ] as [String: any Sendable],
+        ]
+    }
+
+    func anthropicToolObject() -> [String: any Sendable] {
+        [
+            "name": name,
+            "description": description,
+            "input_schema": (inputJSONSchema ?? inputSchema.jsonValue).anySendable,
+        ]
+    }
+
+    func geminiFunctionDeclarationObject() -> [String: any Sendable] {
+        [
+            "name": name,
+            "description": description,
+            "parameters": (inputJSONSchema ?? inputSchema.jsonValue).anySendable,
+        ]
     }
 }
 
@@ -222,6 +384,10 @@ public struct ToolSpec<Input: ToolInput, Output: ToolOutput>: Sendable {
         }
 
         return trimmed
+    }
+
+    fileprivate static func validatedNameForErasure(_ name: String) throws -> String {
+        try validatedName(name)
     }
 
     private static func isAllowedNameScalar(_ scalar: Unicode.Scalar) -> Bool {

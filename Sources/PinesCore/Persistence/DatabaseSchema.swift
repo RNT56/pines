@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 2
+    public static let currentVersion = 4
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -296,6 +296,62 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_chat_runs_conversation ON chat_runs(conversation_id, started_at);",
             "CREATE INDEX IF NOT EXISTS idx_tool_runs_session ON tool_runs(agent_session_id, created_at);",
             "CREATE INDEX IF NOT EXISTS idx_sync_records_state ON sync_records(state);",
+        ]),
+        DatabaseMigration(version: 3, name: "vault-turboquant-embeddings", sql: [
+            """
+            CREATE TABLE IF NOT EXISTS vault_embeddings (
+                chunk_id TEXT PRIMARY KEY NOT NULL REFERENCES vault_chunks(id) ON DELETE CASCADE,
+                document_id TEXT NOT NULL REFERENCES vault_documents(id) ON DELETE CASCADE,
+                embedding_model_id TEXT NOT NULL,
+                dimensions INTEGER NOT NULL,
+                fp16_embedding BLOB NOT NULL,
+                turboquant_code BLOB NOT NULL,
+                norm REAL NOT NULL,
+                codec_version INTEGER NOT NULL,
+                checksum TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_model ON vault_embeddings(embedding_model_id, dimensions);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_document ON vault_embeddings(document_id);",
+        ]),
+        DatabaseMigration(version: 4, name: "remote-mcp-tools", sql: [
+            """
+            CREATE TABLE IF NOT EXISTS mcp_servers (
+                id TEXT PRIMARY KEY NOT NULL,
+                display_name TEXT NOT NULL,
+                endpoint_url TEXT NOT NULL,
+                auth_mode TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                allow_insecure_local_http INTEGER NOT NULL DEFAULT 0,
+                keychain_service TEXT NOT NULL,
+                keychain_account TEXT NOT NULL,
+                oauth_authorization_url TEXT,
+                oauth_token_url TEXT,
+                oauth_client_id TEXT,
+                oauth_scopes TEXT,
+                oauth_resource TEXT,
+                status TEXT NOT NULL,
+                last_error TEXT,
+                last_connected_at REAL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS mcp_tools (
+                server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+                original_name TEXT NOT NULL,
+                namespaced_name TEXT NOT NULL PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                input_schema_json TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_discovered_at REAL NOT NULL,
+                last_error TEXT
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_mcp_tools_server ON mcp_tools(server_id);",
         ]),
     ]
 }

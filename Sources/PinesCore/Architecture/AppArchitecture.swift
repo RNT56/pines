@@ -83,7 +83,7 @@ public enum PinesArchitecture {
         FeatureModuleDescriptor(
             feature: .agents,
             displayName: "Agents",
-            ownsTables: ["audit_events"],
+            ownsTables: ["audit_events", "mcp_servers", "mcp_tools"],
             ownsPermissions: ["Network", "Browser", "Cloud BYOK"],
             serviceDependencies: ["ToolRegistry", "ExecutionRouter", "SecretStore"]
         ),
@@ -148,8 +148,30 @@ public protocol VaultRepository: Sendable {
     func upsertDocument(_ document: VaultDocumentRecord, localURL: URL?, checksum: String?) async throws
     func deleteDocument(id: UUID) async throws
     func chunks(documentID: UUID) async throws -> [VaultChunk]
+    func embeddings(documentID: UUID) async throws -> [VaultStoredEmbedding]
     func replaceChunks(_ chunks: [VaultChunk], documentID: UUID, embeddingModelID: ModelID?) async throws
+    func replaceChunks(_ chunks: [VaultChunk], embeddings: VaultEmbeddingBatch?, documentID: UUID, embeddingModelID: ModelID?) async throws
     func search(query: String, embedding: [Float]?, limit: Int) async throws -> [VaultSearchResult]
+    func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, limit: Int) async throws -> [VaultSearchResult]
+}
+
+public extension VaultRepository {
+    func embeddings(documentID: UUID) async throws -> [VaultStoredEmbedding] {
+        []
+    }
+
+    func replaceChunks(
+        _ chunks: [VaultChunk],
+        embeddings: VaultEmbeddingBatch?,
+        documentID: UUID,
+        embeddingModelID: ModelID?
+    ) async throws {
+        try await replaceChunks(chunks, documentID: documentID, embeddingModelID: embeddingModelID)
+    }
+
+    func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, limit: Int) async throws -> [VaultSearchResult] {
+        try await search(query: query, embedding: embedding, limit: limit)
+    }
 }
 
 public struct VaultDocumentRecord: Identifiable, Hashable, Codable, Sendable {
@@ -186,6 +208,8 @@ public protocol CloudProviderRepository: Sendable {
     func upsertProvider(_ provider: CloudProviderConfiguration) async throws
     func deleteProvider(id: ProviderID) async throws
 }
+
+public typealias RemoteMCPServerRepository = MCPServerRepository
 
 public protocol ModelDownloadRepository: Sendable {
     func listDownloads() async throws -> [ModelDownloadProgress]

@@ -4,6 +4,15 @@ set -euo pipefail
 echo "Checking git diff whitespace..."
 git diff --check
 
+echo "Checking repository license files..."
+test -f LICENSE
+test -f NOTICE
+grep -q "PolyForm Noncommercial License 1.0.0" LICENSE
+grep -q "Required Notice:" NOTICE
+grep -q "PolyForm-Noncommercial-1.0.0" README.md
+grep -q "PolyForm-Noncommercial-1.0.0" CONTRIBUTING.md
+bash scripts/ci/check-third-party-notices.sh
+
 echo "Checking tracked files for common secret patterns..."
 github_oauth="gh""o_"
 github_pat="gh""p_"

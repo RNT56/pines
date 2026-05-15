@@ -21,6 +21,8 @@
 - `ToolPolicyGate`
 - `Redactor`
 - `MLXRuntimeBridge`
+- `DeviceRuntimeMonitor`
+- `PinesRuntimeMetrics`
 - `GRDBPinesStore`
 - `ModelLifecycleService`
 - `VaultIngestionService`
@@ -46,11 +48,11 @@ Repository protocols separate UI from storage:
 - `ModelInstallRepository`
 - `VaultRepository`
 
-The production local store is GRDB/SQLite with optional CloudKit private-database sync for user-enabled metadata and source documents. API keys, model binaries, prompt caches, generated embeddings, browser state, and transient tool state do not sync.
+The production local store is GRDB/SQLite with optional CloudKit private-database sync for user-enabled metadata and source documents. API keys, model binaries, prompt caches, browser state, and transient tool state do not sync. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
 
 ## Local-First Inference
 
-Normal chat, VLM prompts, embeddings, vault retrieval, and history are local-first. Cloud execution is represented only through explicit agent policy:
+Normal chat, VLM prompts, embeddings, vault retrieval, and history are local-first. Runtime profiles request TurboQuant for local KV cache by default through the pinned MLX forks, including requested/active backend and attention-path diagnostics so the app can distinguish direct compressed Metal attention from packed-lane fallback. Cloud execution is represented only through explicit agent policy:
 
 - `localOnly`
 - `preferLocal`
@@ -58,6 +60,10 @@ Normal chat, VLM prompts, embeddings, vault retrieval, and history are local-fir
 - `cloudRequired`
 
 The router must never silently fall back to cloud. If local capability is missing, the UI should show a consent/configuration path.
+
+`DeviceRuntimeMonitor` adapts local runtime defaults from physical memory, available process memory, and thermal state. Compact 6 GB devices use lower prefill, embedding batch, and vector scan limits; iOS memory warnings stop the active run and unload transient MLX containers.
+
+Vault retrieval stores both FP16 embeddings and compressed TurboQuant vector codes. Search first uses the compressed code path, filters by embedding model where possible, reranks with FP16 cosine, and falls back to SQLite FTS when embeddings are missing.
 
 ## Model Discovery
 

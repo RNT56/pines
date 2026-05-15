@@ -1,8 +1,8 @@
 import Foundation
 import PinesCore
 
-#if canImport(HuggingFace)
-import HuggingFace
+#if canImport(PinesHubXetSupport)
+import PinesHubXetSupport
 #endif
 #if canImport(MLX)
 import MLX
@@ -16,15 +16,13 @@ import MLXVLM
 #if canImport(MLXLMCommon)
 import MLXLMCommon
 #endif
-#if canImport(MLXHuggingFace)
-import MLXHuggingFace
-#endif
 #if canImport(Tokenizers)
 import Tokenizers
 #endif
 
 struct MLXRuntimeBridge {
     private let state = MLXRuntimeState()
+    private let deviceMonitor = DeviceRuntimeMonitor()
 
     var isLinked: Bool {
         #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXEmbedders)
@@ -39,37 +37,196 @@ struct MLXRuntimeBridge {
     var localProviderID: ProviderID { "mlx-local" }
 
     var capabilities: ProviderCapabilities {
-        ProviderCapabilities(
+        let profile = deviceMonitor.currentProfile()
+        return ProviderCapabilities(
             local: true,
             streaming: true,
             textGeneration: true,
-            vision: true,
+            vision: profile.allowsVisionModels,
             embeddings: true,
             toolCalling: true,
             jsonMode: true,
-            maxContextTokens: 8192
+            maxContextTokens: profile.recommendedContextTokens
+        )
+    }
+
+    var runtimeDiagnostics: RuntimeQuantizationDiagnostics {
+        let memoryCounters = deviceMonitor.memoryCounters()
+        let backend = turboQuantBackendSnapshot()
+        let linked = isLinked
+        return RuntimeQuantizationDiagnostics(
+            requestedAlgorithm: .turboQuant,
+            activeAlgorithm: linked ? .turboQuant : .none,
+            preset: .turbo3_5,
+            requestedBackend: backend.requested,
+            activeBackend: linked ? backend.active : nil,
+            metalCodecAvailable: linked && backend.metalCodecAvailable,
+            metalAttentionAvailable: linked && backend.metalAttentionAvailable,
+            activeAttentionPath: linked ? backend.activeAttentionPath : .baseline,
+            metalKernelProfile: linked ? backend.kernelProfile : .mlxPackedFallback,
+            metalSelfTestStatus: linked ? backend.selfTestStatus : nil,
+            metalSelfTestFailureReason: backend.selfTestFailureReason,
+            rawFallbackAllocated: backend.rawFallbackAllocated,
+            devicePerformanceClass: memoryCounters.devicePerformanceClass,
+            turboQuantOptimizationPolicy: memoryCounters.devicePerformanceClass == nil
+                ? nil
+                : deviceMonitor.currentProfile().turboQuantOptimizationPolicy,
+            thermalDownshiftActive: memoryCounters.thermalDownshiftActive,
+            lastUnsupportedAttentionShape: backend.lastUnsupportedAttentionShape,
+            activeFallbackReason: linked
+                ? backend.fallbackReason
+                : "MLX runtime packages are not linked in this build.",
+            memoryCounters: memoryCounters
         )
     }
 
     func defaultRuntimeProfile(for install: ModelInstall) -> RuntimeProfile {
+        let deviceProfile = deviceMonitor.currentProfile()
         let hasVision = install.modalities.contains(.vision)
+        let isCompact = deviceProfile.memoryTier == .compact
+        let isSmallTextModel = (install.parameterCount ?? Int64.max) <= 2_000_000_000
+            || install.repository.localizedCaseInsensitiveContains("1B")
+        let maxKVSize = hasVision
+            ? min(deviceProfile.recommendedContextTokens, 4096)
+            : (isSmallTextModel ? deviceProfile.recommendedSmallModelContextTokens : deviceProfile.recommendedContextTokens)
+        let backend = turboQuantBackendSnapshot()
+        let linked = isLinked
         return RuntimeProfile(
             name: hasVision ? "Vision balanced" : "Local balanced",
             quantization: QuantizationProfile(
                 weightBits: install.repository.localizedCaseInsensitiveContains("4bit") ? 4 : nil,
-                kvBits: 8,
+                kvBits: nil,
                 kvGroupSize: 64,
-                quantizedKVStart: 256,
-                maxKVSize: hasVision ? 4096 : 8192
+                quantizedKVStart: 0,
+                maxKVSize: maxKVSize,
+                algorithm: .turboQuant,
+                kvCacheStrategy: .turboQuant,
+                preset: .turbo3_5,
+                requestedBackend: backend.requested,
+                activeBackend: linked ? backend.active : nil,
+                metalCodecAvailable: linked && backend.metalCodecAvailable,
+                metalAttentionAvailable: linked && backend.metalAttentionAvailable,
+                activeAttentionPath: linked ? backend.activeAttentionPath : .baseline,
+                metalKernelProfile: linked ? backend.kernelProfile : .mlxPackedFallback,
+                metalSelfTestStatus: linked ? backend.selfTestStatus : nil,
+                metalSelfTestFailureReason: backend.selfTestFailureReason,
+                rawFallbackAllocated: backend.rawFallbackAllocated,
+                devicePerformanceClass: deviceProfile.performanceClass,
+                turboQuantOptimizationPolicy: deviceProfile.turboQuantOptimizationPolicy,
+                thermalDownshiftActive: deviceProfile.thermalDownshiftActive,
+                lastUnsupportedAttentionShape: backend.lastUnsupportedAttentionShape,
+                activeFallbackReason: linked
+                    ? backend.fallbackReason
+                    : "MLX runtime packages are not linked in this build.",
+                memoryCounters: deviceMonitor.memoryCounters()
             ),
-            prefillStepSize: hasVision ? 256 : 512,
+            prefillStepSize: hasVision || isCompact
+                ? min(deviceProfile.recommendedPrefillStepSize, 256)
+                : deviceProfile.recommendedPrefillStepSize,
             promptCacheEnabled: !hasVision,
             promptCacheIdentifier: install.repository,
             speculativeDraftModelID: nil,
             speculativeDecodingEnabled: false,
-            unloadOnMemoryPressure: true
+            unloadOnMemoryPressure: true,
+            repetitionContextSize: isCompact ? 16 : 20,
+            maxConcurrentSessions: 1
         )
     }
+
+    private func turboQuantBackendSnapshot() -> (
+        requested: PinesCore.TurboQuantRuntimeBackend,
+        active: PinesCore.TurboQuantRuntimeBackend?,
+        metalCodecAvailable: Bool,
+        metalAttentionAvailable: Bool,
+        activeAttentionPath: PinesCore.TurboQuantAttentionPath,
+        kernelProfile: PinesCore.TurboQuantKernelProfile?,
+        selfTestStatus: PinesCore.TurboQuantSelfTestStatus?,
+        selfTestFailureReason: String?,
+        rawFallbackAllocated: Bool?,
+        lastUnsupportedAttentionShape: String?,
+        fallbackReason: String?
+    ) {
+        #if canImport(MLX)
+        let requested = MLX.TurboQuantBackend.metalPolarQJL
+        let availability = MLX.TurboQuantKernelAvailability.current
+        let activeBackend = availability.runtimeBackend(for: requested)
+        let attentionPath: PinesCore.TurboQuantAttentionPath =
+            activeBackend == .metalPolarQJL && availability.supportsMetalPolarQJLAttention
+            ? .tiledOnlineFused
+            : .mlxPackedFallback
+        return (
+            .metalPolarQJL,
+            Self.coreTurboQuantBackend(from: activeBackend),
+            availability.supportsMetalPolarQJLCodec,
+            availability.supportsMetalPolarQJLAttention,
+            attentionPath,
+            Self.coreTurboQuantKernelProfile(from: availability.selectedKernelProfile),
+            Self.coreTurboQuantSelfTestStatus(from: availability.selfTestStatus),
+            availability.selfTestFailureReason,
+            false,
+            nil,
+            availability.fallbackReason(for: requested)
+        )
+        #else
+        return (
+            .metalPolarQJL,
+            nil,
+            false,
+            false,
+            .baseline,
+            .mlxPackedFallback,
+            nil,
+            nil,
+            nil,
+            nil,
+            "MLX runtime packages are not linked in this build."
+        )
+        #endif
+    }
+
+    #if canImport(MLX)
+    private static func coreTurboQuantBackend(
+        from backend: MLX.TurboQuantBackend
+    ) -> PinesCore.TurboQuantRuntimeBackend {
+        switch backend {
+        case .mlxPacked:
+            .mlxPacked
+        case .polarQJLReference:
+            .polarQJLReference
+        case .metalPolarQJL:
+            .metalPolarQJL
+        }
+    }
+
+    private static func coreTurboQuantKernelProfile(
+        from profile: MLX.TurboQuantKernelProfile
+    ) -> PinesCore.TurboQuantKernelProfile {
+        switch profile {
+        case .portableA16A17:
+            .portableA16A17
+        case .wideA18A19:
+            .wideA18A19
+        case .sustainedA19Pro:
+            .sustainedA19Pro
+        case .mlxPackedFallback:
+            .mlxPackedFallback
+        }
+    }
+
+    private static func coreTurboQuantSelfTestStatus(
+        from status: MLX.TurboQuantRuntimeSelfTestStatus
+    ) -> PinesCore.TurboQuantSelfTestStatus {
+        switch status {
+        case .notRun:
+            .notRun
+        case .passed:
+            .passed
+        case .failed:
+            .failed
+        }
+    }
+
+    #endif
 
     func load(_ install: ModelInstall, profile: RuntimeProfile? = nil) async throws {
         try await state.load(install, profile: profile ?? defaultRuntimeProfile(for: install))
@@ -77,6 +234,10 @@ struct MLXRuntimeBridge {
 
     func unload() async {
         await state.unload()
+    }
+
+    func handleMemoryPressure() async {
+        await state.handleMemoryPressure()
     }
 }
 
@@ -99,7 +260,7 @@ private actor MLXRuntimeState {
     private var visionContainer: MLXLMCommon.ModelContainer?
     #endif
 
-    #if canImport(MLXEmbedders) && canImport(MLXHuggingFace) && canImport(MLXLMCommon) && canImport(MLX) && canImport(HuggingFace) && canImport(Tokenizers)
+    #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
     private let embeddingRuntime = MLXEmbeddingRuntime()
     #endif
 
@@ -107,19 +268,19 @@ private actor MLXRuntimeState {
         activeInstall = install
         activeProfile = profile
 
-        #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXHuggingFace) && canImport(MLXLMCommon) && canImport(HuggingFace) && canImport(Tokenizers)
+        #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         let configuration = Self.lmConfiguration(for: install)
         if install.modalities.contains(.vision) {
             visionContainer = try await VLMModelFactory.shared.loadContainer(
-                from: #hubDownloader(),
-                using: #huggingFaceTokenizerLoader(),
+                from: PinesHubDownloader(),
+                using: PinesTokenizerLoader(),
                 configuration: configuration
             )
             textContainer = nil
         } else if install.modalities.contains(.text) {
             textContainer = try await LLMModelFactory.shared.loadContainer(
-                from: #hubDownloader(),
-                using: #huggingFaceTokenizerLoader(),
+                from: PinesHubDownloader(),
+                using: PinesTokenizerLoader(),
                 configuration: configuration
             )
             visionContainer = nil
@@ -135,9 +296,14 @@ private actor MLXRuntimeState {
         textContainer = nil
         visionContainer = nil
         #endif
-        #if canImport(MLXEmbedders) && canImport(MLXHuggingFace) && canImport(MLXLMCommon) && canImport(MLX) && canImport(HuggingFace) && canImport(Tokenizers)
+        #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await embeddingRuntime.unload()
         #endif
+    }
+
+    func handleMemoryPressure() async {
+        guard activeProfile.unloadOnMemoryPressure else { return }
+        await unload()
     }
 
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
@@ -171,7 +337,8 @@ private actor MLXRuntimeState {
             guard attachment.kind == .image, let localURL = attachment.localURL else { return nil }
             return localURL
         } ?? []
-        let parameters = Self.generateParameters(from: request, profile: profile)
+        let parameters = Self.generateParameters(from: request, profile: profile, install: activeInstall)
+        let toolSpecs = request.allowsTools ? Self.mlxToolSpecs(from: request.availableTools) : nil
 
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -180,7 +347,8 @@ private actor MLXRuntimeState {
                     let session = ChatSession(
                         container,
                         instructions: instructions.isEmpty ? nil : instructions,
-                        generateParameters: parameters
+                        generateParameters: parameters,
+                        tools: toolSpecs
                     )
                     var tokenCount = 0
 
@@ -264,7 +432,7 @@ private actor MLXRuntimeState {
     }
 
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
-        #if canImport(MLXEmbedders) && canImport(MLXHuggingFace) && canImport(MLXLMCommon) && canImport(MLX) && canImport(HuggingFace) && canImport(Tokenizers)
+        #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         return try await embeddingRuntime.embed(request)
         #else
         throw InferenceError.unsupportedCapability("MLXEmbedders is not linked in this build.")
@@ -279,19 +447,53 @@ private actor MLXRuntimeState {
         return MLXLMCommon.ModelConfiguration(id: install.repository, revision: install.revision ?? "main")
     }
 
-    private static func generateParameters(from request: ChatRequest, profile: RuntimeProfile) -> GenerateParameters {
-        GenerateParameters(
+    private static func generateParameters(
+        from request: ChatRequest,
+        profile: RuntimeProfile,
+        install: ModelInstall?
+    ) -> GenerateParameters {
+        let turboQuantSeed: UInt64? =
+            profile.quantization.kvCacheStrategy == .turboQuant
+            ? MLX.TurboQuantConfiguration.deterministicSeed(
+                modelID: install?.repository ?? request.modelID.rawValue,
+                revision: install?.revision ?? "main",
+                cacheLayoutVersion: 3
+            )
+            : nil
+
+        return GenerateParameters(
             maxTokens: request.sampling.maxTokens,
             maxKVSize: profile.quantization.maxKVSize,
-            kvBits: profile.quantization.kvBits,
+            kvBits: profile.quantization.kvCacheStrategy == .turboQuant ? nil : profile.quantization.kvBits,
             kvGroupSize: profile.quantization.kvGroupSize,
             quantizedKVStart: profile.quantization.quantizedKVStart,
+            kvCacheStrategy: profile.quantization.kvCacheStrategy == .turboQuant ? .turboQuant : .mlxAffine,
+            turboQuantPreset: mlxTurboQuantPreset(from: profile.quantization.preset),
+            turboQuantBackend: mlxTurboQuantBackend(from: profile.quantization.requestedBackend),
+            turboQuantSeed: turboQuantSeed,
             temperature: request.sampling.temperature,
             topP: request.sampling.topP,
             repetitionPenalty: request.sampling.repetitionPenalty,
             repetitionContextSize: profile.repetitionContextSize,
             prefillStepSize: profile.prefillStepSize
         )
+    }
+
+    private static func mlxTurboQuantPreset(from preset: PinesCore.TurboQuantPreset?) -> MLX.TurboQuantPreset {
+        guard let preset else { return .turbo3_5 }
+        return MLX.TurboQuantPreset(rawValue: preset.rawValue) ?? .turbo3_5
+    }
+
+    private static func mlxTurboQuantBackend(
+        from backend: PinesCore.TurboQuantRuntimeBackend?
+    ) -> MLXLMCommon.TurboQuantBackend {
+        guard let backend else { return .metalPolarQJL }
+        return MLXLMCommon.TurboQuantBackend(rawValue: backend.rawValue) ?? .metalPolarQJL
+    }
+
+    private static func mlxToolSpecs(from tools: [AnyToolSpec]) -> [MLXLMCommon.ToolSpec]? {
+        let schemas = tools.map { $0.openAIFunctionToolObject() }
+        return schemas.isEmpty ? nil : schemas
     }
 
     private static func finishReason(from reason: GenerateStopReason) -> InferenceFinishReason {
@@ -318,11 +520,39 @@ private actor MLXRuntimeState {
     }
 
     private static func prompt(from messages: [ChatMessage]) -> String {
-        let nonSystem = messages.filter { $0.role != .system }
-        if let lastUser = nonSystem.last(where: { $0.role == .user }) {
-            return lastUser.content
+        let maxCharacters = 24_000
+        let usableMessages = messages
+            .filter { message in
+                message.role != .system
+                    && !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            .suffix(24)
+
+        var packed = [String]()
+        var remaining = maxCharacters
+        for message in usableMessages.reversed() {
+            let label: String
+            switch message.role {
+            case .user:
+                label = "User"
+            case .assistant:
+                label = "Assistant"
+            case .tool:
+                label = "Tool"
+            case .system:
+                label = "System"
+            }
+            let entry = "\(label): \(message.content)"
+            guard remaining > 0 else { break }
+            if entry.count <= remaining {
+                packed.append(entry)
+                remaining -= entry.count
+            } else if message.role == .user, packed.isEmpty {
+                packed.append(String(entry.suffix(remaining)))
+                break
+            }
         }
-        return nonSystem.map { "\($0.role.rawValue): \($0.content)" }.joined(separator: "\n")
+        return packed.reversed().joined(separator: "\n\n")
     }
 }
 

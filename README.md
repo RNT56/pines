@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/RNT56/pines/actions/workflows/ci.yml"><img src="https://github.com/RNT56/pines/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-informational" alt="License: PolyForm Noncommercial 1.0.0"></a>
 </p>
 
 `pines` is an iOS 26-only, local-first AI workbench scaffolded for MLX Swift inference.
@@ -27,6 +28,7 @@ The app is split into production seams:
 - `PinesArchitecture.modules` documents feature ownership for Chats, Models, Vault, Agents, and Settings, including database tables and dependencies.
 - Repository protocols in `PinesCore` isolate persistence from SwiftUI and let GRDB/CloudKit implementations replace seed data without changing views.
 - Agent/cloud routing remains explicit: cloud execution is opt-in through `AgentPolicy` and is never a silent fallback.
+- TurboQuant is the requested default local KV-cache strategy. Pine requests the paper-exact Metal backend, reports native Metal codec and compressed-attention availability, falls back to MLX packed attention when needed, and stores compressed vault embeddings locally for approximate search plus FP16 rerank. Runtime defaults adapt to iOS memory/thermal state, including compact 6 GB device guardrails. See `docs/TURBOQUANT.md`.
 
 ## Design System
 
@@ -70,3 +72,9 @@ See:
 - `docs/SECURITY.md`
 - `docs/STATUS.md`
 - `docs/RELEASES.md`
+
+## License
+
+Pines is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE) (`PolyForm-Noncommercial-1.0.0`). You may use, modify, and redistribute this repository only for permitted noncommercial purposes under that license. Commercial use requires a separate written license from Schtack.
+
+Redistributions must preserve the required notices in [NOTICE](NOTICE). Third-party dependencies keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

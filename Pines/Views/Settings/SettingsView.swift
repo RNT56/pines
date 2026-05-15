@@ -91,6 +91,18 @@ private struct SettingsDetailView: View {
     @State private var providerModelID = "gpt-4.1-mini"
     @State private var providerAPIKey = ""
     @State private var providerEnabled = false
+    @State private var mcpName = "Local MCP"
+    @State private var mcpEndpointURL = "https://"
+    @State private var mcpAuthMode: MCPAuthMode = .none
+    @State private var mcpBearerToken = ""
+    @State private var mcpOAuthAuthorizationURL = ""
+    @State private var mcpOAuthTokenURL = ""
+    @State private var mcpOAuthClientID = ""
+    @State private var mcpOAuthScopes = ""
+    @State private var mcpOAuthResource = ""
+    @State private var mcpEnabled = true
+    @State private var mcpAllowInsecureLocalHTTP = false
+    @State private var mcpEditingServerID: MCPServerID?
     @State private var huggingFaceToken = ""
     @State private var braveSearchKey = ""
 
@@ -230,7 +242,78 @@ private struct SettingsDetailView: View {
             }
 
             Section("Runtime") {
+                let diagnostics = services.mlxRuntime.runtimeDiagnostics
+                let memory = diagnostics.memoryCounters
                 Toggle("Local inference", isOn: .constant(true))
+                LabeledContent("KV cache", value: diagnostics.activeAlgorithm.title)
+                if let preset = diagnostics.preset {
+                    LabeledContent("Preset", value: preset.displayName)
+                }
+                if let requestedBackend = diagnostics.requestedBackend {
+                    LabeledContent("Requested backend", value: requestedBackend.displayName)
+                }
+                if let activeBackend = diagnostics.activeBackend {
+                    LabeledContent("Active backend", value: activeBackend.displayName)
+                }
+                LabeledContent(
+                    "Metal codec",
+                    value: diagnostics.metalCodecAvailable ? "Available" : "Unavailable"
+                )
+                LabeledContent(
+                    "Metal attention",
+                    value: diagnostics.metalAttentionAvailable ? "Available" : "Unavailable"
+                )
+                if let attentionPath = diagnostics.activeAttentionPath {
+                    LabeledContent("Attention path", value: attentionPath.displayName)
+                }
+                if let performanceClass = diagnostics.devicePerformanceClass {
+                    LabeledContent("Performance class", value: performanceClass.displayName)
+                }
+                if let kernelProfile = diagnostics.metalKernelProfile {
+                    LabeledContent("Kernel variant", value: kernelProfile.displayName)
+                }
+                if let selfTest = diagnostics.metalSelfTestStatus {
+                    LabeledContent("MLX self-test", value: selfTest.displayName)
+                }
+                if let policy = diagnostics.turboQuantOptimizationPolicy {
+                    LabeledContent("Optimization policy", value: policy.displayName)
+                }
+                if let rawFallbackAllocated = diagnostics.rawFallbackAllocated {
+                    LabeledContent("Raw KV fallback", value: rawFallbackAllocated ? "Allocated" : "Not allocated")
+                }
+                if diagnostics.thermalDownshiftActive == true {
+                    LabeledContent("Thermal downshift", value: "Active")
+                }
+                if let unsupportedShape = diagnostics.lastUnsupportedAttentionShape {
+                    LabeledContent("Unsupported shape", value: unsupportedShape)
+                }
+                if let hardware = memory.hardwareModelIdentifier {
+                    LabeledContent("Device identifier", value: hardware)
+                }
+                if let metalArchitecture = memory.metalArchitectureName {
+                    LabeledContent("Metal architecture", value: metalArchitecture)
+                }
+                if let workingSet = memory.metalRecommendedWorkingSetBytes {
+                    LabeledContent("MLX working set", value: ByteCountFormatter.string(fromByteCount: workingSet, countStyle: .memory))
+                }
+                if let lowPower = memory.lowPowerModeEnabled {
+                    LabeledContent("Low Power Mode", value: lowPower ? "On" : "Off")
+                }
+                if let contextTokens = memory.recommendedContextTokens {
+                    LabeledContent("Context window", value: "\(contextTokens.formatted()) tokens")
+                }
+                if let physicalMemory = memory.physicalMemoryBytes {
+                    LabeledContent("Device memory", value: ByteCountFormatter.string(fromByteCount: physicalMemory, countStyle: .memory))
+                }
+                if let availableMemory = memory.availableMemoryBytes {
+                    LabeledContent("Available memory", value: ByteCountFormatter.string(fromByteCount: availableMemory, countStyle: .memory))
+                }
+                if let thermalState = memory.thermalState {
+                    LabeledContent("Thermal state", value: thermalState.capitalized)
+                }
+                if let fallback = diagnostics.activeFallbackReason {
+                    LabeledContent("Fallback", value: fallback)
+                }
                 Toggle("Private iCloud sync", isOn: Binding(
                     get: { appModel.storeConfiguration.iCloudSyncEnabled },
                     set: { value in
@@ -388,6 +471,197 @@ private struct SettingsDetailView: View {
                     }
                 }
             }
+
+            Section("MCP Servers") {
+                HStack {
+                    Text(mcpEditingServerID == nil ? "New server" : "Editing server")
+                        .font(theme.typography.headline)
+                    Spacer()
+                    Button {
+                        resetMCPForm()
+                    } label: {
+                        Label("New", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                }
+                TextField("Display name", text: $mcpName)
+                TextField("Streamable HTTP endpoint", text: $mcpEndpointURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Picker("Authentication", selection: $mcpAuthMode) {
+                    ForEach(MCPAuthMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                if mcpAuthMode == .bearerToken {
+                    SecureField("Bearer token", text: $mcpBearerToken)
+                        .textContentType(.password)
+                }
+                if mcpAuthMode == .oauthPKCE {
+                    TextField("Authorization URL", text: $mcpOAuthAuthorizationURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Token URL", text: $mcpOAuthTokenURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Client ID", text: $mcpOAuthClientID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Scopes", text: $mcpOAuthScopes)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Resource", text: $mcpOAuthResource)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                Toggle("Enable server", isOn: $mcpEnabled)
+                Toggle("Allow insecure local HTTP", isOn: $mcpAllowInsecureLocalHTTP)
+
+                HStack {
+                    Button {
+                        Task {
+                            await appModel.saveMCPServer(
+                                existingID: mcpEditingServerID,
+                                displayName: mcpName,
+                                endpointURLString: mcpEndpointURL,
+                                authMode: mcpAuthMode,
+                                bearerToken: mcpBearerToken,
+                                oauthAuthorizationURLString: mcpOAuthAuthorizationURL,
+                                oauthTokenURLString: mcpOAuthTokenURL,
+                                oauthClientID: mcpOAuthClientID,
+                                oauthScopes: mcpOAuthScopes,
+                                oauthResource: mcpOAuthResource,
+                                enabled: mcpEnabled,
+                                allowInsecureLocalHTTP: mcpAllowInsecureLocalHTTP,
+                                services: services
+                            )
+                            mcpBearerToken = ""
+                        }
+                    } label: {
+                        Label("Save and discover tools", systemImage: "point.3.connected.trianglepath.dotted")
+                    }
+
+                    Button {
+                        Task {
+                            if let discovery = await appModel.discoverMCPOAuth(
+                                endpointURLString: mcpEndpointURL,
+                                allowInsecureLocalHTTP: mcpAllowInsecureLocalHTTP,
+                                services: services
+                            ) {
+                                mcpAuthMode = .oauthPKCE
+                                mcpOAuthAuthorizationURL = discovery.authorizationURL.absoluteString
+                                mcpOAuthTokenURL = discovery.tokenURL.absoluteString
+                                mcpOAuthClientID = discovery.clientID
+                                mcpOAuthScopes = discovery.scopes ?? ""
+                                mcpOAuthResource = discovery.resource
+                            }
+                        }
+                    } label: {
+                        Label("Discover OAuth", systemImage: "sparkle.magnifyingglass")
+                    }
+                    .disabled(mcpEndpointURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                if appModel.mcpServers.isEmpty {
+                    Text("No MCP servers configured.")
+                        .foregroundStyle(theme.colors.secondaryText)
+                } else {
+                    ForEach(appModel.mcpServers) { server in
+                        VStack(alignment: .leading, spacing: theme.spacing.small) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                                    Text(server.displayName)
+                                        .font(theme.typography.headline)
+                                    Text(server.endpointURL.absoluteString)
+                                        .font(theme.typography.caption)
+                                        .foregroundStyle(theme.colors.secondaryText)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Text(server.status.rawValue)
+                                    .font(theme.typography.caption)
+                                    .foregroundStyle(server.status == .ready ? theme.colors.success : theme.colors.warning)
+                                Button {
+                                    Task {
+                                        await appModel.refreshMCPServer(server, services: services)
+                                    }
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Refresh \(server.displayName)")
+                                Button {
+                                    loadMCPServer(server)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Edit \(server.displayName)")
+                                if server.authMode == .oauthPKCE {
+                                    Button {
+                                        Task {
+                                            await appModel.connectMCPOAuth(server, services: services)
+                                        }
+                                    } label: {
+                                        Image(systemName: "person.badge.key")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel("Connect OAuth for \(server.displayName)")
+                                    Button {
+                                        Task {
+                                            await appModel.disconnectMCPOAuth(server, services: services)
+                                        }
+                                    } label: {
+                                        Image(systemName: "person.badge.minus")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel("Disconnect OAuth for \(server.displayName)")
+                                }
+                                Button(role: .destructive) {
+                                    Task {
+                                        await appModel.deleteMCPServer(server, services: services)
+                                    }
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Delete \(server.displayName)")
+                            }
+                            if let error = server.lastError {
+                                Text(error)
+                                    .font(theme.typography.caption)
+                                    .foregroundStyle(theme.colors.danger)
+                            }
+                            LabeledContent("Auth", value: server.authMode.title)
+                            if let connectedAt = server.lastConnectedAt {
+                                LabeledContent("Last connected", value: connectedAt.formatted(date: .abbreviated, time: .shortened))
+                            }
+                            ForEach(appModel.mcpTools.filter { $0.serverID == server.id }) { tool in
+                                Toggle(isOn: Binding(
+                                    get: { tool.enabled },
+                                    set: { value in
+                                        Task {
+                                            await appModel.setMCPToolEnabled(tool, enabled: value, services: services)
+                                        }
+                                    }
+                                )) {
+                                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                                        Text(tool.displayName)
+                                        Text(tool.namespacedName)
+                                            .font(theme.typography.caption)
+                                            .foregroundStyle(theme.colors.secondaryText)
+                                        Text(tool.description)
+                                            .font(theme.typography.caption)
+                                            .foregroundStyle(theme.colors.tertiaryText)
+                                            .lineLimit(2)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, theme.spacing.xsmall)
+                    }
+                }
+            }
         }
         .navigationTitle(section.title)
         .pinesInlineNavigationTitle()
@@ -399,6 +673,36 @@ private struct SettingsDetailView: View {
         providerName = kind.defaultDisplayName
         providerBaseURL = kind.defaultBaseURL
         providerModelID = kind.defaultModelID
+    }
+
+    private func loadMCPServer(_ server: MCPServerConfiguration) {
+        mcpEditingServerID = server.id
+        mcpName = server.displayName
+        mcpEndpointURL = server.endpointURL.absoluteString
+        mcpAuthMode = server.authMode
+        mcpBearerToken = ""
+        mcpOAuthAuthorizationURL = server.oauthAuthorizationURL?.absoluteString ?? ""
+        mcpOAuthTokenURL = server.oauthTokenURL?.absoluteString ?? ""
+        mcpOAuthClientID = server.oauthClientID ?? ""
+        mcpOAuthScopes = server.oauthScopes ?? ""
+        mcpOAuthResource = server.oauthResource ?? ""
+        mcpEnabled = server.enabled
+        mcpAllowInsecureLocalHTTP = server.allowInsecureLocalHTTP
+    }
+
+    private func resetMCPForm() {
+        mcpEditingServerID = nil
+        mcpName = "Local MCP"
+        mcpEndpointURL = "https://"
+        mcpAuthMode = .none
+        mcpBearerToken = ""
+        mcpOAuthAuthorizationURL = ""
+        mcpOAuthTokenURL = ""
+        mcpOAuthClientID = ""
+        mcpOAuthScopes = ""
+        mcpOAuthResource = ""
+        mcpEnabled = true
+        mcpAllowInsecureLocalHTTP = false
     }
 }
 
@@ -443,6 +747,19 @@ private extension AgentExecutionMode {
             "Cloud allowed"
         case .cloudRequired:
             "Cloud required"
+        }
+    }
+}
+
+private extension QuantizationAlgorithm {
+    var title: String {
+        switch self {
+        case .none:
+            "None"
+        case .mlxAffine:
+            "MLX affine"
+        case .turboQuant:
+            "TurboQuant"
         }
     }
 }
@@ -505,6 +822,19 @@ private extension CloudProviderKind {
             "openai/gpt-4.1-mini"
         case .custom:
             ""
+        }
+    }
+}
+
+private extension MCPAuthMode {
+    var title: String {
+        switch self {
+        case .none:
+            "None"
+        case .bearerToken:
+            "Bearer token"
+        case .oauthPKCE:
+            "OAuth PKCE"
         }
     }
 }

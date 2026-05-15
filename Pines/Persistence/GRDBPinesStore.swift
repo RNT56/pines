@@ -10,12 +10,14 @@ actor GRDBPinesStore:
     VaultRepository,
     SettingsRepository,
     CloudProviderRepository,
+    MCPServerRepository,
     ModelDownloadRepository,
     AuditEventRepository
 {
     private let database: DatabasePool
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let deviceMonitor = DeviceRuntimeMonitor()
 
     init(configuration: LocalStoreConfiguration = .init()) throws {
         let url = try Self.databaseURL(fileName: configuration.databaseFileName)
@@ -374,8 +376,34 @@ actor GRDBPinesStore:
         }
     }
 
+    func embeddings(documentID: UUID) async throws -> [VaultStoredEmbedding] {
+        try await database.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                SELECT chunk_id, document_id, embedding_model_id, dimensions, fp16_embedding,
+                       turboquant_code, norm, codec_version, checksum, created_at
+                FROM vault_embeddings
+                WHERE document_id = ?
+                ORDER BY created_at ASC, chunk_id ASC
+                """,
+                arguments: [documentID.uuidString]
+            ).map(Self.vaultStoredEmbedding(from:))
+        }
+    }
+
     func replaceChunks(_ chunks: [VaultChunk], documentID: UUID, embeddingModelID: ModelID?) async throws {
+        try await replaceChunks(chunks, embeddings: nil, documentID: documentID, embeddingModelID: embeddingModelID)
+    }
+
+    func replaceChunks(
+        _ chunks: [VaultChunk],
+        embeddings: VaultEmbeddingBatch?,
+        documentID: UUID,
+        embeddingModelID: ModelID?
+    ) async throws {
         try await database.write { db in
+            try db.execute(sql: "DELETE FROM vault_embeddings WHERE document_id = ?", arguments: [documentID.uuidString])
             try db.execute(sql: "DELETE FROM vault_chunks WHERE document_id = ?", arguments: [documentID.uuidString])
             for chunk in chunks {
                 try db.execute(
@@ -395,47 +423,185 @@ actor GRDBPinesStore:
                     ]
                 )
             }
+
+            guard let embeddings, !embeddings.embeddings.isEmpty else {
+                return
+            }
+
+            let now = Date().timeIntervalSinceReferenceDate
+            let embeddingByChunkID = Dictionary(uniqueKeysWithValues: embeddings.embeddings.map { ($0.chunkID, $0) })
+            for chunk in chunks {
+                guard let embedding = embeddingByChunkID[chunk.id], !embedding.vector.isEmpty else {
+                    continue
+                }
+                let norm = Self.vectorMagnitude(embedding.vector)
+                guard norm > 0 else {
+                    continue
+                }
+                let codec = Self.vaultTurboQuantCodec(modelID: embeddings.modelID, dimensions: embedding.vector.count)
+                let encodedCode = try codec.encode(embedding.vector)
+                let codeData = try JSONEncoder().encode(encodedCode)
+                try db.execute(
+                    sql: """
+                    INSERT INTO vault_embeddings
+                        (chunk_id, document_id, embedding_model_id, dimensions, fp16_embedding,
+                         turboquant_code, norm, codec_version, checksum, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        chunk.id,
+                        documentID.uuidString,
+                        embeddings.modelID.rawValue,
+                        embedding.vector.count,
+                        Self.encodeFP16(embedding.vector),
+                        codeData,
+                        Double(norm),
+                        encodedCode.codecVersion,
+                        StableSearchHash.hexDigest(for: "\(chunk.checksum)|\(embeddings.modelID.rawValue)|\(embedding.vector.count)"),
+                        now,
+                    ]
+                )
+            }
         }
     }
 
     func search(query: String, embedding: [Float]?, limit: Int) async throws -> [VaultSearchResult] {
-        let normalizedLimit = max(1, limit)
-        return try await database.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: """
-                SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.text, c.token_estimate, d.title, d.source_type, d.updated_at
-                FROM vault_chunks_fts f
-                JOIN vault_chunks c ON c.id = f.chunk_id
-                JOIN vault_documents d ON d.id = c.document_id
-                WHERE vault_chunks_fts MATCH ?
-                ORDER BY bm25(vault_chunks_fts)
-                LIMIT ?
-                """,
-                arguments: [query.isEmpty ? "*" : query, normalizedLimit]
-            )
+        try await search(query: query, embedding: embedding, embeddingModelID: nil, limit: limit)
+    }
 
-            return rows.map { row in
-                let documentID = UUID(uuidString: row["document_id"]) ?? UUID()
-                let text: String = row["text"]
-                let document = VaultDocumentRecord(
-                    id: documentID,
-                    title: row["title"],
-                    sourceType: row["source_type"],
-                    updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
-                    chunkCount: 0
-                )
-                let chunk = VaultChunk(
-                    id: row["chunk_id"],
-                    sourceID: documentID.uuidString,
-                    ordinal: row["ordinal"],
-                    text: text,
-                    startOffset: 0,
-                    endOffset: text.count,
-                    checksum: StableSearchHash.hexDigest(for: text)
-                )
-                return VaultSearchResult(document: document, chunk: chunk, score: 1, snippet: String(text.prefix(320)))
+    func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, limit: Int) async throws -> [VaultSearchResult] {
+        let normalizedLimit = max(1, limit)
+        if let embedding, !embedding.isEmpty {
+            let vectorResults = try await vectorSearch(
+                embedding: embedding,
+                embeddingModelID: embeddingModelID,
+                limit: normalizedLimit
+            )
+            if !vectorResults.isEmpty {
+                return vectorResults
             }
+        }
+
+        return try await fullTextSearch(query: query, limit: normalizedLimit)
+    }
+
+    private func vectorSearch(embedding: [Float], embeddingModelID: ModelID?, limit: Int) async throws -> [VaultSearchResult] {
+        let scanLimit = max(limit * 16, deviceMonitor.currentProfile().recommendedVectorScanLimit)
+        return try await database.read { db in
+            let rows: [Row]
+            if let embeddingModelID {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT
+                        e.chunk_id, e.document_id, e.embedding_model_id, e.dimensions, e.fp16_embedding,
+                        e.turboquant_code, c.ordinal, c.text, c.token_estimate,
+                        d.title, d.source_type, d.updated_at
+                    FROM vault_embeddings e
+                    JOIN vault_chunks c ON c.id = e.chunk_id
+                    JOIN vault_documents d ON d.id = e.document_id
+                    WHERE e.dimensions = ? AND e.embedding_model_id = ? AND d.sync_state != ?
+                    ORDER BY e.created_at DESC
+                    LIMIT ?
+                    """,
+                    arguments: [embedding.count, embeddingModelID.rawValue, SyncState.deleted.rawValue, scanLimit]
+                )
+            } else {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT
+                        e.chunk_id, e.document_id, e.embedding_model_id, e.dimensions, e.fp16_embedding,
+                        e.turboquant_code, c.ordinal, c.text, c.token_estimate,
+                        d.title, d.source_type, d.updated_at
+                    FROM vault_embeddings e
+                    JOIN vault_chunks c ON c.id = e.chunk_id
+                    JOIN vault_documents d ON d.id = e.document_id
+                    WHERE e.dimensions = ? AND d.sync_state != ?
+                    ORDER BY e.created_at DESC
+                    LIMIT ?
+                    """,
+                    arguments: [embedding.count, SyncState.deleted.rawValue, scanLimit]
+                )
+            }
+
+            struct Candidate {
+                let row: Row
+                let approximateScore: Double
+            }
+
+            let candidates = rows.compactMap { row -> Candidate? in
+                let codeData: Data = row["turboquant_code"]
+                guard let code = try? JSONDecoder().decode(TurboQuantVectorCode.self, from: codeData) else {
+                    return nil
+                }
+                let codec = TurboQuantVectorCodec(preset: code.preset, seed: code.seed)
+                guard let score = try? codec.approximateCosineSimilarity(query: embedding, code: code) else {
+                    return nil
+                }
+                return Candidate(row: row, approximateScore: score)
+            }
+
+            let rerankLimit = max(limit * 4, min(32, candidates.count))
+            return candidates
+                .sorted { lhs, rhs in
+                    lhs.approximateScore > rhs.approximateScore
+                }
+                .prefix(rerankLimit)
+                .compactMap { candidate -> VaultSearchResult? in
+                    let fp16Data: Data = candidate.row["fp16_embedding"]
+                    let dimensions: Int = candidate.row["dimensions"]
+                    guard let storedVector = try? Self.decodeFP16(fp16Data, dimensions: dimensions) else {
+                        return nil
+                    }
+                    let score = Self.cosineSimilarity(embedding, storedVector)
+                    return Self.vaultSearchResult(from: candidate.row, score: score)
+                }
+                .sorted { lhs, rhs in
+                    if lhs.score == rhs.score {
+                        return lhs.id < rhs.id
+                    }
+                    return lhs.score > rhs.score
+                }
+                .prefix(limit)
+                .map { $0 }
+        }
+    }
+
+    private func fullTextSearch(query: String, limit: Int) async throws -> [VaultSearchResult] {
+        return try await database.read { db in
+            let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rows: [Row]
+            if normalizedQuery.isEmpty {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.text, c.token_estimate, d.title, d.source_type, d.updated_at
+                    FROM vault_chunks c
+                    JOIN vault_documents d ON d.id = c.document_id
+                    WHERE d.sync_state != ?
+                    ORDER BY d.updated_at DESC, c.ordinal ASC
+                    LIMIT ?
+                    """,
+                    arguments: [SyncState.deleted.rawValue, limit]
+                )
+            } else {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.text, c.token_estimate, d.title, d.source_type, d.updated_at
+                    FROM vault_chunks_fts f
+                    JOIN vault_chunks c ON c.id = f.chunk_id
+                    JOIN vault_documents d ON d.id = c.document_id
+                    WHERE vault_chunks_fts MATCH ? AND d.sync_state != ?
+                    ORDER BY bm25(vault_chunks_fts)
+                    LIMIT ?
+                    """,
+                    arguments: [normalizedQuery, SyncState.deleted.rawValue, limit]
+                )
+            }
+
+            return rows.map { Self.vaultSearchResult(from: $0, score: 1) }
         }
     }
 
@@ -531,6 +697,122 @@ actor GRDBPinesStore:
     func deleteProvider(id: ProviderID) async throws {
         try await database.write { db in
             try db.execute(sql: "DELETE FROM cloud_providers WHERE id = ?", arguments: [id.rawValue])
+        }
+    }
+
+    // MARK: - MCP Servers
+
+    func listMCPServers() async throws -> [MCPServerConfiguration] {
+        try await database.read { db in
+            try Row.fetchAll(db, sql: "SELECT * FROM mcp_servers ORDER BY display_name").map(Self.mcpServer(from:))
+        }
+    }
+
+    nonisolated func observeMCPServers() -> AsyncStream<[MCPServerConfiguration]> {
+        pollingStream { try await self.listMCPServers() }
+    }
+
+    func upsertMCPServer(_ server: MCPServerConfiguration) async throws {
+        let now = Date()
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO mcp_servers
+                    (id, display_name, endpoint_url, auth_mode, enabled, allow_insecure_local_http,
+                     keychain_service, keychain_account, oauth_authorization_url, oauth_token_url, oauth_client_id,
+                     oauth_scopes, oauth_resource, status, last_error, last_connected_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    endpoint_url = excluded.endpoint_url,
+                    auth_mode = excluded.auth_mode,
+                    enabled = excluded.enabled,
+                    allow_insecure_local_http = excluded.allow_insecure_local_http,
+                    keychain_service = excluded.keychain_service,
+                    keychain_account = excluded.keychain_account,
+                    oauth_authorization_url = excluded.oauth_authorization_url,
+                    oauth_token_url = excluded.oauth_token_url,
+                    oauth_client_id = excluded.oauth_client_id,
+                    oauth_scopes = excluded.oauth_scopes,
+                    oauth_resource = excluded.oauth_resource,
+                    status = excluded.status,
+                    last_error = excluded.last_error,
+                    last_connected_at = excluded.last_connected_at,
+                    updated_at = excluded.updated_at
+                """,
+                arguments: [
+                    server.id.rawValue,
+                    server.displayName,
+                    server.endpointURL.absoluteString,
+                    server.authMode.rawValue,
+                    server.enabled ? 1 : 0,
+                    server.allowInsecureLocalHTTP ? 1 : 0,
+                    server.keychainService,
+                    server.keychainAccount,
+                    server.oauthAuthorizationURL?.absoluteString,
+                    server.oauthTokenURL?.absoluteString,
+                    server.oauthClientID,
+                    server.oauthScopes,
+                    server.oauthResource,
+                    server.status.rawValue,
+                    server.lastError,
+                    server.lastConnectedAt?.timeIntervalSinceReferenceDate,
+                    server.createdAt.timeIntervalSinceReferenceDate,
+                    now.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func deleteMCPServer(id: MCPServerID) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM mcp_servers WHERE id = ?", arguments: [id.rawValue])
+        }
+    }
+
+    func listMCPTools(serverID: MCPServerID?) async throws -> [MCPToolRecord] {
+        try await database.read { db in
+            if let serverID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM mcp_tools WHERE server_id = ? ORDER BY display_name",
+                    arguments: [serverID.rawValue]
+                ).map(Self.mcpTool(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM mcp_tools ORDER BY server_id, display_name").map(Self.mcpTool(from:))
+        }
+    }
+
+    nonisolated func observeMCPTools() -> AsyncStream<[MCPToolRecord]> {
+        pollingStream { try await self.listMCPTools(serverID: nil) }
+    }
+
+    func replaceMCPTools(_ tools: [MCPToolRecord], serverID: MCPServerID) async throws {
+        try await database.write { db in
+            let existingRows = try Row.fetchAll(
+                db,
+                sql: "SELECT namespaced_name, enabled FROM mcp_tools WHERE server_id = ?",
+                arguments: [serverID.rawValue]
+            )
+            let enabledByName = Dictionary(uniqueKeysWithValues: existingRows.map { row in
+                (row["namespaced_name"] as String, (row["enabled"] as Int) == 1)
+            })
+            try db.execute(sql: "DELETE FROM mcp_tools WHERE server_id = ?", arguments: [serverID.rawValue])
+            for var tool in tools {
+                if let previousEnabled = enabledByName[tool.namespacedName] {
+                    tool.enabled = previousEnabled
+                }
+                try Self.insertMCPTool(tool, db: db)
+            }
+        }
+    }
+
+    func updateMCPToolEnabled(serverID: MCPServerID, namespacedName: String, enabled: Bool) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE mcp_tools SET enabled = ? WHERE server_id = ? AND namespaced_name = ?",
+                arguments: [enabled ? 1 : 0, serverID.rawValue, namespacedName]
+            )
         }
     }
 
@@ -726,6 +1008,100 @@ actor GRDBPinesStore:
         )
     }
 
+    private static func vaultStoredEmbedding(from row: Row) -> VaultStoredEmbedding {
+        VaultStoredEmbedding(
+            chunkID: row["chunk_id"],
+            documentID: UUID(uuidString: row["document_id"]) ?? UUID(),
+            modelID: ModelID(rawValue: row["embedding_model_id"]),
+            dimensions: row["dimensions"],
+            fp16Embedding: row["fp16_embedding"],
+            turboQuantCode: row["turboquant_code"],
+            norm: row["norm"],
+            codecVersion: row["codec_version"],
+            checksum: row["checksum"],
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
+        )
+    }
+
+    private static func vaultSearchResult(from row: Row, score: Double) -> VaultSearchResult {
+        let documentID = UUID(uuidString: row["document_id"]) ?? UUID()
+        let text: String = row["text"]
+        let document = VaultDocumentRecord(
+            id: documentID,
+            title: row["title"],
+            sourceType: row["source_type"],
+            updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
+            chunkCount: 0
+        )
+        let chunk = VaultChunk(
+            id: row["chunk_id"],
+            sourceID: documentID.uuidString,
+            ordinal: row["ordinal"],
+            text: text,
+            startOffset: 0,
+            endOffset: text.count,
+            checksum: StableSearchHash.hexDigest(for: text)
+        )
+        return VaultSearchResult(document: document, chunk: chunk, score: score, snippet: String(text.prefix(320)))
+    }
+
+    private static func vaultTurboQuantCodec(modelID: ModelID, dimensions: Int) -> TurboQuantVectorCodec {
+        TurboQuantVectorCodec(
+            preset: .turbo3_5,
+            seed: TurboQuantVectorCodec.stableSeed(for: "\(modelID.rawValue)|\(dimensions)|vault-v1")
+        )
+    }
+
+    private static func encodeFP16(_ vector: [Float]) -> Data {
+        var data = Data()
+        data.reserveCapacity(vector.count * MemoryLayout<UInt16>.size)
+        for value in vector {
+            var bitPattern = Float16(value).bitPattern.littleEndian
+            withUnsafeBytes(of: &bitPattern) { bytes in
+                data.append(contentsOf: bytes)
+            }
+        }
+        return data
+    }
+
+    private static func decodeFP16(_ data: Data, dimensions: Int) throws -> [Float] {
+        guard data.count == dimensions * MemoryLayout<UInt16>.size else {
+            throw VectorIndexError.dimensionMismatch(expected: dimensions * MemoryLayout<UInt16>.size, actual: data.count)
+        }
+
+        return data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else {
+                return []
+            }
+
+            return (0..<dimensions).map { index in
+                let bitPattern = baseAddress
+                    .advanced(by: index * MemoryLayout<UInt16>.size)
+                    .loadUnaligned(as: UInt16.self)
+                return Float(Float16(bitPattern: UInt16(littleEndian: bitPattern)))
+            }
+        }
+    }
+
+    private static func cosineSimilarity(_ lhs: [Float], _ rhs: [Float]) -> Double {
+        guard lhs.count == rhs.count else {
+            return 0
+        }
+        let lhsMagnitude = vectorMagnitude(lhs)
+        let rhsMagnitude = vectorMagnitude(rhs)
+        guard lhsMagnitude > 0, rhsMagnitude > 0 else {
+            return 0
+        }
+        let dot = zip(lhs, rhs).reduce(Float(0)) { partialResult, pair in
+            partialResult + pair.0 * pair.1
+        }
+        return Double(dot / (lhsMagnitude * rhsMagnitude))
+    }
+
+    private static func vectorMagnitude(_ vector: [Float]) -> Float {
+        vector.reduce(Float(0)) { $0 + $1 * $1 }.squareRoot()
+    }
+
     private static func provider(from row: Row) -> CloudProviderConfiguration {
         CloudProviderConfiguration(
             id: ProviderID(rawValue: row["id"]),
@@ -740,6 +1116,68 @@ actor GRDBPinesStore:
             keychainAccount: row["keychain_account"],
             enabledForAgents: (row["enabled_for_agents"] as Int) == 1,
             lastValidatedAt: (row["last_validated_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
+        )
+    }
+
+    private static func mcpServer(from row: Row) -> MCPServerConfiguration {
+        MCPServerConfiguration(
+            id: MCPServerID(rawValue: row["id"]),
+            displayName: row["display_name"],
+            endpointURL: URL(string: row["endpoint_url"]) ?? URL(string: "https://example.invalid/mcp")!,
+            authMode: MCPAuthMode(rawValue: row["auth_mode"]) ?? .none,
+            enabled: (row["enabled"] as Int) == 1,
+            allowInsecureLocalHTTP: (row["allow_insecure_local_http"] as Int) == 1,
+            keychainService: row["keychain_service"],
+            keychainAccount: row["keychain_account"],
+            oauthAuthorizationURL: (row["oauth_authorization_url"] as String?).flatMap(URL.init(string:)),
+            oauthTokenURL: (row["oauth_token_url"] as String?).flatMap(URL.init(string:)),
+            oauthClientID: row["oauth_client_id"] as String?,
+            oauthScopes: row["oauth_scopes"] as String?,
+            oauthResource: row["oauth_resource"] as String?,
+            status: MCPConnectionStatus(rawValue: row["status"]) ?? .disconnected,
+            lastError: row["last_error"] as String?,
+            lastConnectedAt: (row["last_connected_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"])
+        )
+    }
+
+    private static func mcpTool(from row: Row) -> MCPToolRecord {
+        let schemaJSON = row["input_schema_json"] as String
+        let schema = (try? JSONDecoder().decode(JSONValue.self, from: Data(schemaJSON.utf8))) ?? JSONValue.objectSchema()
+        return MCPToolRecord(
+            serverID: MCPServerID(rawValue: row["server_id"]),
+            originalName: row["original_name"],
+            namespacedName: row["namespaced_name"],
+            displayName: row["display_name"],
+            description: row["description"],
+            inputSchema: schema,
+            enabled: (row["enabled"] as Int) == 1,
+            lastDiscoveredAt: Date(timeIntervalSinceReferenceDate: row["last_discovered_at"]),
+            lastError: row["last_error"] as String?
+        )
+    }
+
+    private static func insertMCPTool(_ tool: MCPToolRecord, db: Database) throws {
+        let schemaJSON = String(decoding: try JSONEncoder().encode(tool.inputSchema), as: UTF8.self)
+        try db.execute(
+            sql: """
+            INSERT INTO mcp_tools
+                (server_id, original_name, namespaced_name, display_name, description, input_schema_json,
+                 enabled, last_discovered_at, last_error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            arguments: [
+                tool.serverID.rawValue,
+                tool.originalName,
+                tool.namespacedName,
+                tool.displayName,
+                tool.description,
+                schemaJSON,
+                tool.enabled ? 1 : 0,
+                tool.lastDiscoveredAt.timeIntervalSinceReferenceDate,
+                tool.lastError,
+            ]
         )
     }
 

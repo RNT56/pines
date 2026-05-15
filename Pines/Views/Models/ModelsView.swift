@@ -311,6 +311,58 @@ private struct ModelDetailView: View {
 
                     LabeledContent("Runtime", value: model.runtime)
                     LabeledContent("Profile", value: model.runtimeProfile.name)
+                    LabeledContent("KV cache", value: model.runtimeProfile.quantization.algorithm.title)
+                    if let preset = model.runtimeProfile.quantization.preset {
+                        LabeledContent("KV preset", value: preset.displayName)
+                    }
+                    if let requestedBackend = model.runtimeProfile.quantization.requestedBackend {
+                        LabeledContent("Requested backend", value: requestedBackend.displayName)
+                    }
+                    if let activeBackend = model.runtimeProfile.quantization.activeBackend {
+                        LabeledContent("Active backend", value: activeBackend.displayName)
+                    }
+                    LabeledContent(
+                        "Metal codec",
+                        value: model.runtimeProfile.quantization.metalCodecAvailable ? "Available" : "Unavailable"
+                    )
+                    LabeledContent(
+                        "Metal attention",
+                        value: model.runtimeProfile.quantization.metalAttentionAvailable ? "Available" : "Unavailable"
+                    )
+                    if let attentionPath = model.runtimeProfile.quantization.activeAttentionPath {
+                        LabeledContent("Attention path", value: attentionPath.displayName)
+                    }
+                    if let performanceClass = model.runtimeProfile.quantization.devicePerformanceClass {
+                        LabeledContent("Performance class", value: performanceClass.displayName)
+                    }
+                    if let kernelProfile = model.runtimeProfile.quantization.metalKernelProfile {
+                        LabeledContent("Kernel variant", value: kernelProfile.displayName)
+                    }
+                    if let selfTest = model.runtimeProfile.quantization.metalSelfTestStatus {
+                        LabeledContent("MLX self-test", value: selfTest.displayName)
+                    }
+                    LabeledContent(
+                        "Optimization policy",
+                        value: model.runtimeProfile.quantization.turboQuantOptimizationPolicy.displayName
+                    )
+                    if let rawFallbackAllocated = model.runtimeProfile.quantization.rawFallbackAllocated {
+                        LabeledContent("Raw KV fallback", value: rawFallbackAllocated ? "Allocated" : "Not allocated")
+                    }
+                    if model.runtimeProfile.quantization.thermalDownshiftActive {
+                        LabeledContent("Thermal downshift", value: "Active")
+                    }
+                    if let unsupportedShape = model.runtimeProfile.quantization.lastUnsupportedAttentionShape {
+                        LabeledContent("Unsupported shape", value: unsupportedShape)
+                    }
+                    if let contextTokens = model.runtimeProfile.quantization.memoryCounters.recommendedContextTokens {
+                        LabeledContent("Context window", value: "\(contextTokens.formatted()) tokens")
+                    }
+                    if let thermalState = model.runtimeProfile.quantization.memoryCounters.thermalState {
+                        LabeledContent("Thermal state", value: thermalState.capitalized)
+                    }
+                    if let fallback = model.runtimeProfile.quantization.activeFallbackReason {
+                        LabeledContent("Fallback", value: fallback)
+                    }
                     LabeledContent("Repository", value: model.install.repository)
                     if let revision = model.install.revision {
                         LabeledContent("Revision", value: revision)
@@ -372,6 +424,19 @@ private struct FlowPills: View {
                     .padding(.vertical, theme.spacing.xsmall)
                     .background(theme.colors.elevatedSurface, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
             }
+        }
+    }
+}
+
+private extension QuantizationAlgorithm {
+    var title: String {
+        switch self {
+        case .none:
+            "None"
+        case .mlxAffine:
+            "MLX affine"
+        case .turboQuant:
+            "TurboQuant"
         }
     }
 }

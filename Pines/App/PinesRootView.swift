@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 struct PinesRootView: View {
     @Environment(\.colorScheme) private var systemScheme
     @StateObject private var appModel = PinesAppModel()
@@ -37,6 +41,31 @@ struct PinesRootView: View {
                 showsBootMark = false
             }
         }
+        .onPinesMemoryWarning {
+            appModel.stopCurrentRun()
+            Task {
+                await services.handleMemoryPressure()
+            }
+        }
+        .alert("Approve Tool Call", isPresented: Binding(
+            get: { appModel.pendingToolApproval != nil },
+            set: { presented in
+                if !presented {
+                    appModel.resolvePendingToolApproval(.denied)
+                }
+            }
+        )) {
+            Button("Deny", role: .cancel) {
+                appModel.resolvePendingToolApproval(.denied)
+            }
+            Button("Approve") {
+                appModel.resolvePendingToolApproval(.approved)
+            }
+        } message: {
+            if let request = appModel.pendingToolApproval {
+                Text("\(request.invocation.toolName)\n\(request.invocation.privacyImpact)")
+            }
+        }
     }
 
     private var tabShell: some View {
@@ -60,6 +89,19 @@ struct PinesRootView: View {
         .tabViewStyle(.sidebarAdaptable)
         .tint(theme.colors.accent)
         .background(theme.colors.appBackground.ignoresSafeArea())
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func onPinesMemoryWarning(_ action: @escaping () -> Void) -> some View {
+        #if canImport(UIKit)
+        self.onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            action()
+        }
+        #else
+        self
+        #endif
     }
 }
 

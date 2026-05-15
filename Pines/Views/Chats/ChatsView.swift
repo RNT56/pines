@@ -107,12 +107,11 @@ private struct ChatTranscriptView: View {
                     subtitle: "\(thread.modelName) - \(thread.tokenCount) tokens - \(thread.status.title)"
                 )
 
-                VStack(spacing: theme.spacing.medium) {
+                LazyVStack(spacing: theme.spacing.medium) {
                     ForEach(thread.messages) { message in
                         ChatBubble(
-                            role: message.role.title,
-                            text: message.content,
-                            tint: message.role.tint(in: theme)
+                            message: message,
+                            isStreaming: appModel.activeRunID == message.id
                         )
                     }
 
@@ -163,29 +162,42 @@ private struct ChatTranscriptView: View {
 
 private struct ChatBubble: View {
     @Environment(\.pinesTheme) private var theme
-    let role: String
-    let text: String
-    let tint: Color
+    let message: ChatMessage
+    let isStreaming: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.small) {
             HStack(spacing: theme.spacing.xsmall) {
                 Circle()
-                    .fill(tint)
+                    .fill(message.role.tint(in: theme))
                     .frame(width: 8, height: 8)
 
-                Text(role)
+                Text(message.role.title)
                     .font(theme.typography.caption.weight(.semibold))
                     .foregroundStyle(theme.colors.secondaryText)
             }
 
-            Text(text)
-                .font(theme.typography.body)
-                .foregroundStyle(theme.colors.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            MarkdownMessageView(
+                messageID: message.id,
+                content: message.content,
+                isStreaming: isStreaming
+            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .pinesPanel()
+        .contextMenu {
+            Button {
+                copyToPasteboard(message.content)
+            } label: {
+                Label("Copy as Markdown", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                copyToPasteboard(MarkdownMessageParser().plainText(from: message.content))
+            } label: {
+                Label("Copy as Plain Text", systemImage: "text.alignleft")
+            }
+        }
     }
 }
 

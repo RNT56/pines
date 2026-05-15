@@ -15,10 +15,13 @@ struct VaultIngestionService {
     let inferenceProvider: any InferenceProvider
     let auditRepository: (any AuditEventRepository)?
     let chunker = VaultChunker()
+    private let deviceMonitor = DeviceRuntimeMonitor()
 
     func importFile(url sourceURL: URL) async throws -> VaultDocumentRecord {
         let storedURL = try Self.copyIntoVault(sourceURL)
+        try Task.checkCancellation()
         let text = try await Self.extractText(from: storedURL)
+        try Task.checkCancellation()
         let document = VaultDocumentRecord(
             title: storedURL.deletingPathExtension().lastPathComponent,
             sourceType: Self.sourceType(for: storedURL),
@@ -29,11 +32,28 @@ struct VaultIngestionService {
         try await vaultRepository.upsertDocument(document, localURL: storedURL, checksum: checksum)
 
         let chunks = chunker.chunks(for: text, sourceID: document.id.uuidString)
+        try Task.checkCancellation()
         if let embeddingModelID = try await settingsRepository?.loadSettings().embeddingModelID, !chunks.isEmpty {
-            _ = try? await inferenceProvider.embed(
-                EmbeddingRequest(modelID: embeddingModelID, inputs: chunks.map(\.text))
-            )
-            try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: embeddingModelID)
+            do {
+                if let chunkEmbeddings = try await embed(chunks: chunks, documentID: document.id, modelID: embeddingModelID) {
+                    let embeddings = VaultEmbeddingBatch(
+                        modelID: embeddingModelID,
+                        embeddings: chunkEmbeddings
+                    )
+                    try await vaultRepository.replaceChunks(
+                        chunks,
+                        embeddings: embeddings,
+                        documentID: document.id,
+                        embeddingModelID: embeddingModelID
+                    )
+                } else {
+                    try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
+            }
         } else {
             try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
         }
@@ -48,6 +68,38 @@ struct VaultIngestionService {
             updatedAt: document.updatedAt,
             chunkCount: chunks.count
         )
+    }
+
+    private func embed(
+        chunks: [VaultChunk],
+        documentID: UUID,
+        modelID: ModelID
+    ) async throws -> [VaultChunkEmbedding]? {
+        let batchSize = max(1, deviceMonitor.currentProfile().recommendedEmbeddingBatchSize)
+        var allEmbeddings = [VaultChunkEmbedding]()
+        allEmbeddings.reserveCapacity(chunks.count)
+
+        for startIndex in stride(from: 0, to: chunks.count, by: batchSize) {
+            try Task.checkCancellation()
+            let endIndex = min(startIndex + batchSize, chunks.count)
+            let batch = Array(chunks[startIndex..<endIndex])
+            let result = try await inferenceProvider.embed(
+                EmbeddingRequest(modelID: modelID, inputs: batch.map(\.text))
+            )
+            guard result.vectors.count == batch.count else {
+                return nil
+            }
+            allEmbeddings.append(contentsOf: zip(batch, result.vectors).map { chunk, vector in
+                VaultChunkEmbedding(
+                    chunkID: chunk.id,
+                    documentID: documentID,
+                    modelID: modelID,
+                    vector: vector
+                )
+            })
+        }
+
+        return allEmbeddings
     }
 
     private static func copyIntoVault(_ sourceURL: URL) throws -> URL {

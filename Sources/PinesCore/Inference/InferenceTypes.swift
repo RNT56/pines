@@ -71,6 +71,8 @@ public struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
     public var attachments: [ChatAttachment]
     public var createdAt: Date
     public var toolCallID: String?
+    public var toolName: String?
+    public var toolCalls: [ToolCallDelta]
 
     public init(
         id: UUID = UUID(),
@@ -78,7 +80,9 @@ public struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
         content: String,
         attachments: [ChatAttachment] = [],
         createdAt: Date = Date(),
-        toolCallID: String? = nil
+        toolCallID: String? = nil,
+        toolName: String? = nil,
+        toolCalls: [ToolCallDelta] = []
     ) {
         self.id = id
         self.role = role
@@ -86,6 +90,31 @@ public struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
         self.attachments = attachments
         self.createdAt = createdAt
         self.toolCallID = toolCallID
+        self.toolName = toolName
+        self.toolCalls = toolCalls
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case role
+        case content
+        case attachments
+        case createdAt
+        case toolCallID
+        case toolName
+        case toolCalls
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        role = try container.decode(ChatRole.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        attachments = try container.decodeIfPresent([ChatAttachment].self, forKey: .attachments) ?? []
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        toolCallID = try container.decodeIfPresent(String.self, forKey: .toolCallID)
+        toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
+        toolCalls = try container.decodeIfPresent([ToolCallDelta].self, forKey: .toolCalls) ?? []
     }
 }
 
@@ -151,6 +180,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
     public var messages: [ChatMessage]
     public var sampling: ChatSampling
     public var allowsTools: Bool
+    public var availableTools: [AnyToolSpec]
     public var vaultContextIDs: [UUID]
 
     public init(
@@ -159,6 +189,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         messages: [ChatMessage],
         sampling: ChatSampling = .init(),
         allowsTools: Bool = false,
+        availableTools: [AnyToolSpec] = [],
         vaultContextIDs: [UUID] = []
     ) {
         self.id = id
@@ -166,7 +197,29 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         self.messages = messages
         self.sampling = sampling
         self.allowsTools = allowsTools
+        self.availableTools = availableTools
         self.vaultContextIDs = vaultContextIDs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case modelID
+        case messages
+        case sampling
+        case allowsTools
+        case availableTools
+        case vaultContextIDs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        modelID = try container.decode(ModelID.self, forKey: .modelID)
+        messages = try container.decode([ChatMessage].self, forKey: .messages)
+        sampling = try container.decodeIfPresent(ChatSampling.self, forKey: .sampling) ?? .init()
+        allowsTools = try container.decodeIfPresent(Bool.self, forKey: .allowsTools) ?? false
+        availableTools = try container.decodeIfPresent([AnyToolSpec].self, forKey: .availableTools) ?? []
+        vaultContextIDs = try container.decodeIfPresent([UUID].self, forKey: .vaultContextIDs) ?? []
     }
 }
 

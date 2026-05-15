@@ -23,16 +23,22 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - BYOK cloud streaming adapters for OpenAI-compatible, OpenRouter, Anthropic, and Gemini.
 - Brave Search BYOK tool and WKWebView browser observe/action runtime.
 - Vault file/PDF/image import pipeline with chunking, OCR, and embedding invocation.
-- CloudKit private database sync service for opt-in syncable metadata.
+- TurboQuant runtime profile defaults, requested/active backend diagnostics, Metal codec and compressed-attention availability diagnostics, compressed vault embedding storage, approximate vector search, and FP16 rerank path.
+- iOS runtime guardrails: memory/thermal adaptive profiles, compact 6 GB device defaults, memory-warning unload, bounded vector scans, and batched vault embedding ingestion.
+- Read-only runtime diagnostics and OSLog/MetricKit hooks for generation speed, vault retrieval, and memory pressure.
+- CloudKit private database sync service for opt-in settings, conversations, vault chunks, and explicitly enabled embedding/code blobs.
 - Settings persistence, cloud provider settings flow, and audit event UI.
 - Layered `.icon` source for the app icon.
 - Framework-free verification runner.
 
 ## Not Complete
 
-- Full iOS build/test verification on a machine with full Xcode selected.
+- Real-device TurboQuant acceptance on the A16 through A19 Pro hardware matrix.
 - Production UX hardening for stop/retry/regenerate controls, provider deletion/editing, CloudKit conflict UI, and detailed model compatibility messaging.
 - App Store privacy manifest validation against the final resolved package graph.
+- Fused TurboQuant compressed-attention APIs are implemented in the Schtack MLX forks: row-wise attention code blobs, direct compressed `QK^T`, direct compressed `AV`, tiled online fused decode, runtime capability/self-test probes, and selected kernel profiles. Unsupported devices or shapes still fall back to MLX packed quantized attention.
+- The supported `.metalPolarQJL` rotating path is raw-free for active compressed storage. Prompt caches persist compressed blobs plus layout/ring metadata, while runtime kernel profile selection is recomputed on load.
+- Pines now has a device-adaptive TurboQuant policy layer for A16, A17 Pro, A18, A18 Pro, A19, A19 Pro thin, A19 Pro sustained, and future verified devices. Real-device acceptance remains open for jetsam traces and final quality/throughput thresholds.
 
 ## Verification
 

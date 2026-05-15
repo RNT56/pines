@@ -112,6 +112,12 @@ struct PinesThemeColors {
     var separator: Color
     var accent: Color
     var accentSoft: Color
+    var link: Color
+    var codeBackground: Color
+    var codeHeaderBackground: Color
+    var inlineCodeBackground: Color
+    var quoteBackground: Color
+    var tableHeaderBackground: Color
     var success: Color
     var warning: Color
     var danger: Color
@@ -193,6 +199,12 @@ struct PinesThemeColors {
         secondaryText = dark ? Color(hex: 0xBAC5C1) : Color(hex: 0x4B5652)
         tertiaryText = dark ? Color(hex: 0x87938F) : Color(hex: 0x75807C)
         separator = dark ? Color.white.opacity(0.13) : Color.black.opacity(0.11)
+        link = info
+        codeBackground = dark ? Color.black.opacity(0.30) : Color.black.opacity(0.045)
+        codeHeaderBackground = dark ? Color.white.opacity(0.06) : Color.black.opacity(0.035)
+        inlineCodeBackground = dark ? Color.white.opacity(0.10) : Color.black.opacity(0.07)
+        quoteBackground = accent.opacity(dark ? 0.13 : 0.08)
+        tableHeaderBackground = dark ? Color.white.opacity(0.07) : Color.black.opacity(0.04)
         userBubble = dark ? info.opacity(0.22) : info.opacity(0.10)
         assistantBubble = dark ? accent.opacity(0.18) : accent.opacity(0.09)
         toolBubble = dark ? warning.opacity(0.18) : warning.opacity(0.10)

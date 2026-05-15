@@ -7,6 +7,7 @@ typealias PinesLiveStore = any ConversationRepository
     & VaultRepository
     & SettingsRepository
     & CloudProviderRepository
+    & MCPServerRepository
     & ModelDownloadRepository
     & AuditEventRepository
 
@@ -19,12 +20,14 @@ final class PinesAppServices: @unchecked Sendable {
     let toolPolicyGate: ToolPolicyGate
     let redactor: Redactor
     let mlxRuntime: MLXRuntimeBridge
+    let runtimeMetrics: PinesRuntimeMetrics
     let liveStore: PinesLiveStore?
     let conversationRepository: (any ConversationRepository)?
     let modelInstallRepository: (any ModelInstallRepository)?
     let vaultRepository: (any VaultRepository)?
     let settingsRepository: (any SettingsRepository)?
     let cloudProviderRepository: (any CloudProviderRepository)?
+    let mcpServerRepository: (any MCPServerRepository)?
     let modelDownloadRepository: (any ModelDownloadRepository)?
     let auditRepository: (any AuditEventRepository)?
 
@@ -37,6 +40,7 @@ final class PinesAppServices: @unchecked Sendable {
         toolPolicyGate: ToolPolicyGate = ToolPolicyGate(),
         redactor: Redactor = Redactor(),
         mlxRuntime: MLXRuntimeBridge = MLXRuntimeBridge(),
+        runtimeMetrics: PinesRuntimeMetrics = .shared,
         liveStore: PinesLiveStore? = PinesAppServices.makeDefaultStore()
     ) {
         self.secretStore = secretStore
@@ -47,17 +51,20 @@ final class PinesAppServices: @unchecked Sendable {
         self.toolPolicyGate = toolPolicyGate
         self.redactor = redactor
         self.mlxRuntime = mlxRuntime
+        self.runtimeMetrics = runtimeMetrics
         self.liveStore = liveStore
         conversationRepository = liveStore
         modelInstallRepository = liveStore
         vaultRepository = liveStore
         settingsRepository = liveStore
         cloudProviderRepository = liveStore
+        mcpServerRepository = liveStore
         modelDownloadRepository = liveStore
         auditRepository = liveStore
     }
 
     func bootstrap() async {
+        runtimeMetrics.start()
         try? await toolRegistry.register(CalculatorTool.spec())
         try? await toolRegistry.register(BraveSearchTool.spec(secretStore: secretStore))
         #if canImport(WebKit) && canImport(UIKit)
@@ -72,6 +79,12 @@ final class PinesAppServices: @unchecked Sendable {
         try? await toolRegistry.register(BuiltInToolSpecs.browserObserveSpec())
         try? await toolRegistry.register(BuiltInToolSpecs.browserActionSpec())
         #endif
+        await mcpServerService?.start()
+    }
+
+    func handleMemoryPressure() async {
+        runtimeMetrics.recordMemoryPressure(mlxRuntime.runtimeDiagnostics.memoryCounters)
+        await mlxRuntime.handleMemoryPressure()
     }
 
     var serviceHealth: [ServiceHealth] {
@@ -89,7 +102,12 @@ final class PinesAppServices: @unchecked Sendable {
             ServiceHealth(
                 name: "Tool Registry",
                 readiness: .ready,
-                summary: "Calculator, web-search, and browser tool specs are registered at boot."
+                summary: "Built-in tools and enabled MCP tools are registered at boot."
+            ),
+            ServiceHealth(
+                name: "MCP Servers",
+                readiness: mcpServerRepository == nil ? .unavailable : .ready,
+                summary: mcpServerRepository == nil ? "MCP persistence is unavailable in this build." : "Remote Streamable HTTP MCP servers can be connected from Settings."
             ),
             ServiceHealth(
                 name: "Privacy Boundary",
@@ -135,6 +153,18 @@ final class PinesAppServices: @unchecked Sendable {
         }
         return CloudProviderService(
             repository: cloudProviderRepository,
+            secretStore: secretStore,
+            auditRepository: auditRepository
+        )
+    }
+
+    var mcpServerService: MCPServerService? {
+        guard let mcpServerRepository else {
+            return nil
+        }
+        return MCPServerService(
+            repository: mcpServerRepository,
+            toolRegistry: toolRegistry,
             secretStore: secretStore,
             auditRepository: auditRepository
         )

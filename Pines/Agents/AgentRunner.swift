@@ -34,25 +34,36 @@ struct AgentRunner {
                     while step < session.policy.maxSteps {
                         step += 1
                         var nextToolCall: ToolCallDelta?
+                        var assistantText = ""
+                        var pendingFinish: InferenceFinish?
                         let currentRequest = ChatRequest(
                             id: request.id,
                             modelID: request.modelID,
                             messages: messages,
                             sampling: request.sampling,
                             allowsTools: request.allowsTools,
+                            availableTools: request.availableTools,
                             vaultContextIDs: request.vaultContextIDs
                         )
                         let stream = try await provider.streamEvents(currentRequest)
 
                         for try await event in stream {
-                            continuation.yield(event)
-                            if case let .toolCall(toolCall) = event, toolCall.isComplete {
+                            switch event {
+                            case let .token(delta):
+                                assistantText += delta.text
+                                continuation.yield(event)
+                            case let .toolCall(toolCall) where toolCall.isComplete:
                                 nextToolCall = toolCall
+                                continuation.yield(event)
+                            case let .finish(finish):
+                                pendingFinish = finish
+                            default:
+                                continuation.yield(event)
                             }
                         }
 
                         guard let toolCall = nextToolCall else {
-                            continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                            continuation.yield(.finish(pendingFinish ?? InferenceFinish(reason: .stop)))
                             continuation.finish()
                             return
                         }
@@ -82,6 +93,15 @@ struct AgentRunner {
                         }
 
                         let outputJSON = try await toolRegistry.callRaw(toolCall.name, inputJSON: toolCall.argumentsFragment)
+                        messages.append(
+                            ChatMessage(
+                                role: .assistant,
+                                content: assistantText,
+                                toolCallID: toolCall.id,
+                                toolName: toolCall.name,
+                                toolCalls: [toolCall]
+                            )
+                        )
                         try await auditRepository?.append(
                             AuditEvent(
                                 category: .tool,
@@ -94,7 +114,8 @@ struct AgentRunner {
                             ChatMessage(
                                 role: .tool,
                                 content: outputJSON,
-                                toolCallID: toolCall.id
+                                toolCallID: toolCall.id,
+                                toolName: toolCall.name
                             )
                         )
                     }

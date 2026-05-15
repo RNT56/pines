@@ -47,6 +47,21 @@ public actor ToolRegistry {
         tools[spec.name] = registered
     }
 
+    public func registerRaw(
+        _ metadata: AnyToolSpec,
+        handler: @escaping @Sendable (_ inputJSON: String) async throws -> String
+    ) throws {
+        guard tools[metadata.name] == nil else {
+            throw ToolRegistryError.duplicateTool(name: metadata.name)
+        }
+
+        tools[metadata.name] = RegisteredTool(metadata: metadata) { data in
+            let input = String(decoding: data, as: UTF8.self)
+            let output = try await handler(input)
+            return Data(output.utf8)
+        }
+    }
+
     @discardableResult
     public func unregister(_ name: String) -> Bool {
         tools.removeValue(forKey: name) != nil

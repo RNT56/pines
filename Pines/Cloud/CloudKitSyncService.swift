@@ -44,9 +44,18 @@ struct CloudKitSyncService {
             }
         }
 
-        let documents = try await vaultRepository.listDocuments()
-        for document in documents {
-            records.append(vaultDocumentRecord(document))
+        if settings.storeConfiguration.syncsSourceDocuments {
+            let documents = try await vaultRepository.listDocuments()
+            for document in documents {
+                records.append(vaultDocumentRecord(document))
+                let chunks = try await vaultRepository.chunks(documentID: document.id)
+                records.append(contentsOf: chunks.map { vaultChunkRecord($0, documentID: document.id) })
+
+                if settings.storeConfiguration.syncsEmbeddings {
+                    let embeddings = try await vaultRepository.embeddings(documentID: document.id)
+                    records.append(contentsOf: embeddings.map(vaultEmbeddingRecord))
+                }
+            }
         }
 
         try await save(records)
@@ -105,5 +114,41 @@ struct CloudKitSyncService {
         record["updatedAt"] = document.updatedAt as CKRecordValue
         record["chunkCount"] = document.chunkCount as CKRecordValue
         return record
+    }
+
+    private func vaultChunkRecord(_ chunk: VaultChunk, documentID: UUID) -> CKRecord {
+        let record = CKRecord(recordType: "VaultChunk", recordID: CKRecord.ID(recordName: chunk.id, zoneID: zoneID))
+        record["documentID"] = documentID.uuidString as CKRecordValue
+        record["ordinal"] = chunk.ordinal as CKRecordValue
+        record["text"] = chunk.text as CKRecordValue
+        record["startOffset"] = chunk.startOffset as CKRecordValue
+        record["endOffset"] = chunk.endOffset as CKRecordValue
+        record["checksum"] = chunk.checksum as CKRecordValue
+        return record
+    }
+
+    private func vaultEmbeddingRecord(_ embedding: VaultStoredEmbedding) -> CKRecord {
+        let recordName = "\(embedding.chunkID)-\(Self.stableRecordSuffix(embedding.modelID.rawValue))"
+        let record = CKRecord(recordType: "VaultEmbedding", recordID: CKRecord.ID(recordName: recordName, zoneID: zoneID))
+        record["chunkID"] = embedding.chunkID as CKRecordValue
+        record["documentID"] = embedding.documentID.uuidString as CKRecordValue
+        record["modelID"] = embedding.modelID.rawValue as CKRecordValue
+        record["dimensions"] = embedding.dimensions as CKRecordValue
+        record["fp16Embedding"] = embedding.fp16Embedding as NSData
+        record["turboQuantCode"] = embedding.turboQuantCode as NSData
+        record["norm"] = embedding.norm as CKRecordValue
+        record["codecVersion"] = embedding.codecVersion as CKRecordValue
+        record["checksum"] = embedding.checksum as CKRecordValue
+        record["createdAt"] = embedding.createdAt as CKRecordValue
+        return record
+    }
+
+    private static func stableRecordSuffix(_ value: String) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
     }
 }

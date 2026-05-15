@@ -11,10 +11,17 @@ mkdir -p "$bundle"
 
 git archive --format=tar HEAD | tar -x -C "$bundle"
 
+for required_file in LICENSE NOTICE THIRD_PARTY_NOTICES.md; do
+  test -f "$bundle/$required_file"
+done
+
 cat > "$bundle/RELEASE_NOTES.md" <<NOTES
 # pines ${tag}
 
 This is a source/developer-preview release for the local-first iOS app foundation.
+
+License: PolyForm Noncommercial License 1.0.0. Commercial use requires a separate written license from Schtack.
+Third-party dependency notices are documented in THIRD_PARTY_NOTICES.md.
 
 Build locally with:
 

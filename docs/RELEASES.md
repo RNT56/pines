@@ -32,6 +32,8 @@ git push origin v0.1.0
 
 The release workflow validates the app, creates a source bundle, writes a SHA-256 checksum, and publishes a GitHub Release with generated release notes.
 
+Release bundles must include the repository `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES.md` files. Pines is source-available under the PolyForm Noncommercial License 1.0.0 (`PolyForm-Noncommercial-1.0.0`), and commercial use requires a separate written license from Schtack. Third-party dependencies keep their own licenses.
+
 ## Manual Release
 
 The release workflow also supports manual dispatch with a `tag` input. Use this only when the tag already exists or when the workflow should create/update assets for that tag.
