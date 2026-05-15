@@ -19,14 +19,12 @@
 		5A73B2F9FA959A8D2A6173EF /* BYOKCloudInferenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */; };
 		62BBB7D1AE85A01EA319E717 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 392E0E75023B6010705E840E /* MLXLLM */; };
 		667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */; };
-		676531EBE4A6C26147C9053B /* Mark.svg in Resources */ = {isa = PBXBuildFile; fileRef = 951C28DB62F91AE6C71C3305 /* Mark.svg */; };
 		69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */; };
 		6F2B60A874B79E3B73C27624 /* CloudProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */; };
 		79BE7BF0C5BD5EE6979AD3B9 /* VaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CFBB6BB9E0574B8AA20150 /* VaultView.swift */; };
 		7C1B3D61D81211AD1F0FBCF7 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */; };
 		8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */; };
 		8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 79248E6D82F6B41C4A99016B /* Tokenizers */; };
-		93EC0D8FC1D3A0BF21D032AF /* Contents.json in Resources */ = {isa = PBXBuildFile; fileRef = E154462C13CBB3F8E7BED6EB /* Contents.json */; };
 		9C997FA62CFD3FF3DFBA6FC7 /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = 85E4D304B541EE6A90CEFD6F /* MLXEmbedders */; };
 		A23582944454AFA76540B625 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500C1CF070133DCF6885979F /* ModelsView.swift */; };
 		B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8627F9808A76C0F0A91729 /* SettingsView.swift */; };
@@ -38,7 +36,6 @@
 		D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */; };
 		E3A57273D77B9C0AB688FDC5 /* HuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = E24B71D9F4C11C92EA51743C /* HuggingFace */; };
 		E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */; };
-		E8679D9775FD1B0D047ED266 /* Background.svg in Resources */ = {isa = PBXBuildFile; fileRef = 0F218239CF9E01E6CB015D66 /* Background.svg */; };
 		E96F244C6E13B6BBAD411CE0 /* WKWebViewBrowserRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */; };
 		EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */; };
 		F1BB293494A6B2AA162BD7D9 /* MLXRuntimeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */; };
@@ -47,7 +44,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		0F218239CF9E01E6CB015D66 /* Background.svg */ = {isa = PBXFileReference; path = Background.svg; sourceTree = "<group>"; };
 		231A63B8882B7235FD4DD6B7 /* Pines.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Pines.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3777534B3E27910D84F4EA38 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		385CEF8800BD8942B61831AC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -69,12 +65,10 @@
 		82DE8010D019802F630AAF0B /* PinesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesApp.swift; sourceTree = "<group>"; };
 		92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
 		948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchTool.swift; sourceTree = "<group>"; };
-		951C28DB62F91AE6C71C3305 /* Mark.svg */ = {isa = PBXFileReference; path = Mark.svg; sourceTree = "<group>"; };
 		9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
 		D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
 		DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelLifecycleService.swift; sourceTree = "<group>"; };
 		DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppServices.swift; sourceTree = "<group>"; };
-		E154462C13CBB3F8E7BED6EB /* Contents.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Contents.json; sourceTree = "<group>"; };
 		EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXRuntimeBridge.swift; sourceTree = "<group>"; };
 		FFFEAD9040192EA2246EDAD7 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -112,7 +106,6 @@
 				D6F63C1D05D9FB3DB7AAF13B /* App */,
 				DD8D69DF1F92243025A4F280 /* Cloud */,
 				CE8D57B3B84489AD378AF98A /* Design */,
-				694E34879A251BED1541B843 /* IconComposer */,
 				EF13282535E058B9BD5CA12A /* Persistence */,
 				8216D235A1572028B3065549 /* Runtime */,
 				9617E933B2A1D1595AB3F04D /* Tools */,
@@ -161,14 +154,6 @@
 				6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */,
 			);
 			path = Vault;
-			sourceTree = "<group>";
-		};
-		694E34879A251BED1541B843 /* IconComposer */ = {
-			isa = PBXGroup;
-			children = (
-				AEC1BF6DD355A21FD1D49CE4 /* Pines.icon */,
-			);
-			path = IconComposer;
 			sourceTree = "<group>";
 		};
 		7747FF9E51429855562F2EDD /* Chats */ = {
@@ -224,16 +209,6 @@
 				937082C9F040A1A09D9E5EB9 /* Vault */,
 			);
 			path = Views;
-			sourceTree = "<group>";
-		};
-		AEC1BF6DD355A21FD1D49CE4 /* Pines.icon */ = {
-			isa = PBXGroup;
-			children = (
-				0F218239CF9E01E6CB015D66 /* Background.svg */,
-				E154462C13CBB3F8E7BED6EB /* Contents.json */,
-				951C28DB62F91AE6C71C3305 /* Mark.svg */,
-			);
-			path = Pines.icon;
 			sourceTree = "<group>";
 		};
 		C48BA4525CB18DD23AB12169 /* Models */ = {
@@ -356,9 +331,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				C01E6498FFFBC564A01F56AB /* Assets.xcassets in Resources */,
-				E8679D9775FD1B0D047ED266 /* Background.svg in Resources */,
-				93EC0D8FC1D3A0BF21D032AF /* Contents.json in Resources */,
-				676531EBE4A6C26147C9053B /* Mark.svg in Resources */,
 				14C935C0C8E726C774184D06 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -34,6 +34,8 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: Pines
+        excludes:
+          - IconComposer/**
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.schtack.pines
