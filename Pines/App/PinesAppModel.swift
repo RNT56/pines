@@ -2,6 +2,11 @@ import Foundation
 import SwiftUI
 import PinesCore
 
+private enum ChatStreamPerformance {
+    static let renderInterval: TimeInterval = 0.05
+    static let persistenceInterval: TimeInterval = 0.25
+}
+
 @MainActor
 final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var threads: [PinesThreadPreview]
@@ -70,6 +75,109 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         currentRunTask = nil
         setChatError(message)
         emitHaptic(.runFailed)
+    }
+
+    private func upsertThreadPreview(_ preview: PinesThreadPreview, moveToFront: Bool) {
+        var nextThreads = threads
+        if let index = nextThreads.firstIndex(where: { $0.id == preview.id }) {
+            nextThreads[index] = preview
+            if moveToFront, index > 0, preview.status != .archived {
+                let updated = nextThreads.remove(at: index)
+                nextThreads.insert(updated, at: 0)
+            }
+        } else if moveToFront {
+            nextThreads.insert(preview, at: 0)
+        } else {
+            nextThreads.append(preview)
+        }
+        setIfChanged(\.threads, nextThreads)
+    }
+
+    private func applyThreadMessages(
+        _ messages: [ChatMessage],
+        conversationID: UUID,
+        fallbackRecord: ConversationRecord? = nil,
+        status: PinesThreadStatus? = nil,
+        moveToFront: Bool = false
+    ) {
+        if let existing = threads.first(where: { $0.id == conversationID }) {
+            upsertThreadPreview(
+                Self.threadPreview(from: existing, messages: messages, status: status),
+                moveToFront: moveToFront
+            )
+        } else if let fallbackRecord {
+            upsertThreadPreview(
+                Self.threadPreview(from: fallbackRecord, messages: messages, status: status),
+                moveToFront: moveToFront
+            )
+        }
+    }
+
+    private func appendThreadMessage(
+        _ message: ChatMessage,
+        conversationID: UUID,
+        fallbackRecord: ConversationRecord? = nil,
+        status: PinesThreadStatus? = nil,
+        moveToFront: Bool = false
+    ) {
+        var messages = threads.first(where: { $0.id == conversationID })?.messages ?? []
+        messages.append(message)
+        applyThreadMessages(
+            messages,
+            conversationID: conversationID,
+            fallbackRecord: fallbackRecord,
+            status: status,
+            moveToFront: moveToFront
+        )
+    }
+
+    private func updateThreadMessage(
+        conversationID: UUID,
+        messageID: UUID,
+        content: String,
+        status: PinesThreadStatus? = nil,
+        fallbackMessage: ChatMessage? = nil
+    ) {
+        guard let thread = threads.first(where: { $0.id == conversationID }) else { return }
+        var messages = thread.messages
+        if let index = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[index].content = content
+        } else if var fallbackMessage {
+            fallbackMessage.content = content
+            messages.append(fallbackMessage)
+        } else {
+            return
+        }
+        applyThreadMessages(messages, conversationID: conversationID, status: status)
+    }
+
+    private func refreshThread(
+        conversationID: UUID,
+        repository: any ConversationRepository,
+        fallbackRecord: ConversationRecord? = nil,
+        status: PinesThreadStatus? = nil,
+        moveToFront: Bool = false
+    ) async {
+        do {
+            let messages = try await repository.messages(in: conversationID)
+            let fallback: ConversationRecord?
+            if let fallbackRecord {
+                fallback = fallbackRecord
+            } else if threads.contains(where: { $0.id == conversationID }) {
+                fallback = nil
+            } else {
+                fallback = try await repository.listConversations().first { $0.id == conversationID }
+            }
+            applyThreadMessages(
+                messages,
+                conversationID: conversationID,
+                fallbackRecord: fallback,
+                status: status,
+                moveToFront: moveToFront
+            )
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
     }
 
     var modelSuggestions: [String] {
@@ -205,7 +313,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             }
             let modelID = preferredInstalledTextModel()?.modelID
             let conversation = try await repository.createConversation(title: "New chat", defaultModelID: modelID)
-            await refreshAll(services: services)
+            upsertThreadPreview(
+                Self.threadPreview(from: conversation, messages: []),
+                moveToFront: true
+            )
             emitHaptic(.primaryAction)
             return conversation.id
         } catch {
@@ -244,10 +355,15 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         var runRepository: (any ConversationRepository)?
+        var runConversationID: UUID?
         var assistantMessageID: UUID?
         var accumulated = ""
         var tokenCount = 0
         var failureMessage: String?
+        var lastRenderedContent = ""
+        var lastPersistedContent = ""
+        var lastRenderedAt = Date.distantPast
+        var lastPersistedAt = Date.distantPast
 
         do {
             guard let repository = services.conversationRepository else {
@@ -265,10 +381,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 failPendingChatStart(serviceError ?? "Unable to create a chat.")
                 return
             }
+            runConversationID = conversationID
 
             let userMessage = ChatMessage(role: .user, content: trimmed)
             try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: nil, providerID: nil)
-            await refreshAll(services: services)
+            appendThreadMessage(userMessage, conversationID: conversationID, status: .local, moveToFront: true)
 
             let localInstall = preferredInstalledTextModel(for: conversationID)
             let availableTools = await services.toolRegistry.listSpecs()
@@ -323,7 +440,32 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             activeRunID = assistantMessage.id
             assistantMessageID = assistantMessage.id
             emitHaptic(.runAccepted)
-            await refreshAll(services: services)
+            appendThreadMessage(assistantMessage, conversationID: conversationID, status: .streaming, moveToFront: true)
+
+            func flushAssistantUpdate(
+                content: String,
+                messageStatus: MessageStatus,
+                threadStatus: PinesThreadStatus,
+                force: Bool = false
+            ) async throws {
+                let now = Date()
+                if force || (content != lastRenderedContent && now.timeIntervalSince(lastRenderedAt) >= ChatStreamPerformance.renderInterval) {
+                    updateThreadMessage(
+                        conversationID: conversationID,
+                        messageID: assistantMessage.id,
+                        content: content,
+                        status: threadStatus,
+                        fallbackMessage: assistantMessage
+                    )
+                    lastRenderedContent = content
+                    lastRenderedAt = now
+                }
+                if force || (content != lastPersistedContent && now.timeIntervalSince(lastPersistedAt) >= ChatStreamPerformance.persistenceInterval) {
+                    try await repository.updateMessage(id: assistantMessage.id, content: content, status: messageStatus, tokenCount: tokenCount)
+                    lastPersistedContent = content
+                    lastPersistedAt = now
+                }
+            }
 
             let messages = try await repository.messages(in: conversationID)
             let vaultContext = await vaultContextMessage(for: trimmed, services: services)
@@ -376,25 +518,25 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         emitHaptic(hapticEvent)
                     }
                     clearChatError()
-                    try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: .streaming, tokenCount: tokenCount)
+                    try await flushAssistantUpdate(content: accumulated, messageStatus: .streaming, threadStatus: .streaming)
                 case let .finish(finish):
                     didReceiveTerminalEvent = true
                     let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                     if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         let message = finish.message ?? "The selected model finished without producing output."
                         failureMessage = message
-                        try await repository.updateMessage(id: assistantMessage.id, content: message, status: .failed, tokenCount: tokenCount)
+                        try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true)
                         setChatError(message)
                         emitHaptic(.runFailed)
                     } else {
-                        try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: status, tokenCount: tokenCount)
+                        try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true)
                         clearChatError()
                         emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
                     }
                 case let .failure(failure):
                     didReceiveTerminalEvent = true
                     failureMessage = failure.message
-                    try await repository.updateMessage(id: assistantMessage.id, content: failure.message, status: .failed, tokenCount: tokenCount)
+                    try await flushAssistantUpdate(content: failure.message, messageStatus: .failed, threadStatus: .local, force: true)
                     setChatError(failure.message)
                     emitHaptic(.runFailed)
                 case let .metrics(metrics):
@@ -402,7 +544,6 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 case .toolCall:
                     emitHaptic(.streamMilestone)
                 }
-                await refreshAll(services: services)
             }
 
             if !didReceiveTerminalEvent {
@@ -410,15 +551,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 if finalText.isEmpty {
                     let message = "The inference stream ended before the model produced output."
                     failureMessage = message
-                    try await repository.updateMessage(id: assistantMessage.id, content: message, status: .failed, tokenCount: tokenCount)
+                    try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true)
                     setChatError(message)
                     emitHaptic(.runFailed)
                 } else {
-                    try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: .complete, tokenCount: tokenCount)
+                    try await flushAssistantUpdate(content: accumulated, messageStatus: .complete, threadStatus: .local, force: true)
                     clearChatError()
                     emitHaptic(.runCompleted)
                 }
-                await refreshAll(services: services)
             }
 
             services.runtimeMetrics.recordGenerationFinished(
@@ -428,7 +568,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             )
             activeRunID = nil
             currentRunTask = nil
-            await refreshAll(services: services)
+            await refreshThread(conversationID: conversationID, repository: repository, status: .local)
         } catch InferenceError.cancelled {
             if let runRepository, let assistantMessageID {
                 try? await runRepository.updateMessage(
@@ -438,10 +578,20 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     tokenCount: tokenCount
                 )
             }
+            if let runConversationID, let assistantMessageID {
+                updateThreadMessage(
+                    conversationID: runConversationID,
+                    messageID: assistantMessageID,
+                    content: accumulated,
+                    status: .local
+                )
+            }
             activeRunID = nil
             currentRunTask = nil
             emitHaptic(.runCancelled)
-            await refreshAll(services: services)
+            if let runRepository, let runConversationID {
+                await refreshThread(conversationID: runConversationID, repository: runRepository, status: .local)
+            }
         } catch {
             let message = failureMessage ?? error.localizedDescription
             if let runRepository, let assistantMessageID {
@@ -452,10 +602,20 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     tokenCount: tokenCount
                 )
             }
+            if let runConversationID, let assistantMessageID {
+                updateThreadMessage(
+                    conversationID: runConversationID,
+                    messageID: assistantMessageID,
+                    content: accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? message : accumulated,
+                    status: .local
+                )
+            }
             activeRunID = nil
             currentRunTask = nil
             emitHaptic(.runFailed)
-            await refreshAll(services: services)
+            if let runRepository, let runConversationID {
+                await refreshThread(conversationID: runConversationID, repository: runRepository, status: .local)
+            }
             setChatError(message)
         }
     }
@@ -1213,7 +1373,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     for conversation in conversations {
                         guard let messages = try? await conversationRepository.messages(in: conversation.id) else { continue }
                         let preview = await MainActor.run {
-                            Self.threadPreview(from: conversation, messages: messages)
+                            if let self,
+                               let activeRunID = self.activeRunID,
+                               let existing = self.threads.first(where: { $0.id == conversation.id }),
+                               existing.status == .streaming,
+                               existing.messages.contains(where: { $0.id == activeRunID }) {
+                                return Self.threadPreview(from: existing, messages: existing.messages, status: .streaming)
+                            }
+                            return Self.threadPreview(from: conversation, messages: messages)
                         }
                         previews.append(preview)
                     }
@@ -1796,7 +1963,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         setIfChanged(\.models, previews)
     }
 
-    private static func threadPreview(from record: ConversationRecord, messages: [ChatMessage]) -> PinesThreadPreview {
+    private static func threadPreview(
+        from record: ConversationRecord,
+        messages: [ChatMessage],
+        status: PinesThreadStatus? = nil,
+        updatedAt: Date? = nil
+    ) -> PinesThreadPreview {
         let lastMessage = messages.last?.content.trimmingCharacters(in: .whitespacesAndNewlines)
         return PinesThreadPreview(
             id: record.id,
@@ -1805,10 +1977,35 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
             lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
             messages: messages,
-            status: record.archived ? .archived : .local,
-            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt),
-            tokenCount: messages.reduce(0) { $0 + max(1, $1.content.split(separator: " ").count) }
+            status: record.archived ? .archived : (status ?? .local),
+            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: updatedAt ?? record.updatedAt),
+            tokenCount: threadTokenCount(messages)
         )
+    }
+
+    private static func threadPreview(
+        from existing: PinesThreadPreview,
+        messages: [ChatMessage],
+        status: PinesThreadStatus? = nil,
+        updatedAt: Date = Date()
+    ) -> PinesThreadPreview {
+        let lastMessage = messages.last?.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedStatus = existing.status == .archived ? PinesThreadStatus.archived : (status ?? existing.status)
+        return PinesThreadPreview(
+            id: existing.id,
+            title: existing.title,
+            modelName: existing.modelName,
+            modelID: existing.modelID,
+            lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
+            messages: messages,
+            status: resolvedStatus,
+            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: updatedAt),
+            tokenCount: resolvedStatus == .streaming ? existing.tokenCount : threadTokenCount(messages)
+        )
+    }
+
+    private static func threadTokenCount(_ messages: [ChatMessage]) -> Int {
+        messages.reduce(0) { $0 + max(1, $1.content.split(separator: " ").count) }
     }
 
     private static func install(from summary: RemoteModelSummary, preflight: ModelPreflightResult) -> ModelInstall {
