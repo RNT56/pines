@@ -1,11 +1,13 @@
 import Foundation
 import PinesCore
 
-#if canImport(MLX) && canImport(MLXEmbedders) && canImport(MLXHuggingFace) && canImport(MLXLMCommon)
+#if canImport(MLX) && canImport(MLXEmbedders) && canImport(MLXHuggingFace) && canImport(MLXLMCommon) && canImport(HuggingFace) && canImport(Tokenizers)
+import HuggingFace
 import MLX
 import MLXEmbedders
 import MLXHuggingFace
 import MLXLMCommon
+import Tokenizers
 
 actor MLXEmbeddingRuntime {
     private var container: EmbedderModelContainer?
