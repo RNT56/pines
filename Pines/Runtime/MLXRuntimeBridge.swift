@@ -93,7 +93,7 @@ private actor MLXRuntimeState {
     private var visionContainer: MLXLMCommon.ModelContainer?
     #endif
 
-    #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX)
+    #if canImport(MLXEmbedders) && canImport(MLXHuggingFace) && canImport(MLXLMCommon) && canImport(MLX)
     private let embeddingRuntime = MLXEmbeddingRuntime()
     #endif
 
@@ -101,13 +101,21 @@ private actor MLXRuntimeState {
         activeInstall = install
         activeProfile = profile
 
-        #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon)
+        #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXHuggingFace) && canImport(MLXLMCommon)
         let configuration = Self.lmConfiguration(for: install)
         if install.modalities.contains(.vision) {
-            visionContainer = try await VLMModelFactory.shared.loadContainer(configuration: configuration)
+            visionContainer = try await VLMModelFactory.shared.loadContainer(
+                from: #hubDownloader(),
+                using: #huggingFaceTokenizerLoader(),
+                configuration: configuration
+            )
             textContainer = nil
         } else if install.modalities.contains(.text) {
-            textContainer = try await LLMModelFactory.shared.loadContainer(configuration: configuration)
+            textContainer = try await LLMModelFactory.shared.loadContainer(
+                from: #hubDownloader(),
+                using: #huggingFaceTokenizerLoader(),
+                configuration: configuration
+            )
             visionContainer = nil
         }
         #else
@@ -121,7 +129,7 @@ private actor MLXRuntimeState {
         textContainer = nil
         visionContainer = nil
         #endif
-        #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX)
+        #if canImport(MLXEmbedders) && canImport(MLXHuggingFace) && canImport(MLXLMCommon) && canImport(MLX)
         await embeddingRuntime.unload()
         #endif
     }
@@ -249,7 +257,7 @@ private actor MLXRuntimeState {
     }
 
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
-        #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX)
+        #if canImport(MLXEmbedders) && canImport(MLXHuggingFace) && canImport(MLXLMCommon) && canImport(MLX)
         return try await embeddingRuntime.embed(request)
         #else
         throw InferenceError.unsupportedCapability("MLXEmbedders is not linked in this build.")

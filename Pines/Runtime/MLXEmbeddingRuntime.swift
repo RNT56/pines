@@ -1,9 +1,10 @@
 import Foundation
 import PinesCore
 
-#if canImport(MLX) && canImport(MLXEmbedders) && canImport(MLXLMCommon)
+#if canImport(MLX) && canImport(MLXEmbedders) && canImport(MLXHuggingFace) && canImport(MLXLMCommon)
 import MLX
 import MLXEmbedders
+import MLXHuggingFace
 import MLXLMCommon
 
 actor MLXEmbeddingRuntime {
@@ -18,6 +19,8 @@ actor MLXEmbeddingRuntime {
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
         if container == nil || modelID != request.modelID {
             container = try await EmbedderModelFactory.shared.loadContainer(
+                from: #hubDownloader(),
+                using: #huggingFaceTokenizerLoader(),
                 configuration: MLXLMCommon.ModelConfiguration(id: request.modelID.rawValue)
             )
             modelID = request.modelID
