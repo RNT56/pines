@@ -33,7 +33,7 @@ actor MLXEmbeddingRuntime {
         }
 
         let normalize = request.normalize
-        let vectors = try await container.perform { context in
+        let vectors = await container.perform { context in
             let tokenizer = context.tokenizer
             let inputs = request.inputs.map {
                 tokenizer.encode(text: $0, addSpecialTokens: true)

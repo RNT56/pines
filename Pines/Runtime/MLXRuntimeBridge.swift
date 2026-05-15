@@ -167,15 +167,16 @@ private actor MLXRuntimeState {
             .filter { $0.role == .system }
             .map(\.content)
             .joined(separator: "\n\n")
-        let images = latestUser?.attachments.compactMap { attachment -> UserInput.Image? in
+        let imageURLs = latestUser?.attachments.compactMap { attachment -> URL? in
             guard attachment.kind == .image, let localURL = attachment.localURL else { return nil }
-            return .url(localURL)
+            return localURL
         } ?? []
         let parameters = Self.generateParameters(from: request, profile: profile)
 
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
+                    let images = imageURLs.map(UserInput.Image.url)
                     let session = ChatSession(
                         container,
                         instructions: instructions.isEmpty ? nil : instructions,

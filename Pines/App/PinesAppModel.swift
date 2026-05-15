@@ -96,10 +96,13 @@ final class PinesAppModel: ObservableObject {
 
             if let conversationRepository = services.conversationRepository {
                 let conversations = try await conversationRepository.listConversations()
-                threads = try await conversations.asyncMap { conversation in
+                var previews = [PinesThreadPreview]()
+                previews.reserveCapacity(conversations.count)
+                for conversation in conversations {
                     let messages = try await conversationRepository.messages(in: conversation.id)
-                    return Self.threadPreview(from: conversation, messages: messages)
+                    previews.append(Self.threadPreview(from: conversation, messages: messages))
                 }
+                threads = previews
             }
 
             if let vaultRepository = services.vaultRepository {
@@ -533,9 +536,14 @@ final class PinesAppModel: ObservableObject {
         if let conversationRepository = services.conversationRepository {
             Task { [weak self] in
                 for await conversations in conversationRepository.observeConversations() {
-                    let previews = await conversations.asyncCompactMap { conversation -> PinesThreadPreview? in
-                        guard let messages = try? await conversationRepository.messages(in: conversation.id) else { return nil }
-                        return Self.threadPreview(from: conversation, messages: messages)
+                    var previews = [PinesThreadPreview]()
+                    previews.reserveCapacity(conversations.count)
+                    for conversation in conversations {
+                        guard let messages = try? await conversationRepository.messages(in: conversation.id) else { continue }
+                        let preview = await MainActor.run {
+                            Self.threadPreview(from: conversation, messages: messages)
+                        }
+                        previews.append(preview)
                     }
                     await MainActor.run {
                         self?.threads = previews
