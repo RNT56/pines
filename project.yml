@@ -48,6 +48,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Pines/Pines.entitlements
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: WLDMWQ963U
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
         GENERATE_INFOPLIST_FILE: NO
@@ -92,6 +93,7 @@ targets:
         PRODUCT_NAME: Pines Watch
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: WLDMWQ963U
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
     dependencies:

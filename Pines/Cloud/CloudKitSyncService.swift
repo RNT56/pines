@@ -3,6 +3,8 @@ import Foundation
 import PinesCore
 
 struct CloudKitSyncService {
+    static let defaultContainerIdentifier = "iCloud.com.schtack.pines"
+
     private let container: CKContainer
     private let database: CKDatabase
     private let zoneID = CKRecordZone.ID(zoneName: "PinesPrivate", ownerName: CKCurrentUserDefaultName)
@@ -13,7 +15,7 @@ struct CloudKitSyncService {
     let auditRepository: (any AuditEventRepository)?
 
     init(
-        containerIdentifier: String = "iCloud.com.schtack.pines",
+        containerIdentifier: String = Self.defaultContainerIdentifier,
         conversationRepository: any ConversationRepository,
         vaultRepository: any VaultRepository,
         settingsRepository: any SettingsRepository,
@@ -27,9 +29,18 @@ struct CloudKitSyncService {
         self.auditRepository = auditRepository
     }
 
+    static func hasRequiredEntitlements(containerIdentifier: String = Self.defaultContainerIdentifier) -> Bool {
+        #if PINES_CLOUDKIT_ENABLED
+        return !containerIdentifier.isEmpty
+        #else
+        return false
+        #endif
+    }
+
     func syncNow() async throws {
         let settings = try await settingsRepository.loadSettings()
         guard settings.storeConfiguration.iCloudSyncEnabled else { return }
+        guard Self.hasRequiredEntitlements() else { return }
         try await ensureZone()
 
         var records = [CKRecord]()

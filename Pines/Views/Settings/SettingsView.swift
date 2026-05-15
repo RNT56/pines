@@ -106,6 +106,10 @@ private struct SettingsDetailView: View {
     @State private var huggingFaceToken = ""
     @State private var braveSearchKey = ""
 
+    private var iCloudSyncAvailable: Bool {
+        services.cloudKitSyncService != nil
+    }
+
     var body: some View {
         Form {
             Section {
@@ -315,14 +319,15 @@ private struct SettingsDetailView: View {
                     LabeledContent("Fallback", value: fallback)
                 }
                 Toggle("Private iCloud sync", isOn: Binding(
-                    get: { appModel.storeConfiguration.iCloudSyncEnabled },
+                    get: { iCloudSyncAvailable && appModel.storeConfiguration.iCloudSyncEnabled },
                     set: { value in
-                        appModel.storeConfiguration.iCloudSyncEnabled = value
+                        appModel.storeConfiguration.iCloudSyncEnabled = iCloudSyncAvailable && value
                         Task {
                             await appModel.saveSettings(services: services)
                         }
                     }
                 ))
+                .disabled(!iCloudSyncAvailable)
                 Toggle("Sync source documents", isOn: Binding(
                     get: { appModel.storeConfiguration.syncsSourceDocuments },
                     set: { value in
@@ -332,6 +337,7 @@ private struct SettingsDetailView: View {
                         }
                     }
                 ))
+                .disabled(!iCloudSyncAvailable || !appModel.storeConfiguration.iCloudSyncEnabled)
                 Toggle("Sync embeddings", isOn: Binding(
                     get: { appModel.storeConfiguration.syncsEmbeddings },
                     set: { value in
@@ -341,6 +347,7 @@ private struct SettingsDetailView: View {
                         }
                     }
                 ))
+                .disabled(!iCloudSyncAvailable || !appModel.storeConfiguration.iCloudSyncEnabled)
             }
 
             Section("Hugging Face") {

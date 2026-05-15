@@ -441,12 +441,14 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
+				LastUpgradeCheck = 1700;
 				TargetAttributes = {
 					5ABD42396BC25E46F453A6A1 = {
+						DevelopmentTeam = WLDMWQ963U;
 						ProvisioningStyle = Automatic;
 					};
 					82648A6E9285BDBBB41FA8FB = {
+						DevelopmentTeam = WLDMWQ963U;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -559,6 +561,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WLDMWQ963U;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.watchkitapp;
@@ -578,6 +581,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WLDMWQ963U;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Pines/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -722,6 +726,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WLDMWQ963U;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Pines/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -743,6 +748,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WLDMWQ963U;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.watchkitapp;
