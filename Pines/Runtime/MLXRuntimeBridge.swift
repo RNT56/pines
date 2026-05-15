@@ -93,7 +93,7 @@ private actor MLXRuntimeState {
     private var visionContainer: MLXLMCommon.ModelContainer?
     #endif
 
-    #if canImport(MLXEmbedders) && canImport(MLX)
+    #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX)
     private let embeddingRuntime = MLXEmbeddingRuntime()
     #endif
 
@@ -121,7 +121,7 @@ private actor MLXRuntimeState {
         textContainer = nil
         visionContainer = nil
         #endif
-        #if canImport(MLXEmbedders) && canImport(MLX)
+        #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX)
         await embeddingRuntime.unload()
         #endif
     }
@@ -249,7 +249,7 @@ private actor MLXRuntimeState {
     }
 
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
-        #if canImport(MLXEmbedders) && canImport(MLX)
+        #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX)
         return try await embeddingRuntime.embed(request)
         #else
         throw InferenceError.unsupportedCapability("MLXEmbedders is not linked in this build.")

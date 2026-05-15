@@ -1,12 +1,13 @@
 import Foundation
 import PinesCore
 
-#if canImport(MLX) && canImport(MLXEmbedders)
+#if canImport(MLX) && canImport(MLXEmbedders) && canImport(MLXLMCommon)
 import MLX
 import MLXEmbedders
+import MLXLMCommon
 
 actor MLXEmbeddingRuntime {
-    private var container: ModelContainer?
+    private var container: EmbedderModelContainer?
     private var modelID: ModelID?
 
     func unload() {
@@ -16,8 +17,8 @@ actor MLXEmbeddingRuntime {
 
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
         if container == nil || modelID != request.modelID {
-            container = try await loadModelContainer(
-                configuration: ModelConfiguration(id: request.modelID.rawValue)
+            container = try await EmbedderModelFactory.shared.loadContainer(
+                configuration: MLXLMCommon.ModelConfiguration(id: request.modelID.rawValue)
             )
             modelID = request.modelID
         }
@@ -27,7 +28,8 @@ actor MLXEmbeddingRuntime {
         }
 
         let normalize = request.normalize
-        let vectors = try container.perform { model, tokenizer, pooling in
+        let vectors = try await container.perform { context in
+            let tokenizer = context.tokenizer
             let inputs = request.inputs.map {
                 tokenizer.encode(text: $0, addSpecialTokens: true)
             }
@@ -41,8 +43,8 @@ actor MLXEmbeddingRuntime {
             )
             let mask = (padded .!= tokenizer.eosTokenId ?? 0)
             let tokenTypes = MLXArray.zeros(like: padded)
-            let result = pooling(
-                model(padded, positionIds: nil, tokenTypeIds: tokenTypes, attentionMask: mask),
+            let result = context.pooling(
+                context.model(padded, positionIds: nil, tokenTypeIds: tokenTypes, attentionMask: mask),
                 normalize: normalize,
                 applyLayerNorm: true
             )
