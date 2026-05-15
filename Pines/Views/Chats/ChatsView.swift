@@ -111,6 +111,7 @@ private struct ChatThreadRow: View {
 }
 
 private struct ChatTranscriptView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
@@ -119,39 +120,48 @@ private struct ChatTranscriptView: View {
     let thread: PinesThreadPreview
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: theme.spacing.large) {
-                PinesSectionHeader(
-                    thread.title,
-                    subtitle: "\(thread.modelName) - \(thread.tokenCount) tokens - \(thread.status.title)"
-                )
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: theme.spacing.large) {
+                    PinesSectionHeader(
+                        thread.title,
+                        subtitle: "\(thread.modelName) - \(thread.tokenCount) tokens - \(thread.status.title)"
+                    )
 
-                LazyVStack(spacing: theme.spacing.medium) {
-                    ForEach(thread.messages) { message in
-                        ChatBubble(
-                            message: message,
-                            isStreaming: appModel.activeRunID == message.id
-                        )
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    LazyVStack(spacing: theme.spacing.medium) {
+                        ForEach(thread.messages) { message in
+                            ChatBubble(
+                                message: message,
+                                isStreaming: appModel.activeRunID == message.id
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+
+                        ChatRunState(request: thread.request)
                     }
+                    .animation(theme.motion.standard, value: thread.messages.count)
 
-                    ChatRunState(request: thread.request)
+                    Color.clear
+                        .frame(height: 1)
+                        .id("chat-bottom")
                 }
-                .animation(theme.motion.standard, value: thread.messages.count)
-
-                if let serviceError = appModel.serviceError {
-                    Text(serviceError)
-                        .font(theme.typography.caption)
-                        .foregroundStyle(theme.colors.danger)
-                        .pinesSurface(.elevated)
+                .padding(contentPadding)
+                .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: thread.messages.count) { _, _ in
+                withAnimation(theme.motion.standard) {
+                    proxy.scrollTo("chat-bottom", anchor: .bottom)
                 }
             }
-            .padding(theme.spacing.large)
-            .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .onChange(of: appModel.activeRunID) { _, _ in
+                withAnimation(theme.motion.standard) {
+                    proxy.scrollTo("chat-bottom", anchor: .bottom)
+                }
+            }
         }
         .navigationTitle(thread.title)
-        .scrollDismissesKeyboard(.interactively)
         .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .toolbar {
@@ -180,15 +190,32 @@ private struct ChatTranscriptView: View {
         }
         .pinesAppBackground()
         .safeAreaInset(edge: .bottom) {
-            ChatComposerBar(threadID: thread.id)
-                .padding(.horizontal, theme.spacing.large)
-                .padding(.bottom, theme.spacing.small)
-                .background {
-                    Rectangle()
-                        .fill(theme.colors.backgroundWash)
-                        .ignoresSafeArea()
+            VStack(spacing: theme.spacing.small) {
+                if let chatError = appModel.chatError {
+                    ChatErrorBanner(
+                        message: chatError,
+                        dismiss: { appModel.dismissChatError() }
+                    )
+                    .padding(.horizontal, contentPadding)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
+
+                ChatComposerBar(threadID: thread.id)
+                    .padding(.horizontal, contentPadding)
+            }
+            .padding(.top, theme.spacing.xsmall)
+            .padding(.bottom, theme.spacing.small)
+            .background {
+                Rectangle()
+                    .fill(theme.colors.backgroundWash)
+                    .ignoresSafeArea()
+            }
+            .animation(theme.motion.standard, value: appModel.chatError)
         }
+    }
+
+    private var contentPadding: CGFloat {
+        horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large
     }
 }
 
@@ -340,6 +367,7 @@ private extension ChatRole {
 }
 
 private struct ChatComposerBar: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
@@ -352,52 +380,12 @@ private struct ChatComposerBar: View {
     let threadID: UUID?
 
     var body: some View {
-        HStack(spacing: theme.spacing.small) {
-            Button {
-                haptics.play(.primaryAction)
-            } label: {
-                Image(systemName: "paperclip")
+        Group {
+            if horizontalSizeClass == .compact {
+                compactLayout
+            } else {
+                regularLayout
             }
-            .accessibilityLabel("Attach")
-            .pinesButtonStyle(.icon)
-
-            Menu {
-                ForEach(appModel.mcpPrompts) { prompt in
-                    Button(prompt.title ?? prompt.name) {
-                        haptics.play(.primaryAction)
-                        selectedMCPPrompt = prompt
-                        seedPromptArguments(prompt)
-                    }
-                }
-            } label: {
-                Image(systemName: "text.bubble")
-            }
-            .accessibilityLabel("MCP prompts")
-            .disabled(appModel.mcpPrompts.isEmpty)
-            .pinesButtonStyle(.icon)
-
-            TextField("Ask Pines", text: $draft, axis: .vertical)
-                .lineLimit(1...4)
-                .textFieldStyle(.plain)
-                .focused($isFocused)
-                .font(theme.typography.body)
-                .foregroundStyle(theme.colors.primaryText)
-                .padding(.vertical, theme.spacing.xsmall)
-                .submitLabel(.send)
-                .onSubmit {
-                    guard appModel.activeRunID == nil else { return }
-                    sendDraft()
-                }
-
-            Button {
-                sendDraft()
-            } label: {
-                Image(systemName: appModel.activeRunID == nil ? "arrow.up" : "stop.fill")
-                    .symbolEffect(.bounce, options: .nonRepeating, value: didCommitSend)
-            }
-            .accessibilityLabel("Send")
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.activeRunID != nil)
-            .pinesButtonStyle(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.activeRunID != nil ? .secondary : .primary)
         }
         .sheet(item: $selectedMCPPrompt) { prompt in
             MCPPromptInvocationSheet(
@@ -416,24 +404,87 @@ private struct ChatComposerBar: View {
             .pinesTheme(theme)
         }
         .pinesSurface(.chrome, padding: theme.spacing.small)
-        .overlay {
-            RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
-                .strokeBorder(isFocused ? theme.colors.focusRing : Color.clear, lineWidth: isFocused ? theme.stroke.selected : 0)
+        .contentShape(RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
+        .onTapGesture {
+            isFocused = true
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
+        .animation(theme.motion.fast, value: draft.isEmpty)
+    }
 
-                Button {
-                    haptics.play(.navigationSelected)
-                    isFocused = false
-                } label: {
-                    Label("Dismiss Keyboard", systemImage: "keyboard.chevron.compact.down")
-                }
+    private var regularLayout: some View {
+        HStack(spacing: theme.spacing.small) {
+            attachButton
+            promptButton
+            inputField
+            sendButton
+        }
+    }
+
+    private var compactLayout: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            inputField
+
+            HStack(spacing: theme.spacing.small) {
+                attachButton
+                promptButton
+                Spacer(minLength: theme.spacing.small)
+                sendButton
             }
         }
-        .animation(theme.motion.fast, value: isFocused)
-        .animation(theme.motion.fast, value: draft.isEmpty)
+    }
+
+    private var inputField: some View {
+        TextField("Ask Pines", text: $draft, axis: .vertical)
+            .lineLimit(1...4)
+            .textFieldStyle(.plain)
+            .focused($isFocused)
+            .font(theme.typography.body)
+            .foregroundStyle(theme.colors.primaryText)
+            .padding(.vertical, theme.spacing.xsmall)
+            .submitLabel(.send)
+            .onSubmit {
+                guard appModel.activeRunID == nil else { return }
+                sendDraft()
+            }
+    }
+
+    private var attachButton: some View {
+        Button {
+            haptics.play(.primaryAction)
+        } label: {
+            Image(systemName: "paperclip")
+        }
+        .accessibilityLabel("Attach")
+        .pinesButtonStyle(.icon)
+    }
+
+    private var promptButton: some View {
+        Menu {
+            ForEach(appModel.mcpPrompts) { prompt in
+                Button(prompt.title ?? prompt.name) {
+                    haptics.play(.primaryAction)
+                    selectedMCPPrompt = prompt
+                    seedPromptArguments(prompt)
+                }
+            }
+        } label: {
+            Image(systemName: "text.bubble")
+        }
+        .accessibilityLabel("MCP prompts")
+        .disabled(appModel.mcpPrompts.isEmpty)
+        .pinesButtonStyle(.icon)
+    }
+
+    private var sendButton: some View {
+        Button {
+            sendDraft()
+        } label: {
+            Image(systemName: appModel.activeRunID == nil ? "arrow.up" : "stop.fill")
+                .symbolEffect(.bounce, options: .nonRepeating, value: didCommitSend)
+        }
+        .accessibilityLabel("Send")
+        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.activeRunID != nil)
+        .pinesButtonStyle(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.activeRunID != nil ? .secondary : .primary)
     }
 
     private func sendDraft() {
@@ -461,6 +512,38 @@ private struct ChatComposerBar: View {
 
     private func promptArgumentKey(prompt: MCPPromptRecord, argument: MCPPromptArgument) -> String {
         "\(prompt.id):\(argument.name)"
+    }
+}
+
+private struct ChatErrorBanner: View {
+    @Environment(\.pinesTheme) private var theme
+    let message: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: theme.spacing.small) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(theme.colors.warning)
+                .padding(.top, 2)
+
+            Text(message)
+                .font(theme.typography.callout)
+                .foregroundStyle(theme.colors.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            Spacer(minLength: theme.spacing.small)
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .accessibilityLabel("Dismiss error")
+            .pinesButtonStyle(.icon)
+        }
+        .pinesSurface(.elevated, padding: theme.spacing.medium)
     }
 }
 

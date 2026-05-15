@@ -13,6 +13,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var selectedThemeTemplate: PinesThemeTemplate
     @Published var interfaceMode: PinesInterfaceMode
     @Published var serviceError: String?
+    @Published var chatError: String?
     @Published var activeRunID: UUID?
     @Published var auditEvents: [AuditEvent]
     @Published var cloudProviders: [CloudProviderConfiguration]
@@ -48,6 +49,27 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     ) {
         guard self[keyPath: keyPath] != value else { return }
         self[keyPath: keyPath] = value
+    }
+
+    func dismissChatError() {
+        clearChatError()
+    }
+
+    private func setChatError(_ message: String) {
+        setIfChanged(\.chatError, message)
+        setIfChanged(\.serviceError, message)
+    }
+
+    private func clearChatError() {
+        setIfChanged(\.chatError, nil)
+        setIfChanged(\.serviceError, nil)
+    }
+
+    private func failPendingChatStart(_ message: String) {
+        activeRunID = nil
+        currentRunTask = nil
+        setChatError(message)
+        emitHaptic(.runFailed)
     }
 
     var modelSuggestions: [String] {
@@ -195,6 +217,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
     func startSending(_ draft: String, in threadID: UUID?, services: PinesAppServices) {
         guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        clearChatError()
         emitHaptic(.sendCommitted)
         currentRunTask?.cancel()
         currentRunTask = Task { [weak self] in
@@ -228,7 +251,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
         do {
             guard let repository = services.conversationRepository else {
-                serviceError = "Conversation repository is unavailable."
+                failPendingChatStart("Conversation repository is unavailable.")
                 return
             }
             runRepository = repository
@@ -239,8 +262,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             } else if let created = await createChat(services: services) {
                 conversationID = created
             } else {
+                failPendingChatStart(serviceError ?? "Unable to create a chat.")
                 return
             }
+
+            let userMessage = ChatMessage(role: .user, content: trimmed)
+            try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: nil, providerID: nil)
+            await refreshAll(services: services)
 
             let localInstall = preferredInstalledTextModel(for: conversationID)
             let availableTools = await services.toolRegistry.listSpecs()
@@ -265,7 +293,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             switch route.destination {
             case .local:
                 guard let localInstall else {
-                    serviceError = "Download and select a local text model before starting local chat."
+                    failPendingChatStart("Download and select a local text model before starting local chat.")
                     return
                 }
                 try await services.mlxRuntime.load(localInstall)
@@ -274,23 +302,20 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 selectedModelID = localInstall.modelID
             case let .cloud(providerID):
                 guard let cloudCandidate else {
-                    serviceError = "No enabled cloud provider is configured for agents."
+                    failPendingChatStart("No enabled cloud provider is configured for agents.")
                     return
                 }
                 guard let cloudModelID = cloudCandidate.0.defaultModelID ?? localInstall?.modelID else {
-                    serviceError = "Configure a default model for the selected cloud provider."
+                    failPendingChatStart("Configure a default model for the selected cloud provider.")
                     return
                 }
                 selectedProvider = cloudCandidate.1
                 selectedProviderID = providerID
                 selectedModelID = cloudModelID
             case let .denied(reason):
-                serviceError = "\(reason)"
+                failPendingChatStart("\(reason)")
                 return
             }
-
-            let userMessage = ChatMessage(role: .user, content: trimmed)
-            try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: selectedModelID, providerID: nil)
 
             let assistantMessage = ChatMessage(role: .assistant, content: "")
             try await repository.appendMessage(assistantMessage, status: .streaming, conversationID: conversationID, modelID: selectedModelID, providerID: selectedProviderID)
@@ -350,7 +375,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     if let hapticEvent = streamHaptics.event(tokenCount: tokenCount, content: accumulated) {
                         emitHaptic(hapticEvent)
                     }
-                    serviceError = nil
+                    clearChatError()
                     try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: .streaming, tokenCount: tokenCount)
                 case let .finish(finish):
                     didReceiveTerminalEvent = true
@@ -359,17 +384,18 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         let message = finish.message ?? "The selected model finished without producing output."
                         failureMessage = message
                         try await repository.updateMessage(id: assistantMessage.id, content: message, status: .failed, tokenCount: tokenCount)
-                        serviceError = message
+                        setChatError(message)
                         emitHaptic(.runFailed)
                     } else {
                         try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: status, tokenCount: tokenCount)
-                        serviceError = nil
+                        clearChatError()
                         emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
                     }
                 case let .failure(failure):
                     didReceiveTerminalEvent = true
                     failureMessage = failure.message
                     try await repository.updateMessage(id: assistantMessage.id, content: failure.message, status: .failed, tokenCount: tokenCount)
+                    setChatError(failure.message)
                     emitHaptic(.runFailed)
                 case let .metrics(metrics):
                     services.runtimeMetrics.recordGenerationMetrics(metrics, modelID: selectedModelID)
@@ -385,11 +411,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     let message = "The inference stream ended before the model produced output."
                     failureMessage = message
                     try await repository.updateMessage(id: assistantMessage.id, content: message, status: .failed, tokenCount: tokenCount)
-                    serviceError = message
+                    setChatError(message)
                     emitHaptic(.runFailed)
                 } else {
                     try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: .complete, tokenCount: tokenCount)
-                    serviceError = nil
+                    clearChatError()
                     emitHaptic(.runCompleted)
                 }
                 await refreshAll(services: services)
@@ -428,9 +454,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             }
             activeRunID = nil
             currentRunTask = nil
-            serviceError = message
             emitHaptic(.runFailed)
             await refreshAll(services: services)
+            setChatError(message)
         }
     }
 
