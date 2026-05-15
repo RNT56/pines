@@ -82,7 +82,10 @@ jobs:
 
       - name: Ensure iOS platform is installed
         run: |
-          xcodebuild -downloadPlatform iOS
+          sudo xcodebuild -runFirstLaunch || true
+          if ! xcodebuild -downloadPlatform iOS -architectureVariant universal; then
+            echo "::warning::xcodebuild could not download the iOS platform on this runner."
+          fi
           xcodebuild -showsdks
 
       - name: Report generated project drift

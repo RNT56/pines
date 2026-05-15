@@ -10,7 +10,7 @@ typealias PinesLiveStore = any ConversationRepository
     & ModelDownloadRepository
     & AuditEventRepository
 
-final class PinesAppServices {
+final class PinesAppServices: @unchecked Sendable {
     let secretStore: any SecretStore
     let modelCatalog: HuggingFaceModelCatalogService
     let preflightClassifier: ModelPreflightClassifier
