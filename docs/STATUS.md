@@ -8,35 +8,31 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - SwiftUI app shell with Chats, Models, Vault, and Settings surfaces.
 - Custom app icon assets.
 - Environment-driven design system with selectable templates and light/dark modes.
-- Core inference/provider/model contracts.
+- Core inference/provider/model contracts, including typed stream events.
 - Local/cloud execution routing rules.
 - Hugging Face model catalog search and model preflight classification.
 - Curated model manifest.
-- Persistence schema for conversations, messages, model installs, vault documents, chunks, FTS, and audit events.
+- Persistence schema for conversations, messages, model installs/downloads, vault documents, chunks, FTS, settings, cloud providers, sync records, agent/tool runs, and audit events.
 - Tool registry, typed tool specs, calculator tool, and policy gate.
 - Agent policy and tool invocation models.
 - Vault chunking and exact cosine vector index.
 - Keychain-backed secret store for iOS.
-- MLX runtime bridge placeholders and runtime profile generation.
+- GRDB-backed app store/repository implementation.
+- MLX runtime bridge that loads MLX LLM/VLM/embedder containers when linked.
+- Hugging Face preflight and resumable model install/delete service.
+- BYOK cloud streaming adapters for OpenAI-compatible, OpenRouter, Anthropic, and Gemini.
+- Brave Search BYOK tool and WKWebView browser observe/action runtime.
+- Vault file/PDF/image import pipeline with chunking, OCR, and embedding invocation.
+- CloudKit private database sync service for opt-in syncable metadata.
+- Settings persistence, cloud provider settings flow, and audit event UI.
+- Layered `.icon` source for the app icon.
 - Framework-free verification runner.
 
 ## Not Complete
 
-- Real MLX model loading, streaming, VLM inference, embedding inference, prompt cache, KV cache controls, and speculative decoding.
-- Model download/resume/checksum/install/delete.
-- GRDB runtime persistence and migrations.
-- CloudKit sync.
-- Real chat send/stop/retry/regenerate/attachment workflows.
-- Live model browser backed by Hugging Face results.
-- File import, PDF extraction, OCR, and embedding jobs for the vault.
-- BYOK provider onboarding and validation.
-- Cloud provider streaming adapters.
-- Full agent loop.
-- Real web search provider integration.
-- WKWebView browser automation runtime.
-- Audit persistence and audit UI.
-- App Store privacy manifest final review.
-- Full iOS build verification on a machine with full Xcode selected.
+- Full iOS build/test verification on a machine with full Xcode selected.
+- Production UX hardening for stop/retry/regenerate controls, provider deletion/editing, CloudKit conflict UI, and detailed model compatibility messaging.
+- App Store privacy manifest validation against the final resolved package graph.
 
 ## Verification
 

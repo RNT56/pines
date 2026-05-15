@@ -1,10 +1,13 @@
 import SwiftUI
 import PinesCore
+import UniformTypeIdentifiers
 
 struct VaultView: View {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @State private var selectedItemID: PinesVaultItemPreview.ID?
+    @State private var showingImporter = false
 
     private var selectedItem: PinesVaultItemPreview? {
         guard let selectedItemID else {
@@ -28,6 +31,7 @@ struct VaultView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
+                        showingImporter = true
                     } label: {
                         Image(systemName: "doc.badge.plus")
                     }
@@ -42,6 +46,17 @@ struct VaultView: View {
             }
             .onAppear {
                 selectedItemID = selectedItemID ?? appModel.vaultItems.first?.id
+            }
+            .fileImporter(
+                isPresented: $showingImporter,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: false
+            ) { result in
+                if case let .success(urls) = result, let url = urls.first {
+                    Task {
+                        await appModel.importVaultFile(url, services: services)
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .background(theme.colors.secondaryBackground)

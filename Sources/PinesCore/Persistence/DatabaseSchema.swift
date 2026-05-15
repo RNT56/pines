@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 1
+    public static let currentVersion = 2
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -134,6 +134,168 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);",
             "CREATE INDEX IF NOT EXISTS idx_vault_chunks_document ON vault_chunks(document_id, ordinal);",
             "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at);",
+        ]),
+        DatabaseMigration(version: 2, name: "production-runtime-state", sql: [
+            """
+            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content, conversation_id, message_id)
+                VALUES (new.rowid, new.content, new.conversation_id, new.id);
+            END;
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, content, conversation_id, message_id)
+                VALUES ('delete', old.rowid, old.content, old.conversation_id, old.id);
+            END;
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content ON messages BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, content, conversation_id, message_id)
+                VALUES ('delete', old.rowid, old.content, old.conversation_id, old.id);
+                INSERT INTO messages_fts(rowid, content, conversation_id, message_id)
+                VALUES (new.rowid, new.content, new.conversation_id, new.id);
+            END;
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS vault_chunks_ai AFTER INSERT ON vault_chunks BEGIN
+                INSERT INTO vault_chunks_fts(rowid, text, document_id, chunk_id)
+                VALUES (new.rowid, new.text, new.document_id, new.id);
+            END;
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS vault_chunks_ad AFTER DELETE ON vault_chunks BEGIN
+                INSERT INTO vault_chunks_fts(vault_chunks_fts, rowid, text, document_id, chunk_id)
+                VALUES ('delete', old.rowid, old.text, old.document_id, old.id);
+            END;
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS vault_chunks_au AFTER UPDATE OF text ON vault_chunks BEGIN
+                INSERT INTO vault_chunks_fts(vault_chunks_fts, rowid, text, document_id, chunk_id)
+                VALUES ('delete', old.rowid, old.text, old.document_id, old.id);
+                INSERT INTO vault_chunks_fts(rowid, text, document_id, chunk_id)
+                VALUES (new.rowid, new.text, new.document_id, new.id);
+            END;
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY NOT NULL,
+                value_json TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                sync_state TEXT NOT NULL DEFAULT 'local'
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS cloud_providers (
+                id TEXT PRIMARY KEY NOT NULL,
+                kind TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                default_model_id TEXT,
+                validation_status TEXT NOT NULL,
+                last_validation_error TEXT,
+                extra_headers_json TEXT,
+                keychain_service TEXT NOT NULL,
+                keychain_account TEXT NOT NULL,
+                enabled_for_agents INTEGER NOT NULL DEFAULT 0,
+                last_validated_at REAL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS model_downloads (
+                id TEXT PRIMARY KEY NOT NULL,
+                repository TEXT NOT NULL,
+                revision TEXT,
+                status TEXT NOT NULL,
+                bytes_received INTEGER NOT NULL DEFAULT 0,
+                total_bytes INTEGER,
+                current_file TEXT,
+                checksum TEXT,
+                local_path TEXT,
+                error_message TEXT,
+                updated_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS sync_records (
+                id TEXT PRIMARY KEY NOT NULL,
+                entity_table TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                cloud_record_name TEXT,
+                change_tag TEXT,
+                state TEXT NOT NULL,
+                last_synced_at REAL,
+                UNIQUE(entity_table, entity_id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS chat_runs (
+                id TEXT PRIMARY KEY NOT NULL,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                request_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                provider_id TEXT,
+                model_id TEXT NOT NULL,
+                started_at REAL,
+                finished_at REAL,
+                error_message TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS agent_sessions (
+                id TEXT PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL,
+                policy_json TEXT NOT NULL,
+                provider_id TEXT,
+                status TEXT NOT NULL,
+                step_index INTEGER NOT NULL DEFAULT 0,
+                tool_call_count INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                error_message TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS tool_runs (
+                id TEXT PRIMARY KEY NOT NULL,
+                agent_session_id TEXT,
+                invocation_json TEXT NOT NULL,
+                result_json TEXT,
+                approval_status TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                resolved_at REAL,
+                network_domains TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS vault_import_jobs (
+                id TEXT PRIMARY KEY NOT NULL,
+                document_id TEXT,
+                source_path TEXT,
+                file_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                progress REAL NOT NULL DEFAULT 0,
+                error_message TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS browser_actions (
+                id TEXT PRIMARY KEY NOT NULL,
+                kind TEXT NOT NULL,
+                url TEXT,
+                selector TEXT,
+                text TEXT,
+                requires_approval INTEGER NOT NULL DEFAULT 1,
+                created_at REAL NOT NULL
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_model_downloads_repository ON model_downloads(repository);",
+            "CREATE INDEX IF NOT EXISTS idx_chat_runs_conversation ON chat_runs(conversation_id, started_at);",
+            "CREATE INDEX IF NOT EXISTS idx_tool_runs_session ON tool_runs(agent_session_id, created_at);",
+            "CREATE INDEX IF NOT EXISTS idx_sync_records_state ON sync_records(state);",
         ]),
     ]
 }

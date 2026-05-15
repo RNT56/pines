@@ -21,6 +21,12 @@
 - `ToolPolicyGate`
 - `Redactor`
 - `MLXRuntimeBridge`
+- `GRDBPinesStore`
+- `ModelLifecycleService`
+- `VaultIngestionService`
+- `CloudProviderService`
+- `CloudKitSyncService`
+- `AgentRunner`
 
 SwiftUI views receive services via environment values. This keeps views from constructing runtime dependencies directly and makes it possible to swap live, mock, or preview implementations.
 
@@ -40,7 +46,7 @@ Repository protocols separate UI from storage:
 - `ModelInstallRepository`
 - `VaultRepository`
 
-The intended production implementation is GRDB/SQLite for local storage with optional CloudKit sync for user-enabled metadata and source documents. API keys, model binaries, prompt caches, and generated embeddings must not sync by default.
+The production local store is GRDB/SQLite with optional CloudKit private-database sync for user-enabled metadata and source documents. API keys, model binaries, prompt caches, generated embeddings, browser state, and transient tool state do not sync.
 
 ## Local-First Inference
 
@@ -55,7 +61,7 @@ The router must never silently fall back to cloud. If local capability is missin
 
 ## Model Discovery
 
-`ModelHubKit` primitives query Hugging Face MLX-tagged models and classify installability through preflight metadata:
+`ModelHubKit` primitives query Hugging Face MLX-tagged models, fetch preflight metadata, and drive resumable model install/delete:
 
 - `config.json`
 - tokenizer files
@@ -64,7 +70,7 @@ The router must never silently fall back to cloud. If local capability is missin
 - safetensors files and size
 - repository tags and license
 
-Curated models are kept separate from discoverable models. 1-bit/BitNet models are treated as experimental unless the exact repository/device combination is verified.
+Curated models are kept separate from discoverable models. 1-bit/BitNet models are treated as experimental unless the exact repository/device combination is verified. Downloads are staged, resumable through byte ranges, checksum-verified when Hugging Face exposes an LFS SHA-256, and atomically promoted into the app model directory.
 
 ## Tool Safety
 
@@ -76,4 +82,4 @@ Tool definitions are typed, versioned, schema-backed, and include permission met
 - timeout
 - permissions such as network, browser, files, photos, clipboard, or cloud context
 
-`ToolPolicyGate` validates invocations before execution. Web and browser tools are currently specs/placeholders; calculator is implemented locally with a safe arithmetic parser.
+`ToolPolicyGate` validates invocations before execution. Calculator is implemented locally with a safe arithmetic parser. `web.search` uses a Brave Search BYOK key from Keychain, and browser automation runs through an isolated non-persistent `WKWebView` runtime with observe and user-approved action tools.

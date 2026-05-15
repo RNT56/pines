@@ -88,4 +88,23 @@ public actor ToolRegistry {
         let outputData = try await tool.run(inputData)
         return try JSONDecoder().decode(Output.self, from: outputData)
     }
+
+    public func callRaw(_ name: String, inputJSON: String) async throws -> String {
+        guard let tool = tools[name] else {
+            throw ToolRegistryError.toolNotFound(name: name)
+        }
+
+        guard let inputData = inputJSON.data(using: .utf8) else {
+            throw ToolRegistryError.typeMismatch(
+                name: name,
+                expectedInput: tool.metadata.inputType,
+                expectedOutput: tool.metadata.outputType,
+                actualInput: "Invalid UTF-8 JSON",
+                actualOutput: "String"
+            )
+        }
+
+        let outputData = try await tool.run(inputData)
+        return String(decoding: outputData, as: UTF8.self)
+    }
 }

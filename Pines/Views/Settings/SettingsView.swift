@@ -79,14 +79,20 @@ private struct SettingsSectionRow: View {
 private struct SettingsDetailView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
     let section: PinesSettingsSection
     let executionMode: AgentExecutionMode
     let storeConfiguration: LocalStoreConfiguration
     @Binding var selectedThemeTemplate: PinesThemeTemplate
     @Binding var interfaceMode: PinesInterfaceMode
-    @State private var localInference = true
-    @State private var privateSync = false
-    @State private var approvalRequired = true
+    @State private var providerKind: CloudProviderKind = .openAICompatible
+    @State private var providerName = "OpenAI"
+    @State private var providerBaseURL = "https://api.openai.com/v1"
+    @State private var providerModelID = "gpt-4.1-mini"
+    @State private var providerAPIKey = ""
+    @State private var providerEnabled = false
+    @State private var huggingFaceToken = ""
+    @State private var braveSearchKey = ""
 
     var body: some View {
         Form {
@@ -126,12 +132,20 @@ private struct SettingsDetailView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: interfaceMode) { _, _ in
+                    Task {
+                        await appModel.saveSettings(services: services)
+                    }
+                }
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
                     ForEach(PinesThemeTemplate.allCases) { template in
                         Button {
                             withAnimation(theme.motion.standard) {
                                 selectedThemeTemplate = template
+                            }
+                            Task {
+                                await appModel.saveSettings(services: services)
                             }
                         } label: {
                             PinesThemePreviewCard(
@@ -146,9 +160,19 @@ private struct SettingsDetailView: View {
             }
 
             Section("Core") {
-                LabeledContent("Execution mode", value: executionMode.title)
-                LabeledContent("Store", value: storeConfiguration.databaseFileName)
-                LabeledContent("Protection", value: storeConfiguration.dataProtection.title)
+                Picker("Execution mode", selection: $appModel.executionMode) {
+                    ForEach(AgentExecutionMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .onChange(of: appModel.executionMode) { _, _ in
+                    Task {
+                        await appModel.saveSettings(services: services)
+                    }
+                }
+
+                LabeledContent("Store", value: appModel.storeConfiguration.databaseFileName)
+                LabeledContent("Protection", value: appModel.storeConfiguration.dataProtection.title)
             }
 
             Section("Architecture health") {
@@ -176,16 +200,205 @@ private struct SettingsDetailView: View {
                 }
             }
 
+            Section("Audit") {
+                if appModel.auditEvents.isEmpty {
+                    Text("No audit events recorded.")
+                        .foregroundStyle(theme.colors.secondaryText)
+                } else {
+                    ForEach(appModel.auditEvents.prefix(8)) { event in
+                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                            HStack {
+                                Text(event.category.rawValue)
+                                    .font(theme.typography.caption.weight(.semibold))
+                                    .foregroundStyle(theme.colors.accent)
+                                Spacer()
+                                Text(event.createdAt, style: .time)
+                                    .font(theme.typography.caption)
+                                    .foregroundStyle(theme.colors.tertiaryText)
+                            }
+                            Text(event.summary)
+                                .font(theme.typography.callout)
+                            if let payload = event.redactedPayload {
+                                Text(payload)
+                                    .font(theme.typography.caption)
+                                    .foregroundStyle(theme.colors.secondaryText)
+                                    .lineLimit(3)
+                            }
+                        }
+                    }
+                }
+            }
+
             Section("Runtime") {
-                Toggle("Local inference", isOn: $localInference)
-                Toggle("Private iCloud sync", isOn: $privateSync)
-                Toggle("Require tool approval", isOn: $approvalRequired)
+                Toggle("Local inference", isOn: .constant(true))
+                Toggle("Private iCloud sync", isOn: Binding(
+                    get: { appModel.storeConfiguration.iCloudSyncEnabled },
+                    set: { value in
+                        appModel.storeConfiguration.iCloudSyncEnabled = value
+                        Task {
+                            await appModel.saveSettings(services: services)
+                        }
+                    }
+                ))
+                Toggle("Sync source documents", isOn: Binding(
+                    get: { appModel.storeConfiguration.syncsSourceDocuments },
+                    set: { value in
+                        appModel.storeConfiguration.syncsSourceDocuments = value
+                        Task {
+                            await appModel.saveSettings(services: services)
+                        }
+                    }
+                ))
+                Toggle("Sync embeddings", isOn: Binding(
+                    get: { appModel.storeConfiguration.syncsEmbeddings },
+                    set: { value in
+                        appModel.storeConfiguration.syncsEmbeddings = value
+                        Task {
+                            await appModel.saveSettings(services: services)
+                        }
+                    }
+                ))
+            }
+
+            Section("Hugging Face") {
+                LabeledContent("Hub token", value: appModel.huggingFaceCredentialStatus)
+                SecureField("Access token", text: $huggingFaceToken)
+                    .textContentType(.password)
+
+                HStack {
+                    Button {
+                        Task {
+                            await appModel.saveHuggingFaceToken(huggingFaceToken, services: services)
+                            huggingFaceToken = ""
+                        }
+                    } label: {
+                        Label("Save", systemImage: "key.fill")
+                    }
+                    .disabled(huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button {
+                        Task {
+                            await appModel.validateHuggingFaceToken(services: services)
+                        }
+                    } label: {
+                        Label("Validate", systemImage: "checkmark.seal")
+                    }
+
+                    Button(role: .destructive) {
+                        Task {
+                            await appModel.deleteHuggingFaceToken(services: services)
+                            huggingFaceToken = ""
+                        }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+
+            Section("Agent Tool Keys") {
+                LabeledContent("Brave Search", value: appModel.braveSearchCredentialStatus)
+                SecureField("Brave Search API key", text: $braveSearchKey)
+                    .textContentType(.password)
+
+                HStack {
+                    Button {
+                        Task {
+                            await appModel.saveBraveSearchKey(braveSearchKey, services: services)
+                            braveSearchKey = ""
+                        }
+                    } label: {
+                        Label("Save", systemImage: "magnifyingglass.circle")
+                    }
+                    .disabled(braveSearchKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button(role: .destructive) {
+                        Task {
+                            await appModel.saveBraveSearchKey("", services: services)
+                            braveSearchKey = ""
+                        }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+
+            Section("Cloud BYOK") {
+                Picker("Provider", selection: $providerKind) {
+                    ForEach(CloudProviderKind.allCases, id: \.self) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+                .onChange(of: providerKind) { _, kind in
+                    applyProviderDefaults(kind)
+                }
+                TextField("Display name", text: $providerName)
+                TextField("Base URL", text: $providerBaseURL)
+                TextField("Default model", text: $providerModelID)
+                SecureField("API key", text: $providerAPIKey)
+                Toggle("Enable for agents", isOn: $providerEnabled)
+
+                Button {
+                    Task {
+                        await appModel.saveCloudProvider(
+                            kind: providerKind,
+                            displayName: providerName,
+                            baseURLString: providerBaseURL,
+                            defaultModelID: providerModelID,
+                            apiKey: providerAPIKey,
+                            enabledForAgents: providerEnabled,
+                            services: services
+                        )
+                        providerAPIKey = ""
+                    }
+                } label: {
+                    Label("Save and validate", systemImage: "key")
+                }
+
+                ForEach(appModel.cloudProviders) { provider in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(provider.displayName)
+                            Text(provider.kind.title)
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.secondaryText)
+                        }
+                        Spacer()
+                        Text(provider.validationStatus.rawValue)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(provider.validationStatus == .valid ? theme.colors.success : theme.colors.warning)
+                        Button {
+                            Task {
+                                await appModel.validateCloudProvider(provider, services: services)
+                            }
+                        } label: {
+                            Image(systemName: "checkmark.seal")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Validate \(provider.displayName)")
+
+                        Button(role: .destructive) {
+                            Task {
+                                await appModel.deleteCloudProvider(provider, services: services)
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Delete \(provider.displayName)")
+                    }
+                }
             }
         }
         .navigationTitle(section.title)
         .pinesInlineNavigationTitle()
         .scrollContentBackground(.hidden)
         .pinesAppBackground()
+    }
+
+    private func applyProviderDefaults(_ kind: CloudProviderKind) {
+        providerName = kind.defaultDisplayName
+        providerBaseURL = kind.defaultBaseURL
+        providerModelID = kind.defaultModelID
     }
 }
 
@@ -230,6 +443,68 @@ private extension AgentExecutionMode {
             "Cloud allowed"
         case .cloudRequired:
             "Cloud required"
+        }
+    }
+}
+
+private extension CloudProviderKind {
+    var title: String {
+        switch self {
+        case .openAICompatible:
+            "OpenAI-compatible"
+        case .anthropic:
+            "Anthropic"
+        case .gemini:
+            "Gemini"
+        case .openRouter:
+            "OpenRouter"
+        case .custom:
+            "Custom"
+        }
+    }
+
+    var defaultDisplayName: String {
+        switch self {
+        case .openAICompatible:
+            "OpenAI"
+        case .anthropic:
+            "Anthropic"
+        case .gemini:
+            "Gemini"
+        case .openRouter:
+            "OpenRouter"
+        case .custom:
+            "Custom"
+        }
+    }
+
+    var defaultBaseURL: String {
+        switch self {
+        case .openAICompatible:
+            "https://api.openai.com/v1"
+        case .anthropic:
+            "https://api.anthropic.com"
+        case .gemini:
+            "https://generativelanguage.googleapis.com"
+        case .openRouter:
+            "https://openrouter.ai/api/v1"
+        case .custom:
+            "https://"
+        }
+    }
+
+    var defaultModelID: String {
+        switch self {
+        case .openAICompatible:
+            "gpt-4.1-mini"
+        case .anthropic:
+            "claude-3-5-haiku-latest"
+        case .gemini:
+            "gemini-2.0-flash"
+        case .openRouter:
+            "openai/gpt-4.1-mini"
+        case .custom:
+            ""
         }
     }
 }

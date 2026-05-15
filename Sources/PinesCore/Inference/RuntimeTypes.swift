@@ -48,23 +48,35 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
     public var quantization: QuantizationProfile
     public var prefillStepSize: Int
     public var promptCacheEnabled: Bool
+    public var promptCacheIdentifier: String?
     public var speculativeDraftModelID: ModelID?
+    public var speculativeDecodingEnabled: Bool
     public var unloadOnMemoryPressure: Bool
+    public var repetitionContextSize: Int
+    public var maxConcurrentSessions: Int
 
     public init(
         name: String = "Balanced",
         quantization: QuantizationProfile = .init(kvBits: 8),
         prefillStepSize: Int = 512,
         promptCacheEnabled: Bool = true,
+        promptCacheIdentifier: String? = nil,
         speculativeDraftModelID: ModelID? = nil,
-        unloadOnMemoryPressure: Bool = true
+        speculativeDecodingEnabled: Bool = false,
+        unloadOnMemoryPressure: Bool = true,
+        repetitionContextSize: Int = 20,
+        maxConcurrentSessions: Int = 1
     ) {
         self.name = name
         self.quantization = quantization
         self.prefillStepSize = prefillStepSize
         self.promptCacheEnabled = promptCacheEnabled
+        self.promptCacheIdentifier = promptCacheIdentifier
         self.speculativeDraftModelID = speculativeDraftModelID
+        self.speculativeDecodingEnabled = speculativeDecodingEnabled
         self.unloadOnMemoryPressure = unloadOnMemoryPressure
+        self.repetitionContextSize = repetitionContextSize
+        self.maxConcurrentSessions = maxConcurrentSessions
     }
 }
 

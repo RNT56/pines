@@ -53,6 +53,37 @@ public enum BuiltInToolSpecs {
             throw AgentError.permissionDenied("Browser tool requires a WKWebView runtime.")
         }
     }
+
+    public static func browserActionSpec() throws -> ToolSpec<BrowserActionInput, BrowserActionOutput> {
+        try ToolSpec(
+            name: "browser.action",
+            description: "Run a user-approved action in the isolated in-app browser.",
+            inputSchema: ToolIOSchema(
+                properties: [
+                    "kind": .init(type: .string, description: "Action kind: navigate, click, typeText, submit, screenshot, or stop."),
+                    "url": .init(type: .string, description: "URL for navigation or current page."),
+                    "selector": .init(type: .string, description: "CSS selector for DOM actions."),
+                    "text": .init(type: .string, description: "Text for typeText actions."),
+                ],
+                required: ["kind"]
+            ),
+            outputSchema: ToolIOSchema(
+                properties: [
+                    "summary": .init(type: .string, description: "Sanitized action result."),
+                    "snapshot": .init(type: .string, description: "Sanitized page snapshot."),
+                    "screenshotBase64": .init(type: .string, description: "Optional PNG screenshot encoded as base64."),
+                ],
+                required: ["summary"]
+            ),
+            permissions: [.browser, .network],
+            sideEffect: .readsExternalData,
+            networkPolicy: .userApproved,
+            timeoutSeconds: 10,
+            explanationRequired: true
+        ) { _ in
+            throw AgentError.permissionDenied("Browser tool requires a WKWebView runtime.")
+        }
+    }
 }
 
 public struct WebSearchInput: ToolInput, Equatable {
@@ -86,5 +117,31 @@ public struct BrowserObserveOutput: ToolOutput, Equatable {
 
     public init(snapshot: String) {
         self.snapshot = snapshot
+    }
+}
+
+public struct BrowserActionInput: ToolInput, Equatable {
+    public var kind: BrowserActionKind
+    public var url: String?
+    public var selector: String?
+    public var text: String?
+
+    public init(kind: BrowserActionKind, url: String? = nil, selector: String? = nil, text: String? = nil) {
+        self.kind = kind
+        self.url = url
+        self.selector = selector
+        self.text = text
+    }
+}
+
+public struct BrowserActionOutput: ToolOutput, Equatable {
+    public var summary: String
+    public var snapshot: String
+    public var screenshotBase64: String?
+
+    public init(summary: String, snapshot: String = "", screenshotBase64: String? = nil) {
+        self.summary = summary
+        self.snapshot = snapshot
+        self.screenshotBase64 = screenshotBase64
     }
 }
