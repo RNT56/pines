@@ -79,13 +79,13 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
             guard let selector = input.selector else {
                 throw AgentError.invalidToolArguments("browser.action click requires selector.")
             }
-            _ = try await evaluateJavaScript("document.querySelector(\(Self.jsString(selector)))?.click();")
+            try await evaluateJavaScript("document.querySelector(\(Self.jsString(selector)))?.click();")
             return BrowserActionOutput(summary: "Clicked \(selector).", snapshot: try await snapshotText())
         case .typeText:
             guard let selector = input.selector, let text = input.text else {
                 throw AgentError.invalidToolArguments("browser.action typeText requires selector and text.")
             }
-            _ = try await evaluateJavaScript(
+            try await evaluateJavaScript(
                 """
                 (() => {
                   const el = document.querySelector(\(Self.jsString(selector)));
@@ -103,7 +103,7 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
             guard let selector = input.selector else {
                 throw AgentError.invalidToolArguments("browser.action submit requires selector.")
             }
-            _ = try await evaluateJavaScript("document.querySelector(\(Self.jsString(selector)))?.submit?.();")
+            try await evaluateJavaScript("document.querySelector(\(Self.jsString(selector)))?.submit?.();")
             await waitForNavigation()
             return BrowserActionOutput(summary: "Submitted \(selector).", snapshot: try await snapshotText())
         case .screenshot:
@@ -154,7 +154,7 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
     }
 
     private func snapshotText() async throws -> String {
-        let value = try await evaluateJavaScript(
+        try await evaluateJavaScriptString(
             """
             (() => {
               const title = document.title || '';
@@ -164,16 +164,27 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
             })();
             """
         )
-        return value as? String ?? ""
     }
 
-    private func evaluateJavaScript(_ script: String) async throws -> Any? {
+    private func evaluateJavaScript(_ script: String) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            webView.evaluateJavaScript(script) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    private func evaluateJavaScriptString(_ script: String) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             webView.evaluateJavaScript(script) { value, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
-                    continuation.resume(returning: value)
+                    continuation.resume(returning: value as? String ?? "")
                 }
             }
         }
