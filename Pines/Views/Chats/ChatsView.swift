@@ -2,6 +2,7 @@ import SwiftUI
 import PinesCore
 
 struct ChatsView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
@@ -9,11 +10,19 @@ struct ChatsView: View {
     @State private var selectedThreadID: PinesThreadPreview.ID?
 
     private var selectedThread: PinesThreadPreview? {
-        guard let selectedThreadID else {
-            return appModel.threads.first
+        guard let selectedThreadID = selectedThreadID ?? defaultThreadID else {
+            return nil
         }
 
         return appModel.threads.first { $0.id == selectedThreadID }
+    }
+
+    private var defaultThreadID: PinesThreadPreview.ID? {
+        shouldAutoSelectSidebarItem ? appModel.threads.first?.id : nil
+    }
+
+    private var shouldAutoSelectSidebarItem: Bool {
+        horizontalSizeClass != .compact
     }
 
     var body: some View {
@@ -21,8 +30,9 @@ struct ChatsView: View {
             List(selection: $selectedThreadID) {
                 Section("Recent") {
                     ForEach(appModel.threads) { thread in
-                        ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
-                            .tag(thread.id)
+                        NavigationLink(value: thread.id) {
+                            ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
+                        }
                     }
                 }
             }
@@ -40,8 +50,15 @@ struct ChatsView: View {
                     .accessibilityLabel("New chat")
                 }
             }
-            .onAppear {
-                selectedThreadID = selectedThreadID ?? appModel.threads.first?.id
+            .onAppear(perform: selectDefaultThreadIfNeeded)
+            .onChange(of: horizontalSizeClass) { _, _ in
+                selectDefaultThreadIfNeeded()
+            }
+            .onChange(of: appModel.threads) { _, threads in
+                if let selectedThreadID, !threads.contains(where: { $0.id == selectedThreadID }) {
+                    self.selectedThreadID = nil
+                }
+                selectDefaultThreadIfNeeded()
             }
             .onChange(of: selectedThreadID) { _, _ in
                 haptics.play(.navigationSelected)
@@ -59,6 +76,11 @@ struct ChatsView: View {
                 )
             }
         }
+    }
+
+    private func selectDefaultThreadIfNeeded() {
+        guard shouldAutoSelectSidebarItem else { return }
+        selectedThreadID = selectedThreadID ?? appModel.threads.first?.id
     }
 }
 

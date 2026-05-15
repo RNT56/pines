@@ -40,6 +40,7 @@ struct PinesRootView: View {
                 PinesBootMarkView()
                     .environmentObject(haptics)
                     .pinesTheme(theme)
+                    .ignoresSafeArea()
                     .zIndex(1)
             }
         }
@@ -56,7 +57,7 @@ struct PinesRootView: View {
             self.watchSessionService = watchSessionService
             #endif
             await appModel.bootstrap(services: services)
-            try? await Task.sleep(nanoseconds: 720_000_000)
+            try? await Task.sleep(nanoseconds: 950_000_000)
             withAnimation(theme.motion.emphasized) {
                 showsBootMark = false
             }

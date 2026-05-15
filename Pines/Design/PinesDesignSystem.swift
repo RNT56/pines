@@ -506,29 +506,370 @@ enum PinesPalette {
 struct PinesBootMarkView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var didAppear = false
+
+    private let stages = [
+        PinesBootStage(title: "Runtime", systemImage: "cpu", tint: .accent),
+        PinesBootStage(title: "Vault", systemImage: "shippingbox", tint: .warning),
+        PinesBootStage(title: "Tools", systemImage: "wrench.and.screwdriver", tint: .info),
+    ]
 
     var body: some View {
-        VStack(spacing: theme.spacing.large) {
-            PinesMark(size: 92)
-                .transition(.opacity.combined(with: reduceMotion ? .identity : .scale(scale: 0.94)))
+        GeometryReader { proxy in
+            ZStack {
+                PinesAmbientBackground(animates: true)
+                    .ignoresSafeArea()
 
-            VStack(spacing: theme.spacing.xsmall) {
-                Text("pines")
-                    .font(theme.typography.hero)
-                    .foregroundStyle(theme.colors.primaryText)
+                PinesBootSignalField(isActive: didAppear && !reduceMotion)
+                    .ignoresSafeArea()
 
-                Text("Local-first AI workbench")
-                    .font(theme.typography.callout)
-                    .foregroundStyle(theme.colors.secondaryText)
+                VStack(spacing: theme.spacing.xlarge) {
+                    PinesBootMarkCluster(isActive: didAppear && !reduceMotion)
+                        .scaleEffect(didAppear || reduceMotion ? 1 : 0.9)
+                        .opacity(didAppear ? 1 : 0)
+
+                    VStack(spacing: theme.spacing.small) {
+                        Text("pines")
+                            .font(theme.typography.hero)
+                            .foregroundStyle(theme.colors.primaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+
+                        Text("Local-first AI workbench")
+                            .font(theme.typography.callout)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.84)
+                    }
+                    .offset(y: didAppear || reduceMotion ? 0 : 10)
+                    .opacity(didAppear ? 1 : 0)
+
+                    HStack(spacing: theme.spacing.small) {
+                        ForEach(Array(stages.enumerated()), id: \.element.id) { index, stage in
+                            PinesBootStageChip(
+                                stage: stage,
+                                isActive: didAppear,
+                                delay: Double(index) * 0.12
+                            )
+                        }
+                    }
+
+                    VStack(spacing: theme.spacing.small) {
+                        PinesBootSignalBar(isActive: didAppear && !reduceMotion)
+
+                        Text("Starting private workspace")
+                            .font(theme.typography.caption.weight(.medium))
+                            .foregroundStyle(theme.colors.tertiaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.84)
+                    }
+                    .opacity(didAppear ? 1 : 0)
+                }
+                .frame(width: max(0, min(430, proxy.size.width - 32)))
+                .padding(.horizontal, theme.spacing.large)
+                .padding(.vertical, theme.spacing.xxlarge)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+        .ignoresSafeArea()
+        .background(theme.colors.appBackground)
+        .onAppear {
+            guard !didAppear else { return }
+            withAnimation(reduceMotion ? nil : .spring(duration: 0.68, bounce: 0.24)) {
+                didAppear = true
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            PinesAmbientBackground(animates: true)
-            Rectangle()
-                .fill(theme.colors.glassSurface)
+        .transition(.asymmetric(
+            insertion: .opacity.combined(with: reduceMotion ? .identity : .scale(scale: 0.96)),
+            removal: .opacity.combined(with: reduceMotion ? .identity : .scale(scale: 1.04))
+        ))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Pines is starting")
+    }
+}
+
+private struct PinesBootStage: Identifiable {
+    enum Tint {
+        case accent
+        case info
+        case warning
+
+        func color(in theme: PinesTheme) -> Color {
+            switch self {
+            case .accent:
+                theme.colors.accent
+            case .info:
+                theme.colors.info
+            case .warning:
+                theme.colors.warning
+            }
         }
-        .transition(.opacity.combined(with: reduceMotion ? .identity : .scale(scale: 0.98)))
+    }
+
+    var id: String { title }
+    let title: String
+    let systemImage: String
+    let tint: Tint
+}
+
+private struct PinesBootMarkCluster: View {
+    @Environment(\.pinesTheme) private var theme
+    let isActive: Bool
+    @State private var spin = false
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<3, id: \.self) { index in
+                let diameter = 130 + CGFloat(index * 30)
+                Circle()
+                    .stroke(
+                        ringGradient(for: index),
+                        style: StrokeStyle(lineWidth: index == 0 ? 2.2 : 1.3, lineCap: .round)
+                    )
+                    .frame(width: diameter, height: diameter)
+                    .scaleEffect(pulse ? 1.08 + CGFloat(index) * 0.035 : 0.92)
+                    .opacity(pulse ? 0.14 : 0.48 - Double(index) * 0.10)
+                    .animation(
+                        isActive ? .easeOut(duration: 1.7).repeatForever(autoreverses: false).delay(Double(index) * 0.18) : nil,
+                        value: pulse
+                    )
+            }
+
+            Circle()
+                .trim(from: 0.05, to: 0.70)
+                .stroke(
+                    AngularGradient(
+                        colors: [
+                            theme.colors.accent,
+                            theme.colors.chartB,
+                            theme.colors.warning,
+                            theme.colors.accent,
+                        ],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .frame(width: 154, height: 154)
+                .rotationEffect(.degrees(spin ? 360 : 0))
+                .shadow(color: theme.colors.accent.opacity(theme.colorScheme == .dark ? 0.32 : 0.20), radius: 12, x: 0, y: 0)
+                .animation(isActive ? .linear(duration: 3.1).repeatForever(autoreverses: false) : nil, value: spin)
+
+            Circle()
+                .trim(from: 0.62, to: 0.92)
+                .stroke(
+                    theme.colors.info.opacity(0.72),
+                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round)
+                )
+                .frame(width: 178, height: 178)
+                .rotationEffect(.degrees(spin ? -360 : 0))
+                .animation(isActive ? .linear(duration: 4.8).repeatForever(autoreverses: false) : nil, value: spin)
+
+            PinesMark(size: 116)
+                .shadow(color: theme.colors.accent.opacity(theme.colorScheme == .dark ? 0.32 : 0.16), radius: 22, x: 0, y: 12)
+        }
+        .frame(width: 200, height: 200)
+        .onAppear {
+            guard isActive else { return }
+            spin = true
+            pulse = true
+        }
+        .onChange(of: isActive) { _, active in
+            guard active else { return }
+            spin = true
+            pulse = true
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func ringGradient(for index: Int) -> AngularGradient {
+        AngularGradient(
+            colors: [
+                theme.colors.accent.opacity(index == 0 ? 0.92 : 0.52),
+                theme.colors.info.opacity(index == 1 ? 0.78 : 0.42),
+                theme.colors.warning.opacity(index == 2 ? 0.72 : 0.34),
+                theme.colors.accent.opacity(index == 0 ? 0.92 : 0.52),
+            ],
+            center: .center
+        )
+    }
+}
+
+private struct PinesBootStageChip: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let stage: PinesBootStage
+    let isActive: Bool
+    let delay: Double
+
+    var body: some View {
+        let tint = stage.tint.color(in: theme)
+        VStack(spacing: theme.spacing.xsmall) {
+            Image(systemName: stage.systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tint)
+                .symbolEffect(.pulse, options: .repeating.speed(0.55), value: isActive && !reduceMotion)
+
+            Text(stage.title)
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .background(tint.opacity(theme.colorScheme == .dark ? 0.14 : 0.10), in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .strokeBorder(tint.opacity(0.22), lineWidth: theme.stroke.hairline)
+        }
+        .opacity(isActive ? 1 : 0)
+        .offset(y: isActive || reduceMotion ? 0 : 12)
+        .animation(reduceMotion ? nil : .spring(duration: 0.54, bounce: 0.24).delay(delay), value: isActive)
+    }
+}
+
+private struct PinesBootSignalBar: View {
+    @Environment(\.pinesTheme) private var theme
+    let isActive: Bool
+    @State private var sweep = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(theme.colors.controlFill)
+
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                theme.colors.accent.opacity(0.15),
+                                theme.colors.accent,
+                                theme.colors.chartB,
+                                theme.colors.warning.opacity(0.88),
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: proxy.size.width * 0.62)
+                    .offset(x: isActive ? (sweep ? proxy.size.width * 0.62 : -proxy.size.width * 0.18) : proxy.size.width * 0.14)
+                    .shadow(color: theme.colors.accent.opacity(theme.colorScheme == .dark ? 0.34 : 0.22), radius: 8, x: 0, y: 0)
+            }
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+            }
+        }
+        .frame(height: 8)
+        .onAppear {
+            guard isActive else { return }
+            withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                sweep = true
+            }
+        }
+        .onChange(of: isActive) { _, active in
+            guard active else { return }
+            withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                sweep = true
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct PinesBootSignalField: View {
+    @Environment(\.pinesTheme) private var theme
+    let isActive: Bool
+    @State private var sweep = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Rectangle()
+                    .fill(theme.colors.appBackground.opacity(theme.colorScheme == .dark ? 0.26 : 0.18))
+
+                ForEach(0..<7, id: \.self) { index in
+                    let y = proxy.size.height * (0.12 + CGFloat(index) * 0.13)
+                    RoundedRectangle(cornerRadius: theme.radius.capsule, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.clear,
+                                    signalColor(for: index).opacity(0.34),
+                                    Color.clear,
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: proxy.size.width * 0.72, height: index.isMultiple(of: 2) ? 2 : 1)
+                        .rotationEffect(.degrees(index.isMultiple(of: 2) ? -16 : 12))
+                        .position(
+                            x: sweep ? proxy.size.width * 0.62 : proxy.size.width * 0.38,
+                            y: y
+                        )
+                        .opacity(theme.colorScheme == .dark ? 0.68 : 0.44)
+                }
+
+                bootTracePath(size: proxy.size)
+                    .trim(from: sweep ? 0.10 : 0, to: sweep ? 1 : 0.82)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                theme.colors.accent.opacity(0.10),
+                                theme.colors.chartB.opacity(0.26),
+                                theme.colors.warning.opacity(0.20),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        style: StrokeStyle(lineWidth: theme.stroke.hairline, lineCap: .round, lineJoin: .round)
+                    )
+                    .opacity(theme.colorScheme == .dark ? 0.82 : 0.54)
+            }
+            .clipped()
+        }
+        .onAppear {
+            guard isActive else { return }
+            withAnimation(.easeInOut(duration: 4.6).repeatForever(autoreverses: true)) {
+                sweep = true
+            }
+        }
+        .onChange(of: isActive) { _, active in
+            guard active else { return }
+            withAnimation(.easeInOut(duration: 4.6).repeatForever(autoreverses: true)) {
+                sweep = true
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func signalColor(for index: Int) -> Color {
+        switch index % 3 {
+        case 0:
+            theme.colors.accent
+        case 1:
+            theme.colors.info
+        default:
+            theme.colors.warning
+        }
+    }
+
+    private func bootTracePath(size: CGSize) -> Path {
+        var path = Path()
+        let columns: [CGFloat] = [0.08, 0.24, 0.42, 0.64, 0.82]
+        for (index, column) in columns.enumerated() {
+            let x = size.width * column
+            path.move(to: CGPoint(x: x, y: size.height * 0.08))
+            path.addLine(to: CGPoint(x: x + CGFloat(index % 2 == 0 ? 18 : -18), y: size.height * 0.38))
+            path.addLine(to: CGPoint(x: x + CGFloat(index % 2 == 0 ? -8 : 8), y: size.height * 0.66))
+            path.addLine(to: CGPoint(x: x, y: size.height * 0.92))
+        }
+        return path
     }
 }
 

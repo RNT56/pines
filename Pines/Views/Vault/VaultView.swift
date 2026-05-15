@@ -3,6 +3,7 @@ import PinesCore
 import UniformTypeIdentifiers
 
 struct VaultView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
@@ -11,11 +12,19 @@ struct VaultView: View {
     @State private var showingImporter = false
 
     private var selectedItem: PinesVaultItemPreview? {
-        guard let selectedItemID else {
-            return appModel.vaultItems.first
+        guard let selectedItemID = selectedItemID ?? defaultItemID else {
+            return nil
         }
 
         return appModel.vaultItems.first { $0.id == selectedItemID }
+    }
+
+    private var defaultItemID: PinesVaultItemPreview.ID? {
+        shouldAutoSelectSidebarItem ? appModel.vaultItems.first?.id : nil
+    }
+
+    private var shouldAutoSelectSidebarItem: Bool {
+        horizontalSizeClass != .compact
     }
 
     var body: some View {
@@ -23,8 +32,9 @@ struct VaultView: View {
             List(selection: $selectedItemID) {
                 Section("Vault") {
                     ForEach(appModel.vaultItems) { item in
-                        VaultItemRow(item: item, isSelected: selectedItemID == item.id)
-                            .tag(item.id)
+                        NavigationLink(value: item.id) {
+                            VaultItemRow(item: item, isSelected: selectedItemID == item.id)
+                        }
                     }
                 }
             }
@@ -48,8 +58,15 @@ struct VaultView: View {
                     .accessibilityLabel("Search vault")
                 }
             }
-            .onAppear {
-                selectedItemID = selectedItemID ?? appModel.vaultItems.first?.id
+            .onAppear(perform: selectDefaultItemIfNeeded)
+            .onChange(of: horizontalSizeClass) { _, _ in
+                selectDefaultItemIfNeeded()
+            }
+            .onChange(of: appModel.vaultItems) { _, items in
+                if let selectedItemID, !items.contains(where: { $0.id == selectedItemID }) {
+                    self.selectedItemID = nil
+                }
+                selectDefaultItemIfNeeded()
             }
             .onChange(of: selectedItemID) { _, _ in
                 haptics.play(.navigationSelected)
@@ -78,6 +95,11 @@ struct VaultView: View {
                 )
             }
         }
+    }
+
+    private func selectDefaultItemIfNeeded() {
+        guard shouldAutoSelectSidebarItem else { return }
+        selectedItemID = selectedItemID ?? appModel.vaultItems.first?.id
     }
 }
 

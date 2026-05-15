@@ -2,17 +2,26 @@ import SwiftUI
 import PinesCore
 
 struct SettingsView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedSectionID: PinesSettingsSection.ID?
 
     private var selectedSection: PinesSettingsSection? {
-        guard let selectedSectionID else {
-            return appModel.settingsSections.first
+        guard let selectedSectionID = selectedSectionID ?? defaultSectionID else {
+            return nil
         }
 
         return appModel.settingsSections.first { $0.id == selectedSectionID }
+    }
+
+    private var defaultSectionID: PinesSettingsSection.ID? {
+        shouldAutoSelectSidebarItem ? appModel.settingsSections.first?.id : nil
+    }
+
+    private var shouldAutoSelectSidebarItem: Bool {
+        horizontalSizeClass != .compact
     }
 
     var body: some View {
@@ -28,8 +37,15 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .pinesExpressiveScrollHaptics()
-            .onAppear {
-                selectedSectionID = selectedSectionID ?? appModel.settingsSections.first?.id
+            .onAppear(perform: selectDefaultSectionIfNeeded)
+            .onChange(of: horizontalSizeClass) { _, _ in
+                selectDefaultSectionIfNeeded()
+            }
+            .onChange(of: appModel.settingsSections) { _, sections in
+                if let selectedSectionID, !sections.contains(where: { $0.id == selectedSectionID }) {
+                    self.selectedSectionID = nil
+                }
+                selectDefaultSectionIfNeeded()
             }
             .onChange(of: selectedSectionID) { _, _ in
                 haptics.play(.navigationSelected)
@@ -53,6 +69,11 @@ struct SettingsView: View {
                 )
             }
         }
+    }
+
+    private func selectDefaultSectionIfNeeded() {
+        guard shouldAutoSelectSidebarItem else { return }
+        selectedSectionID = selectedSectionID ?? appModel.settingsSections.first?.id
     }
 }
 
