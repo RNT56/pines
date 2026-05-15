@@ -54,6 +54,9 @@ struct WatchRootView: View {
                             NavigationLink(value: conversation.id) {
                                 WatchConversationRow(conversation: conversation)
                             }
+                            .simultaneousGesture(TapGesture().onEnded {
+                                WatchHaptics.shared.play(.navigationSelected)
+                            })
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button {
                                     renameTitle = conversation.title
@@ -82,6 +85,7 @@ struct WatchRootView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        WatchHaptics.shared.play(.primaryAction)
                         model.refresh()
                     } label: {
                         Image(systemName: "arrow.clockwise")

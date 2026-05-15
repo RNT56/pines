@@ -42,6 +42,13 @@ struct MCPToolsListResult: Decodable, Sendable {
 
 struct MCPServerNotification: Sendable {
     var method: String
+    var params: JSONValue?
+}
+
+enum MCPServerEvent: Sendable {
+    case notification(MCPServerNotification)
+    case samplingRequest(id: JSONValue, request: MCPSamplingRequest)
+    case request(id: JSONValue, method: String, params: JSONValue?)
 }
 
 final class MCPStreamableHTTPClient: @unchecked Sendable {
@@ -53,11 +60,23 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     private var sessionID: String?
     private var negotiatedProtocolVersion: String?
     private var nextID = 1
+    private let featurePolicy: MCPClientFeaturePolicy
 
-    init(server: MCPServerConfiguration, secretStore: any SecretStore, urlSession: URLSession = .shared) {
+    init(
+        server: MCPServerConfiguration,
+        secretStore: any SecretStore,
+        featurePolicy: MCPClientFeaturePolicy? = nil,
+        urlSession: URLSession = .shared
+    ) {
         self.server = server
         self.secretStore = secretStore
         self.urlSession = urlSession
+        self.featurePolicy = featurePolicy ?? MCPClientFeaturePolicy(
+            resourcesEnabled: server.resourcesEnabled,
+            promptsEnabled: server.promptsEnabled,
+            samplingEnabled: server.samplingEnabled,
+            subscriptionsEnabled: server.subscriptionsEnabled
+        )
     }
 
     func update(server: MCPServerConfiguration) {
@@ -67,10 +86,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     func initialize() async throws -> MCPInitializeResult {
         let params: JSONValue = .object([
             "protocolVersion": .string(Self.currentProtocolVersion),
-            "capabilities": .object([
-                "roots": .object(["listChanged": .bool(false)]),
-                "sampling": .object([:]),
-            ]),
+            "capabilities": featurePolicy.initializeCapabilities,
             "clientInfo": .object([
                 "name": .string("Pines"),
                 "version": .string("0.1.0"),
@@ -96,6 +112,87 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         return try await sendRequest(method: "tools/call", params: params)
     }
 
+    func listResources() async throws -> [MCPResourceRecord] {
+        var cursor: String?
+        var records = [MCPResourceRecord]()
+        repeat {
+            let params = cursor.map { JSONValue.object(["cursor": .string($0)]) }
+            let result: MCPResourcesListResult = try await sendRequest(method: "resources/list", params: params)
+            records.append(contentsOf: result.resources.map { $0.record(serverID: server.id) })
+            cursor = result.nextCursor
+        } while cursor != nil
+        return records
+    }
+
+    func readResource(uri: String) async throws -> [MCPResourceContent] {
+        let result: MCPResourceReadResult = try await sendRequest(
+            method: "resources/read",
+            params: .object(["uri": .string(uri)])
+        )
+        return result.contents
+    }
+
+    func listResourceTemplates() async throws -> [MCPResourceTemplateRecord] {
+        var cursor: String?
+        var records = [MCPResourceTemplateRecord]()
+        repeat {
+            let params = cursor.map { JSONValue.object(["cursor": .string($0)]) }
+            let result: MCPResourceTemplatesListResult = try await sendRequest(method: "resources/templates/list", params: params)
+            records.append(contentsOf: result.resourceTemplates.map { $0.record(serverID: server.id) })
+            cursor = result.nextCursor
+        } while cursor != nil
+        return records
+    }
+
+    func subscribeResource(uri: String) async throws {
+        _ = try await sendRequestEmpty(method: "resources/subscribe", params: .object(["uri": .string(uri)]))
+    }
+
+    func unsubscribeResource(uri: String) async throws {
+        _ = try await sendRequestEmpty(method: "resources/unsubscribe", params: .object(["uri": .string(uri)]))
+    }
+
+    func listPrompts() async throws -> [MCPPromptRecord] {
+        var cursor: String?
+        var records = [MCPPromptRecord]()
+        repeat {
+            let params = cursor.map { JSONValue.object(["cursor": .string($0)]) }
+            let result: MCPPromptsListResult = try await sendRequest(method: "prompts/list", params: params)
+            records.append(contentsOf: result.prompts.map { $0.record(serverID: server.id) })
+            cursor = result.nextCursor
+        } while cursor != nil
+        return records
+    }
+
+    func getPrompt(name: String, arguments: [String: String]) async throws -> MCPPromptResult {
+        var argumentObject = [String: JSONValue]()
+        for (key, value) in arguments {
+            argumentObject[key] = .string(value)
+        }
+        return try await sendRequest(
+            method: "prompts/get",
+            params: .object([
+                "name": .string(name),
+                "arguments": .object(argumentObject),
+            ])
+        )
+    }
+
+    func sendSamplingResult(id: JSONValue, result: MCPSamplingResult) async throws {
+        let value = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(result))
+        try await sendJSONRPCResponse(id: id, result: value)
+    }
+
+    func sendJSONRPCError(id: JSONValue, code: Int, message: String) async throws {
+        try await sendJSONRPCResponse(
+            id: id,
+            error: .object([
+                "code": .number(Double(code)),
+                "message": .string(message),
+            ])
+        )
+    }
+
     func terminateSession() async {
         guard sessionID != nil else { return }
         var request = URLRequest(url: server.endpointURL)
@@ -106,6 +203,25 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     }
 
     func notificationStream() -> AsyncThrowingStream<MCPServerNotification, Error> {
+        let events = serverEventStream()
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await event in events {
+                        if case let .notification(notification) = event {
+                            continuation.yield(notification)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    func serverEventStream() -> AsyncThrowingStream<MCPServerEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -130,8 +246,8 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
                     for try await rawLine in bytes.lines {
                         let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
                         if line.isEmpty {
-                            if let notification = Self.notification(fromSSEDataLines: dataLines) {
-                                continuation.yield(notification)
+                            if let event = try Self.event(fromSSEDataLines: dataLines, serverID: server.id) {
+                                continuation.yield(event)
                             }
                             dataLines.removeAll()
                         } else if line.hasPrefix("data:") {
@@ -154,6 +270,34 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     private func sendRequest<Result: Decodable>(method: String, params: JSONValue?) async throws -> Result {
         let data: Data = try await sendJSONRPC(method: method, params: params, expectsResponse: true)
         return try Self.decodeJSONRPCResult(Result.self, from: data)
+    }
+
+    private func sendRequestEmpty(method: String, params: JSONValue?) async throws {
+        let _: MCPEmptyResult = try await sendRequest(method: method, params: params)
+    }
+
+    private func sendJSONRPCResponse(id: JSONValue, result: JSONValue? = nil, error: JSONValue? = nil) async throws {
+        var body: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": id.jsonObject,
+        ]
+        if let result {
+            body["result"] = result.jsonObject
+        }
+        if let error {
+            body["error"] = error.jsonObject
+        }
+        var request = URLRequest(url: server.endpointURL)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        try await applyAuthHeader(to: &request)
+        applyBaseHeaders(to: &request)
+        let (_, response) = try await urlSession.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw MCPTransportError.invalidHTTPResponse
+        }
     }
 
     private func sendJSONRPC(method: String, params: JSONValue?, expectsResponse: Bool) async throws -> Data {
@@ -346,7 +490,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         throw MCPTransportError.invalidJSONRPCResponse
     }
 
-    private static func notification(fromSSEDataLines dataLines: [String]) -> MCPServerNotification? {
+    private static func event(fromSSEDataLines dataLines: [String], serverID: MCPServerID) throws -> MCPServerEvent? {
         guard !dataLines.isEmpty,
               let data = dataLines.joined(separator: "\n").data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -355,7 +499,33 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         else {
             return nil
         }
-        return MCPServerNotification(method: method)
+        let value = try JSONDecoder().decode(JSONValue.self, from: data)
+        let params = value.objectValue?["params"]
+        if let id = value.objectValue?["id"] {
+            if method == "sampling/createMessage" {
+                let request = try samplingRequest(id: id, serverID: serverID, params: params)
+                return .samplingRequest(id: id, request: request)
+            }
+            return .request(id: id, method: method, params: params)
+        }
+        return .notification(MCPServerNotification(method: method, params: params))
+    }
+
+    private static func samplingRequest(id: JSONValue, serverID: MCPServerID, params: JSONValue?) throws -> MCPSamplingRequest {
+        let data = try JSONEncoder().encode(params ?? .object([:]))
+        let decoded = try JSONDecoder().decode(MCPSamplingCreateMessageParams.self, from: data)
+        return MCPSamplingRequest(
+            id: id.stableString,
+            serverID: serverID,
+            messages: decoded.messages,
+            systemPrompt: decoded.systemPrompt,
+            includeContext: decoded.includeContext,
+            maxTokens: decoded.maxTokens,
+            temperature: decoded.temperature,
+            stopSequences: decoded.stopSequences ?? [],
+            modelPreferences: decoded.modelPreferences,
+            tools: decoded.tools ?? []
+        )
     }
 
     private static func isLocalHTTPHost(_ host: String?) -> Bool {
@@ -378,6 +548,105 @@ private struct MCPResponseEnvelope<Result: Decodable>: Decodable {
     var error: MCPJSONRPCError?
 }
 
+private struct MCPEmptyResult: Decodable {}
+
+private struct MCPResourcesListResult: Decodable {
+    var resources: [RemoteResource]
+    var nextCursor: String?
+}
+
+private struct MCPResourceReadResult: Decodable {
+    var contents: [MCPResourceContent]
+}
+
+private struct MCPResourceTemplatesListResult: Decodable {
+    var resourceTemplates: [RemoteResourceTemplate]
+    var nextCursor: String?
+}
+
+private struct MCPPromptsListResult: Decodable {
+    var prompts: [RemotePrompt]
+    var nextCursor: String?
+}
+
+private struct RemoteResource: Decodable {
+    var uri: String
+    var name: String
+    var title: String?
+    var description: String?
+    var mimeType: String?
+    var size: Int64?
+    var icons: [MCPIcon]?
+    var annotations: MCPAnnotations?
+
+    func record(serverID: MCPServerID) -> MCPResourceRecord {
+        MCPResourceRecord(
+            serverID: serverID,
+            uri: uri,
+            name: name,
+            title: title,
+            description: description,
+            mimeType: mimeType,
+            size: size,
+            icons: icons ?? [],
+            annotations: annotations
+        )
+    }
+}
+
+private struct RemoteResourceTemplate: Decodable {
+    var uriTemplate: String
+    var name: String
+    var title: String?
+    var description: String?
+    var mimeType: String?
+    var icons: [MCPIcon]?
+    var annotations: MCPAnnotations?
+
+    func record(serverID: MCPServerID) -> MCPResourceTemplateRecord {
+        MCPResourceTemplateRecord(
+            serverID: serverID,
+            uriTemplate: uriTemplate,
+            name: name,
+            title: title,
+            description: description,
+            mimeType: mimeType,
+            icons: icons ?? [],
+            annotations: annotations
+        )
+    }
+}
+
+private struct RemotePrompt: Decodable {
+    var name: String
+    var title: String?
+    var description: String?
+    var arguments: [MCPPromptArgument]?
+    var icons: [MCPIcon]?
+
+    func record(serverID: MCPServerID) -> MCPPromptRecord {
+        MCPPromptRecord(
+            serverID: serverID,
+            name: name,
+            title: title,
+            description: description,
+            arguments: arguments ?? [],
+            icons: icons ?? []
+        )
+    }
+}
+
+private struct MCPSamplingCreateMessageParams: Decodable {
+    var messages: [MCPPromptMessage]
+    var modelPreferences: JSONValue?
+    var systemPrompt: String?
+    var includeContext: String?
+    var maxTokens: Int?
+    var temperature: Double?
+    var stopSequences: [String]?
+    var tools: [MCPToolDefinition]?
+}
+
 private struct MCPOAuthTokenResponse: Decodable {
     var accessToken: String
     var refreshToken: String?
@@ -395,6 +664,19 @@ private extension String {
 }
 
 private extension JSONValue {
+    var stableString: String {
+        switch self {
+        case let .string(value):
+            value
+        case let .number(value):
+            String(value)
+        case let .bool(value):
+            String(value)
+        default:
+            String(decoding: (try? JSONEncoder().encode(self)) ?? Data(), as: UTF8.self)
+        }
+    }
+
     var jsonObject: Any {
         switch self {
         case let .object(value):

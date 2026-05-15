@@ -28,6 +28,7 @@
 		56FB9E2B958AE80AB1CB0856 /* MarkdownMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD9A00CA54B90E791E77F56 /* MarkdownMessageView.swift */; };
 		57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */; };
 		5A73B2F9FA959A8D2A6173EF /* BYOKCloudInferenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */; };
+		5DEFA11F0FB695B117D0E944 /* PinesHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103EAAA54824744E18DB139D /* PinesHaptics.swift */; };
 		62BBB7D1AE85A01EA319E717 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 94F08BBEEA508DB04384B5C9 /* MLX */; };
 		667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */; };
 		69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */; };
@@ -35,6 +36,7 @@
 		74762C61D2E73B7909039286 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 79453BB5651564170C3A0B1C /* Markdown */; };
 		78A1D2B0783CF04BAE99BC62 /* WatchTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC95D2DA4ED0AE5A971C6BA3 /* WatchTranscriptView.swift */; };
 		79BE7BF0C5BD5EE6979AD3B9 /* VaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CFBB6BB9E0574B8AA20150 /* VaultView.swift */; };
+		7A75A7192BA0A4B4EE4C3237 /* WatchHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */; };
 		7C1B3D61D81211AD1F0FBCF7 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = D445A834A842FDF08C100D34 /* MLXVLM */; };
 		8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */; };
 		8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 79248E6D82F6B41C4A99016B /* Tokenizers */; };
@@ -86,6 +88,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		103EAAA54824744E18DB139D /* PinesHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHaptics.swift; sourceTree = "<group>"; };
 		1E1D28BDF947E8721585572A /* PinesWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PinesWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		231A63B8882B7235FD4DD6B7 /* Pines.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Pines.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3777534B3E27910D84F4EA38 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -117,6 +120,7 @@
 		92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
 		948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchTool.swift; sourceTree = "<group>"; };
 		9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
+		A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHaptics.swift; sourceTree = "<group>"; };
 		A790E0D7CCFB1AF34B214B13 /* PinesHuggingFaceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHuggingFaceBridge.swift; sourceTree = "<group>"; };
 		AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRuntimeMetrics.swift; sourceTree = "<group>"; };
 		C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
@@ -173,6 +177,7 @@
 				D6F63C1D05D9FB3DB7AAF13B /* App */,
 				DD8D69DF1F92243025A4F280 /* Cloud */,
 				CE8D57B3B84489AD378AF98A /* Design */,
+				88A8808223E461F22F9C61EF /* Feedback */,
 				0C5E3CDF58D288579F2CB064 /* MCP */,
 				EF13282535E058B9BD5CA12A /* Persistence */,
 				8216D235A1572028B3065549 /* Runtime */,
@@ -287,6 +292,14 @@
 			path = Runtime;
 			sourceTree = "<group>";
 		};
+		88A8808223E461F22F9C61EF /* Feedback */ = {
+			isa = PBXGroup;
+			children = (
+				103EAAA54824744E18DB139D /* PinesHaptics.swift */,
+			);
+			path = Feedback;
+			sourceTree = "<group>";
+		};
 		937082C9F040A1A09D9E5EB9 /* Vault */ = {
 			isa = PBXGroup;
 			children = (
@@ -337,6 +350,7 @@
 			children = (
 				7C379B46E87980ED73F59DCD /* PinesWatchApp.swift */,
 				58FC276317CB9F908EE2727B /* WatchChatViewModel.swift */,
+				A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -441,7 +455,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1700;
+				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					5ABD42396BC25E46F453A6A1 = {
 						DevelopmentTeam = WLDMWQ963U;
@@ -522,6 +536,7 @@
 				E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */,
 				D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */,
 				55937CA552490AEA6ED46131 /* PinesDesignSystem.swift in Sources */,
+				5DEFA11F0FB695B117D0E944 /* PinesHaptics.swift in Sources */,
 				06E6CA0D37D79C43E61B8FC6 /* PinesHuggingFaceBridge.swift in Sources */,
 				57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */,
 				FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */,
@@ -539,6 +554,7 @@
 			files = (
 				38172F301F9B09B3CBA85F97 /* PinesWatchApp.swift in Sources */,
 				2CAAEFE65E1DD44DFDF11701 /* WatchChatViewModel.swift in Sources */,
+				7A75A7192BA0A4B4EE4C3237 /* WatchHaptics.swift in Sources */,
 				30026D20DA004DF5A0C2BE13 /* WatchRootView.swift in Sources */,
 				78A1D2B0783CF04BAE99BC62 /* WatchTranscriptView.swift in Sources */,
 			);

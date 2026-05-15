@@ -25,17 +25,27 @@ public struct ModelPreflightClassifier: Sendable {
         let hasTokenizer = input.files.contains { file in
             file.path == "tokenizer.json" || file.path == "tokenizer.model" || file.path == "tokenizer_config.json"
         }
+        let lowerRepository = input.repository.lowercased()
+        let hasEmbeddingSignal = lowerRepository.contains("embedding")
+            || input.tags.contains { tag in
+                let lowerTag = tag.lowercased()
+                return lowerTag == "feature-extraction"
+                    || lowerTag == "sentence-similarity"
+                    || lowerTag == "sentence-transformers"
+                    || lowerTag == "embeddings"
+            }
 
         var modalities = Set<ModelModality>()
         var reasons = [String]()
 
-        if let modelType, supportedLLMTypes.contains(modelType) {
+        if let modelType, supportedLLMTypes.contains(modelType), !hasEmbeddingSignal {
             modalities.insert(.text)
         }
         if let modelType, supportedVLMTypes.contains(modelType) || processorClass?.localizedCaseInsensitiveContains("processor") == true {
+            modalities.insert(.text)
             modalities.insert(.vision)
         }
-        if let modelType, supportedEmbedderTypes.contains(modelType) {
+        if let modelType, supportedEmbedderTypes.contains(modelType), hasEmbeddingSignal || !supportedLLMTypes.contains(modelType) {
             modalities.insert(.embeddings)
         }
 
@@ -49,7 +59,6 @@ public struct ModelPreflightClassifier: Sendable {
             reasons.append("config.json does not expose model_type.")
         }
 
-        let lowerRepository = input.repository.lowercased()
         let hasExperimentalOneBitSignal = lowerRepository.contains("1bit")
             || lowerRepository.contains("1-bit")
             || lowerRepository.contains("bitnet")
@@ -89,8 +98,9 @@ public struct ModelPreflightClassifier: Sendable {
         "glm4", "glm4_moe", "glm4_moe_lite", "starcoder2", "cohere", "openelm",
         "internlm2", "granite", "granitemoehybrid", "mimo", "mimo_v2_flash",
         "minimax", "bitnet", "smollm3", "ernie4_5", "lfm2", "lfm2_moe",
-        "exaone4", "olmo2", "olmo3", "olmoe", "falcon_h1", "jamba", "gpt_oss",
-        "nanochat", "nemotron_h", "apertus",
+        "exaone4", "olmo2", "olmo3", "olmoe", "falcon_h1", "jamba", "jamba_3b",
+        "gpt_oss", "nanochat", "nemotron_h", "apertus", "afmoe", "bailing_moe",
+        "minicpm",
     ]
 
     public static let defaultSupportedVLMTypes: Set<String> = [

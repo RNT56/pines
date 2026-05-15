@@ -6,6 +6,7 @@ struct VaultView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedItemID: PinesVaultItemPreview.ID?
     @State private var showingImporter = false
 
@@ -31,6 +32,7 @@ struct VaultView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
+                        haptics.play(.primaryAction)
                         showingImporter = true
                     } label: {
                         Image(systemName: "doc.badge.plus")
@@ -38,6 +40,7 @@ struct VaultView: View {
                     .accessibilityLabel("Import")
 
                     Button {
+                        haptics.play(.primaryAction)
                     } label: {
                         Image(systemName: "magnifyingglass")
                     }
@@ -46,6 +49,9 @@ struct VaultView: View {
             }
             .onAppear {
                 selectedItemID = selectedItemID ?? appModel.vaultItems.first?.id
+            }
+            .onChange(of: selectedItemID) { _, _ in
+                haptics.play(.navigationSelected)
             }
             .fileImporter(
                 isPresented: $showingImporter,
@@ -91,6 +97,7 @@ private struct VaultItemRow: View {
                     Text(item.title)
                         .font(theme.typography.headline)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.82)
 
                     Spacer(minLength: theme.spacing.small)
 
@@ -103,6 +110,7 @@ private struct VaultItemRow: View {
                     .font(theme.typography.callout)
                     .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(2)
+                    .minimumScaleFactor(0.86)
             }
         }
         .padding(.vertical, theme.spacing.xsmall)
@@ -118,7 +126,7 @@ private struct VaultDetailView: View {
             VStack(alignment: .leading, spacing: theme.spacing.large) {
                 PinesSectionHeader(item.title, subtitle: item.detail)
 
-                HStack(spacing: theme.spacing.small) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: theme.spacing.small)], alignment: .leading, spacing: theme.spacing.small) {
                     PinesMetricPill(title: item.kind.title, systemImage: item.kind.systemImage)
                     PinesMetricPill(title: item.sensitivity.title, systemImage: item.sensitivity.systemImage, tint: item.sensitivity == .locked ? theme.colors.warning : theme.colors.accent)
                     PinesMetricPill(title: "\(item.linkedThreads) links", systemImage: "link")
@@ -139,7 +147,7 @@ private struct VaultDetailView: View {
                             .foregroundStyle(theme.colors.tertiaryText)
                     }
                 }
-                .pinesPanel()
+                .pinesSurface(.elevated)
 
                 VStack(alignment: .leading, spacing: theme.spacing.medium) {
                     Text("Linked activity")
@@ -153,6 +161,7 @@ private struct VaultDetailView: View {
 
                             Text(index == 0 ? "Chat context prepared" : "Retrieval citation queued")
                                 .font(theme.typography.callout)
+                                .pinesFittingText()
 
                             Spacer()
                         }
@@ -163,7 +172,7 @@ private struct VaultDetailView: View {
                         }
                     }
                 }
-                .pinesPanel()
+                .pinesSurface(.panel)
             }
             .padding(theme.spacing.large)
             .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .leading)

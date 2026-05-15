@@ -16,26 +16,53 @@ public struct RemoteModelSummary: Identifiable, Hashable, Codable, Sendable {
     public var author: String?
     public var downloads: Int?
     public var likes: Int?
+    public var libraryName: String?
     public var tags: [String]
     public var task: HubTask?
     public var lastModified: Date?
+    public var files: [ModelFileInfo]
+    public var modelType: String?
+    public var license: String?
 
     public init(
         repository: String,
         author: String? = nil,
         downloads: Int? = nil,
         likes: Int? = nil,
+        libraryName: String? = nil,
         tags: [String] = [],
         task: HubTask? = nil,
-        lastModified: Date? = nil
+        lastModified: Date? = nil,
+        files: [ModelFileInfo] = [],
+        modelType: String? = nil,
+        license: String? = nil
     ) {
         self.repository = repository
         self.author = author
         self.downloads = downloads
         self.likes = likes
+        self.libraryName = libraryName
         self.tags = tags
         self.task = task
         self.lastModified = lastModified
+        self.files = files
+        self.modelType = modelType
+        self.license = license
+    }
+
+    public var preflightInput: ModelPreflightInput {
+        ModelPreflightInput(
+            repository: repository,
+            configJSON: Self.configJSON(modelType: modelType),
+            files: files,
+            tags: tags,
+            license: license
+        )
+    }
+
+    private static func configJSON(modelType: String?) -> Data? {
+        guard let modelType else { return nil }
+        return try? JSONSerialization.data(withJSONObject: ["model_type": modelType])
     }
 }
 
@@ -178,7 +205,9 @@ public struct HuggingFaceModelCatalogService: Sendable {
     public func search(filters: ModelSearchFilters, accessToken: String? = nil) async throws -> [RemoteModelSummary] {
         var components = URLComponents(url: baseURL.appending(path: "/api/models"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
-            URLQueryItem(name: "library", value: "mlx"),
+            URLQueryItem(name: "filter", value: "mlx"),
+            URLQueryItem(name: "full", value: "true"),
+            URLQueryItem(name: "config", value: "true"),
             URLQueryItem(name: "limit", value: String(max(1, min(filters.limit, 100)))),
             URLQueryItem(name: "sort", value: filters.sort.rawValue),
             URLQueryItem(name: "direction", value: filters.descending ? "-1" : "1"),
@@ -203,9 +232,15 @@ public struct HuggingFaceModelCatalogService: Sendable {
                 author: dto.author,
                 downloads: dto.downloads,
                 likes: dto.likes,
+                libraryName: dto.libraryName,
                 tags: dto.tags ?? [],
                 task: dto.pipelineTag.flatMap(HubTask.init(rawValue:)),
-                lastModified: dto.lastModified
+                lastModified: dto.lastModified,
+                files: dto.siblings?.map {
+                    ModelFileInfo(path: $0.rfilename, size: $0.size ?? $0.lfs?.size, oid: $0.blobID ?? $0.lfs?.oid)
+                } ?? [],
+                modelType: dto.config?.modelType,
+                license: dto.cardData?.license ?? dto.tags?.licenseTagValue
             )
         }
     }
@@ -271,18 +306,34 @@ private struct HubModelDTO: Decodable {
     var author: String?
     var downloads: Int?
     var likes: Int?
+    var libraryName: String?
     var tags: [String]?
     var pipelineTag: String?
     var lastModified: Date?
+    var siblings: [HubSiblingDTO]?
+    var config: HubModelConfigDTO?
+    var cardData: HubCardDataDTO?
 
     enum CodingKeys: String, CodingKey {
         case id = "modelId"
         case author
         case downloads
         case likes
+        case libraryName = "library_name"
         case tags
         case pipelineTag = "pipeline_tag"
         case lastModified = "lastModified"
+        case siblings
+        case config
+        case cardData
+    }
+}
+
+private struct HubModelConfigDTO: Decodable {
+    var modelType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case modelType = "model_type"
     }
 }
 
@@ -321,4 +372,14 @@ private struct HubLFSDTO: Decodable {
 
 private struct HubCardDataDTO: Decodable {
     var license: String?
+}
+
+private extension [String] {
+    var licenseTagValue: String? {
+        compactMap { tag -> String? in
+            guard tag.localizedCaseInsensitiveContains("license:") else { return nil }
+            return tag.split(separator: ":", maxSplits: 1).last.map(String.init)
+        }
+        .first
+    }
 }

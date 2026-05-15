@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import PinesCore
 
 @main
@@ -6,6 +9,7 @@ struct PinesCoreTestRunner {
     static func main() async throws {
         try testExecutionRouter()
         try testModelPreflight()
+        try await testModelCatalogSearch()
         try testPersistenceSchema()
         try testProductionTypes()
         try testDeviceProfiles()
@@ -83,6 +87,74 @@ struct PinesCoreTestRunner {
             )
         )
         try expectEqual(unsupported.verification, .unsupported)
+
+        let embedding = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+                configJSON: #"{"model_type":"qwen3"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 600_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "feature-extraction", "sentence-similarity"]
+            )
+        )
+        try expectEqual(embedding.modalities, [.embeddings])
+
+        let vlm = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+                configJSON: #"{"model_type":"qwen2_5_vl"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 3_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ]
+            )
+        )
+        try expect(vlm.modalities.contains(.text), "VLM preflight should remain text-capable")
+        try expect(vlm.modalities.contains(.vision), "VLM preflight should be vision-capable")
+    }
+
+    private static func testModelCatalogSearch() async throws {
+        let client = RecordingHTTPClient(
+            payload: """
+            [
+              {
+                "modelId": "example/Qwen3-Embedding-0.6B-MLX",
+                "author": "example",
+                "downloads": 42,
+                "likes": 7,
+                "library_name": "mlx",
+                "pipeline_tag": "feature-extraction",
+                "tags": ["mlx", "safetensors", "qwen3", "feature-extraction", "license:apache-2.0"],
+                "config": { "model_type": "qwen3" },
+                "siblings": [
+                  { "rfilename": "model.safetensors", "size": 600000000, "lfs": { "oid": "abc", "size": 600000000 } },
+                  { "rfilename": "tokenizer.json", "size": 300000 }
+                ]
+              }
+            ]
+            """
+        )
+        let service = HuggingFaceModelCatalogService(client: client, baseURL: URL(string: "https://hub.test")!)
+        let models = try await service.search(filters: ModelSearchFilters(query: "qwen", task: .featureExtraction, limit: 5))
+        let requestURL = try await client.lastURL()
+        let queryItems = Dictionary(uniqueKeysWithValues: URLComponents(url: requestURL, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
+
+        try expectEqual(queryItems["filter"], "mlx")
+        try expectEqual(queryItems["full"], "true")
+        try expectEqual(queryItems["config"], "true")
+        try expectEqual(queryItems["search"], "qwen")
+        try expectEqual(queryItems["pipeline_tag"], "feature-extraction")
+        try expectEqual(models.count, 1)
+        try expectEqual(models[0].libraryName, "mlx")
+        try expectEqual(models[0].modelType, "qwen3")
+        try expectEqual(models[0].files.count, 2)
+        try expectEqual(models[0].license, "apache-2.0")
+
+        let classified = ModelPreflightClassifier().classify(models[0].preflightInput)
+        try expectEqual(classified.verification, .installable)
+        try expectEqual(classified.modalities, [.embeddings])
     }
 
     private static func testPersistenceSchema() throws {
@@ -99,7 +171,9 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS tool_runs"), "missing tool run table")
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_servers"), "missing MCP server table")
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_tools"), "missing MCP tool table")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 4)
+        try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_resources"), "missing MCP resources table")
+        try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_prompts"), "missing MCP prompts table")
+        try expectEqual(PinesDatabaseSchema.currentVersion, 5)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")
@@ -315,6 +389,16 @@ struct PinesCoreTestRunner {
         )
         let decoded = try JSONDecoder().decode(MCPToolRecord.self, from: JSONEncoder().encode(record))
         try expectEqual(decoded, record)
+
+        let policy = MCPClientFeaturePolicy(samplingEnabled: true)
+        let capabilities = try expectDictionary(policy.initializeCapabilities.anySendable, "sampling policy must encode object")
+        try expect(capabilities["sampling"] != nil, "sampling should be advertised when enabled")
+        let noRoots = try expectDictionary(MCPClientFeaturePolicy().initializeCapabilities.anySendable, "empty policy must encode object")
+        try expect(noRoots["roots"] == nil, "Pines must not advertise roots")
+
+        let promptMessage = MCPPromptMessage(role: .user, content: [.text("hello")])
+        let decodedMessage = try JSONDecoder().decode(MCPPromptMessage.self, from: JSONEncoder().encode(promptMessage))
+        try expectEqual(decodedMessage, promptMessage)
     }
 
     private static func testMarkdownMessageParser() throws {
@@ -543,6 +627,35 @@ private struct FakeInferenceProvider: InferenceProvider {
 
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
         EmbeddingResult(modelID: request.modelID, vectors: [[1, 0]])
+    }
+}
+
+private actor RecordingHTTPClient: HTTPClient {
+    private let payload: Data
+    private var urls: [URL] = []
+
+    init(payload: String) {
+        self.payload = Data(payload.utf8)
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if let url = request.url {
+            urls.append(url)
+        }
+        let response = HTTPURLResponse(
+            url: request.url ?? URL(string: "https://hub.test")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (payload, response)
+    }
+
+    func lastURL() throws -> URL {
+        guard let url = urls.last else {
+            throw TestFailure("expected recorded HTTP request")
+        }
+        return url
     }
 }
 

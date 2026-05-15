@@ -4,6 +4,7 @@ import PinesCore
 struct SettingsView: View {
     @Environment(\.pinesTheme) private var theme
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedSectionID: PinesSettingsSection.ID?
 
     private var selectedSection: PinesSettingsSection? {
@@ -17,7 +18,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedSectionID) {
-                Section("Preferences") {
+                Section("Settings") {
                     ForEach(appModel.settingsSections) { section in
                         SettingsSectionRow(section: section)
                             .tag(section.id)
@@ -27,6 +28,9 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .onAppear {
                 selectedSectionID = selectedSectionID ?? appModel.settingsSections.first?.id
+            }
+            .onChange(of: selectedSectionID) { _, _ in
+                haptics.play(.navigationSelected)
             }
             .scrollContentBackground(.hidden)
             .background(theme.colors.secondaryBackground)
@@ -65,11 +69,13 @@ private struct SettingsSectionRow: View {
             VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
                 Text(section.title)
                     .font(theme.typography.headline)
+                    .pinesFittingText()
 
                 Text(section.subtitle)
                     .font(theme.typography.callout)
                     .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(2)
+                    .minimumScaleFactor(0.86)
             }
         }
         .padding(.vertical, theme.spacing.xsmall)
@@ -80,6 +86,7 @@ private struct SettingsDetailView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
     let section: PinesSettingsSection
     let executionMode: AgentExecutionMode
     let storeConfiguration: LocalStoreConfiguration
@@ -102,7 +109,15 @@ private struct SettingsDetailView: View {
     @State private var mcpOAuthResource = ""
     @State private var mcpEnabled = true
     @State private var mcpAllowInsecureLocalHTTP = false
+    @State private var mcpResourcesEnabled = false
+    @State private var mcpPromptsEnabled = false
+    @State private var mcpSamplingEnabled = false
+    @State private var mcpBYOKSamplingEnabled = false
+    @State private var mcpSubscriptionsEnabled = false
+    @State private var mcpMaxSamplingRequests = 3
     @State private var mcpEditingServerID: MCPServerID?
+    @State private var mcpResourcePreviews: [String: String] = [:]
+    @State private var mcpPromptArguments: [String: String] = [:]
     @State private var huggingFaceToken = ""
     @State private var braveSearchKey = ""
 
@@ -124,7 +139,7 @@ private struct SettingsDetailView: View {
                 .padding(.vertical, theme.spacing.xsmall)
             }
 
-            Section("Defaults") {
+            Section("At a glance") {
                 ForEach(section.rows) { row in
                     HStack(spacing: theme.spacing.medium) {
                         Image(systemName: row.systemImage)
@@ -137,115 +152,148 @@ private struct SettingsDetailView: View {
 
                         Text(row.detail)
                             .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
                     }
                 }
             }
 
-            Section("Design template") {
-                Picker("Interface mode", selection: $interfaceMode) {
-                    ForEach(PinesInterfaceMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: interfaceMode) { _, _ in
-                    Task {
-                        await appModel.saveSettings(services: services)
-                    }
-                }
-
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
-                    ForEach(PinesThemeTemplate.allCases) { template in
-                        Button {
-                            withAnimation(theme.motion.standard) {
-                                selectedThemeTemplate = template
-                            }
-                            Task {
-                                await appModel.saveSettings(services: services)
-                            }
-                        } label: {
-                            PinesThemePreviewCard(
-                                template: template,
-                                isSelected: selectedThemeTemplate == template
-                            )
+            if section.destination == .design {
+                Section("Appearance") {
+                    Picker("Interface mode", selection: $interfaceMode) {
+                        ForEach(PinesInterfaceMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
                         }
-                        .buttonStyle(.plain)
                     }
-                }
-                .padding(.vertical, theme.spacing.xsmall)
-            }
-
-            Section("Core") {
-                Picker("Execution mode", selection: $appModel.executionMode) {
-                    ForEach(AgentExecutionMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .onChange(of: appModel.executionMode) { _, _ in
-                    Task {
-                        await appModel.saveSettings(services: services)
-                    }
-                }
-
-                LabeledContent("Store", value: appModel.storeConfiguration.databaseFileName)
-                LabeledContent("Protection", value: appModel.storeConfiguration.dataProtection.title)
-            }
-
-            Section("Architecture health") {
-                ForEach(services.serviceHealth) { service in
-                    HStack(spacing: theme.spacing.medium) {
-                        Circle()
-                            .fill(service.readiness.tint(in: theme))
-                            .frame(width: 9, height: 9)
-
-                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                            Text(service.name)
-                                .font(theme.typography.headline)
-
-                            Text(service.summary)
-                                .font(theme.typography.caption)
-                                .foregroundStyle(theme.colors.secondaryText)
+                    .pickerStyle(.segmented)
+                    .onChange(of: interfaceMode) { _, _ in
+                        Task {
+                            await appModel.saveSettings(services: services)
                         }
-
-                        Spacer()
-
-                        Text(service.readiness.title)
-                            .font(theme.typography.caption)
-                            .foregroundStyle(service.readiness.tint(in: theme))
                     }
-                }
-            }
 
-            Section("Audit") {
-                if appModel.auditEvents.isEmpty {
-                    Text("No audit events recorded.")
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
+                        ForEach(PinesThemeTemplate.allCases) { template in
+                            Button {
+                                withAnimation(theme.motion.standard) {
+                                    selectedThemeTemplate = template
+                                }
+                                Task {
+                                    await appModel.saveSettings(services: services)
+                                }
+                            } label: {
+                                PinesThemePreviewCard(
+                                    template: template,
+                                    isSelected: selectedThemeTemplate == template
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, theme.spacing.xsmall)
+                }
+
+                Section("Haptics") {
+                    Picker("Feedback", selection: $haptics.mode) {
+                        ForEach(PinesHapticMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: haptics.mode) { _, newMode in
+                        if newMode != .off {
+                            haptics.play(.primaryAction)
+                        }
+                    }
+
+                    Text(haptics.mode.subtitle)
+                        .font(theme.typography.caption)
                         .foregroundStyle(theme.colors.secondaryText)
-                } else {
-                    ForEach(appModel.auditEvents.prefix(8)) { event in
-                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                            HStack {
-                                Text(event.category.rawValue)
-                                    .font(theme.typography.caption.weight(.semibold))
-                                    .foregroundStyle(theme.colors.accent)
-                                Spacer()
-                                Text(event.createdAt, style: .time)
-                                    .font(theme.typography.caption)
-                                    .foregroundStyle(theme.colors.tertiaryText)
-                            }
-                            Text(event.summary)
-                                .font(theme.typography.callout)
-                            if let payload = event.redactedPayload {
-                                Text(payload)
+                }
+            }
+
+            if section.destination == .inference {
+                Section("Execution") {
+                    Picker("Execution mode", selection: $appModel.executionMode) {
+                        ForEach(AgentExecutionMode.allCases, id: \.self) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .onChange(of: appModel.executionMode) { _, _ in
+                        Task {
+                            await appModel.saveSettings(services: services)
+                        }
+                    }
+
+                    Text("Controls how Pines routes chat work between local MLX inference and configured cloud providers.")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+            }
+
+            if section.destination == .system {
+                Section("Architecture health") {
+                    ForEach(services.serviceHealth) { service in
+                        HStack(spacing: theme.spacing.medium) {
+                            PinesStatusIndicator(
+                                color: service.readiness.tint(in: theme),
+                                isActive: service.readiness == .booting,
+                                size: 9
+                            )
+
+                            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                                Text(service.name)
+                                    .font(theme.typography.headline)
+                                    .pinesFittingText()
+
+                                Text(service.summary)
                                     .font(theme.typography.caption)
                                     .foregroundStyle(theme.colors.secondaryText)
-                                    .lineLimit(3)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.86)
+                            }
+
+                            Spacer()
+
+                            Text(service.readiness.title)
+                                .font(theme.typography.caption)
+                                .foregroundStyle(service.readiness.tint(in: theme))
+                        }
+                    }
+                }
+
+                Section("Audit") {
+                    if appModel.auditEvents.isEmpty {
+                        Text("No audit events recorded.")
+                            .foregroundStyle(theme.colors.secondaryText)
+                    } else {
+                        ForEach(appModel.auditEvents.prefix(8)) { event in
+                            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                                HStack {
+                                    Text(event.category.rawValue)
+                                        .font(theme.typography.caption.weight(.semibold))
+                                        .foregroundStyle(theme.colors.accent)
+                                    Spacer()
+                                    Text(event.createdAt, style: .time)
+                                        .font(theme.typography.caption)
+                                        .foregroundStyle(theme.colors.tertiaryText)
+                                }
+                                Text(event.summary)
+                                    .font(theme.typography.callout)
+                                if let payload = event.redactedPayload {
+                                    Text(payload)
+                                        .font(theme.typography.caption)
+                                        .foregroundStyle(theme.colors.secondaryText)
+                                        .lineLimit(3)
+                                }
                             }
                         }
                     }
                 }
             }
 
-            Section("Runtime") {
+            if section.destination == .inference {
+                Section("Runtime diagnostics") {
                 let diagnostics = services.mlxRuntime.runtimeDiagnostics
                 let memory = diagnostics.memoryCounters
                 Toggle("Local inference", isOn: .constant(true))
@@ -318,39 +366,9 @@ private struct SettingsDetailView: View {
                 if let fallback = diagnostics.activeFallbackReason {
                     LabeledContent("Fallback", value: fallback)
                 }
-                Toggle("Private iCloud sync", isOn: Binding(
-                    get: { iCloudSyncAvailable && appModel.storeConfiguration.iCloudSyncEnabled },
-                    set: { value in
-                        appModel.storeConfiguration.iCloudSyncEnabled = iCloudSyncAvailable && value
-                        Task {
-                            await appModel.saveSettings(services: services)
-                        }
-                    }
-                ))
-                .disabled(!iCloudSyncAvailable)
-                Toggle("Sync source documents", isOn: Binding(
-                    get: { appModel.storeConfiguration.syncsSourceDocuments },
-                    set: { value in
-                        appModel.storeConfiguration.syncsSourceDocuments = value
-                        Task {
-                            await appModel.saveSettings(services: services)
-                        }
-                    }
-                ))
-                .disabled(!iCloudSyncAvailable || !appModel.storeConfiguration.iCloudSyncEnabled)
-                Toggle("Sync embeddings", isOn: Binding(
-                    get: { appModel.storeConfiguration.syncsEmbeddings },
-                    set: { value in
-                        appModel.storeConfiguration.syncsEmbeddings = value
-                        Task {
-                            await appModel.saveSettings(services: services)
-                        }
-                    }
-                ))
-                .disabled(!iCloudSyncAvailable || !appModel.storeConfiguration.iCloudSyncEnabled)
             }
 
-            Section("Hugging Face") {
+                Section("Hugging Face") {
                 LabeledContent("Hub token", value: appModel.huggingFaceCredentialStatus)
                 SecureField("Access token", text: $huggingFaceToken)
                     .textContentType(.password)
@@ -365,6 +383,7 @@ private struct SettingsDetailView: View {
                         Label("Save", systemImage: "key.fill")
                     }
                     .disabled(huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .pinesButtonStyle(.primary)
 
                     Button {
                         Task {
@@ -373,6 +392,7 @@ private struct SettingsDetailView: View {
                     } label: {
                         Label("Validate", systemImage: "checkmark.seal")
                     }
+                    .pinesButtonStyle(.secondary)
 
                     Button(role: .destructive) {
                         Task {
@@ -382,10 +402,13 @@ private struct SettingsDetailView: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .pinesButtonStyle(.destructive)
                 }
             }
+            }
 
-            Section("Agent Tool Keys") {
+            if section.destination == .tools {
+                Section("Agent Tool Keys") {
                 LabeledContent("Brave Search", value: appModel.braveSearchCredentialStatus)
                 SecureField("Brave Search API key", text: $braveSearchKey)
                     .textContentType(.password)
@@ -400,6 +423,7 @@ private struct SettingsDetailView: View {
                         Label("Save", systemImage: "magnifyingglass.circle")
                     }
                     .disabled(braveSearchKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .pinesButtonStyle(.primary)
 
                     Button(role: .destructive) {
                         Task {
@@ -409,10 +433,49 @@ private struct SettingsDetailView: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .pinesButtonStyle(.destructive)
                 }
             }
 
-            Section("Cloud BYOK") {
+            }
+
+            if section.destination == .privacy {
+                Section("Storage and Sync") {
+                    LabeledContent("Store", value: appModel.storeConfiguration.databaseFileName)
+                    LabeledContent("Protection", value: appModel.storeConfiguration.dataProtection.title)
+                    Toggle("Private iCloud sync", isOn: Binding(
+                        get: { iCloudSyncAvailable && appModel.storeConfiguration.iCloudSyncEnabled },
+                        set: { value in
+                            appModel.storeConfiguration.iCloudSyncEnabled = iCloudSyncAvailable && value
+                            Task {
+                                await appModel.saveSettings(services: services)
+                            }
+                        }
+                    ))
+                    .disabled(!iCloudSyncAvailable)
+                    Toggle("Sync source documents", isOn: Binding(
+                        get: { appModel.storeConfiguration.syncsSourceDocuments },
+                        set: { value in
+                            appModel.storeConfiguration.syncsSourceDocuments = value
+                            Task {
+                                await appModel.saveSettings(services: services)
+                            }
+                        }
+                    ))
+                    .disabled(!iCloudSyncAvailable || !appModel.storeConfiguration.iCloudSyncEnabled)
+                    Toggle("Sync embeddings", isOn: Binding(
+                        get: { appModel.storeConfiguration.syncsEmbeddings },
+                        set: { value in
+                            appModel.storeConfiguration.syncsEmbeddings = value
+                            Task {
+                                await appModel.saveSettings(services: services)
+                            }
+                        }
+                    ))
+                    .disabled(!iCloudSyncAvailable || !appModel.storeConfiguration.iCloudSyncEnabled)
+                }
+
+                Section("Cloud BYOK") {
                 Picker("Provider", selection: $providerKind) {
                     ForEach(CloudProviderKind.allCases, id: \.self) { kind in
                         Text(kind.title).tag(kind)
@@ -443,11 +506,13 @@ private struct SettingsDetailView: View {
                 } label: {
                     Label("Save and validate", systemImage: "key")
                 }
+                .pinesButtonStyle(.primary)
 
                 ForEach(appModel.cloudProviders) { provider in
                     HStack {
                         VStack(alignment: .leading) {
                             Text(provider.displayName)
+                                .pinesFittingText()
                             Text(provider.kind.title)
                                 .font(theme.typography.caption)
                                 .foregroundStyle(theme.colors.secondaryText)
@@ -463,8 +528,8 @@ private struct SettingsDetailView: View {
                         } label: {
                             Image(systemName: "checkmark.seal")
                         }
-                        .buttonStyle(.borderless)
                         .accessibilityLabel("Validate \(provider.displayName)")
+                        .pinesButtonStyle(.icon)
 
                         Button(role: .destructive) {
                             Task {
@@ -473,12 +538,14 @@ private struct SettingsDetailView: View {
                         } label: {
                             Image(systemName: "trash")
                         }
-                        .buttonStyle(.borderless)
                         .accessibilityLabel("Delete \(provider.displayName)")
+                        .pinesButtonStyle(.icon)
                     }
                 }
             }
+            }
 
+            if section.destination == .tools {
             Section("MCP Servers") {
                 HStack {
                     Text(mcpEditingServerID == nil ? "New server" : "Editing server")
@@ -489,7 +556,7 @@ private struct SettingsDetailView: View {
                     } label: {
                         Label("New", systemImage: "plus")
                     }
-                    .buttonStyle(.borderless)
+                    .pinesButtonStyle(.secondary)
                 }
                 TextField("Display name", text: $mcpName)
                 TextField("Streamable HTTP endpoint", text: $mcpEndpointURL)
@@ -523,8 +590,17 @@ private struct SettingsDetailView: View {
                 }
                 Toggle("Enable server", isOn: $mcpEnabled)
                 Toggle("Allow insecure local HTTP", isOn: $mcpAllowInsecureLocalHTTP)
+                Toggle("Resources", isOn: $mcpResourcesEnabled)
+                Toggle("Prompts", isOn: $mcpPromptsEnabled)
+                Toggle("Sampling", isOn: $mcpSamplingEnabled)
+                Toggle("BYOK sampling", isOn: $mcpBYOKSamplingEnabled)
+                    .disabled(!mcpSamplingEnabled)
+                Toggle("Resource subscriptions", isOn: $mcpSubscriptionsEnabled)
+                    .disabled(!mcpResourcesEnabled)
+                Stepper("Sampling requests per session: \(mcpMaxSamplingRequests)", value: $mcpMaxSamplingRequests, in: 0...20)
+                    .disabled(!mcpSamplingEnabled)
 
-                HStack {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
                     Button {
                         Task {
                             await appModel.saveMCPServer(
@@ -538,6 +614,12 @@ private struct SettingsDetailView: View {
                                 oauthClientID: mcpOAuthClientID,
                                 oauthScopes: mcpOAuthScopes,
                                 oauthResource: mcpOAuthResource,
+                                resourcesEnabled: mcpResourcesEnabled,
+                                promptsEnabled: mcpPromptsEnabled,
+                                samplingEnabled: mcpSamplingEnabled,
+                                byokSamplingEnabled: mcpBYOKSamplingEnabled,
+                                subscriptionsEnabled: mcpSubscriptionsEnabled,
+                                maxSamplingRequestsPerSession: mcpMaxSamplingRequests,
                                 enabled: mcpEnabled,
                                 allowInsecureLocalHTTP: mcpAllowInsecureLocalHTTP,
                                 services: services
@@ -547,6 +629,7 @@ private struct SettingsDetailView: View {
                     } label: {
                         Label("Save and discover tools", systemImage: "point.3.connected.trianglepath.dotted")
                     }
+                    .pinesButtonStyle(.primary, fillWidth: true)
 
                     Button {
                         Task {
@@ -567,6 +650,7 @@ private struct SettingsDetailView: View {
                         Label("Discover OAuth", systemImage: "sparkle.magnifyingglass")
                     }
                     .disabled(mcpEndpointURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .pinesButtonStyle(.secondary, fillWidth: true)
                 }
 
                 if appModel.mcpServers.isEmpty {
@@ -579,15 +663,18 @@ private struct SettingsDetailView: View {
                                 VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
                                     Text(server.displayName)
                                         .font(theme.typography.headline)
+                                        .pinesFittingText()
                                     Text(server.endpointURL.absoluteString)
                                         .font(theme.typography.caption)
                                         .foregroundStyle(theme.colors.secondaryText)
                                         .lineLimit(1)
+                                        .minimumScaleFactor(0.78)
                                 }
                                 Spacer()
                                 Text(server.status.rawValue)
                                     .font(theme.typography.caption)
                                     .foregroundStyle(server.status == .ready ? theme.colors.success : theme.colors.warning)
+                                    .pinesFittingText()
                                 Button {
                                     Task {
                                         await appModel.refreshMCPServer(server, services: services)
@@ -595,15 +682,15 @@ private struct SettingsDetailView: View {
                                 } label: {
                                     Image(systemName: "arrow.clockwise")
                                 }
-                                .buttonStyle(.borderless)
                                 .accessibilityLabel("Refresh \(server.displayName)")
+                                .pinesButtonStyle(.icon)
                                 Button {
                                     loadMCPServer(server)
                                 } label: {
                                     Image(systemName: "pencil")
                                 }
-                                .buttonStyle(.borderless)
                                 .accessibilityLabel("Edit \(server.displayName)")
+                                .pinesButtonStyle(.icon)
                                 if server.authMode == .oauthPKCE {
                                     Button {
                                         Task {
@@ -612,8 +699,8 @@ private struct SettingsDetailView: View {
                                     } label: {
                                         Image(systemName: "person.badge.key")
                                     }
-                                    .buttonStyle(.borderless)
                                     .accessibilityLabel("Connect OAuth for \(server.displayName)")
+                                    .pinesButtonStyle(.icon)
                                     Button {
                                         Task {
                                             await appModel.disconnectMCPOAuth(server, services: services)
@@ -621,8 +708,8 @@ private struct SettingsDetailView: View {
                                     } label: {
                                         Image(systemName: "person.badge.minus")
                                     }
-                                    .buttonStyle(.borderless)
                                     .accessibilityLabel("Disconnect OAuth for \(server.displayName)")
+                                    .pinesButtonStyle(.icon)
                                 }
                                 Button(role: .destructive) {
                                     Task {
@@ -631,8 +718,8 @@ private struct SettingsDetailView: View {
                                 } label: {
                                     Image(systemName: "trash")
                                 }
-                                .buttonStyle(.borderless)
                                 .accessibilityLabel("Delete \(server.displayName)")
+                                .pinesButtonStyle(.icon)
                             }
                             if let error = server.lastError {
                                 Text(error)
@@ -643,6 +730,11 @@ private struct SettingsDetailView: View {
                             if let connectedAt = server.lastConnectedAt {
                                 LabeledContent("Last connected", value: connectedAt.formatted(date: .abbreviated, time: .shortened))
                             }
+                            LabeledContent(
+                                "Capabilities",
+                                value: server.enabledCapabilityTitles.joined(separator: ", ").nilIfEmpty ?? "Tools only"
+                            )
+                            DisclosureGroup("Tools") {
                             ForEach(appModel.mcpTools.filter { $0.serverID == server.id }) { tool in
                                 Toggle(isOn: Binding(
                                     get: { tool.enabled },
@@ -664,16 +756,165 @@ private struct SettingsDetailView: View {
                                     }
                                 }
                             }
+                            }
+                            DisclosureGroup("Resources") {
+                                Button {
+                                    Task {
+                                        await appModel.refreshMCPResources(server, services: services)
+                                    }
+                                } label: {
+                                    Label("Refresh resources", systemImage: "arrow.clockwise")
+                                }
+                                .pinesButtonStyle(.secondary)
+                                ForEach(appModel.mcpResources.filter { $0.serverID == server.id }) { resource in
+                                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                                        Text(resource.title ?? resource.name)
+                                        Text(resource.uri)
+                                            .font(theme.typography.caption)
+                                            .foregroundStyle(theme.colors.secondaryText)
+                                            .lineLimit(1)
+                                        Button {
+                                            Task {
+                                                if let preview = await appModel.previewMCPResource(resource, services: services) {
+                                                    mcpResourcePreviews[resource.uri] = preview
+                                                }
+                                            }
+                                        } label: {
+                                            Label("Preview", systemImage: "doc.text.magnifyingglass")
+                                        }
+                                        .pinesButtonStyle(.secondary)
+                                        if let preview = mcpResourcePreviews[resource.uri] {
+                                            Text(preview)
+                                                .font(theme.typography.caption)
+                                                .foregroundStyle(theme.colors.secondaryText)
+                                                .lineLimit(8)
+                                                .textSelection(.enabled)
+                                        }
+                                        HStack {
+                                            Toggle("Attach to chat context", isOn: Binding(
+                                                get: { resource.selectedForContext },
+                                                set: { value in
+                                                    Task {
+                                                        await appModel.setMCPResourceSelected(resource, selected: value, services: services)
+                                                    }
+                                                }
+                                            ))
+                                            if server.subscriptionsEnabled {
+                                                Toggle("Subscribe", isOn: Binding(
+                                                    get: { resource.subscribed },
+                                                    set: { value in
+                                                        Task {
+                                                            await appModel.setMCPResourceSubscribed(resource, subscribed: value, services: services)
+                                                        }
+                                                    }
+                                                ))
+                                            }
+                                        }
+                                    }
+                                }
+                                if !appModel.mcpResourceTemplates.filter({ $0.serverID == server.id }).isEmpty {
+                                    Text("Templates")
+                                        .font(theme.typography.headline)
+                                    ForEach(appModel.mcpResourceTemplates.filter { $0.serverID == server.id }) { template in
+                                        VStack(alignment: .leading) {
+                                            Text(template.title ?? template.name)
+                                            Text(template.uriTemplate)
+                                                .font(theme.typography.caption)
+                                                .foregroundStyle(theme.colors.secondaryText)
+                                        }
+                                    }
+                                }
+                            }
+                            .disabled(!server.resourcesEnabled)
+                            DisclosureGroup("Prompts") {
+                                Button {
+                                    Task {
+                                        await appModel.refreshMCPPrompts(server, services: services)
+                                    }
+                                } label: {
+                                    Label("Refresh prompts", systemImage: "arrow.clockwise")
+                                }
+                                .pinesButtonStyle(.secondary)
+                                ForEach(appModel.mcpPrompts.filter { $0.serverID == server.id }) { prompt in
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                                            Text(prompt.title ?? prompt.name)
+                                            Text(prompt.description ?? "No description")
+                                                .font(theme.typography.caption)
+                                                .foregroundStyle(theme.colors.secondaryText)
+                                                .lineLimit(2)
+                                            ForEach(prompt.arguments, id: \.name) { argument in
+                                                TextField(
+                                                    argument.required == true ? "\(argument.name) required" : argument.name,
+                                                    text: promptArgumentBinding(prompt: prompt, argument: argument)
+                                                )
+                                                .textInputAutocapitalization(.never)
+                                                .autocorrectionDisabled()
+                                            }
+                                        }
+                                        Spacer()
+                                        Button {
+                                            Task {
+                                                await appModel.useMCPPrompt(
+                                                    prompt,
+                                                    arguments: promptArguments(for: prompt),
+                                                    services: services
+                                                )
+                                            }
+                                        } label: {
+                                            Image(systemName: "text.bubble")
+                                        }
+                                        .accessibilityLabel("Use \(prompt.name)")
+                                        .pinesButtonStyle(.icon)
+                                    }
+                                }
+                            }
+                            .disabled(!server.promptsEnabled)
+                            DisclosureGroup("Sampling") {
+                                LabeledContent("Enabled", value: server.samplingEnabled ? "Yes" : "No")
+                                LabeledContent("BYOK", value: server.byokSamplingEnabled ? "Allowed" : "Disabled")
+                                LabeledContent("Limit", value: "\(server.maxSamplingRequestsPerSession) per session")
+                            }
+                            .disabled(!server.samplingEnabled)
+                            DisclosureGroup("Auth") {
+                                LabeledContent("Mode", value: server.authMode.title)
+                                if let resource = server.oauthResource {
+                                    LabeledContent("Resource", value: resource)
+                                }
+                            }
+                            DisclosureGroup("Activity") {
+                                LabeledContent("Status", value: server.status.rawValue)
+                                if let error = server.lastError {
+                                    Text(error)
+                                        .font(theme.typography.caption)
+                                        .foregroundStyle(theme.colors.danger)
+                                }
+                            }
                         }
                         .padding(.vertical, theme.spacing.xsmall)
                     }
                 }
+            }
             }
         }
         .navigationTitle(section.title)
         .pinesInlineNavigationTitle()
         .scrollContentBackground(.hidden)
         .pinesAppBackground()
+    }
+
+    private func promptArgumentBinding(prompt: MCPPromptRecord, argument: MCPPromptArgument) -> Binding<String> {
+        let key = "\(prompt.id):\(argument.name)"
+        return Binding(
+            get: { mcpPromptArguments[key] ?? "" },
+            set: { mcpPromptArguments[key] = $0 }
+        )
+    }
+
+    private func promptArguments(for prompt: MCPPromptRecord) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: prompt.arguments.map { argument in
+            ("\(argument.name)", mcpPromptArguments["\(prompt.id):\(argument.name)"] ?? "")
+        })
     }
 
     private func applyProviderDefaults(_ kind: CloudProviderKind) {
@@ -695,6 +936,12 @@ private struct SettingsDetailView: View {
         mcpOAuthResource = server.oauthResource ?? ""
         mcpEnabled = server.enabled
         mcpAllowInsecureLocalHTTP = server.allowInsecureLocalHTTP
+        mcpResourcesEnabled = server.resourcesEnabled
+        mcpPromptsEnabled = server.promptsEnabled
+        mcpSamplingEnabled = server.samplingEnabled
+        mcpBYOKSamplingEnabled = server.byokSamplingEnabled
+        mcpSubscriptionsEnabled = server.subscriptionsEnabled
+        mcpMaxSamplingRequests = server.maxSamplingRequestsPerSession
     }
 
     private func resetMCPForm() {
@@ -710,6 +957,39 @@ private struct SettingsDetailView: View {
         mcpOAuthResource = ""
         mcpEnabled = true
         mcpAllowInsecureLocalHTTP = false
+        mcpResourcesEnabled = false
+        mcpPromptsEnabled = false
+        mcpSamplingEnabled = false
+        mcpBYOKSamplingEnabled = false
+        mcpSubscriptionsEnabled = false
+        mcpMaxSamplingRequests = 3
+    }
+}
+
+private enum SettingsDestination {
+    case design
+    case inference
+    case privacy
+    case tools
+    case system
+}
+
+private extension PinesSettingsSection {
+    var destination: SettingsDestination {
+        switch title {
+        case "Design":
+            .design
+        case "Inference":
+            .inference
+        case "Privacy":
+            .privacy
+        case "Tools":
+            .tools
+        case "System":
+            .system
+        default:
+            .design
+        }
     }
 }
 
@@ -843,6 +1123,22 @@ private extension MCPAuthMode {
         case .oauthPKCE:
             "OAuth PKCE"
         }
+    }
+}
+
+private extension MCPServerConfiguration {
+    var enabledCapabilityTitles: [String] {
+        var values = [String]()
+        if resourcesEnabled { values.append("Resources") }
+        if promptsEnabled { values.append("Prompts") }
+        if samplingEnabled { values.append("Sampling") }
+        return values
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

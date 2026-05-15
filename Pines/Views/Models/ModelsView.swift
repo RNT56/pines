@@ -5,6 +5,7 @@ struct ModelsView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedModelID: PinesModelPreview.ID?
     @State private var searchText = ""
     @State private var selectedTaskFilter: HubTask?
@@ -28,6 +29,20 @@ struct ModelsView: View {
         ].joined(separator: "|")
     }
 
+    private var isDiscovering: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || selectedTaskFilter != nil
+            || selectedVerificationFilter != nil
+            || selectedInstallStateFilter != nil
+    }
+
+    private var modelSectionTitle: String {
+        if appModel.isSearchingModels {
+            return "Searching Hugging Face"
+        }
+        return isDiscovering ? "MLX Hub results" : "Recommended models"
+    }
+
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedModelID) {
@@ -42,30 +57,41 @@ struct ModelsView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                if searchText.isEmpty, !appModel.modelSuggestions.isEmpty {
-                    Section("Suggestions") {
-                        ForEach(appModel.modelSuggestions, id: \.self) { suggestion in
-                            Button {
-                                searchText = suggestion
-                            } label: {
-                                Label(suggestion, systemImage: "sparkle.magnifyingglass")
-                                    .lineLimit(1)
-                            }
-                        }
+                Section {
+                    if appModel.isSearchingModels {
+                        ModelListStatusRow(
+                            title: "Searching Hugging Face",
+                            detail: "Checking MLX metadata",
+                            systemImage: "magnifyingglass",
+                            showsProgress: true
+                        )
                     }
-                }
 
-                Section(appModel.isSearchingModels ? "Searching Hugging Face" : "Models") {
                     if let error = appModel.modelSearchError {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .font(theme.typography.caption)
-                            .foregroundStyle(theme.colors.warning)
+                        ModelListStatusRow(
+                            title: "Search failed",
+                            detail: error,
+                            systemImage: "exclamationmark.triangle.fill",
+                            tint: theme.colors.warning
+                        )
+                    } else if !appModel.isSearchingModels, appModel.models.isEmpty {
+                        ModelListStatusRow(
+                            title: "No matching MLX models",
+                            detail: "Try a different query or filter",
+                            systemImage: "magnifyingglass"
+                        )
                     }
 
                     ForEach(appModel.models) { model in
                         ModelRow(model: model, isDefault: appModel.defaultModelID == model.install.modelID)
                             .tag(model.id)
                     }
+                } header: {
+                    ModelResultsHeader(
+                        title: modelSectionTitle,
+                        count: appModel.models.count,
+                        isDiscovering: isDiscovering
+                    )
                 }
             }
             .navigationTitle("Models")
@@ -73,6 +99,7 @@ struct ModelsView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
                         if let selectedModel {
+                            haptics.play(.primaryAction)
                             Task {
                                 await appModel.selectDefaultModel(selectedModel, services: services)
                             }
@@ -85,6 +112,7 @@ struct ModelsView: View {
 
                     Button {
                         if let selectedModel {
+                            haptics.play(.primaryAction)
                             Task {
                                 await appModel.installModel(repository: selectedModel.install.repository, services: services)
                             }
@@ -97,6 +125,7 @@ struct ModelsView: View {
 
                     Button(role: .destructive) {
                         if let selectedModel {
+                            haptics.play(.destructiveAction)
                             Task {
                                 await appModel.deleteModel(repository: selectedModel.install.repository, services: services)
                             }
@@ -109,11 +138,8 @@ struct ModelsView: View {
                 }
             }
             .searchable(text: $searchText, prompt: "Search Hugging Face")
-            .searchSuggestions {
-                ForEach(appModel.modelSuggestions, id: \.self) { suggestion in
-                    Text(suggestion).searchCompletion(suggestion)
-                }
-            }
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
             .task(id: searchFingerprint) {
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 guard !Task.isCancelled else { return }
@@ -128,8 +154,17 @@ struct ModelsView: View {
             .onAppear {
                 selectedModelID = selectedModelID ?? appModel.models.first?.id
             }
+            .onChange(of: selectedModelID) { _, _ in
+                haptics.play(.navigationSelected)
+            }
+            .onChange(of: appModel.models) { _, models in
+                guard !models.contains(where: { $0.id == selectedModelID }) else { return }
+                selectedModelID = models.first?.id
+            }
             .scrollContentBackground(.hidden)
             .background(theme.colors.secondaryBackground)
+            .animation(theme.motion.fast, value: appModel.isSearchingModels)
+            .animation(theme.motion.fast, value: appModel.models)
         } detail: {
             if let selectedModel {
                 ModelDetailView(model: selectedModel)
@@ -152,45 +187,102 @@ private struct ModelFilterControls: View {
     let isSearching: Bool
 
     var body: some View {
-        HStack(spacing: theme.spacing.small) {
-            Menu {
-                Button("All tasks") { selectedTask = nil }
-                ForEach(HubTask.allCases, id: \.self) { task in
-                    Button(task.title) { selectedTask = task }
+        ScrollView(.horizontal) {
+            HStack(spacing: theme.spacing.small) {
+                Menu {
+                    Button("All tasks") { selectedTask = nil }
+                    ForEach(HubTask.allCases, id: \.self) { task in
+                        Button(task.title) { selectedTask = task }
+                    }
+                } label: {
+                    Label(selectedTask?.title ?? "All tasks", systemImage: selectedTask?.systemImage ?? "line.3.horizontal.decrease.circle")
                 }
-            } label: {
-                Label(selectedTask?.title ?? "All tasks", systemImage: selectedTask?.systemImage ?? "line.3.horizontal.decrease.circle")
-            }
-            .buttonStyle(.bordered)
+                .pinesButtonStyle(.secondary)
 
-            Menu {
-                Button("All compatibility") { selectedVerification = nil }
-                ForEach(ModelVerificationState.allCases, id: \.self) { state in
-                    Button(state.title) { selectedVerification = state }
+                Menu {
+                    Button("All compatibility") { selectedVerification = nil }
+                    ForEach(ModelVerificationState.allCases, id: \.self) { state in
+                        Button(state.title) { selectedVerification = state }
+                    }
+                } label: {
+                    Label(selectedVerification?.title ?? "Compatibility", systemImage: "checkmark.seal")
                 }
-            } label: {
-                Label(selectedVerification?.title ?? "Compatibility", systemImage: "checkmark.seal")
-            }
-            .buttonStyle(.bordered)
+                .pinesButtonStyle(.secondary)
 
-            Menu {
-                Button("Any state") { selectedInstallState = nil }
-                ForEach(ModelInstallState.allCases, id: \.self) { state in
-                    Button(state.title) { selectedInstallState = state }
+                Menu {
+                    Button("Any state") { selectedInstallState = nil }
+                    ForEach(ModelInstallState.allCases, id: \.self) { state in
+                        Button(state.title) { selectedInstallState = state }
+                    }
+                } label: {
+                    Label(selectedInstallState?.title ?? "State", systemImage: "externaldrive.badge.checkmark")
                 }
-            } label: {
-                Label(selectedInstallState?.title ?? "State", systemImage: "externaldrive.badge.checkmark")
-            }
-            .buttonStyle(.bordered)
+                .pinesButtonStyle(.secondary)
 
-            Spacer(minLength: theme.spacing.xsmall)
-
-            if isSearching {
-                ProgressView()
-                    .controlSize(.small)
+                if isSearching {
+                    PinesStatusIndicator(color: theme.colors.accent, isActive: true, size: 9)
+                        .padding(.horizontal, theme.spacing.xsmall)
+                }
             }
         }
+        .scrollIndicators(.hidden)
         .font(theme.typography.caption.weight(.medium))
+    }
+}
+
+private struct ModelResultsHeader: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let count: Int
+    let isDiscovering: Bool
+
+    var body: some View {
+        HStack(spacing: theme.spacing.small) {
+            Text(title)
+            Spacer(minLength: theme.spacing.small)
+            Text("\(count)")
+                .font(theme.typography.code)
+                .foregroundStyle(isDiscovering ? theme.colors.accent : theme.colors.tertiaryText)
+                .padding(.horizontal, theme.spacing.xsmall)
+                .padding(.vertical, theme.spacing.xxsmall)
+                .background(theme.colors.controlFill, in: Capsule())
+        }
+    }
+}
+
+private struct ModelListStatusRow: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let detail: String
+    let systemImage: String
+    var showsProgress = false
+    var tint: Color?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: theme.spacing.small) {
+            if showsProgress {
+                PinesStatusIndicator(color: tint ?? theme.colors.accent, isActive: true, size: 10)
+                    .frame(width: 22, height: 22)
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(tint ?? theme.colors.accent)
+                    .frame(width: 22, height: 22)
+            }
+
+            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                Text(title)
+                    .font(theme.typography.headline)
+                    .foregroundStyle(theme.colors.primaryText)
+                    .pinesFittingText()
+                Text(detail)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.86)
+            }
+        }
+        .padding(.vertical, theme.spacing.xsmall)
     }
 }
 
@@ -214,22 +306,26 @@ private struct ModelRow: View {
 
                 Spacer(minLength: theme.spacing.small)
 
-                Image(systemName: model.status.systemImage)
-                    .foregroundStyle(model.status.tint(in: theme))
+                PinesStatusIndicator(
+                    color: model.status.tint(in: theme),
+                    isActive: model.status == .indexing || model.install.state == .downloading,
+                    size: 9
+                )
             }
 
             Text("\(model.family) - \(model.footprint) - \(model.contextWindow)")
                 .font(theme.typography.callout)
                 .foregroundStyle(theme.colors.secondaryText)
                 .lineLimit(1)
+                .minimumScaleFactor(0.82)
 
             if let progress = model.downloadProgress, progress.isActive {
-                ProgressView(value: progress.fractionCompleted)
-                    .tint(theme.colors.accent)
+                PinesProgressBar(value: progress.fractionCompleted)
                 Text(progress.currentFile ?? progress.status.title)
                     .font(theme.typography.caption)
                     .foregroundStyle(theme.colors.tertiaryText)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.82)
             }
         }
         .padding(.vertical, theme.spacing.xsmall)
@@ -240,6 +336,7 @@ private struct ModelDetailView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
     let model: PinesModelPreview
 
     var body: some View {
@@ -258,35 +355,38 @@ private struct ModelDetailView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
 
-                HStack(spacing: theme.spacing.small) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
                     Button {
+                        haptics.play(.primaryAction)
                         Task {
                             await appModel.installModel(repository: model.install.repository, services: services)
                         }
                     } label: {
                         Label("Download", systemImage: "arrow.down.circle")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .pinesButtonStyle(.primary, fillWidth: true)
                     .disabled(model.install.state == .installed || model.status == .indexing || model.status == .unsupported)
 
                     Button {
+                        haptics.play(.primaryAction)
                         Task {
                             await appModel.selectDefaultModel(model, services: services)
                         }
                     } label: {
                         Label("Use", systemImage: "checkmark.circle")
                     }
-                    .buttonStyle(.bordered)
+                    .pinesButtonStyle(.secondary, fillWidth: true)
                     .disabled(model.install.state != .installed)
 
                     Button(role: .destructive) {
+                        haptics.play(.destructiveAction)
                         Task {
                             await appModel.deleteModel(repository: model.install.repository, services: services)
                         }
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
-                    .buttonStyle(.bordered)
+                    .pinesButtonStyle(.destructive, fillWidth: true)
                     .disabled(model.install.state == .remote)
                 }
 
@@ -300,8 +400,7 @@ private struct ModelDetailView: View {
                             .foregroundStyle(theme.colors.secondaryText)
                     }
 
-                    ProgressView(value: model.readiness)
-                        .tint(theme.colors.accent)
+                    PinesProgressBar(value: model.readiness)
 
                     if let progress = model.downloadProgress {
                         Text(progress.progressLabel)
@@ -372,7 +471,7 @@ private struct ModelDetailView: View {
                     }
                 }
                 .font(theme.typography.callout)
-                .pinesPanel()
+                .pinesSurface(.elevated)
 
                 VStack(alignment: .leading, spacing: theme.spacing.medium) {
                     Text("Capabilities")
@@ -380,7 +479,7 @@ private struct ModelDetailView: View {
 
                     FlowPills(items: model.capabilities.isEmpty ? ["metadata pending"] : model.capabilities)
                 }
-                .pinesPanel()
+                .pinesSurface(.panel)
 
                 if !model.compatibilityWarnings.isEmpty {
                     VStack(alignment: .leading, spacing: theme.spacing.small) {
@@ -392,7 +491,7 @@ private struct ModelDetailView: View {
                                 .foregroundStyle(model.install.verification == .unsupported ? theme.colors.danger : theme.colors.warning)
                         }
                     }
-                    .pinesPanel()
+                    .pinesSurface(.elevated)
                 }
             }
             .padding(theme.spacing.large)
@@ -422,7 +521,13 @@ private struct FlowPills: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, theme.spacing.small)
                     .padding(.vertical, theme.spacing.xsmall)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
                     .background(theme.colors.elevatedSurface, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                            .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
+                    }
             }
         }
     }

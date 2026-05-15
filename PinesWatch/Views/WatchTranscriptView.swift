@@ -77,6 +77,7 @@ struct WatchTranscriptView: View {
         }
         .navigationTitle(title)
         .task(id: conversationID) {
+            WatchHaptics.shared.play(.navigationSelected)
             model.selectConversation(conversationID)
         }
     }

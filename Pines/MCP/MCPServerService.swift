@@ -7,12 +7,14 @@ struct MCPServerService {
     let secretStore: any SecretStore
     let auditRepository: (any AuditEventRepository)?
 
-    func start() async {
+    typealias SamplingHandler = @Sendable (_ request: MCPSamplingRequest, _ server: MCPServerConfiguration) async throws -> MCPSamplingResult
+
+    func start(samplingHandler: SamplingHandler? = nil) async {
         let servers = (try? await repository.listMCPServers()) ?? []
         for server in servers where server.enabled {
             Task {
                 try? await refresh(server)
-                await watchListChanges(for: server)
+                await watchEvents(for: server, samplingHandler: samplingHandler)
             }
         }
     }
@@ -59,6 +61,12 @@ struct MCPServerService {
             let tools = try await client.listTools()
             let records = Self.toolRecords(from: tools, server: connecting)
             try await repository.replaceMCPTools(records, serverID: server.id)
+            if server.resourcesEnabled {
+                try await refreshResources(server: connecting, client: client)
+            }
+            if server.promptsEnabled {
+                try await refreshPrompts(server: connecting, client: client)
+            }
 
             var ready = connecting
             ready.status = .ready
@@ -89,6 +97,54 @@ struct MCPServerService {
         if let server = servers.first(where: { $0.id == serverID }), server.enabled {
             try await refresh(server)
         }
+    }
+
+    func refreshResources(_ server: MCPServerConfiguration) async throws {
+        let client = MCPStreamableHTTPClient(server: server, secretStore: secretStore)
+        _ = try await client.initialize()
+        try await refreshResources(server: server, client: client)
+    }
+
+    func refreshPrompts(_ server: MCPServerConfiguration) async throws {
+        let client = MCPStreamableHTTPClient(server: server, secretStore: secretStore)
+        _ = try await client.initialize()
+        try await refreshPrompts(server: server, client: client)
+    }
+
+    func readResource(_ resource: MCPResourceRecord) async throws -> [MCPResourceContent] {
+        guard let server = try await repository.listMCPServers().first(where: { $0.id == resource.serverID }) else {
+            throw ToolRegistryError.toolNotFound(name: resource.serverID.rawValue)
+        }
+        let client = MCPStreamableHTTPClient(server: server, secretStore: secretStore)
+        _ = try await client.initialize()
+        return try await client.readResource(uri: resource.uri)
+    }
+
+    func setResourceSelected(_ resource: MCPResourceRecord, selected: Bool) async throws {
+        try await repository.updateMCPResourceSelection(serverID: resource.serverID, uri: resource.uri, selected: selected)
+    }
+
+    func setResourceSubscribed(_ resource: MCPResourceRecord, subscribed: Bool) async throws {
+        guard let server = try await repository.listMCPServers().first(where: { $0.id == resource.serverID }) else {
+            throw ToolRegistryError.toolNotFound(name: resource.serverID.rawValue)
+        }
+        let client = MCPStreamableHTTPClient(server: server, secretStore: secretStore)
+        _ = try await client.initialize()
+        if subscribed {
+            try await client.subscribeResource(uri: resource.uri)
+        } else {
+            try await client.unsubscribeResource(uri: resource.uri)
+        }
+        try await repository.updateMCPResourceSubscription(serverID: resource.serverID, uri: resource.uri, subscribed: subscribed)
+    }
+
+    func getPrompt(_ prompt: MCPPromptRecord, arguments: [String: String]) async throws -> MCPPromptResult {
+        guard let server = try await repository.listMCPServers().first(where: { $0.id == prompt.serverID }) else {
+            throw ToolRegistryError.toolNotFound(name: prompt.serverID.rawValue)
+        }
+        let client = MCPStreamableHTTPClient(server: server, secretStore: secretStore)
+        _ = try await client.initialize()
+        return try await client.getPrompt(name: prompt.name, arguments: arguments)
     }
 
     private func registerEnabledTools(server: MCPServerConfiguration, client: MCPStreamableHTTPClient) async throws {
@@ -128,13 +184,49 @@ struct MCPServerService {
         }
     }
 
-    private func watchListChanges(for server: MCPServerConfiguration) async {
+    private func refreshResources(server: MCPServerConfiguration, client: MCPStreamableHTTPClient) async throws {
+        let resources = try await client.listResources()
+        let templates = try await client.listResourceTemplates()
+        try await repository.replaceMCPResources(resources, serverID: server.id)
+        try await repository.replaceMCPResourceTemplates(templates, serverID: server.id)
+    }
+
+    private func refreshPrompts(server: MCPServerConfiguration, client: MCPStreamableHTTPClient) async throws {
+        let prompts = try await client.listPrompts()
+        try await repository.replaceMCPPrompts(prompts, serverID: server.id)
+    }
+
+    private func watchEvents(for server: MCPServerConfiguration, samplingHandler: SamplingHandler?) async {
         let client = MCPStreamableHTTPClient(server: server, secretStore: secretStore)
         do {
             _ = try await client.initialize()
-            for try await notification in client.notificationStream() {
-                if notification.method == "notifications/tools/list_changed" {
+            for try await event in client.serverEventStream() {
+                switch event {
+                case let .notification(notification) where notification.method == "notifications/tools/list_changed":
                     try await refresh(server)
+                case let .notification(notification) where notification.method == "notifications/resources/list_changed" || notification.method == "notifications/resources/updated":
+                    if server.resourcesEnabled {
+                        try await refreshResources(server)
+                    }
+                case let .notification(notification) where notification.method == "notifications/prompts/list_changed":
+                    if server.promptsEnabled {
+                        try await refreshPrompts(server)
+                    }
+                case let .samplingRequest(id, request):
+                    guard server.samplingEnabled, let samplingHandler else {
+                        try await client.sendJSONRPCError(id: id, code: -32000, message: "Sampling is disabled for this MCP server.")
+                        continue
+                    }
+                    do {
+                        let result = try await samplingHandler(request, server)
+                        try await client.sendSamplingResult(id: id, result: result)
+                    } catch {
+                        try await client.sendJSONRPCError(id: id, code: -32000, message: error.localizedDescription)
+                    }
+                case let .request(id, method, _):
+                    try await client.sendJSONRPCError(id: id, code: -32601, message: "Unsupported client request: \(method)")
+                case .notification:
+                    break
                 }
             }
         } catch {

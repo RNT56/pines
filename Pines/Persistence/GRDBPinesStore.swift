@@ -720,8 +720,10 @@ actor GRDBPinesStore:
                 INSERT INTO mcp_servers
                     (id, display_name, endpoint_url, auth_mode, enabled, allow_insecure_local_http,
                      keychain_service, keychain_account, oauth_authorization_url, oauth_token_url, oauth_client_id,
-                     oauth_scopes, oauth_resource, status, last_error, last_connected_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     oauth_scopes, oauth_resource, resources_enabled, prompts_enabled, sampling_enabled,
+                     byok_sampling_enabled, subscriptions_enabled, max_sampling_requests_per_session,
+                     status, last_error, last_connected_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     display_name = excluded.display_name,
                     endpoint_url = excluded.endpoint_url,
@@ -735,6 +737,12 @@ actor GRDBPinesStore:
                     oauth_client_id = excluded.oauth_client_id,
                     oauth_scopes = excluded.oauth_scopes,
                     oauth_resource = excluded.oauth_resource,
+                    resources_enabled = excluded.resources_enabled,
+                    prompts_enabled = excluded.prompts_enabled,
+                    sampling_enabled = excluded.sampling_enabled,
+                    byok_sampling_enabled = excluded.byok_sampling_enabled,
+                    subscriptions_enabled = excluded.subscriptions_enabled,
+                    max_sampling_requests_per_session = excluded.max_sampling_requests_per_session,
                     status = excluded.status,
                     last_error = excluded.last_error,
                     last_connected_at = excluded.last_connected_at,
@@ -754,6 +762,12 @@ actor GRDBPinesStore:
                     server.oauthClientID,
                     server.oauthScopes,
                     server.oauthResource,
+                    server.resourcesEnabled ? 1 : 0,
+                    server.promptsEnabled ? 1 : 0,
+                    server.samplingEnabled ? 1 : 0,
+                    server.byokSamplingEnabled ? 1 : 0,
+                    server.subscriptionsEnabled ? 1 : 0,
+                    server.maxSamplingRequestsPerSession,
                     server.status.rawValue,
                     server.lastError,
                     server.lastConnectedAt?.timeIntervalSinceReferenceDate,
@@ -813,6 +827,113 @@ actor GRDBPinesStore:
                 sql: "UPDATE mcp_tools SET enabled = ? WHERE server_id = ? AND namespaced_name = ?",
                 arguments: [enabled ? 1 : 0, serverID.rawValue, namespacedName]
             )
+        }
+    }
+
+    func listMCPResources(serverID: MCPServerID?) async throws -> [MCPResourceRecord] {
+        try await database.read { db in
+            if let serverID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM mcp_resources WHERE server_id = ? ORDER BY name",
+                    arguments: [serverID.rawValue]
+                ).map(Self.mcpResource(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM mcp_resources ORDER BY server_id, name").map(Self.mcpResource(from:))
+        }
+    }
+
+    nonisolated func observeMCPResources() -> AsyncStream<[MCPResourceRecord]> {
+        pollingStream { try await self.listMCPResources(serverID: nil) }
+    }
+
+    func replaceMCPResources(_ resources: [MCPResourceRecord], serverID: MCPServerID) async throws {
+        try await database.write { db in
+            let existingRows = try Row.fetchAll(
+                db,
+                sql: "SELECT uri, selected_for_context, subscribed FROM mcp_resources WHERE server_id = ?",
+                arguments: [serverID.rawValue]
+            )
+            let stateByURI = Dictionary(uniqueKeysWithValues: existingRows.map { row in
+                (
+                    row["uri"] as String,
+                    ((row["selected_for_context"] as Int) == 1, (row["subscribed"] as Int) == 1)
+                )
+            })
+            try db.execute(sql: "DELETE FROM mcp_resources WHERE server_id = ?", arguments: [serverID.rawValue])
+            for var resource in resources {
+                if let state = stateByURI[resource.uri] {
+                    resource.selectedForContext = state.0
+                    resource.subscribed = state.1
+                }
+                try Self.insertMCPResource(resource, db: db)
+            }
+        }
+    }
+
+    func updateMCPResourceSelection(serverID: MCPServerID, uri: String, selected: Bool) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE mcp_resources SET selected_for_context = ? WHERE server_id = ? AND uri = ?",
+                arguments: [selected ? 1 : 0, serverID.rawValue, uri]
+            )
+        }
+    }
+
+    func updateMCPResourceSubscription(serverID: MCPServerID, uri: String, subscribed: Bool) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE mcp_resources SET subscribed = ? WHERE server_id = ? AND uri = ?",
+                arguments: [subscribed ? 1 : 0, serverID.rawValue, uri]
+            )
+        }
+    }
+
+    func listMCPResourceTemplates(serverID: MCPServerID?) async throws -> [MCPResourceTemplateRecord] {
+        try await database.read { db in
+            if let serverID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM mcp_resource_templates WHERE server_id = ? ORDER BY name",
+                    arguments: [serverID.rawValue]
+                ).map(Self.mcpResourceTemplate(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM mcp_resource_templates ORDER BY server_id, name").map(Self.mcpResourceTemplate(from:))
+        }
+    }
+
+    func replaceMCPResourceTemplates(_ templates: [MCPResourceTemplateRecord], serverID: MCPServerID) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM mcp_resource_templates WHERE server_id = ?", arguments: [serverID.rawValue])
+            for template in templates {
+                try Self.insertMCPResourceTemplate(template, db: db)
+            }
+        }
+    }
+
+    func listMCPPrompts(serverID: MCPServerID?) async throws -> [MCPPromptRecord] {
+        try await database.read { db in
+            if let serverID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM mcp_prompts WHERE server_id = ? ORDER BY name",
+                    arguments: [serverID.rawValue]
+                ).map(Self.mcpPrompt(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM mcp_prompts ORDER BY server_id, name").map(Self.mcpPrompt(from:))
+        }
+    }
+
+    nonisolated func observeMCPPrompts() -> AsyncStream<[MCPPromptRecord]> {
+        pollingStream { try await self.listMCPPrompts(serverID: nil) }
+    }
+
+    func replaceMCPPrompts(_ prompts: [MCPPromptRecord], serverID: MCPServerID) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM mcp_prompts WHERE server_id = ?", arguments: [serverID.rawValue])
+            for prompt in prompts {
+                try Self.insertMCPPrompt(prompt, db: db)
+            }
         }
     }
 
@@ -1134,6 +1255,12 @@ actor GRDBPinesStore:
             oauthClientID: row["oauth_client_id"] as String?,
             oauthScopes: row["oauth_scopes"] as String?,
             oauthResource: row["oauth_resource"] as String?,
+            resourcesEnabled: ((row["resources_enabled"] as Int?) ?? 0) == 1,
+            promptsEnabled: ((row["prompts_enabled"] as Int?) ?? 0) == 1,
+            samplingEnabled: ((row["sampling_enabled"] as Int?) ?? 0) == 1,
+            byokSamplingEnabled: ((row["byok_sampling_enabled"] as Int?) ?? 0) == 1,
+            subscriptionsEnabled: ((row["subscriptions_enabled"] as Int?) ?? 0) == 1,
+            maxSamplingRequestsPerSession: (row["max_sampling_requests_per_session"] as Int?) ?? 3,
             status: MCPConnectionStatus(rawValue: row["status"]) ?? .disconnected,
             lastError: row["last_error"] as String?,
             lastConnectedAt: (row["last_connected_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
@@ -1179,6 +1306,130 @@ actor GRDBPinesStore:
                 tool.lastError,
             ]
         )
+    }
+
+    private static func mcpResource(from row: Row) -> MCPResourceRecord {
+        MCPResourceRecord(
+            serverID: MCPServerID(rawValue: row["server_id"]),
+            uri: row["uri"],
+            name: row["name"],
+            title: row["title"] as String?,
+            description: row["description"] as String?,
+            mimeType: row["mime_type"] as String?,
+            size: row["size"] as Int64?,
+            icons: decodeJSON(row["icons_json"] as String?) ?? [],
+            annotations: decodeJSON(row["annotations_json"] as String?),
+            selectedForContext: (row["selected_for_context"] as Int) == 1,
+            subscribed: (row["subscribed"] as Int) == 1,
+            lastDiscoveredAt: Date(timeIntervalSinceReferenceDate: row["last_discovered_at"])
+        )
+    }
+
+    private static func mcpResourceTemplate(from row: Row) -> MCPResourceTemplateRecord {
+        MCPResourceTemplateRecord(
+            serverID: MCPServerID(rawValue: row["server_id"]),
+            uriTemplate: row["uri_template"],
+            name: row["name"],
+            title: row["title"] as String?,
+            description: row["description"] as String?,
+            mimeType: row["mime_type"] as String?,
+            icons: decodeJSON(row["icons_json"] as String?) ?? [],
+            annotations: decodeJSON(row["annotations_json"] as String?),
+            lastDiscoveredAt: Date(timeIntervalSinceReferenceDate: row["last_discovered_at"])
+        )
+    }
+
+    private static func mcpPrompt(from row: Row) -> MCPPromptRecord {
+        MCPPromptRecord(
+            serverID: MCPServerID(rawValue: row["server_id"]),
+            name: row["name"],
+            title: row["title"] as String?,
+            description: row["description"] as String?,
+            arguments: decodeJSON(row["arguments_json"] as String?) ?? [],
+            icons: decodeJSON(row["icons_json"] as String?) ?? [],
+            lastDiscoveredAt: Date(timeIntervalSinceReferenceDate: row["last_discovered_at"])
+        )
+    }
+
+    private static func insertMCPResource(_ resource: MCPResourceRecord, db: Database) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO mcp_resources
+                (server_id, uri, name, title, description, mime_type, size, icons_json, annotations_json,
+                 selected_for_context, subscribed, last_discovered_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            arguments: [
+                resource.serverID.rawValue,
+                resource.uri,
+                resource.name,
+                resource.title,
+                resource.description,
+                resource.mimeType,
+                resource.size,
+                encodeJSON(resource.icons),
+                encodeJSON(resource.annotations),
+                resource.selectedForContext ? 1 : 0,
+                resource.subscribed ? 1 : 0,
+                resource.lastDiscoveredAt.timeIntervalSinceReferenceDate,
+            ]
+        )
+    }
+
+    private static func insertMCPResourceTemplate(_ template: MCPResourceTemplateRecord, db: Database) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO mcp_resource_templates
+                (server_id, uri_template, name, title, description, mime_type, icons_json, annotations_json, last_discovered_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            arguments: [
+                template.serverID.rawValue,
+                template.uriTemplate,
+                template.name,
+                template.title,
+                template.description,
+                template.mimeType,
+                encodeJSON(template.icons),
+                encodeJSON(template.annotations),
+                template.lastDiscoveredAt.timeIntervalSinceReferenceDate,
+            ]
+        )
+    }
+
+    private static func insertMCPPrompt(_ prompt: MCPPromptRecord, db: Database) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO mcp_prompts
+                (server_id, name, title, description, arguments_json, icons_json, last_discovered_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            arguments: [
+                prompt.serverID.rawValue,
+                prompt.name,
+                prompt.title,
+                prompt.description,
+                encodeJSON(prompt.arguments),
+                encodeJSON(prompt.icons),
+                prompt.lastDiscoveredAt.timeIntervalSinceReferenceDate,
+            ]
+        )
+    }
+
+    private static func encodeJSON<T: Encodable>(_ value: T?) -> String? {
+        guard let value else { return nil }
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func encodeJSON<T: Encodable>(_ value: T) -> String? {
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func decodeJSON<T: Decodable>(_ string: String?) -> T? {
+        guard let string, !string.isEmpty else { return nil }
+        return try? JSONDecoder().decode(T.self, from: Data(string.utf8))
     }
 
     private static func download(from row: Row) -> ModelDownloadProgress {

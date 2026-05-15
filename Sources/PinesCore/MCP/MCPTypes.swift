@@ -118,6 +118,12 @@ public struct MCPServerConfiguration: Identifiable, Hashable, Codable, Sendable 
     public var oauthClientID: String?
     public var oauthScopes: String?
     public var oauthResource: String?
+    public var resourcesEnabled: Bool
+    public var promptsEnabled: Bool
+    public var samplingEnabled: Bool
+    public var byokSamplingEnabled: Bool
+    public var subscriptionsEnabled: Bool
+    public var maxSamplingRequestsPerSession: Int
     public var status: MCPConnectionStatus
     public var lastError: String?
     public var lastConnectedAt: Date?
@@ -138,6 +144,12 @@ public struct MCPServerConfiguration: Identifiable, Hashable, Codable, Sendable 
         oauthClientID: String? = nil,
         oauthScopes: String? = nil,
         oauthResource: String? = nil,
+        resourcesEnabled: Bool = false,
+        promptsEnabled: Bool = false,
+        samplingEnabled: Bool = false,
+        byokSamplingEnabled: Bool = false,
+        subscriptionsEnabled: Bool = false,
+        maxSamplingRequestsPerSession: Int = 3,
         status: MCPConnectionStatus = .disconnected,
         lastError: String? = nil,
         lastConnectedAt: Date? = nil,
@@ -157,11 +169,44 @@ public struct MCPServerConfiguration: Identifiable, Hashable, Codable, Sendable 
         self.oauthClientID = oauthClientID
         self.oauthScopes = oauthScopes
         self.oauthResource = oauthResource
+        self.resourcesEnabled = resourcesEnabled
+        self.promptsEnabled = promptsEnabled
+        self.samplingEnabled = samplingEnabled
+        self.byokSamplingEnabled = byokSamplingEnabled
+        self.subscriptionsEnabled = subscriptionsEnabled
+        self.maxSamplingRequestsPerSession = max(0, maxSamplingRequestsPerSession)
         self.status = status
         self.lastError = lastError
         self.lastConnectedAt = lastConnectedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+}
+
+public struct MCPClientFeaturePolicy: Hashable, Codable, Sendable {
+    public var resourcesEnabled: Bool
+    public var promptsEnabled: Bool
+    public var samplingEnabled: Bool
+    public var subscriptionsEnabled: Bool
+
+    public init(
+        resourcesEnabled: Bool = false,
+        promptsEnabled: Bool = false,
+        samplingEnabled: Bool = false,
+        subscriptionsEnabled: Bool = false
+    ) {
+        self.resourcesEnabled = resourcesEnabled
+        self.promptsEnabled = promptsEnabled
+        self.samplingEnabled = samplingEnabled
+        self.subscriptionsEnabled = subscriptionsEnabled
+    }
+
+    public var initializeCapabilities: JSONValue {
+        var capabilities = [String: JSONValue]()
+        if samplingEnabled {
+            capabilities["sampling"] = .object([:])
+        }
+        return .object(capabilities)
     }
 }
 
@@ -266,6 +311,352 @@ public struct MCPContentBlock: Codable, Hashable, Sendable {
     }
 }
 
+public struct MCPAnnotations: Codable, Hashable, Sendable {
+    public var audience: [MCPRole]?
+    public var priority: Double?
+    public var lastModified: String?
+
+    public init(audience: [MCPRole]? = nil, priority: Double? = nil, lastModified: String? = nil) {
+        self.audience = audience
+        self.priority = priority
+        self.lastModified = lastModified
+    }
+}
+
+public struct MCPIcon: Codable, Hashable, Sendable {
+    public var src: String
+    public var mimeType: String?
+    public var sizes: [String]?
+
+    public init(src: String, mimeType: String? = nil, sizes: [String]? = nil) {
+        self.src = src
+        self.mimeType = mimeType
+        self.sizes = sizes
+    }
+}
+
+public struct MCPResourceRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String { uri }
+    public var serverID: MCPServerID
+    public var uri: String
+    public var name: String
+    public var title: String?
+    public var description: String?
+    public var mimeType: String?
+    public var size: Int64?
+    public var icons: [MCPIcon]
+    public var annotations: MCPAnnotations?
+    public var selectedForContext: Bool
+    public var subscribed: Bool
+    public var lastDiscoveredAt: Date
+
+    public init(
+        serverID: MCPServerID,
+        uri: String,
+        name: String,
+        title: String? = nil,
+        description: String? = nil,
+        mimeType: String? = nil,
+        size: Int64? = nil,
+        icons: [MCPIcon] = [],
+        annotations: MCPAnnotations? = nil,
+        selectedForContext: Bool = false,
+        subscribed: Bool = false,
+        lastDiscoveredAt: Date = Date()
+    ) {
+        self.serverID = serverID
+        self.uri = uri
+        self.name = name
+        self.title = title
+        self.description = description
+        self.mimeType = mimeType
+        self.size = size
+        self.icons = icons
+        self.annotations = annotations
+        self.selectedForContext = selectedForContext
+        self.subscribed = subscribed
+        self.lastDiscoveredAt = lastDiscoveredAt
+    }
+}
+
+public struct MCPResourceTemplateRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String { uriTemplate }
+    public var serverID: MCPServerID
+    public var uriTemplate: String
+    public var name: String
+    public var title: String?
+    public var description: String?
+    public var mimeType: String?
+    public var icons: [MCPIcon]
+    public var annotations: MCPAnnotations?
+    public var lastDiscoveredAt: Date
+
+    public init(
+        serverID: MCPServerID,
+        uriTemplate: String,
+        name: String,
+        title: String? = nil,
+        description: String? = nil,
+        mimeType: String? = nil,
+        icons: [MCPIcon] = [],
+        annotations: MCPAnnotations? = nil,
+        lastDiscoveredAt: Date = Date()
+    ) {
+        self.serverID = serverID
+        self.uriTemplate = uriTemplate
+        self.name = name
+        self.title = title
+        self.description = description
+        self.mimeType = mimeType
+        self.icons = icons
+        self.annotations = annotations
+        self.lastDiscoveredAt = lastDiscoveredAt
+    }
+}
+
+public struct MCPResourceContent: Codable, Hashable, Sendable {
+    public var uri: String
+    public var mimeType: String?
+    public var text: String?
+    public var blob: String?
+    public var annotations: MCPAnnotations?
+
+    public init(uri: String, mimeType: String? = nil, text: String? = nil, blob: String? = nil, annotations: MCPAnnotations? = nil) {
+        self.uri = uri
+        self.mimeType = mimeType
+        self.text = text
+        self.blob = blob
+        self.annotations = annotations
+    }
+}
+
+public struct MCPPromptArgument: Codable, Hashable, Sendable {
+    public var name: String
+    public var description: String?
+    public var required: Bool?
+
+    public init(name: String, description: String? = nil, required: Bool? = nil) {
+        self.name = name
+        self.description = description
+        self.required = required
+    }
+}
+
+public struct MCPPromptRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String { "\(serverID.rawValue):\(name)" }
+    public var serverID: MCPServerID
+    public var name: String
+    public var title: String?
+    public var description: String?
+    public var arguments: [MCPPromptArgument]
+    public var icons: [MCPIcon]
+    public var lastDiscoveredAt: Date
+
+    public init(
+        serverID: MCPServerID,
+        name: String,
+        title: String? = nil,
+        description: String? = nil,
+        arguments: [MCPPromptArgument] = [],
+        icons: [MCPIcon] = [],
+        lastDiscoveredAt: Date = Date()
+    ) {
+        self.serverID = serverID
+        self.name = name
+        self.title = title
+        self.description = description
+        self.arguments = arguments
+        self.icons = icons
+        self.lastDiscoveredAt = lastDiscoveredAt
+    }
+}
+
+public enum MCPMessageContent: Codable, Hashable, Sendable {
+    case text(String)
+    case image(data: String, mimeType: String)
+    case audio(data: String, mimeType: String)
+    case resource(MCPResourceContent)
+    case toolUse(id: String, name: String, input: JSONValue)
+    case toolResult(toolUseID: String, content: [MCPMessageContent])
+    case unknown(JSONValue)
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case text
+        case data
+        case mimeType
+        case resource
+        case id
+        case name
+        case input
+        case toolUseID
+        case toolUseId
+        case content
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decodeIfPresent(String.self, forKey: .type)
+        switch type {
+        case "text":
+            self = .text(try container.decodeIfPresent(String.self, forKey: .text) ?? "")
+        case "image":
+            self = .image(
+                data: try container.decodeIfPresent(String.self, forKey: .data) ?? "",
+                mimeType: try container.decodeIfPresent(String.self, forKey: .mimeType) ?? "image/png"
+            )
+        case "audio":
+            self = .audio(
+                data: try container.decodeIfPresent(String.self, forKey: .data) ?? "",
+                mimeType: try container.decodeIfPresent(String.self, forKey: .mimeType) ?? "audio/wav"
+            )
+        case "resource":
+            self = .resource(try container.decode(MCPResourceContent.self, forKey: .resource))
+        case "tool_use":
+            self = .toolUse(
+                id: try container.decode(String.self, forKey: .id),
+                name: try container.decode(String.self, forKey: .name),
+                input: try container.decodeIfPresent(JSONValue.self, forKey: .input) ?? .object([:])
+            )
+        case "tool_result":
+            self = .toolResult(
+                toolUseID: try container.decodeIfPresent(String.self, forKey: .toolUseID)
+                    ?? container.decode(String.self, forKey: .toolUseId),
+                content: try container.decodeIfPresent([MCPMessageContent].self, forKey: .content) ?? []
+            )
+        default:
+            self = .unknown(try JSONValue(from: decoder))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .text(text):
+            try container.encode("text", forKey: .type)
+            try container.encode(text, forKey: .text)
+        case let .image(data, mimeType):
+            try container.encode("image", forKey: .type)
+            try container.encode(data, forKey: .data)
+            try container.encode(mimeType, forKey: .mimeType)
+        case let .audio(data, mimeType):
+            try container.encode("audio", forKey: .type)
+            try container.encode(data, forKey: .data)
+            try container.encode(mimeType, forKey: .mimeType)
+        case let .resource(resource):
+            try container.encode("resource", forKey: .type)
+            try container.encode(resource, forKey: .resource)
+        case let .toolUse(id, name, input):
+            try container.encode("tool_use", forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(name, forKey: .name)
+            try container.encode(input, forKey: .input)
+        case let .toolResult(toolUseID, content):
+            try container.encode("tool_result", forKey: .type)
+            try container.encode(toolUseID, forKey: .toolUseID)
+            try container.encode(content, forKey: .content)
+        case let .unknown(value):
+            try value.encode(to: encoder)
+        }
+    }
+}
+
+public struct MCPPromptMessage: Codable, Hashable, Sendable {
+    public var role: MCPRole
+    public var content: [MCPMessageContent]
+
+    enum CodingKeys: String, CodingKey {
+        case role
+        case content
+    }
+
+    public init(role: MCPRole, content: [MCPMessageContent]) {
+        self.role = role
+        self.content = content
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        role = try container.decode(MCPRole.self, forKey: .role)
+        if let content = try? container.decode([MCPMessageContent].self, forKey: .content) {
+            self.content = content
+        } else {
+            self.content = [try container.decode(MCPMessageContent.self, forKey: .content)]
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(role, forKey: .role)
+        if content.count == 1 {
+            try container.encode(content[0], forKey: .content)
+        } else {
+            try container.encode(content, forKey: .content)
+        }
+    }
+}
+
+public struct MCPPromptResult: Codable, Hashable, Sendable {
+    public var description: String?
+    public var messages: [MCPPromptMessage]
+
+    public init(description: String? = nil, messages: [MCPPromptMessage]) {
+        self.description = description
+        self.messages = messages
+    }
+}
+
+public struct MCPSamplingRequest: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var serverID: MCPServerID
+    public var messages: [MCPPromptMessage]
+    public var systemPrompt: String?
+    public var includeContext: String?
+    public var maxTokens: Int?
+    public var temperature: Double?
+    public var stopSequences: [String]
+    public var modelPreferences: JSONValue?
+    public var tools: [MCPToolDefinition]
+
+    public init(
+        id: String,
+        serverID: MCPServerID,
+        messages: [MCPPromptMessage],
+        systemPrompt: String? = nil,
+        includeContext: String? = nil,
+        maxTokens: Int? = nil,
+        temperature: Double? = nil,
+        stopSequences: [String] = [],
+        modelPreferences: JSONValue? = nil,
+        tools: [MCPToolDefinition] = []
+    ) {
+        self.id = id
+        self.serverID = serverID
+        self.messages = messages
+        self.systemPrompt = systemPrompt
+        self.includeContext = includeContext
+        self.maxTokens = maxTokens
+        self.temperature = temperature
+        self.stopSequences = stopSequences
+        self.modelPreferences = modelPreferences
+        self.tools = tools
+    }
+}
+
+public struct MCPSamplingResult: Codable, Hashable, Sendable {
+    public var role: MCPRole
+    public var content: MCPMessageContent
+    public var model: String
+    public var stopReason: String?
+
+    public init(role: MCPRole = .assistant, content: MCPMessageContent, model: String, stopReason: String? = nil) {
+        self.role = role
+        self.content = content
+        self.model = model
+        self.stopReason = stopReason
+    }
+}
+
 public struct MCPToolCallResult: Codable, Hashable, Sendable {
     public var content: [MCPContentBlock]
     public var structuredContent: JSONValue?
@@ -340,4 +731,14 @@ public protocol MCPServerRepository: Sendable {
     func observeMCPTools() -> AsyncStream<[MCPToolRecord]>
     func replaceMCPTools(_ tools: [MCPToolRecord], serverID: MCPServerID) async throws
     func updateMCPToolEnabled(serverID: MCPServerID, namespacedName: String, enabled: Bool) async throws
+    func listMCPResources(serverID: MCPServerID?) async throws -> [MCPResourceRecord]
+    func observeMCPResources() -> AsyncStream<[MCPResourceRecord]>
+    func replaceMCPResources(_ resources: [MCPResourceRecord], serverID: MCPServerID) async throws
+    func updateMCPResourceSelection(serverID: MCPServerID, uri: String, selected: Bool) async throws
+    func updateMCPResourceSubscription(serverID: MCPServerID, uri: String, subscribed: Bool) async throws
+    func listMCPResourceTemplates(serverID: MCPServerID?) async throws -> [MCPResourceTemplateRecord]
+    func replaceMCPResourceTemplates(_ templates: [MCPResourceTemplateRecord], serverID: MCPServerID) async throws
+    func listMCPPrompts(serverID: MCPServerID?) async throws -> [MCPPromptRecord]
+    func observeMCPPrompts() -> AsyncStream<[MCPPromptRecord]>
+    func replaceMCPPrompts(_ prompts: [MCPPromptRecord], serverID: MCPServerID) async throws
 }

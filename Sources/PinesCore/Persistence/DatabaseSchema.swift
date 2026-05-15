@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 4
+    public static let currentVersion = 5
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -352,6 +352,59 @@ public enum PinesDatabaseSchema {
             );
             """,
             "CREATE INDEX IF NOT EXISTS idx_mcp_tools_server ON mcp_tools(server_id);",
+        ]),
+        DatabaseMigration(version: 5, name: "mcp-resources-prompts-sampling", sql: [
+            "ALTER TABLE mcp_servers ADD COLUMN resources_enabled INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE mcp_servers ADD COLUMN prompts_enabled INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE mcp_servers ADD COLUMN sampling_enabled INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE mcp_servers ADD COLUMN byok_sampling_enabled INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE mcp_servers ADD COLUMN subscriptions_enabled INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE mcp_servers ADD COLUMN max_sampling_requests_per_session INTEGER NOT NULL DEFAULT 3;",
+            """
+            CREATE TABLE IF NOT EXISTS mcp_resources (
+                server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+                uri TEXT NOT NULL,
+                name TEXT NOT NULL,
+                title TEXT,
+                description TEXT,
+                mime_type TEXT,
+                size INTEGER,
+                icons_json TEXT,
+                annotations_json TEXT,
+                selected_for_context INTEGER NOT NULL DEFAULT 0,
+                subscribed INTEGER NOT NULL DEFAULT 0,
+                last_discovered_at REAL NOT NULL,
+                PRIMARY KEY(server_id, uri)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS mcp_resource_templates (
+                server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+                uri_template TEXT NOT NULL,
+                name TEXT NOT NULL,
+                title TEXT,
+                description TEXT,
+                mime_type TEXT,
+                icons_json TEXT,
+                annotations_json TEXT,
+                last_discovered_at REAL NOT NULL,
+                PRIMARY KEY(server_id, uri_template)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS mcp_prompts (
+                server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                title TEXT,
+                description TEXT,
+                arguments_json TEXT,
+                icons_json TEXT,
+                last_discovered_at REAL NOT NULL,
+                PRIMARY KEY(server_id, name)
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_mcp_resources_server ON mcp_resources(server_id);",
+            "CREATE INDEX IF NOT EXISTS idx_mcp_prompts_server ON mcp_prompts(server_id);",
         ]),
     ]
 }

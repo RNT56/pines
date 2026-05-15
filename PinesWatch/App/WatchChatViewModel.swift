@@ -38,6 +38,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     private var queuedRequestIDs = Set<UUID>()
     private var lastSequenceByRequestID: [UUID: Int] = [:]
     private var isSceneActive = true
+    private var streamHaptics = WatchStreamHapticGate()
 
     init(session: WCSession = .default) {
         self.session = session
@@ -73,6 +74,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func createConversation() {
+        WatchHaptics.shared.play(.primaryAction)
         isWorking = true
         sendTracked(kind: .createConversation, summary: "Creating chat")
     }
@@ -80,6 +82,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     func renameConversation(_ id: UUID, title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        WatchHaptics.shared.play(.primaryAction)
         sendTracked(
             kind: .renameConversation,
             payload: WatchRenameConversationRequest(conversationID: id, title: trimmed),
@@ -88,6 +91,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func setConversationArchived(_ id: UUID, archived: Bool) {
+        WatchHaptics.shared.play(archived ? .destructiveAction : .primaryAction)
         sendTracked(
             kind: .archiveConversation,
             payload: WatchArchiveConversationRequest(conversationID: id, archived: archived),
@@ -96,6 +100,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func deleteConversation(_ id: UUID) {
+        WatchHaptics.shared.play(.destructiveAction)
         sendTracked(
             kind: .deleteConversation,
             payload: WatchDeleteConversationRequest(conversationID: id),
@@ -106,6 +111,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     func sendDraft(_ draft: String) {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, activeRunID == nil else { return }
+        WatchHaptics.shared.play(.sendCommitted)
 
         let request = WatchSendMessageRequest(conversationID: selectedConversationID, text: trimmed)
         let requestID = UUID()
@@ -126,6 +132,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
 
     func cancelRun() {
         guard let activeRunID else { return }
+        WatchHaptics.shared.play(.runCancelled)
         send(kind: .cancelRun, payload: WatchCancelRunRequest(runID: activeRunID))
         self.activeRunID = nil
         isWorking = false
@@ -134,6 +141,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     func retryPendingRequest(_ request: PendingWatchRequest) {
         do {
             let envelope = try WatchChatCodec.envelope(from: request.envelopeData)
+            WatchHaptics.shared.play(.primaryAction)
             try send([WatchChatCodec.envelopeKey: request.envelopeData], kind: envelope.kind)
             statusText = "Retrying"
         } catch {
@@ -142,6 +150,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func discardPendingRequest(_ request: PendingWatchRequest) {
+        WatchHaptics.shared.play(.destructiveAction)
         completePendingRequest(request.requestID)
     }
 
@@ -156,10 +165,21 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
             self.isReachable = isReachable
             self.statusText = statusText
             if isReachable {
+                WatchHaptics.shared.play(.appReady)
+            }
+            if isReachable {
                 self.retryQueuedPendingRequests()
             }
         }
     }
+
+    #if os(iOS)
+    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}
+
+    nonisolated func sessionDidDeactivate(_ session: WCSession) {
+        session.activate()
+    }
+    #endif
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         let isReachable = session.isReachable
@@ -167,6 +187,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
             self.isReachable = isReachable
             self.statusText = isReachable ? "Connected" : "Open Pines on iPhone"
             if isReachable {
+                WatchHaptics.shared.play(.appReady)
                 self.refresh()
                 self.retryQueuedPendingRequests()
             }
@@ -299,6 +320,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
             handle(envelope)
         } catch {
             statusText = error.localizedDescription
+            WatchHaptics.shared.play(.runFailed)
             isWorking = false
         }
     }
@@ -345,6 +367,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
             }
         } catch {
             statusText = error.localizedDescription
+            WatchHaptics.shared.play(.runFailed)
             isWorking = false
         }
     }
@@ -362,6 +385,10 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     private func apply(_ update: WatchChatRunUpdate) {
+        if let event = streamHaptics.event(for: update) {
+            WatchHaptics.shared.play(event)
+        }
+
         selectedConversationID = update.conversationID
         if update.status == .accepted || update.status == .streaming {
             activeRunID = update.runID

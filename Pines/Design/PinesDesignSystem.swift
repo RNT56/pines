@@ -106,6 +106,9 @@ struct PinesThemeColors {
     var surface: Color
     var elevatedSurface: Color
     var glassSurface: AnyShapeStyle
+    var backgroundWash: AnyShapeStyle
+    var surfaceHighlight: Color
+    var surfaceShadow: Color
     var primaryText: Color
     var secondaryText: Color
     var tertiaryText: Color
@@ -128,6 +131,7 @@ struct PinesThemeColors {
     var sidebarSelection: Color
     var controlFill: Color
     var controlPressed: Color
+    var controlBorder: Color
     var focusRing: Color
     var chartA: Color
     var chartB: Color
@@ -194,23 +198,46 @@ struct PinesThemeColors {
             chartC = Color(hex: dark ? 0xA7B8D8 : 0x476B9E)
         }
 
-        glassSurface = AnyShapeStyle(.regularMaterial)
+        switch template {
+        case .evergreen:
+            glassSurface = AnyShapeStyle(dark ? .regularMaterial : .thinMaterial)
+        case .graphite:
+            glassSurface = AnyShapeStyle(dark ? .thinMaterial : .regularMaterial)
+        case .aurora:
+            glassSurface = AnyShapeStyle(.ultraThinMaterial)
+        case .paper:
+            glassSurface = AnyShapeStyle(dark ? .regularMaterial : .thickMaterial)
+        }
+        backgroundWash = AnyShapeStyle(
+            LinearGradient(
+                colors: [
+                    appBackground,
+                    secondaryBackground.opacity(dark ? 0.72 : 0.82),
+                    appBackground
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        surfaceHighlight = dark ? Color.white.opacity(template == .graphite ? 0.05 : 0.08) : Color.white.opacity(template == .paper ? 0.90 : 0.72)
+        surfaceShadow = dark ? Color.black.opacity(template == .aurora ? 0.46 : 0.34) : Color.black.opacity(template == .graphite ? 0.08 : 0.10)
         primaryText = dark ? Color(hex: 0xF5F7F6) : Color(hex: 0x151A18)
         secondaryText = dark ? Color(hex: 0xBAC5C1) : Color(hex: 0x4B5652)
         tertiaryText = dark ? Color(hex: 0x87938F) : Color(hex: 0x75807C)
-        separator = dark ? Color.white.opacity(0.13) : Color.black.opacity(0.11)
+        separator = dark ? Color.white.opacity(template == .graphite ? 0.16 : 0.13) : Color.black.opacity(template == .paper ? 0.10 : 0.11)
         link = info
-        codeBackground = dark ? Color.black.opacity(0.30) : Color.black.opacity(0.045)
-        codeHeaderBackground = dark ? Color.white.opacity(0.06) : Color.black.opacity(0.035)
+        codeBackground = dark ? Color.black.opacity(template == .aurora ? 0.36 : 0.30) : Color.black.opacity(template == .paper ? 0.035 : 0.045)
+        codeHeaderBackground = dark ? Color.white.opacity(0.06) : Color.black.opacity(template == .paper ? 0.025 : 0.035)
         inlineCodeBackground = dark ? Color.white.opacity(0.10) : Color.black.opacity(0.07)
         quoteBackground = accent.opacity(dark ? 0.13 : 0.08)
         tableHeaderBackground = dark ? Color.white.opacity(0.07) : Color.black.opacity(0.04)
-        userBubble = dark ? info.opacity(0.22) : info.opacity(0.10)
-        assistantBubble = dark ? accent.opacity(0.18) : accent.opacity(0.09)
+        userBubble = dark ? info.opacity(template == .aurora ? 0.28 : 0.22) : info.opacity(template == .graphite ? 0.08 : 0.10)
+        assistantBubble = dark ? accent.opacity(template == .paper ? 0.15 : 0.18) : accent.opacity(template == .paper ? 0.075 : 0.09)
         toolBubble = dark ? warning.opacity(0.18) : warning.opacity(0.10)
         sidebarSelection = accent.opacity(dark ? 0.26 : 0.13)
-        controlFill = dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
-        controlPressed = dark ? Color.white.opacity(0.14) : Color.black.opacity(0.10)
+        controlFill = dark ? Color.white.opacity(template == .graphite ? 0.06 : 0.08) : Color.black.opacity(template == .paper ? 0.035 : 0.05)
+        controlPressed = dark ? Color.white.opacity(template == .graphite ? 0.12 : 0.14) : Color.black.opacity(0.10)
+        controlBorder = dark ? Color.white.opacity(template == .graphite ? 0.18 : 0.14) : Color.black.opacity(template == .paper ? 0.08 : 0.10)
         focusRing = accent.opacity(0.72)
     }
 }
@@ -228,12 +255,13 @@ struct PinesTypography {
 
     init(template: PinesThemeTemplate) {
         let titleWeight: Font.Weight = template == .paper ? .semibold : .bold
-        hero = .largeTitle.weight(titleWeight)
-        title = .title2.weight(titleWeight)
+        let bodyDesign: Font.Design = template == .graphite ? .default : .rounded
+        hero = .system(.largeTitle, design: bodyDesign).weight(titleWeight)
+        title = .system(.title2, design: bodyDesign).weight(titleWeight)
         section = .headline.weight(.semibold)
         headline = .subheadline.weight(.semibold)
-        body = .body
-        bodyEmphasis = .body.weight(.medium)
+        body = .system(.body, design: bodyDesign)
+        bodyEmphasis = .system(.body, design: bodyDesign).weight(.medium)
         callout = .callout
         caption = .caption
         code = .system(.caption, design: .monospaced).weight(.medium)
@@ -271,11 +299,13 @@ struct PinesThemeRadius: Equatable {
     init(template: PinesThemeTemplate) {
         switch template {
         case .graphite:
-            control = 6; panel = 8; sheet = 12
+            control = 7; panel = 9; sheet = 14
         case .paper:
-            control = 8; panel = 8; sheet = 14
+            control = 10; panel = 10; sheet = 16
+        case .aurora:
+            control = 10; panel = 12; sheet = 20
         default:
-            control = 8; panel = 8; sheet = 16
+            control = 9; panel = 10; sheet = 18
         }
     }
 }
@@ -298,9 +328,9 @@ struct PinesThemeShadow: Equatable {
     var panelY: CGFloat
 
     init(template: PinesThemeTemplate, scheme: ColorScheme) {
-        panelColor = scheme == .dark ? Color.black.opacity(0.28) : Color.black.opacity(template == .paper ? 0.07 : 0.09)
-        panelRadius = template == .graphite ? 10 : 18
-        panelY = template == .graphite ? 5 : 10
+        panelColor = scheme == .dark ? Color.black.opacity(template == .aurora ? 0.42 : 0.30) : Color.black.opacity(template == .paper ? 0.06 : 0.10)
+        panelRadius = template == .graphite ? 8 : template == .aurora ? 22 : 16
+        panelY = template == .graphite ? 3 : template == .paper ? 7 : 9
     }
 }
 
@@ -446,9 +476,15 @@ struct PinesMetricPill: View {
             .labelStyle(.titleAndIcon)
             .foregroundStyle(resolvedTint)
             .lineLimit(1)
+            .minimumScaleFactor(0.78)
             .padding(.horizontal, theme.spacing.small)
             .padding(.vertical, theme.spacing.xsmall)
-            .background(resolvedTint.opacity(0.12), in: Capsule())
+            .frame(minHeight: 28)
+            .background(resolvedTint.opacity(theme.colorScheme == .dark ? 0.18 : 0.12), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(resolvedTint.opacity(0.18), lineWidth: theme.stroke.hairline)
+            }
     }
 }
 
@@ -486,6 +522,7 @@ struct PinesEmptyState: View {
 
 struct PinesThemePreviewCard: View {
     @Environment(\.pinesTheme) private var currentTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let template: PinesThemeTemplate
     let isSelected: Bool
 
@@ -496,51 +533,389 @@ struct PinesThemePreviewCard: View {
                 Text(template.title)
                     .font(preview.typography.headline)
                     .foregroundStyle(preview.colors.primaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Spacer()
 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(preview.colors.accent)
+                        .transition(.scale.combined(with: .opacity))
                 }
             }
 
+            VStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                    .fill(preview.colors.secondaryBackground)
+                    .frame(height: 16)
+                    .overlay(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                            .fill(preview.colors.sidebarSelection)
+                            .frame(width: 72, height: 10)
+                            .padding(.leading, 8)
+                    }
+
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                        .fill(preview.colors.assistantBubble)
+
+                    RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                        .fill(preview.colors.userBubble)
+
+                    RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                        .fill(preview.colors.toolBubble)
+                }
+                .frame(height: 28)
+            }
+            .padding(8)
+            .background(preview.colors.elevatedSurface, in: RoundedRectangle(cornerRadius: preview.radius.panel, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: preview.radius.panel, style: .continuous)
+                    .strokeBorder(preview.colors.separator, lineWidth: preview.stroke.hairline)
+            }
+
             HStack(spacing: 5) {
-                ForEach([preview.colors.accent, preview.colors.info, preview.colors.warning, preview.colors.surface], id: \.description) { color in
+                ForEach([preview.colors.accent, preview.colors.info, preview.colors.warning, preview.colors.chartC], id: \.description) { color in
                     Circle()
                         .fill(color)
-                        .frame(width: 18, height: 18)
-                        .overlay(Circle().strokeBorder(preview.colors.separator, lineWidth: 1))
+                        .frame(width: 15, height: 15)
+                        .overlay(Circle().strokeBorder(preview.colors.separator, lineWidth: preview.stroke.hairline))
                 }
             }
+            .frame(height: 18)
 
             Text(template.subtitle)
                 .font(preview.typography.caption)
                 .foregroundStyle(preview.colors.secondaryText)
                 .lineLimit(2)
+                .minimumScaleFactor(0.82)
         }
         .padding(preview.spacing.medium)
-        .background(preview.colors.surface, in: RoundedRectangle(cornerRadius: preview.radius.panel, style: .continuous))
+        .background(preview.colors.surface, in: RoundedRectangle(cornerRadius: preview.radius.sheet, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: preview.radius.panel, style: .continuous)
+            RoundedRectangle(cornerRadius: preview.radius.sheet, style: .continuous)
                 .strokeBorder(isSelected ? preview.colors.accent : preview.colors.separator, lineWidth: isSelected ? preview.stroke.selected : preview.stroke.hairline)
+        }
+        .shadow(color: preview.shadow.panelColor.opacity(isSelected ? 1 : 0.45), radius: isSelected ? preview.shadow.panelRadius * 0.45 : preview.shadow.panelRadius * 0.22, x: 0, y: isSelected ? preview.shadow.panelY * 0.45 : preview.shadow.panelY * 0.20)
+        .scaleEffect(isSelected && !reduceMotion ? 1.015 : 1)
+        .animation(reduceMotion ? nil : preview.motion.standard, value: isSelected)
+    }
+}
+
+enum PinesSurfaceKind {
+    case panel
+    case elevated
+    case glass
+    case inset
+    case selected
+    case chrome
+}
+
+private struct PinesSurfaceModifier: ViewModifier {
+    @Environment(\.pinesTheme) private var theme
+    let kind: PinesSurfaceKind
+    let padding: CGFloat?
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .padding(padding ?? theme.spacing.medium)
+            .background(backgroundStyle, in: shape)
+            .overlay {
+                shape
+                    .strokeBorder(borderColor, lineWidth: borderWidth)
+            }
+            .overlay {
+                if kind != .inset {
+                    shape
+                        .strokeBorder(theme.colors.surfaceHighlight.opacity(highlightOpacity), lineWidth: theme.stroke.hairline)
+                        .blendMode(.plusLighter)
+                }
+            }
+            .shadow(color: shadowColor, radius: shadowRadius, x: 0, y: shadowY)
+    }
+
+    private var cornerRadius: CGFloat {
+        switch kind {
+        case .chrome, .glass:
+            theme.radius.sheet
+        default:
+            theme.radius.panel
+        }
+    }
+
+    private var backgroundStyle: AnyShapeStyle {
+        switch kind {
+        case .glass, .chrome:
+            theme.colors.glassSurface
+        case .elevated, .selected:
+            AnyShapeStyle(theme.colors.elevatedSurface)
+        case .inset:
+            AnyShapeStyle(theme.colors.controlFill)
+        case .panel:
+            AnyShapeStyle(theme.colors.surface)
+        }
+    }
+
+    private var borderColor: Color {
+        switch kind {
+        case .selected:
+            theme.colors.accent.opacity(0.72)
+        case .glass, .chrome:
+            theme.colors.controlBorder
+        case .inset:
+            theme.colors.separator.opacity(0.7)
+        case .panel, .elevated:
+            theme.colors.separator
+        }
+    }
+
+    private var borderWidth: CGFloat {
+        kind == .selected ? theme.stroke.selected : theme.stroke.hairline
+    }
+
+    private var highlightOpacity: Double {
+        switch kind {
+        case .elevated, .selected:
+            0.85
+        case .glass, .chrome:
+            0.70
+        default:
+            0.42
+        }
+    }
+
+    private var shadowColor: Color {
+        switch kind {
+        case .inset:
+            Color.clear
+        case .selected:
+            theme.colors.accent.opacity(theme.colorScheme == .dark ? 0.18 : 0.14)
+        default:
+            theme.shadow.panelColor
+        }
+    }
+
+    private var shadowRadius: CGFloat {
+        switch kind {
+        case .elevated, .selected:
+            theme.shadow.panelRadius * 0.55
+        case .glass, .chrome:
+            theme.shadow.panelRadius * 0.40
+        case .panel:
+            theme.shadow.panelRadius * 0.30
+        case .inset:
+            0
+        }
+    }
+
+    private var shadowY: CGFloat {
+        switch kind {
+        case .elevated, .selected:
+            theme.shadow.panelY * 0.55
+        case .glass, .chrome:
+            theme.shadow.panelY * 0.35
+        case .panel:
+            theme.shadow.panelY * 0.25
+        case .inset:
+            0
         }
     }
 }
 
-private struct PinesPanelModifier: ViewModifier {
-    @Environment(\.pinesTheme) private var theme
-    let padding: CGFloat?
+enum PinesButtonKind {
+    case primary
+    case secondary
+    case ghost
+    case destructive
+    case icon
+}
 
-    func body(content: Content) -> some View {
-        content
-            .padding(padding ?? theme.spacing.medium)
-            .background(theme.colors.surface, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+struct PinesButtonStyle: ButtonStyle {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var kind: PinesButtonKind = .secondary
+    var fillWidth = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(font)
+            .foregroundStyle(foregroundColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+            .allowsTightening(true)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, horizontalPadding)
+            .frame(minWidth: minWidth, maxWidth: fillWidth ? .infinity : nil, minHeight: minHeight)
+            .background(backgroundStyle(configuration: configuration), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
-                    .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(borderColor(configuration: configuration), lineWidth: borderWidth)
             }
-            .shadow(color: theme.shadow.panelColor, radius: theme.shadow.panelRadius * 0.35, x: 0, y: theme.shadow.panelY * 0.35)
+            .shadow(color: shadowColor(configuration: configuration), radius: shadowRadius, x: 0, y: shadowY)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.965 : 1)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: configuration.isPressed)
+    }
+
+    private var font: Font {
+        kind == .icon ? theme.typography.caption.weight(.semibold) : theme.typography.callout.weight(.semibold)
+    }
+
+    private var foregroundColor: Color {
+        switch kind {
+        case .primary:
+            theme.colorScheme == .dark ? Color.black.opacity(0.88) : Color.white
+        case .destructive:
+            theme.colors.danger
+        case .secondary, .ghost, .icon:
+            theme.colors.primaryText
+        }
+    }
+
+    private var horizontalPadding: CGFloat {
+        switch kind {
+        case .icon:
+            0
+        case .ghost:
+            theme.spacing.small
+        default:
+            theme.spacing.medium
+        }
+    }
+
+    private var minWidth: CGFloat? {
+        kind == .icon ? minHeight : nil
+    }
+
+    private var minHeight: CGFloat {
+        kind == .icon ? 36 : 38
+    }
+
+    private var cornerRadius: CGFloat {
+        kind == .icon ? theme.radius.control : theme.radius.control + 2
+    }
+
+    private var borderWidth: CGFloat {
+        kind == .primary ? 0 : theme.stroke.hairline
+    }
+
+    private func backgroundStyle(configuration: Configuration) -> AnyShapeStyle {
+        if configuration.isPressed {
+            return AnyShapeStyle(kind == .primary ? theme.colors.accent.opacity(0.82) : theme.colors.controlPressed)
+        }
+
+        switch kind {
+        case .primary:
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [theme.colors.accent, theme.colors.chartB.opacity(0.92)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .secondary, .icon:
+            return AnyShapeStyle(theme.colors.controlFill)
+        case .ghost:
+            return AnyShapeStyle(Color.clear)
+        case .destructive:
+            return AnyShapeStyle(theme.colors.danger.opacity(theme.colorScheme == .dark ? 0.14 : 0.08))
+        }
+    }
+
+    private func borderColor(configuration: Configuration) -> Color {
+        if configuration.isPressed {
+            return theme.colors.focusRing.opacity(0.48)
+        }
+
+        switch kind {
+        case .primary:
+            return Color.clear
+        case .destructive:
+            return theme.colors.danger.opacity(0.24)
+        case .secondary, .icon:
+            return theme.colors.controlBorder
+        case .ghost:
+            return Color.clear
+        }
+    }
+
+    private func shadowColor(configuration: Configuration) -> Color {
+        guard kind == .primary, !configuration.isPressed else {
+            return Color.clear
+        }
+        return theme.colors.accent.opacity(theme.colorScheme == .dark ? 0.20 : 0.16)
+    }
+
+    private var shadowRadius: CGFloat {
+        kind == .primary ? theme.shadow.panelRadius * 0.35 : 0
+    }
+
+    private var shadowY: CGFloat {
+        kind == .primary ? theme.shadow.panelY * 0.25 : 0
+    }
+}
+
+struct PinesStatusIndicator: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let color: Color
+    var isActive = false
+    var size: CGFloat = 9
+    @State private var pulse = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .overlay {
+                if isActive && !reduceMotion {
+                    Circle()
+                        .stroke(color.opacity(0.35), lineWidth: 1)
+                        .scaleEffect(pulse ? 2.4 : 1)
+                        .opacity(pulse ? 0 : 0.72)
+                }
+            }
+            .shadow(color: color.opacity(theme.colorScheme == .dark ? 0.44 : 0.24), radius: isActive ? 5 : 2, x: 0, y: 0)
+            .onAppear {
+                guard isActive, !reduceMotion else { return }
+                withAnimation(.easeOut(duration: 1.35).repeatForever(autoreverses: false)) {
+                    pulse = true
+                }
+            }
+    }
+}
+
+struct PinesProgressBar: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let value: Double
+    var tint: Color?
+
+    private var clampedValue: Double {
+        min(1, max(0, value))
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(theme.colors.controlFill)
+
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [tint ?? theme.colors.accent, theme.colors.chartB],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: max(7, proxy.size.width * clampedValue))
+                    .shadow(color: (tint ?? theme.colors.accent).opacity(theme.colorScheme == .dark ? 0.24 : 0.16), radius: 5, x: 0, y: 0)
+            }
+        }
+        .frame(height: 7)
+        .animation(reduceMotion ? nil : theme.motion.standard, value: clampedValue)
     }
 }
 
@@ -549,17 +924,31 @@ private struct PinesAppBackgroundModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(theme.colors.appBackground)
+            .background(theme.colors.backgroundWash)
     }
 }
 
 extension View {
     func pinesPanel(padding: CGFloat? = nil) -> some View {
-        modifier(PinesPanelModifier(padding: padding))
+        modifier(PinesSurfaceModifier(kind: .panel, padding: padding))
+    }
+
+    func pinesSurface(_ kind: PinesSurfaceKind = .panel, padding: CGFloat? = nil) -> some View {
+        modifier(PinesSurfaceModifier(kind: kind, padding: padding))
     }
 
     func pinesAppBackground() -> some View {
         modifier(PinesAppBackgroundModifier())
+    }
+
+    func pinesButtonStyle(_ kind: PinesButtonKind = .secondary, fillWidth: Bool = false) -> some View {
+        buttonStyle(PinesButtonStyle(kind: kind, fillWidth: fillWidth))
+    }
+
+    func pinesFittingText(lines: Int = 1, minimumScale: CGFloat = 0.78) -> some View {
+        lineLimit(lines)
+            .minimumScaleFactor(minimumScale)
+            .allowsTightening(true)
     }
 
     @ViewBuilder

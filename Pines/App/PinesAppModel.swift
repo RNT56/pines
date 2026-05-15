@@ -18,7 +18,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var cloudProviders: [CloudProviderConfiguration]
     @Published var mcpServers: [MCPServerConfiguration] = []
     @Published var mcpTools: [MCPToolRecord] = []
+    @Published var mcpResources: [MCPResourceRecord] = []
+    @Published var mcpResourceTemplates: [MCPResourceTemplateRecord] = []
+    @Published var mcpPrompts: [MCPPromptRecord] = []
     @Published var pendingToolApproval: ToolApprovalRequest?
+    @Published var pendingMCPSamplingRequest: MCPSamplingRequest?
+    @Published var pendingMCPSamplingResultReview: MCPSamplingResultReview?
+    @Published var mcpSamplingPromptDraft = ""
+    @Published var hapticSignal: PinesHapticSignal?
     @Published var modelDownloads: [ModelDownloadProgress] = []
     @Published var isSearchingModels = false
     @Published var modelSearchError: String?
@@ -27,6 +34,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var braveSearchCredentialStatus = "Not configured"
     private var currentRunTask: Task<Void, Never>?
     private var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
+    private var samplingContinuation: CheckedContinuation<Bool, Never>?
+    private var samplingResultContinuation: CheckedContinuation<Bool, Never>?
+    private var mcpSamplingRequestCountByServer: [MCPServerID: Int] = [:]
 
     var modelSuggestions: [String] {
         Array(
@@ -69,6 +79,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     func bootstrap(services: PinesAppServices) async {
         await refreshAll(services: services)
         observeRepositories(services: services)
+        await services.mcpServerService?.start { [weak self] request, server in
+            guard let self else {
+                throw InferenceError.cancelled
+            }
+            return try await self.handleMCPSampling(request, server: server, services: services)
+        }
     }
 
     func refreshAll(services: PinesAppServices) async {
@@ -124,6 +140,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             if let mcpServerRepository = services.mcpServerRepository {
                 mcpServers = try await mcpServerRepository.listMCPServers()
                 mcpTools = try await mcpServerRepository.listMCPTools(serverID: nil)
+                mcpResources = try await mcpServerRepository.listMCPResources(serverID: nil)
+                mcpResourceTemplates = try await mcpServerRepository.listMCPResourceTemplates(serverID: nil)
+                mcpPrompts = try await mcpServerRepository.listMCPPrompts(serverID: nil)
             }
 
             await refreshCredentialStatuses(services: services)
@@ -144,14 +163,18 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 ?? models.first?.install.modelID
             let conversation = try await repository.createConversation(title: "New chat", defaultModelID: modelID)
             await refreshAll(services: services)
+            emitHaptic(.primaryAction)
             return conversation.id
         } catch {
             serviceError = error.localizedDescription
+            emitHaptic(.runFailed)
             return nil
         }
     }
 
     func startSending(_ draft: String, in threadID: UUID?, services: PinesAppServices) {
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        emitHaptic(.sendCommitted)
         currentRunTask?.cancel()
         currentRunTask = Task { [weak self] in
             await self?.sendMessage(draft, in: threadID, services: services)
@@ -162,7 +185,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         currentRunTask?.cancel()
         currentRunTask = nil
         activeRunID = nil
+        emitHaptic(.runCancelled)
         resolvePendingToolApproval(.denied)
+        resolvePendingMCPSampling(false)
+        resolvePendingMCPSamplingResultReview(false)
     }
 
     func retryLastUserMessage(in thread: PinesThreadPreview, services: PinesAppServices) {
@@ -238,13 +264,18 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             try await repository.appendMessage(assistantMessage, status: .streaming, conversationID: conversationID, modelID: selectedModelID, providerID: selectedProviderID)
 
             activeRunID = assistantMessage.id
+            emitHaptic(.runAccepted)
             await refreshAll(services: services)
 
             let messages = try await repository.messages(in: conversationID)
             let vaultContext = await vaultContextMessage(for: trimmed, services: services)
+            let mcpContext = await mcpResourceContextMessage(services: services)
             var requestMessages = messages
             if let vaultContext {
                 requestMessages.insert(vaultContext.message, at: 0)
+            }
+            if let mcpContext {
+                requestMessages.insert(mcpContext, at: 0)
             }
             let request = ChatRequest(
                 modelID: selectedModelID,
@@ -276,6 +307,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             var accumulated = ""
             var tokenCount = 0
             let generationStartedAt = Date()
+            var streamHaptics = PinesStreamHapticGate()
 
             for try await event in stream {
                 guard !Task.isCancelled else { throw InferenceError.cancelled }
@@ -283,16 +315,21 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 case let .token(delta):
                     accumulated += delta.text
                     tokenCount += max(delta.tokenCount, 1)
+                    if let hapticEvent = streamHaptics.event(tokenCount: tokenCount, content: accumulated) {
+                        emitHaptic(hapticEvent)
+                    }
                     try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: .streaming, tokenCount: tokenCount)
                 case let .finish(finish):
                     let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                     try await repository.updateMessage(id: assistantMessage.id, content: accumulated, status: status, tokenCount: tokenCount)
+                    emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
                 case let .failure(failure):
                     try await repository.updateMessage(id: assistantMessage.id, content: failure.message, status: .failed, tokenCount: tokenCount)
+                    emitHaptic(.runFailed)
                 case let .metrics(metrics):
                     services.runtimeMetrics.recordGenerationMetrics(metrics, modelID: selectedModelID)
                 case .toolCall:
-                    break
+                    emitHaptic(.streamMilestone)
                 }
                 await refreshAll(services: services)
             }
@@ -305,10 +342,16 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             activeRunID = nil
             currentRunTask = nil
             await refreshAll(services: services)
+        } catch InferenceError.cancelled {
+            activeRunID = nil
+            currentRunTask = nil
+            emitHaptic(.runCancelled)
+            await refreshAll(services: services)
         } catch {
             activeRunID = nil
             currentRunTask = nil
             serviceError = error.localizedDescription
+            emitHaptic(.runFailed)
             await refreshAll(services: services)
         }
     }
@@ -358,6 +401,29 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 """
             ),
             documentIDs
+        )
+    }
+
+    private func mcpResourceContextMessage(services: PinesAppServices) async -> ChatMessage? {
+        let selected = mcpResources.filter(\.selectedForContext).prefix(4)
+        guard !selected.isEmpty else { return nil }
+        var sections = [String]()
+        for resource in selected {
+            guard let contents = try? await services.mcpServerService?.readResource(resource) else {
+                continue
+            }
+            for content in contents {
+                guard let text = content.text, !text.isEmpty else { continue }
+                sections.append("Resource \(resource.name) (\(resource.uri)):\n\(String(text.prefix(4_000)))")
+            }
+        }
+        guard !sections.isEmpty else { return nil }
+        return ChatMessage(
+            role: .system,
+            content: """
+            Use this user-selected MCP resource context when relevant. Treat it as external, server-provided context.
+            \(sections.joined(separator: "\n\n"))
+            """
         )
     }
 
@@ -432,14 +498,17 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 await refreshAll(services: services)
             } else {
                 let token = try await services.huggingFaceCredentialService.readToken()
-                let filters = ModelSearchFilters(query: query, task: task, limit: 30)
+                let filters = ModelSearchFilters(query: trimmed, task: task, limit: 50)
                 let remoteModels = try await services.modelCatalog.search(filters: filters, accessToken: token)
                 let installed = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
                 let installedByRepository = Dictionary(uniqueKeysWithValues: installed.map { ($0.repository.lowercased(), $0) })
                 let downloadByRepository = Self.latestDownloadByRepository(modelDownloads)
                 let previews = remoteModels.compactMap { summary -> PinesModelPreview? in
-                    let install = installedByRepository[summary.repository.lowercased()]
-                        ?? Self.install(from: summary)
+                    let preflight = services.preflightClassifier.classify(summary.preflightInput)
+                    let existingInstall = installedByRepository[summary.repository.lowercased()]
+                    let install = existingInstall?.enriched(with: preflight)
+                        ?? Self.install(from: summary, preflight: preflight)
+                    guard preflight.verification != .unsupported || verification == .unsupported || installState == .unsupported else { return nil }
                     guard verification == nil || install.verification == verification else { return nil }
                     guard installState == nil || install.state == installState else { return nil }
                     return Self.modelPreview(
@@ -572,6 +641,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         oauthClientID: String,
         oauthScopes: String,
         oauthResource: String,
+        resourcesEnabled: Bool,
+        promptsEnabled: Bool,
+        samplingEnabled: Bool,
+        byokSamplingEnabled: Bool,
+        subscriptionsEnabled: Bool,
+        maxSamplingRequestsPerSession: Int,
         enabled: Bool,
         allowInsecureLocalHTTP: Bool,
         services: PinesAppServices
@@ -599,7 +674,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 oauthTokenURL: URL(string: oauthTokenURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
                 oauthClientID: oauthClientID.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 oauthScopes: oauthScopes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-                oauthResource: oauthResource.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                oauthResource: oauthResource.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                resourcesEnabled: resourcesEnabled,
+                promptsEnabled: promptsEnabled,
+                samplingEnabled: samplingEnabled,
+                byokSamplingEnabled: byokSamplingEnabled,
+                subscriptionsEnabled: subscriptionsEnabled,
+                maxSamplingRequestsPerSession: maxSamplingRequestsPerSession
             )
             try await service.saveServer(server, bearerToken: bearerToken.isEmpty ? nil : bearerToken)
             await refreshAll(services: services)
@@ -679,6 +760,82 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         } catch {
             serviceError = error.localizedDescription
             await refreshAll(services: services)
+        }
+    }
+
+    func refreshMCPResources(_ server: MCPServerConfiguration, services: PinesAppServices) async {
+        do {
+            try await services.mcpServerService?.refreshResources(server)
+            await refreshAll(services: services)
+        } catch {
+            serviceError = error.localizedDescription
+        }
+    }
+
+    func refreshMCPPrompts(_ server: MCPServerConfiguration, services: PinesAppServices) async {
+        do {
+            try await services.mcpServerService?.refreshPrompts(server)
+            await refreshAll(services: services)
+        } catch {
+            serviceError = error.localizedDescription
+        }
+    }
+
+    func setMCPResourceSelected(_ resource: MCPResourceRecord, selected: Bool, services: PinesAppServices) async {
+        do {
+            try await services.mcpServerService?.setResourceSelected(resource, selected: selected)
+            await refreshAll(services: services)
+        } catch {
+            serviceError = error.localizedDescription
+        }
+    }
+
+    func setMCPResourceSubscribed(_ resource: MCPResourceRecord, subscribed: Bool, services: PinesAppServices) async {
+        do {
+            try await services.mcpServerService?.setResourceSubscribed(resource, subscribed: subscribed)
+            await refreshAll(services: services)
+        } catch {
+            serviceError = error.localizedDescription
+        }
+    }
+
+    func previewMCPResource(_ resource: MCPResourceRecord, services: PinesAppServices) async -> String? {
+        do {
+            guard let contents = try await services.mcpServerService?.readResource(resource) else {
+                return nil
+            }
+            let preview = contents.map { content in
+                if let text = content.text, !text.isEmpty {
+                    return String(text.prefix(6_000))
+                }
+                if let blob = content.blob {
+                    return "[Binary resource: \(content.mimeType ?? "application/octet-stream"), \(blob.count) base64 characters]"
+                }
+                return "[Empty resource content]"
+            }.joined(separator: "\n\n")
+            return preview.isEmpty ? "[Empty resource content]" : preview
+        } catch {
+            serviceError = error.localizedDescription
+            return nil
+        }
+    }
+
+    func useMCPPrompt(_ prompt: MCPPromptRecord, arguments: [String: String] = [:], services: PinesAppServices) async {
+        do {
+            let trimmedArguments = arguments.mapValues { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let missing = prompt.arguments.first { ($0.required ?? false) && (trimmedArguments[$0.name]?.isEmpty ?? true) }
+            if let missing {
+                serviceError = "Missing MCP prompt argument: \(missing.name)."
+                return
+            }
+            let completeArguments = Dictionary(uniqueKeysWithValues: prompt.arguments.map { argument in
+                (argument.name, trimmedArguments[argument.name] ?? "")
+            })
+            guard let result = try await services.mcpServerService?.getPrompt(prompt, arguments: completeArguments) else { return }
+            let text = Self.chatText(from: result.messages)
+            startSending(text, in: nil, services: services)
+        } catch {
+            serviceError = error.localizedDescription
         }
     }
 
@@ -869,11 +1026,26 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     }
                 }
             }
+            Task { [weak self] in
+                for await resources in mcpServerRepository.observeMCPResources() {
+                    await MainActor.run {
+                        self?.mcpResources = resources
+                    }
+                }
+            }
+            Task { [weak self] in
+                for await prompts in mcpServerRepository.observeMCPPrompts() {
+                    await MainActor.run {
+                        self?.mcpPrompts = prompts
+                    }
+                }
+            }
         }
     }
 
     func requestToolApproval(_ request: ToolApprovalRequest) async -> ToolApprovalStatus {
         pendingToolApproval = request
+        emitHaptic(.toolApprovalNeeded)
         return await withCheckedContinuation { continuation in
             approvalContinuation = continuation
         }
@@ -881,8 +1053,230 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
     func resolvePendingToolApproval(_ status: ToolApprovalStatus) {
         pendingToolApproval = nil
+        emitHaptic(status == .approved ? .primaryAction : .runCancelled)
         approvalContinuation?.resume(returning: status)
         approvalContinuation = nil
+    }
+
+    func resolvePendingMCPSampling(_ approved: Bool) {
+        pendingMCPSamplingRequest = nil
+        samplingContinuation?.resume(returning: approved)
+        samplingContinuation = nil
+    }
+
+    func resolvePendingMCPSamplingResultReview(_ approved: Bool) {
+        pendingMCPSamplingResultReview = nil
+        samplingResultContinuation?.resume(returning: approved)
+        samplingResultContinuation = nil
+    }
+
+    private func requestMCPSamplingApproval(_ request: MCPSamplingRequest) async -> Bool {
+        pendingMCPSamplingRequest = request
+        mcpSamplingPromptDraft = Self.chatText(from: request.messages)
+        emitHaptic(.toolApprovalNeeded)
+        return await withCheckedContinuation { continuation in
+            samplingContinuation = continuation
+        }
+    }
+
+    private func requestMCPSamplingResultApproval(_ result: MCPSamplingResult, serverID: MCPServerID) async -> Bool {
+        pendingMCPSamplingResultReview = MCPSamplingResultReview(
+            serverID: serverID,
+            result: result,
+            summary: Self.samplingResultSummary(result)
+        )
+        emitHaptic(.toolApprovalNeeded)
+        return await withCheckedContinuation { continuation in
+            samplingResultContinuation = continuation
+        }
+    }
+
+    private func emitHaptic(_ event: PinesHapticEvent) {
+        hapticSignal = PinesHapticSignal(event: event)
+    }
+
+    private func handleMCPSampling(
+        _ request: MCPSamplingRequest,
+        server: MCPServerConfiguration,
+        services: PinesAppServices
+    ) async throws -> MCPSamplingResult {
+        guard server.samplingEnabled else {
+            throw InferenceError.unsupportedCapability("Sampling is disabled for this MCP server.")
+        }
+        let usedRequests = mcpSamplingRequestCountByServer[server.id, default: 0]
+        guard usedRequests < server.maxSamplingRequestsPerSession else {
+            throw InferenceError.invalidRequest("MCP sampling request limit reached for \(server.displayName).")
+        }
+        guard await requestMCPSamplingApproval(request) else {
+            throw AgentError.permissionDenied("MCP sampling request was denied.")
+        }
+        mcpSamplingRequestCountByServer[server.id, default: 0] += 1
+        let editedPrompt = mcpSamplingPromptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let messages = try Self.chatMessages(
+            from: request.messages,
+            systemPrompt: request.systemPrompt,
+            editedPrompt: editedPrompt.isEmpty ? nil : editedPrompt
+        )
+        let modelID = defaultModelID
+            ?? models.first(where: { $0.install.state == .installed })?.install.modelID
+            ?? models.first?.install.modelID
+            ?? ModelID(rawValue: "mlx-community/Llama-3.2-1B-Instruct-4bit")
+        let tools = try request.tools.map {
+            try AnyToolSpec(
+                name: $0.name,
+                version: "mcp-sampling",
+                description: $0.description ?? "MCP sampling tool \($0.name).",
+                inputJSONSchema: $0.inputSchema
+            )
+        }
+        let sampling = ChatSampling(
+            maxTokens: request.maxTokens ?? 512,
+            temperature: Float(request.temperature ?? 0.6)
+        )
+        let chatRequest = ChatRequest(
+            modelID: modelID,
+            messages: messages,
+            sampling: sampling,
+            allowsTools: !tools.isEmpty,
+            availableTools: tools
+        )
+
+        if let result = try? await runMCPSampling(chatRequest, provider: services.mlxRuntime, modelID: modelID) {
+            guard await requestMCPSamplingResultApproval(result, serverID: server.id) else {
+                throw AgentError.permissionDenied("MCP sampling result was not approved for return.")
+            }
+            return result
+        }
+
+        guard server.byokSamplingEnabled,
+              let cloudProvider = cloudProviders.first(where: { $0.enabledForAgents })
+        else {
+            throw InferenceError.providerUnavailable(services.mlxRuntime.localProviderID)
+        }
+        let provider = BYOKCloudInferenceProvider(configuration: cloudProvider, secretStore: services.secretStore)
+        let result = try await runMCPSampling(
+            chatRequest,
+            provider: provider,
+            modelID: cloudProvider.defaultModelID ?? modelID
+        )
+        guard await requestMCPSamplingResultApproval(result, serverID: server.id) else {
+            throw AgentError.permissionDenied("MCP sampling result was not approved for return.")
+        }
+        return result
+    }
+
+    private func runMCPSampling(
+        _ request: ChatRequest,
+        provider: any InferenceProvider,
+        modelID: ModelID
+    ) async throws -> MCPSamplingResult {
+        let stream = try await provider.streamEvents(request)
+        var text = ""
+        var stopReason = "endTurn"
+        for try await event in stream {
+            switch event {
+            case let .token(delta):
+                text += delta.text
+            case let .toolCall(toolCall):
+                let input = (try? JSONDecoder().decode(JSONValue.self, from: Data(toolCall.argumentsFragment.utf8))) ?? .object([:])
+                return MCPSamplingResult(
+                    content: .toolUse(id: toolCall.id, name: toolCall.name, input: input),
+                    model: modelID.rawValue,
+                    stopReason: "toolUse"
+                )
+            case let .finish(finish):
+                stopReason = finish.reason == .length ? "maxTokens" : "endTurn"
+            case let .failure(failure):
+                throw InferenceError.invalidRequest(failure.message)
+            case .metrics:
+                break
+            }
+        }
+        return MCPSamplingResult(content: .text(text), model: modelID.rawValue, stopReason: stopReason)
+    }
+
+    private static func chatMessages(from messages: [MCPPromptMessage], systemPrompt: String?, editedPrompt: String? = nil) throws -> [ChatMessage] {
+        var chatMessages = [ChatMessage]()
+        if let systemPrompt, !systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            chatMessages.append(ChatMessage(role: .system, content: systemPrompt))
+        }
+        if let editedPrompt, !editedPrompt.isEmpty {
+            chatMessages.append(ChatMessage(role: .user, content: editedPrompt))
+            return chatMessages
+        }
+        for message in messages {
+            let role: ChatRole = message.role == .assistant ? .assistant : .user
+            let converted = try textAndAttachments(from: message.content)
+            chatMessages.append(ChatMessage(role: role, content: converted.text, attachments: converted.attachments))
+        }
+        return chatMessages
+    }
+
+    private static func samplingResultSummary(_ result: MCPSamplingResult) -> String {
+        switch result.content {
+        case let .text(text):
+            text
+        case let .toolUse(id, name, _):
+            "Tool use \(id): \(name)"
+        case let .toolResult(toolUseID, content):
+            let text = (try? textAndAttachments(from: content).text) ?? ""
+            return "Tool result \(toolUseID)\n\(text)"
+        case let .resource(resource):
+            resource.text ?? "[Resource: \(resource.uri)]"
+        case let .image(_, mimeType):
+            "[Image: \(mimeType)]"
+        case let .audio(_, mimeType):
+            "[Audio: \(mimeType)]"
+        case .unknown:
+            "[Unsupported sampling result content]"
+        }
+    }
+
+    private static func chatText(from messages: [MCPPromptMessage]) -> String {
+        messages.map { message in
+            (try? textAndAttachments(from: message.content).text) ?? ""
+        }.joined(separator: "\n\n")
+    }
+
+    private static func textAndAttachments(from contents: [MCPMessageContent]) throws -> (text: String, attachments: [ChatAttachment]) {
+        var parts = [String]()
+        var attachments = [ChatAttachment]()
+        for content in contents {
+            switch content {
+            case let .text(text):
+                parts.append(text)
+            case let .resource(resource):
+                if let text = resource.text {
+                    parts.append(text)
+                } else if let blob = resource.blob {
+                    parts.append("[Embedded resource: \(resource.uri), \(blob.count) base64 characters]")
+                }
+            case let .image(data, mimeType):
+                let url = try writeTemporaryMCPBlob(data: data, mimeType: mimeType)
+                attachments.append(ChatAttachment(kind: .image, fileName: url.lastPathComponent, contentType: mimeType, localURL: url, byteCount: (try? Data(contentsOf: url).count) ?? 0))
+                parts.append("[Image: \(mimeType)]")
+            case .audio:
+                throw InferenceError.unsupportedCapability("Audio sampling content is not supported yet.")
+            case let .toolUse(id, name, _):
+                parts.append("[Tool use \(id): \(name)]")
+            case let .toolResult(toolUseID, content):
+                let nested = try textAndAttachments(from: content)
+                parts.append("[Tool result \(toolUseID)]\n\(nested.text)")
+            case .unknown:
+                break
+            }
+        }
+        return (parts.joined(separator: "\n\n"), attachments)
+    }
+
+    private static func writeTemporaryMCPBlob(data: String, mimeType: String) throws -> URL {
+        guard let decoded = Data(base64Encoded: data) else {
+            throw InferenceError.invalidRequest("MCP image content was not valid base64.")
+        }
+        let ext = mimeType == "image/jpeg" ? "jpg" : "png"
+        let url = FileManager.default.temporaryDirectory.appending(path: "mcp-\(UUID().uuidString).\(ext)")
+        try decoded.write(to: url)
+        return url
     }
 
     private func refreshCredentialStatuses(services: PinesAppServices) async {
@@ -910,25 +1304,33 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         )
     }
 
-    private static func install(from summary: RemoteModelSummary) -> ModelInstall {
-        let modalities: Set<ModelModality>
-        switch summary.task {
-        case .imageTextToText:
-            modalities = [.text, .vision]
-        case .featureExtraction, .sentenceSimilarity:
-            modalities = [.embeddings]
-        case .textGeneration, .none:
-            modalities = [.text]
-        }
-
+    private static func install(from summary: RemoteModelSummary, preflight: ModelPreflightResult) -> ModelInstall {
         return ModelInstall(
             modelID: ModelID(rawValue: summary.repository),
             displayName: summary.repository.components(separatedBy: "/").last ?? summary.repository,
             repository: summary.repository,
-            modalities: modalities,
-            verification: CuratedModelManifest.default.contains(repository: summary.repository) ? .verified : .installable,
-            state: .remote
+            modalities: preflight.modalities.isEmpty ? Self.modalities(from: summary) : preflight.modalities,
+            verification: preflight.verification,
+            state: preflight.verification == .unsupported ? .unsupported : .remote,
+            estimatedBytes: preflight.estimatedBytes > 0 ? preflight.estimatedBytes : nil,
+            license: preflight.license,
+            modelType: preflight.modelType,
+            processorClass: preflight.processorClass
         )
+    }
+
+    private static func modalities(from summary: RemoteModelSummary) -> Set<ModelModality> {
+        if summary.tags.contains(where: { $0 == "feature-extraction" || $0 == "sentence-similarity" || $0 == "sentence-transformers" }) {
+            return [.embeddings]
+        }
+        switch summary.task {
+        case .imageTextToText:
+            return [.text, .vision]
+        case .featureExtraction, .sentenceSimilarity:
+            return [.embeddings]
+        case .textGeneration, .none:
+            return [.text]
+        }
     }
 
     private static func modelPreview(
@@ -1033,6 +1435,26 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     }
 }
 
+private extension ModelInstall {
+    func enriched(with preflight: ModelPreflightResult) -> ModelInstall {
+        var copy = self
+        if !preflight.modalities.isEmpty {
+            copy.modalities = preflight.modalities
+        }
+        copy.verification = CuratedModelManifest.default.contains(repository: repository) ? .verified : preflight.verification
+        if copy.state == .remote, preflight.verification == .unsupported {
+            copy.state = .unsupported
+        }
+        if preflight.estimatedBytes > 0 {
+            copy.estimatedBytes = preflight.estimatedBytes
+        }
+        copy.license = preflight.license ?? copy.license
+        copy.modelType = preflight.modelType ?? copy.modelType
+        copy.processorClass = preflight.processorClass ?? copy.processorClass
+        return copy
+    }
+}
+
 private extension Array where Element: Hashable {
     func uniqued() -> [Element] {
         var seen = Set<Element>()
@@ -1123,6 +1545,13 @@ enum PinesThreadStatus: String, Hashable {
             theme.colors.tertiaryText
         }
     }
+}
+
+struct MCPSamplingResultReview: Identifiable, Hashable {
+    let id = UUID()
+    let serverID: MCPServerID
+    let result: MCPSamplingResult
+    let summary: String
 }
 
 struct PinesModelPreview: Identifiable, Hashable {
@@ -1271,47 +1700,47 @@ private enum PinesStaticSettings {
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20000")!,
             title: "Design",
-            subtitle: "Templates, light and dark mode, density, and motion.",
+            subtitle: "Theme, motion, haptics, and visual feel.",
             systemImage: "paintpalette",
             rows: [
                 PinesSettingsRow(
                     id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20010")!,
                     title: "Theme template",
-                    detail: "Evergreen",
+                    detail: "Color and surface system",
                     systemImage: "swatchpalette"
                 ),
                 PinesSettingsRow(
                     id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20011")!,
-                    title: "Mode",
-                    detail: "System",
-                    systemImage: "circle.lefthalf.filled"
+                    title: "Interaction feel",
+                    detail: "Haptics and motion",
+                    systemImage: "waveform.path"
                 )
             ]
         ),
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20001")!,
             title: "Inference",
-            subtitle: "Runtime, memory, and model defaults.",
+            subtitle: "Execution mode, local runtime, memory, and model access.",
             systemImage: "cpu",
             rows: [
                 PinesSettingsRow(
                     id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A21001")!,
-                    title: "Default model",
-                    detail: "Qwen3 8B",
+                    title: "Execution policy",
+                    detail: "Local or BYOK cloud",
                     systemImage: "sparkles"
                 ),
                 PinesSettingsRow(
                     id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A21002")!,
-                    title: "Context budget",
-                    detail: "32K tokens",
-                    systemImage: "text.line.first.and.arrowtriangle.forward"
+                    title: "Runtime diagnostics",
+                    detail: "MLX and memory state",
+                    systemImage: "memorychip"
                 )
             ]
         ),
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20002")!,
             title: "Privacy",
-            subtitle: "Vault, sync, and key isolation.",
+            subtitle: "Storage, sync, and bring-your-own-key providers.",
             systemImage: "lock.shield",
             rows: [
                 PinesSettingsRow(
@@ -1322,8 +1751,8 @@ private enum PinesStaticSettings {
                 ),
                 PinesSettingsRow(
                     id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A22002")!,
-                    title: "Cloud sync",
-                    detail: "Private database",
+                    title: "Provider keys",
+                    detail: "Stored in Keychain",
                     systemImage: "icloud"
                 )
             ]
@@ -1331,7 +1760,7 @@ private enum PinesStaticSettings {
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20003")!,
             title: "Tools",
-            subtitle: "Agent actions and approvals.",
+            subtitle: "Agent search keys, MCP servers, resources, and prompts.",
             systemImage: "wrench.and.screwdriver",
             rows: [
                 PinesSettingsRow(
@@ -1342,9 +1771,29 @@ private enum PinesStaticSettings {
                 ),
                 PinesSettingsRow(
                     id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A23002")!,
-                    title: "Workspace access",
-                    detail: "Selected folders",
-                    systemImage: "folder.badge.gearshape"
+                    title: "MCP servers",
+                    detail: "Tools and context",
+                    systemImage: "point.3.connected.trianglepath.dotted"
+                )
+            ]
+        ),
+        PinesSettingsSection(
+            id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20004")!,
+            title: "System",
+            subtitle: "Service health, readiness, and recent audit activity.",
+            systemImage: "waveform.path.ecg",
+            rows: [
+                PinesSettingsRow(
+                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A24001")!,
+                    title: "Architecture health",
+                    detail: "Service readiness",
+                    systemImage: "stethoscope"
+                ),
+                PinesSettingsRow(
+                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A24002")!,
+                    title: "Audit trail",
+                    detail: "Recent local events",
+                    systemImage: "list.bullet.clipboard"
                 )
             ]
         )

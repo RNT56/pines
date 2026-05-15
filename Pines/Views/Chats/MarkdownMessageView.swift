@@ -453,17 +453,24 @@ private struct MarkdownCodeBlockView: View {
 
 private struct MarkdownIconButtonStyle: ButtonStyle {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(theme.typography.caption.weight(.semibold))
-            .foregroundStyle(theme.colors.secondaryText)
-            .frame(width: 30, height: 30)
+            .foregroundStyle(configuration.isPressed ? theme.colors.primaryText : theme.colors.secondaryText)
+            .frame(width: 32, height: 32)
             .background(
                 configuration.isPressed ? theme.colors.controlPressed : theme.colors.controlFill,
                 in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
             )
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                    .strokeBorder(configuration.isPressed ? theme.colors.focusRing.opacity(0.45) : theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+            }
             .contentShape(RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.94 : 1)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: configuration.isPressed)
     }
 }
 

@@ -79,7 +79,6 @@ final class PinesAppServices: @unchecked Sendable {
         try? await toolRegistry.register(BuiltInToolSpecs.browserObserveSpec())
         try? await toolRegistry.register(BuiltInToolSpecs.browserActionSpec())
         #endif
-        await mcpServerService?.start()
     }
 
     func handleMemoryPressure() async {
