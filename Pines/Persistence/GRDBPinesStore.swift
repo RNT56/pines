@@ -55,7 +55,7 @@ actor GRDBPinesStore:
     // MARK: - Conversations
 
     func listConversations() async throws -> [ConversationRecord] {
-        try database.read { db in
+        try await database.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
@@ -75,7 +75,7 @@ actor GRDBPinesStore:
     func createConversation(title: String, defaultModelID: ModelID?) async throws -> ConversationRecord {
         let record = ConversationRecord(title: title, defaultModelID: defaultModelID)
         let now = Date()
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: """
                 INSERT INTO conversations (id, title, created_at, updated_at, default_model_id, sync_state)
@@ -95,7 +95,7 @@ actor GRDBPinesStore:
     }
 
     func updateConversationTitle(_ title: String, conversationID: UUID) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
                 arguments: [title, Date().timeIntervalSinceReferenceDate, conversationID.uuidString]
@@ -104,7 +104,7 @@ actor GRDBPinesStore:
     }
 
     func setConversationArchived(_ archived: Bool, conversationID: UUID) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: "UPDATE conversations SET archived_at = ?, updated_at = ? WHERE id = ?",
                 arguments: [
@@ -117,7 +117,7 @@ actor GRDBPinesStore:
     }
 
     func deleteConversation(id: UUID) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: "UPDATE conversations SET deleted_at = ?, updated_at = ?, sync_state = ? WHERE id = ?",
                 arguments: [Date().timeIntervalSinceReferenceDate, Date().timeIntervalSinceReferenceDate, SyncState.deleted.rawValue, id.uuidString]
@@ -126,7 +126,7 @@ actor GRDBPinesStore:
     }
 
     func messages(in conversationID: UUID) async throws -> [ChatMessage] {
-        try database.read { db in
+        try await database.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
@@ -151,7 +151,7 @@ actor GRDBPinesStore:
         modelID: ModelID?,
         providerID: ProviderID?
     ) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: """
                 INSERT INTO messages
@@ -199,7 +199,7 @@ actor GRDBPinesStore:
     }
 
     func updateMessage(id: UUID, content: String, status: MessageStatus, tokenCount: Int?) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: "UPDATE messages SET content = ?, status = ?, token_count = ? WHERE id = ?",
                 arguments: [content, status.rawValue, tokenCount, id.uuidString]
@@ -210,7 +210,7 @@ actor GRDBPinesStore:
     // MARK: - Models
 
     func listInstalledAndCuratedModels() async throws -> [ModelInstall] {
-        let installed = try database.read { db in
+        let installed = try await database.read { db in
             try Row.fetchAll(
                 db,
                 sql: "SELECT * FROM model_installs ORDER BY updated_at DESC"
@@ -243,7 +243,7 @@ actor GRDBPinesStore:
 
     func upsertInstall(_ install: ModelInstall) async throws {
         let now = Date()
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: """
                 INSERT INTO model_installs
@@ -283,7 +283,7 @@ actor GRDBPinesStore:
     }
 
     func updateInstallState(_ state: ModelInstallState, for repository: String) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: "UPDATE model_installs SET state = ?, updated_at = ? WHERE repository = ?",
                 arguments: [state.rawValue, Date().timeIntervalSinceReferenceDate, repository]
@@ -292,7 +292,7 @@ actor GRDBPinesStore:
     }
 
     func deleteInstall(repository: String) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(sql: "DELETE FROM model_installs WHERE repository = ?", arguments: [repository])
         }
     }
@@ -300,7 +300,7 @@ actor GRDBPinesStore:
     // MARK: - Vault
 
     func listDocuments() async throws -> [VaultDocumentRecord] {
-        try database.read { db in
+        try await database.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
@@ -322,7 +322,7 @@ actor GRDBPinesStore:
 
     func upsertDocument(_ document: VaultDocumentRecord, localURL: URL?, checksum: String?) async throws {
         let now = Date()
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: """
                 INSERT INTO vault_documents
@@ -351,7 +351,7 @@ actor GRDBPinesStore:
     }
 
     func deleteDocument(id: UUID) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: "UPDATE vault_documents SET sync_state = ?, updated_at = ? WHERE id = ?",
                 arguments: [SyncState.deleted.rawValue, Date().timeIntervalSinceReferenceDate, id.uuidString]
@@ -360,7 +360,7 @@ actor GRDBPinesStore:
     }
 
     func chunks(documentID: UUID) async throws -> [VaultChunk] {
-        try database.read { db in
+        try await database.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
@@ -375,7 +375,7 @@ actor GRDBPinesStore:
     }
 
     func replaceChunks(_ chunks: [VaultChunk], documentID: UUID, embeddingModelID: ModelID?) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(sql: "DELETE FROM vault_chunks WHERE document_id = ?", arguments: [documentID.uuidString])
             for chunk in chunks {
                 try db.execute(
@@ -389,7 +389,7 @@ actor GRDBPinesStore:
                         documentID.uuidString,
                         chunk.ordinal,
                         chunk.text,
-                        chunk.tokenEstimate,
+                        max(1, chunk.characterCount / 4),
                         embeddingModelID?.rawValue,
                         Date().timeIntervalSinceReferenceDate,
                     ]
@@ -400,7 +400,7 @@ actor GRDBPinesStore:
 
     func search(query: String, embedding: [Float]?, limit: Int) async throws -> [VaultSearchResult] {
         let normalizedLimit = max(1, limit)
-        return try database.read { db in
+        return try await database.read { db in
             let rows = try Row.fetchAll(
                 db,
                 sql: """
@@ -442,7 +442,7 @@ actor GRDBPinesStore:
     // MARK: - Settings
 
     func loadSettings() async throws -> AppSettingsSnapshot {
-        try database.read { db in
+        try await database.read { db in
             guard let row = try Row.fetchOne(db, sql: "SELECT value_json FROM app_settings WHERE key = ?", arguments: ["app"]) else {
                 return AppSettingsSnapshot()
             }
@@ -457,7 +457,7 @@ actor GRDBPinesStore:
 
     func saveSettings(_ settings: AppSettingsSnapshot) async throws {
         let json = String(decoding: try encoder.encode(settings), as: UTF8.self)
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: """
                 INSERT INTO app_settings (key, value_json, updated_at, sync_state)
@@ -475,7 +475,7 @@ actor GRDBPinesStore:
     // MARK: - Cloud Providers
 
     func listProviders() async throws -> [CloudProviderConfiguration] {
-        try database.read { db in
+        try await database.read { db in
             try Row.fetchAll(db, sql: "SELECT * FROM cloud_providers ORDER BY display_name").map(Self.provider(from:))
         }
     }
@@ -486,7 +486,7 @@ actor GRDBPinesStore:
 
     func upsertProvider(_ provider: CloudProviderConfiguration) async throws {
         let now = Date()
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: """
                 INSERT INTO cloud_providers
@@ -529,7 +529,7 @@ actor GRDBPinesStore:
     }
 
     func deleteProvider(id: ProviderID) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(sql: "DELETE FROM cloud_providers WHERE id = ?", arguments: [id.rawValue])
         }
     }
@@ -537,7 +537,7 @@ actor GRDBPinesStore:
     // MARK: - Downloads
 
     func listDownloads() async throws -> [ModelDownloadProgress] {
-        try database.read { db in
+        try await database.read { db in
             try Row.fetchAll(db, sql: "SELECT * FROM model_downloads ORDER BY updated_at DESC").map(Self.download(from:))
         }
     }
@@ -547,7 +547,7 @@ actor GRDBPinesStore:
     }
 
     func upsertDownload(_ progress: ModelDownloadProgress) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: """
                 INSERT INTO model_downloads
@@ -581,7 +581,7 @@ actor GRDBPinesStore:
     }
 
     func deleteDownload(id: UUID) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(sql: "DELETE FROM model_downloads WHERE id = ?", arguments: [id.uuidString])
         }
     }
@@ -589,7 +589,7 @@ actor GRDBPinesStore:
     // MARK: - Audit
 
     func append(_ event: AuditEvent) async throws {
-        try database.write { db in
+        try await database.write { db in
             try db.execute(
                 sql: """
                 INSERT INTO audit_events
@@ -612,7 +612,7 @@ actor GRDBPinesStore:
     }
 
     func list(category: AuditCategory?, limit: Int) async throws -> [AuditEvent] {
-        try database.read { db in
+        try await database.read { db in
             let sql: String
             let arguments: StatementArguments
             if let category {
