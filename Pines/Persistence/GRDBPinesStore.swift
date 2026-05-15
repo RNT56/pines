@@ -21,7 +21,7 @@ actor GRDBPinesStore:
         let url = try Self.databaseURL(fileName: configuration.databaseFileName)
         database = try DatabasePool(path: url.path)
         try Self.migrator.migrate(database)
-        try seedCuratedModels()
+        try Self.seedCuratedModels(in: database)
     }
 
     private static func databaseURL(fileName: String) throws -> URL {
@@ -632,7 +632,7 @@ actor GRDBPinesStore:
 
     // MARK: - Mapping
 
-    private func seedCuratedModels() throws {
+    private static func seedCuratedModels(in database: DatabasePool) throws {
         try database.write { db in
             for entry in CuratedModelManifest.default.entries {
                 let exists = try Bool.fetchOne(

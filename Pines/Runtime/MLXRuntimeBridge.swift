@@ -10,9 +10,6 @@ import MLXLLM
 #if canImport(MLXVLM)
 import MLXVLM
 #endif
-#if canImport(MLXEmbedders)
-import MLXEmbedders
-#endif
 #if canImport(MLXLMCommon)
 import MLXLMCommon
 #endif
@@ -96,9 +93,8 @@ private actor MLXRuntimeState {
     private var visionContainer: MLXLMCommon.ModelContainer?
     #endif
 
-    #if canImport(MLXEmbedders)
-    private var embeddingContainer: MLXEmbedders.ModelContainer?
-    private var embeddingModelID: ModelID?
+    #if canImport(MLXEmbedders) && canImport(MLX)
+    private let embeddingRuntime = MLXEmbeddingRuntime()
     #endif
 
     func load(_ install: ModelInstall, profile: RuntimeProfile) async throws {
@@ -125,9 +121,8 @@ private actor MLXRuntimeState {
         textContainer = nil
         visionContainer = nil
         #endif
-        #if canImport(MLXEmbedders)
-        embeddingContainer = nil
-        embeddingModelID = nil
+        #if canImport(MLXEmbedders) && canImport(MLX)
+        await embeddingRuntime.unload()
         #endif
     }
 
@@ -255,42 +250,7 @@ private actor MLXRuntimeState {
 
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
         #if canImport(MLXEmbedders) && canImport(MLX)
-        if embeddingContainer == nil || embeddingModelID != request.modelID {
-            embeddingContainer = try await MLXEmbedders.loadModelContainer(
-                configuration: MLXEmbedders.ModelConfiguration(id: request.modelID.rawValue)
-            )
-            embeddingModelID = request.modelID
-        }
-
-        guard let embeddingContainer else {
-            throw InferenceError.modelNotLoaded(request.modelID)
-        }
-
-        let normalize = request.normalize
-        let vectors = try embeddingContainer.perform { model, tokenizer, pooling in
-            let inputs = request.inputs.map {
-                tokenizer.encode(text: $0, addSpecialTokens: true)
-            }
-            let maxLength = inputs.reduce(into: 16) { length, tokens in
-                length = max(length, tokens.count)
-            }
-            let padded = stacked(
-                inputs.map { tokens in
-                    MLXArray(tokens + Array(repeating: tokenizer.eosTokenId ?? 0, count: maxLength - tokens.count))
-                }
-            )
-            let mask = (padded .!= tokenizer.eosTokenId ?? 0)
-            let tokenTypes = MLXArray.zeros(like: padded)
-            let result = pooling(
-                model(padded, positionIds: nil, tokenTypeIds: tokenTypes, attentionMask: mask),
-                normalize: normalize,
-                applyLayerNorm: true
-            )
-            result.eval()
-            return result.map { $0.asArray(Float.self) }
-        }
-
-        return EmbeddingResult(modelID: request.modelID, vectors: vectors)
+        return try await embeddingRuntime.embed(request)
         #else
         throw InferenceError.unsupportedCapability("MLXEmbedders is not linked in this build.")
         #endif
