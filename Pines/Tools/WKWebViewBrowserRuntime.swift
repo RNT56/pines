@@ -167,7 +167,7 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
     }
 
     private func evaluateJavaScript(_ script: String) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             webView.evaluateJavaScript(script) { _, error in
                 if let error {
                     continuation.resume(throwing: error)
