@@ -10,10 +10,15 @@ final class MCPOAuthPresentationContextProvider: NSObject, ASWebAuthenticationPr
     var activeSession: ASWebAuthenticationSession?
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes
+        let scenes = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow } ?? ASPresentationAnchor()
+        if let keyWindow = scenes.flatMap(\.windows).first(where: \.isKeyWindow) {
+            return keyWindow
+        }
+        if let scene = scenes.first {
+            return ASPresentationAnchor(windowScene: scene)
+        }
+        preconditionFailure("OAuth authentication requires an active window scene.")
     }
 }
 
@@ -141,7 +146,7 @@ struct MCPOAuthService {
             .joined(separator: "&")
             .data(using: .utf8)
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard (200..<300).contains(response.statusCode) else {
             throw InferenceError.invalidRequest("OAuth token exchange failed.")
         }
         return try JSONDecoder().decode(OAuthTokenResponse.self, from: data)
@@ -223,8 +228,7 @@ struct MCPOAuthDiscoveryService {
             ],
         ])
         if let (_, response) = try? await urlSession.data(for: request),
-           let http = response as? HTTPURLResponse,
-           let metadata = MCPStreamableHTTPClient.resourceMetadataURL(from: http),
+           let metadata = MCPStreamableHTTPClient.resourceMetadataURL(from: response),
            let metadataURL = URL(string: metadata)
         {
             return metadataURL
@@ -278,7 +282,7 @@ struct MCPOAuthDiscoveryService {
             "response_types": ["code"],
         ])
         let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard (200..<300).contains(response.statusCode) else {
             return nil
         }
         return try JSONDecoder().decode(DynamicClientRegistrationResponse.self, from: data).clientID

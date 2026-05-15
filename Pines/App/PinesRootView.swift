@@ -4,10 +4,15 @@ import SwiftUI
 import UIKit
 #endif
 
+#if canImport(WatchConnectivity)
+import WatchConnectivity
+#endif
+
 struct PinesRootView: View {
     @Environment(\.colorScheme) private var systemScheme
     @StateObject private var appModel = PinesAppModel()
     @State private var services = PinesAppServices()
+    @State private var watchSessionService: PhoneWatchSessionService?
     @State private var selectedTab: PinesTab = .chats
     @State private var showsBootMark = true
 
@@ -35,6 +40,11 @@ struct PinesRootView: View {
         .preferredColorScheme(appModel.interfaceMode.colorScheme)
         .task {
             await services.bootstrap()
+            #if canImport(WatchConnectivity)
+            let watchSessionService = PhoneWatchSessionService(services: services)
+            watchSessionService.start()
+            self.watchSessionService = watchSessionService
+            #endif
             await appModel.bootstrap(services: services)
             try? await Task.sleep(nanoseconds: 720_000_000)
             withAnimation(theme.motion.emphasized) {

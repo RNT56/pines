@@ -7,10 +7,12 @@ let package = Package(
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
+        .watchOS(.v10),
     ],
     products: [
         .library(name: "PinesCore", targets: ["PinesCore"]),
         .library(name: "PinesHubXetSupport", targets: ["PinesHubXetSupport"]),
+        .library(name: "PinesWatchSupport", targets: ["PinesWatchSupport"]),
         .executable(name: "PinesCoreTestRunner", targets: ["PinesCoreTestRunner"]),
     ],
     dependencies: [
@@ -27,6 +29,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Markdown", package: "swift-markdown"),
             ],
+            path: "Sources/PinesCore",
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
             ]
@@ -35,6 +38,15 @@ let package = Package(
             name: "PinesHubXetSupport",
             dependencies: [
                 .product(name: "HuggingFace", package: "swift-huggingface"),
+            ],
+            path: "Sources/PinesHubXetSupport"
+        ),
+        .target(
+            name: "PinesWatchSupport",
+            dependencies: [],
+            path: "Sources/PinesWatchSupport",
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency"),
             ]
         ),
         .executableTarget(

@@ -7,42 +7,51 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		045753D1E6D222CA73E8C829 /* PinesWatchSupport in Frameworks */ = {isa = PBXBuildFile; productRef = B3571EDBCC217B75591214B9 /* PinesWatchSupport */; };
 		06E6CA0D37D79C43E61B8FC6 /* PinesHuggingFaceBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A790E0D7CCFB1AF34B214B13 /* PinesHuggingFaceBridge.swift */; };
 		14C935C0C8E726C774184D06 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FFFEAD9040192EA2246EDAD7 /* PrivacyInfo.xcprivacy */; };
 		1696C482B2BFEADAD7A1744D /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */; };
+		18C03354C01E800E9DF94E48 /* PhoneWatchSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70C871149DDD6846E8A71E4 /* PhoneWatchSessionService.swift */; };
 		1A048AEA62053C4EE5E0F694 /* MCPOAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 630E036C1689081D43923576 /* MCPOAuthService.swift */; };
 		1CF322F450C7E7AB6D6DF9D3 /* MCPStreamableHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5A5CF6509EEA6D6BE1D3F3 /* MCPStreamableHTTPClient.swift */; };
 		255ABB7194C40BA6E2E25069 /* DeviceRuntimeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9114B5CA23ED60D86D72253 /* DeviceRuntimeMonitor.swift */; };
 		2AA5EBBAD5AC8336B9F3DD0D /* HuggingFaceCredentialService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7C4EBAAC5E84277A718C17 /* HuggingFaceCredentialService.swift */; };
-		2B7347D3CA9E68EB3EBE327E /* PinesHubXetSupport in Frameworks */ = {isa = PBXBuildFile; productRef = F5BE958969B414C35418437A /* PinesHubXetSupport */; };
+		2B7347D3CA9E68EB3EBE327E /* PinesWatchSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 5B2EE41E8AC9FFB4D0356A8C /* PinesWatchSupport */; };
+		2CAAEFE65E1DD44DFDF11701 /* WatchChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58FC276317CB9F908EE2727B /* WatchChatViewModel.swift */; };
+		30026D20DA004DF5A0C2BE13 /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */; };
+		38172F301F9B09B3CBA85F97 /* PinesWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C379B46E87980ED73F59DCD /* PinesWatchApp.swift */; };
 		39CF2E229241A26056922251 /* ChatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F090D0FF64498C5E03C0CA /* ChatsView.swift */; };
 		4A8B7ADED7E800D30BC296A1 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 2F62656B16557CFACC3CBFF7 /* PinesCore */; };
-		515C28B0B0B103A7A64AB34C /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */; };
+		515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = 85E4D304B541EE6A90CEFD6F /* MLXEmbedders */; };
+		51F0003C051BEA5B35753F1D /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 907CAD8C8D83C6A5B614EB5A /* HighlightSwift */; };
 		55937CA552490AEA6ED46131 /* PinesDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45C618F4FAB69FDDE0FC788B /* PinesDesignSystem.swift */; };
 		56FB9E2B958AE80AB1CB0856 /* MarkdownMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD9A00CA54B90E791E77F56 /* MarkdownMessageView.swift */; };
 		57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */; };
 		5A73B2F9FA959A8D2A6173EF /* BYOKCloudInferenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */; };
-		62BBB7D1AE85A01EA319E717 /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 97ADD97B0749021A162048FE /* MLXNN */; };
+		62BBB7D1AE85A01EA319E717 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 94F08BBEEA508DB04384B5C9 /* MLX */; };
 		667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */; };
 		69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */; };
 		6F2B60A874B79E3B73C27624 /* CloudProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */; };
-		74762C61D2E73B7909039286 /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 907CAD8C8D83C6A5B614EB5A /* HighlightSwift */; };
+		74762C61D2E73B7909039286 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 79453BB5651564170C3A0B1C /* Markdown */; };
+		78A1D2B0783CF04BAE99BC62 /* WatchTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC95D2DA4ED0AE5A971C6BA3 /* WatchTranscriptView.swift */; };
 		79BE7BF0C5BD5EE6979AD3B9 /* VaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CFBB6BB9E0574B8AA20150 /* VaultView.swift */; };
-		7C1B3D61D81211AD1F0FBCF7 /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = 85E4D304B541EE6A90CEFD6F /* MLXEmbedders */; };
+		7C1B3D61D81211AD1F0FBCF7 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = D445A834A842FDF08C100D34 /* MLXVLM */; };
 		8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */; };
-		8EE7C1B1695A1BAB21575CBD /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 7CB37824DF7BF3CFC294142D /* GRDB */; };
-		9C997FA62CFD3FF3DFBA6FC7 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = D445A834A842FDF08C100D34 /* MLXVLM */; };
+		8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 79248E6D82F6B41C4A99016B /* Tokenizers */; };
+		9C997FA62CFD3FF3DFBA6FC7 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 392E0E75023B6010705E840E /* MLXLLM */; };
 		A23582944454AFA76540B625 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500C1CF070133DCF6885979F /* ModelsView.swift */; };
+		A4A6874199B926262EDBC80B /* PinesWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 1E1D28BDF947E8721585572A /* PinesWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A710B3F4F7869D3FBAC38A93 /* MLXEmbeddingRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6395FE07FF217EF3444678FA /* MLXEmbeddingRuntime.swift */; };
 		B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8627F9808A76C0F0A91729 /* SettingsView.swift */; };
-		B925E264EAB46D0C3EB6B307 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 94F08BBEEA508DB04384B5C9 /* MLX */; };
-		BAF84E40F21C59F00422283F /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 392E0E75023B6010705E840E /* MLXLLM */; };
+		B925E264EAB46D0C3EB6B307 /* PinesHubXetSupport in Frameworks */ = {isa = PBXBuildFile; productRef = F5BE958969B414C35418437A /* PinesHubXetSupport */; };
+		BAF84E40F21C59F00422283F /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 97ADD97B0749021A162048FE /* MLXNN */; };
 		C01E6498FFFBC564A01F56AB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3777534B3E27910D84F4EA38 /* Assets.xcassets */; };
 		C05BF46FDF47D9D3C4831915 /* PinesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82DE8010D019802F630AAF0B /* PinesApp.swift */; };
-		C3A8E8F1D7ADC06A8E2EBA43 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 79453BB5651564170C3A0B1C /* Markdown */; };
+		C3A8E8F1D7ADC06A8E2EBA43 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 7CB37824DF7BF3CFC294142D /* GRDB */; };
+		C411EB6B042D0FE7426C58C8 /* WatchChatOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41ED12D2A8BE4F962735AC89 /* WatchChatOrchestrator.swift */; };
 		D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */; };
 		D1E10E7EF6C3E07FA3696372 /* MCPServerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5934CC4A82DA53648B598CD5 /* MCPServerService.swift */; };
-		E3A57273D77B9C0AB688FDC5 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 79248E6D82F6B41C4A99016B /* Tokenizers */; };
+		E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */; };
 		E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */; };
 		E96F244C6E13B6BBAD411CE0 /* WKWebViewBrowserRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */; };
 		EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */; };
@@ -52,18 +61,45 @@
 		FF4D60F77559E9389E312BD7 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		9C830131F3E6535F1036559E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A68EBAF465EDED0F2EE626D4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 82648A6E9285BDBBB41FA8FB;
+			remoteInfo = PinesWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		EC99CBA933896BE2B6A2D259 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				A4A6874199B926262EDBC80B /* PinesWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		1E1D28BDF947E8721585572A /* PinesWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PinesWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		231A63B8882B7235FD4DD6B7 /* Pines.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Pines.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3777534B3E27910D84F4EA38 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		385CEF8800BD8942B61831AC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		39CFBB6BB9E0574B8AA20150 /* VaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultView.swift; sourceTree = "<group>"; };
 		3D264ABD70B64B0ADB011C52 /* Pines.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Pines.entitlements; sourceTree = "<group>"; };
+		41ED12D2A8BE4F962735AC89 /* WatchChatOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchChatOrchestrator.swift; sourceTree = "<group>"; };
 		443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitSyncService.swift; sourceTree = "<group>"; };
 		45C618F4FAB69FDDE0FC788B /* PinesDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesDesignSystem.swift; sourceTree = "<group>"; };
 		48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WKWebViewBrowserRuntime.swift; sourceTree = "<group>"; };
 		4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProviderService.swift; sourceTree = "<group>"; };
 		500C1CF070133DCF6885979F /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
 		5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GRDBPinesStore.swift; sourceTree = "<group>"; };
+		58FC276317CB9F908EE2727B /* WatchChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchChatViewModel.swift; sourceTree = "<group>"; };
 		5934CC4A82DA53648B598CD5 /* MCPServerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerService.swift; sourceTree = "<group>"; };
 		5A8627F9808A76C0F0A91729 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		5B5A5CF6509EEA6D6BE1D3F3 /* MCPStreamableHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPStreamableHTTPClient.swift; sourceTree = "<group>"; };
@@ -75,6 +111,7 @@
 		6A7C4EBAAC5E84277A718C17 /* HuggingFaceCredentialService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HuggingFaceCredentialService.swift; sourceTree = "<group>"; };
 		77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRootView.swift; sourceTree = "<group>"; };
 		7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BYOKCloudInferenceProvider.swift; sourceTree = "<group>"; };
+		7C379B46E87980ED73F59DCD /* PinesWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesWatchApp.swift; sourceTree = "<group>"; };
 		82DE8010D019802F630AAF0B /* PinesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesApp.swift; sourceTree = "<group>"; };
 		8BD9A00CA54B90E791E77F56 /* MarkdownMessageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownMessageView.swift; sourceTree = "<group>"; };
 		92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
@@ -82,10 +119,13 @@
 		9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
 		A790E0D7CCFB1AF34B214B13 /* PinesHuggingFaceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHuggingFaceBridge.swift; sourceTree = "<group>"; };
 		AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRuntimeMetrics.swift; sourceTree = "<group>"; };
+		C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
 		D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
 		DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelLifecycleService.swift; sourceTree = "<group>"; };
 		DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppServices.swift; sourceTree = "<group>"; };
+		DC95D2DA4ED0AE5A971C6BA3 /* WatchTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTranscriptView.swift; sourceTree = "<group>"; };
 		EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXRuntimeBridge.swift; sourceTree = "<group>"; };
+		F70C871149DDD6846E8A71E4 /* PhoneWatchSessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneWatchSessionService.swift; sourceTree = "<group>"; };
 		F9114B5CA23ED60D86D72253 /* DeviceRuntimeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRuntimeMonitor.swift; sourceTree = "<group>"; };
 		FFFEAD9040192EA2246EDAD7 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -96,17 +136,26 @@
 			buildActionMask = 2147483647;
 			files = (
 				4A8B7ADED7E800D30BC296A1 /* PinesCore in Frameworks */,
-				2B7347D3CA9E68EB3EBE327E /* PinesHubXetSupport in Frameworks */,
-				B925E264EAB46D0C3EB6B307 /* MLX in Frameworks */,
-				62BBB7D1AE85A01EA319E717 /* MLXNN in Frameworks */,
-				BAF84E40F21C59F00422283F /* MLXLLM in Frameworks */,
-				9C997FA62CFD3FF3DFBA6FC7 /* MLXVLM in Frameworks */,
-				7C1B3D61D81211AD1F0FBCF7 /* MLXEmbedders in Frameworks */,
-				515C28B0B0B103A7A64AB34C /* MLXLMCommon in Frameworks */,
-				E3A57273D77B9C0AB688FDC5 /* Tokenizers in Frameworks */,
-				8EE7C1B1695A1BAB21575CBD /* GRDB in Frameworks */,
-				C3A8E8F1D7ADC06A8E2EBA43 /* Markdown in Frameworks */,
-				74762C61D2E73B7909039286 /* HighlightSwift in Frameworks */,
+				2B7347D3CA9E68EB3EBE327E /* PinesWatchSupport in Frameworks */,
+				B925E264EAB46D0C3EB6B307 /* PinesHubXetSupport in Frameworks */,
+				62BBB7D1AE85A01EA319E717 /* MLX in Frameworks */,
+				BAF84E40F21C59F00422283F /* MLXNN in Frameworks */,
+				9C997FA62CFD3FF3DFBA6FC7 /* MLXLLM in Frameworks */,
+				7C1B3D61D81211AD1F0FBCF7 /* MLXVLM in Frameworks */,
+				515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */,
+				E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */,
+				8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */,
+				C3A8E8F1D7ADC06A8E2EBA43 /* GRDB in Frameworks */,
+				74762C61D2E73B7909039286 /* Markdown in Frameworks */,
+				51F0003C051BEA5B35753F1D /* HighlightSwift in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6256B0250EAB947685DA39D7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				045753D1E6D222CA73E8C829 /* PinesWatchSupport in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -130,6 +179,7 @@
 				9617E933B2A1D1595AB3F04D /* Tools */,
 				60540D5B27662B0651C9298F /* Vault */,
 				A622C4E24201419386EE5E3B /* Views */,
+				4330A26A30AB1C006E74D2ED /* Watch */,
 			);
 			path = Pines;
 			sourceTree = "<group>";
@@ -165,14 +215,34 @@
 			children = (
 				787FEF66063BBC0CAFD9F5E8 /* Packages */,
 				09B527187860134DB6F5922F /* Pines */,
+				4016F5BFE6C8B5E64B8D93C9 /* PinesWatch */,
 				44B966D0C304F06A65EAD9F3 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		4016F5BFE6C8B5E64B8D93C9 /* PinesWatch */ = {
+			isa = PBXGroup;
+			children = (
+				C8CFC4E07B9EA487EDA6CF1B /* App */,
+				AB881253B9AE37ADAB73380D /* Views */,
+			);
+			path = PinesWatch;
+			sourceTree = "<group>";
+		};
+		4330A26A30AB1C006E74D2ED /* Watch */ = {
+			isa = PBXGroup;
+			children = (
+				F70C871149DDD6846E8A71E4 /* PhoneWatchSessionService.swift */,
+				41ED12D2A8BE4F962735AC89 /* WatchChatOrchestrator.swift */,
+			);
+			path = Watch;
 			sourceTree = "<group>";
 		};
 		44B966D0C304F06A65EAD9F3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				231A63B8882B7235FD4DD6B7 /* Pines.app */,
+				1E1D28BDF947E8721585572A /* PinesWatch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -245,12 +315,30 @@
 			path = Views;
 			sourceTree = "<group>";
 		};
+		AB881253B9AE37ADAB73380D /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */,
+				DC95D2DA4ED0AE5A971C6BA3 /* WatchTranscriptView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
 		C48BA4525CB18DD23AB12169 /* Models */ = {
 			isa = PBXGroup;
 			children = (
 				500C1CF070133DCF6885979F /* ModelsView.swift */,
 			);
 			path = Models;
+			sourceTree = "<group>";
+		};
+		C8CFC4E07B9EA487EDA6CF1B /* App */ = {
+			isa = PBXGroup;
+			children = (
+				7C379B46E87980ED73F59DCD /* PinesWatchApp.swift */,
+				58FC276317CB9F908EE2727B /* WatchChatViewModel.swift */,
+			);
+			path = App;
 			sourceTree = "<group>";
 		};
 		CE8D57B3B84489AD378AF98A /* Design */ = {
@@ -300,14 +388,17 @@
 				788EA23122E009F1A05FB98F /* Sources */,
 				9EBB76B3ABEA5683B04BC1DB /* Resources */,
 				23758D8D16F24C8C3D8AAAB0 /* Frameworks */,
+				EC99CBA933896BE2B6A2D259 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				D857AB5EC4889CC8664D728C /* PBXTargetDependency */,
 			);
 			name = Pines;
 			packageProductDependencies = (
 				2F62656B16557CFACC3CBFF7 /* PinesCore */,
+				5B2EE41E8AC9FFB4D0356A8C /* PinesWatchSupport */,
 				F5BE958969B414C35418437A /* PinesHubXetSupport */,
 				94F08BBEEA508DB04384B5C9 /* MLX */,
 				97ADD97B0749021A162048FE /* MLXNN */,
@@ -324,6 +415,25 @@
 			productReference = 231A63B8882B7235FD4DD6B7 /* Pines.app */;
 			productType = "com.apple.product-type.application";
 		};
+		82648A6E9285BDBBB41FA8FB /* PinesWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2DBEBB7734CE77A6C0A3062E /* Build configuration list for PBXNativeTarget "PinesWatch" */;
+			buildPhases = (
+				F542B7F9159B8C70328A3BDA /* Sources */,
+				6256B0250EAB947685DA39D7 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PinesWatch;
+			packageProductDependencies = (
+				B3571EDBCC217B75591214B9 /* PinesWatchSupport */,
+			);
+			productName = PinesWatch;
+			productReference = 1E1D28BDF947E8721585572A /* PinesWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -332,6 +442,14 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					5ABD42396BC25E46F453A6A1 = {
+						ProvisioningStyle = Automatic;
+					};
+					82648A6E9285BDBBB41FA8FB = {
+						ProvisioningStyle = Automatic;
+					};
+				};
 			};
 			buildConfigurationList = 4600F55A6BF6AF12514D96AA /* Build configuration list for PBXProject "Pines" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -357,6 +475,7 @@
 			projectRoot = "";
 			targets = (
 				5ABD42396BC25E46F453A6A1 /* Pines */,
+				82648A6E9285BDBBB41FA8FB /* PinesWatch */,
 			);
 		};
 /* End PBXProject section */
@@ -396,6 +515,7 @@
 				56FB9E2B958AE80AB1CB0856 /* MarkdownMessageView.swift in Sources */,
 				F726DC5360EC760DFADDE5FE /* ModelLifecycleService.swift in Sources */,
 				A23582944454AFA76540B625 /* ModelsView.swift in Sources */,
+				18C03354C01E800E9DF94E48 /* PhoneWatchSessionService.swift in Sources */,
 				C05BF46FDF47D9D3C4831915 /* PinesApp.swift in Sources */,
 				E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */,
 				D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */,
@@ -407,19 +527,56 @@
 				69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */,
 				79BE7BF0C5BD5EE6979AD3B9 /* VaultView.swift in Sources */,
 				E96F244C6E13B6BBAD411CE0 /* WKWebViewBrowserRuntime.swift in Sources */,
+				C411EB6B042D0FE7426C58C8 /* WatchChatOrchestrator.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F542B7F9159B8C70328A3BDA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				38172F301F9B09B3CBA85F97 /* PinesWatchApp.swift in Sources */,
+				2CAAEFE65E1DD44DFDF11701 /* WatchChatViewModel.swift in Sources */,
+				30026D20DA004DF5A0C2BE13 /* WatchRootView.swift in Sources */,
+				78A1D2B0783CF04BAE99BC62 /* WatchTranscriptView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		D857AB5EC4889CC8664D728C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 82648A6E9285BDBBB41FA8FB /* PinesWatch */;
+			targetProxy = 9C830131F3E6535F1036559E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		0A18710E23656350931101DE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.watchkitapp;
+				PRODUCT_NAME = "Pines Watch";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
 		88B14977033894EEAD1D1307 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGN_ENTITLEMENTS = Pines/Pines.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Pines/Info.plist;
@@ -485,11 +642,11 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Release;
 		};
@@ -549,11 +706,11 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Debug;
 		};
@@ -561,9 +718,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGN_ENTITLEMENTS = Pines/Pines.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Pines/Info.plist;
@@ -580,9 +737,35 @@
 			};
 			name = Debug;
 		};
+		E55CD6D0A0FC7EE4ECB2F691 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.watchkitapp;
+				PRODUCT_NAME = "Pines Watch";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		2DBEBB7734CE77A6C0A3062E /* Build configuration list for PBXNativeTarget "PinesWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E55CD6D0A0FC7EE4ECB2F691 /* Debug */,
+				0A18710E23656350931101DE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		4600F55A6BF6AF12514D96AA /* Build configuration list for PBXProject "Pines" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -671,6 +854,10 @@
 			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXLLM;
 		};
+		5B2EE41E8AC9FFB4D0356A8C /* PinesWatchSupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PinesWatchSupport;
+		};
 		79248E6D82F6B41C4A99016B /* Tokenizers */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 0A791BAE7FC59744192EC64B /* XCRemoteSwiftPackageReference "swift-transformers" */;
@@ -710,6 +897,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXLMCommon;
+		};
+		B3571EDBCC217B75591214B9 /* PinesWatchSupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PinesWatchSupport;
 		};
 		D445A834A842FDF08C100D34 /* MLXVLM */ = {
 			isa = XCSwiftPackageProductDependency;

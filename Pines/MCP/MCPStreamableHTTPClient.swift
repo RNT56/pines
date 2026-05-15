@@ -198,10 +198,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         try await applyAuthHeader(to: &request, forceOAuthRefresh: forceOAuthRefresh)
         applyBaseHeaders(to: &request)
 
-        let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MCPTransportError.invalidHTTPResponse
-        }
+        let (data, http) = try await urlSession.data(for: request)
         if let headerSessionID = http.value(forHTTPHeaderField: "Mcp-Session-Id"), !headerSessionID.isEmpty {
             sessionID = headerSessionID
         }
@@ -284,7 +281,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
             .joined(separator: "&")
             .data(using: .utf8)
         let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard (200..<300).contains(response.statusCode) else {
             return nil
         }
         let token = try JSONDecoder().decode(MCPOAuthTokenResponse.self, from: data)

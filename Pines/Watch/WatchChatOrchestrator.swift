@@ -1,0 +1,518 @@
+import Foundation
+import PinesCore
+import PinesWatchSupport
+
+struct WatchChatOrchestrator {
+    let services: PinesAppServices
+    let approvalHandler: @Sendable (ToolApprovalRequest) async -> ToolApprovalStatus
+
+    init(
+        services: PinesAppServices,
+        approvalHandler: @escaping @Sendable (ToolApprovalRequest) async -> ToolApprovalStatus = { _ in .denied }
+    ) {
+        self.services = services
+        self.approvalHandler = approvalHandler
+    }
+
+    func snapshot(selectedConversationID: UUID? = nil, activeRunID: UUID? = nil) async throws -> WatchChatSnapshot {
+        guard let repository = services.conversationRepository else {
+            throw WatchChatError.unavailable("Conversation repository is unavailable.")
+        }
+
+        let conversations = try await repository.listConversations()
+        let selectedID = selectedConversationID ?? conversations.first?.id
+        var summaries = [WatchConversationSummary]()
+        summaries.reserveCapacity(conversations.count)
+
+        for conversation in conversations {
+            let messages = try await repository.messages(in: conversation.id)
+            summaries.append(Self.summary(from: conversation, messages: messages))
+        }
+
+        let selectedMessages: [WatchChatMessage]
+        if let selectedID {
+            selectedMessages = try await repository.messages(in: selectedID)
+                .suffix(40)
+                .map(Self.watchMessage(from:))
+        } else {
+            selectedMessages = []
+        }
+
+        return WatchChatSnapshot(
+            conversations: summaries,
+            selectedConversationID: selectedID,
+            messages: selectedMessages,
+            activeRunID: activeRunID,
+            status: phoneStatus()
+        )
+    }
+
+    func createConversation() async throws -> WatchChatSnapshot {
+        guard let repository = services.conversationRepository else {
+            throw WatchChatError.unavailable("Conversation repository is unavailable.")
+        }
+
+        let modelID = try await defaultModelID()
+        let conversation = try await repository.createConversation(title: "New chat", defaultModelID: modelID)
+        return try await snapshot(selectedConversationID: conversation.id)
+    }
+
+    func renameConversation(_ request: WatchRenameConversationRequest) async throws -> WatchChatSnapshot {
+        guard let repository = services.conversationRepository else {
+            throw WatchChatError.unavailable("Conversation repository is unavailable.")
+        }
+
+        let title = request.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else {
+            throw WatchChatError.unavailable("Conversation title is empty.")
+        }
+        try await repository.updateConversationTitle(title, conversationID: request.conversationID)
+        return try await snapshot(selectedConversationID: request.conversationID)
+    }
+
+    func setConversationArchived(_ request: WatchArchiveConversationRequest) async throws -> WatchChatSnapshot {
+        guard let repository = services.conversationRepository else {
+            throw WatchChatError.unavailable("Conversation repository is unavailable.")
+        }
+
+        try await repository.setConversationArchived(request.archived, conversationID: request.conversationID)
+        return try await snapshot(selectedConversationID: request.archived ? nil : request.conversationID)
+    }
+
+    func deleteConversation(_ request: WatchDeleteConversationRequest) async throws -> WatchChatSnapshot {
+        guard let repository = services.conversationRepository else {
+            throw WatchChatError.unavailable("Conversation repository is unavailable.")
+        }
+
+        try await repository.deleteConversation(id: request.conversationID)
+        return try await snapshot()
+    }
+
+    func sendMessage(_ input: WatchSendMessageRequest, runID: UUID) -> AsyncThrowingStream<WatchChatRunUpdate, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var conversationID = input.conversationID
+                var assistantMessage: ChatMessage?
+                var selectedModelID: ModelID?
+                var selectedProviderID: ProviderID?
+                var accumulated = ""
+                var tokenCount = 0
+
+                do {
+                    let trimmed = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else {
+                        throw WatchChatError.unavailable("Message text is empty.")
+                    }
+                    guard let repository = services.conversationRepository else {
+                        throw WatchChatError.unavailable("Conversation repository is unavailable.")
+                    }
+
+                    if conversationID == nil {
+                        let conversation = try await repository.createConversation(
+                            title: Self.title(from: trimmed),
+                            defaultModelID: try await defaultModelID()
+                        )
+                        conversationID = conversation.id
+                    }
+                    guard let conversationID else {
+                        throw WatchChatError.unavailable("Could not create a conversation.")
+                    }
+
+                    let existingMessages = try await repository.messages(in: conversationID)
+                    let shouldAppendUserMessage = !existingMessages.contains { $0.id == input.clientMessageID }
+                    if let existingUserIndex = existingMessages.firstIndex(where: { $0.id == input.clientMessageID }) {
+                        if let existingAssistant = existingMessages
+                            .dropFirst(existingUserIndex + 1)
+                            .first(where: { $0.role == .assistant }) {
+                            continuation.yield(
+                                WatchChatRunUpdate(
+                                    runID: runID,
+                                    conversationID: conversationID,
+                                    assistantMessageID: existingAssistant.id,
+                                    status: existingAssistant.content.isEmpty ? .streaming : .completed,
+                                    text: existingAssistant.content,
+                                    tokenCount: tokenCount
+                                )
+                            )
+                            continuation.finish()
+                            return
+                        }
+                    }
+
+                    let providerSelection = try await selectProvider(conversationID: conversationID)
+                    selectedModelID = providerSelection.modelID
+                    selectedProviderID = providerSelection.providerID
+
+                    if shouldAppendUserMessage {
+                        let userMessage = ChatMessage(id: input.clientMessageID, role: .user, content: trimmed)
+                        try await repository.appendMessage(
+                            userMessage,
+                            status: .complete,
+                            conversationID: conversationID,
+                            modelID: providerSelection.modelID,
+                            providerID: nil
+                        )
+                    }
+
+                    let pendingAssistant = ChatMessage(role: .assistant, content: "")
+                    assistantMessage = pendingAssistant
+                    try await repository.appendMessage(
+                        pendingAssistant,
+                        status: .streaming,
+                        conversationID: conversationID,
+                        modelID: providerSelection.modelID,
+                        providerID: providerSelection.providerID
+                    )
+
+                    continuation.yield(
+                        WatchChatRunUpdate(
+                            runID: runID,
+                            conversationID: conversationID,
+                            assistantMessageID: pendingAssistant.id,
+                            status: .accepted,
+                            text: ""
+                        )
+                    )
+
+                    var messages = try await repository.messages(in: conversationID)
+                    if let vaultContext = await vaultContextMessage(for: trimmed) {
+                        messages.insert(vaultContext.message, at: 0)
+                    }
+
+                    let availableTools = await services.toolRegistry.listSpecs()
+                    let request = ChatRequest(
+                        modelID: providerSelection.modelID,
+                        messages: messages,
+                        allowsTools: !availableTools.isEmpty,
+                        availableTools: availableTools
+                    )
+                    let settings = try? await services.settingsRepository?.loadSettings()
+                    let session = AgentSession(
+                        title: "Watch Chat",
+                        policy: AgentPolicy(
+                            executionMode: settings?.executionMode ?? .preferLocal,
+                            requiresConsentForNetwork: false,
+                            requiresConsentForBrowser: false,
+                            allowsCloudContext: providerSelection.providerID != services.mlxRuntime.localProviderID
+                        ),
+                        providerID: providerSelection.providerID
+                    )
+                    let runner = AgentRunner(
+                        toolRegistry: services.toolRegistry,
+                        policyGate: services.toolPolicyGate,
+                        auditRepository: services.auditRepository,
+                        approvalHandler: approvalHandler
+                    )
+
+                    let startedAt = Date()
+                    let stream = runner.run(session: session, request: request, provider: providerSelection.provider)
+                    for try await event in stream {
+                        try Task.checkCancellation()
+                        switch event {
+                        case let .token(delta):
+                            accumulated += delta.text
+                            tokenCount += max(delta.tokenCount, 1)
+                            try await repository.updateMessage(
+                                id: pendingAssistant.id,
+                                content: accumulated,
+                                status: .streaming,
+                                tokenCount: tokenCount
+                            )
+                            continuation.yield(
+                                WatchChatRunUpdate(
+                                    runID: runID,
+                                    conversationID: conversationID,
+                                    assistantMessageID: pendingAssistant.id,
+                                    status: .streaming,
+                                    text: accumulated,
+                                    tokenCount: tokenCount
+                                )
+                            )
+                        case let .finish(finish):
+                            let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
+                            try await repository.updateMessage(
+                                id: pendingAssistant.id,
+                                content: accumulated,
+                                status: status,
+                                tokenCount: tokenCount
+                            )
+                            continuation.yield(
+                                WatchChatRunUpdate(
+                                    runID: runID,
+                                    conversationID: conversationID,
+                                    assistantMessageID: pendingAssistant.id,
+                                    status: finish.reason == .cancelled ? .cancelled : .completed,
+                                    text: accumulated,
+                                    tokenCount: tokenCount
+                                )
+                            )
+                        case let .failure(failure):
+                            try await repository.updateMessage(
+                                id: pendingAssistant.id,
+                                content: failure.message,
+                                status: .failed,
+                                tokenCount: tokenCount
+                            )
+                            continuation.yield(
+                                WatchChatRunUpdate(
+                                    runID: runID,
+                                    conversationID: conversationID,
+                                    assistantMessageID: pendingAssistant.id,
+                                    status: .failed,
+                                    text: accumulated,
+                                    tokenCount: tokenCount,
+                                    errorMessage: failure.message
+                                )
+                            )
+                        case let .metrics(metrics):
+                            services.runtimeMetrics.recordGenerationMetrics(metrics, modelID: providerSelection.modelID)
+                        case .toolCall:
+                            break
+                        }
+                    }
+
+                    services.runtimeMetrics.recordGenerationFinished(
+                        modelID: providerSelection.modelID,
+                        outputTokens: tokenCount,
+                        elapsedSeconds: Date().timeIntervalSince(startedAt)
+                    )
+                    continuation.finish()
+                } catch is CancellationError {
+                    await markCancelled(
+                        assistantMessage: assistantMessage,
+                        conversationID: conversationID,
+                        selectedModelID: selectedModelID,
+                        selectedProviderID: selectedProviderID,
+                        accumulated: accumulated,
+                        tokenCount: tokenCount
+                    )
+                    if let conversationID {
+                        continuation.yield(
+                            WatchChatRunUpdate(
+                                runID: runID,
+                                conversationID: conversationID,
+                                assistantMessageID: assistantMessage?.id,
+                                status: .cancelled,
+                                text: accumulated,
+                                tokenCount: tokenCount
+                            )
+                        )
+                    }
+                    continuation.finish()
+                } catch {
+                    if let repository = services.conversationRepository,
+                       let assistantMessage {
+                        try? await repository.updateMessage(
+                            id: assistantMessage.id,
+                            content: error.localizedDescription,
+                            status: .failed,
+                            tokenCount: tokenCount
+                        )
+                    }
+                    if let conversationID {
+                        continuation.yield(
+                            WatchChatRunUpdate(
+                                runID: runID,
+                                conversationID: conversationID,
+                                assistantMessageID: assistantMessage?.id,
+                                status: .failed,
+                                text: accumulated,
+                                tokenCount: tokenCount,
+                                errorMessage: error.localizedDescription
+                            )
+                        )
+                    }
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private func defaultModelID() async throws -> ModelID? {
+        if let settings = try? await services.settingsRepository?.loadSettings(),
+           let modelID = settings.defaultModelID {
+            return modelID
+        }
+        let installs = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
+        return installs.first { $0.state == .installed && $0.modalities.contains(.text) }?.modelID
+            ?? installs.first { $0.modalities.contains(.text) }?.modelID
+    }
+
+    private func selectProvider(conversationID: UUID) async throws -> ProviderSelection {
+        let settings = try? await services.settingsRepository?.loadSettings()
+        let conversations = try await services.conversationRepository?.listConversations() ?? []
+        let configuredModelID = settings?.defaultModelID
+            ?? conversations.first { $0.id == conversationID }?.defaultModelID
+        let modelID = if let configuredModelID {
+            configuredModelID
+        } else if let installedModelID = try await defaultModelID() {
+            installedModelID
+        } else {
+            ModelID(rawValue: "mlx-community/Llama-3.2-1B-Instruct-4bit")
+        }
+        let cloudProviders = try await services.cloudProviderRepository?.listProviders() ?? []
+        let cloudCandidate = cloudProviders
+            .first { $0.enabledForAgents }
+            .map { configuration in
+                (
+                    configuration,
+                    BYOKCloudInferenceProvider(configuration: configuration, secretStore: services.secretStore)
+                )
+            }
+        let availableTools = await services.toolRegistry.listSpecs()
+        let route = services.executionRouter.routeChat(
+            mode: settings?.executionMode ?? .preferLocal,
+            local: (services.mlxRuntime.localProviderID, services.mlxRuntime.capabilities),
+            cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
+            requiresVision: false,
+            requiresTools: !availableTools.isEmpty
+        )
+
+        switch route.destination {
+        case .local:
+            return ProviderSelection(
+                provider: services.mlxRuntime,
+                providerID: services.mlxRuntime.localProviderID,
+                modelID: modelID
+            )
+        case let .cloud(providerID):
+            guard let cloudCandidate else {
+                throw WatchChatError.unavailable("No enabled cloud provider is configured for agents.")
+            }
+            return ProviderSelection(
+                provider: cloudCandidate.1,
+                providerID: providerID,
+                modelID: cloudCandidate.0.defaultModelID ?? modelID
+            )
+        case let .denied(reason):
+            throw reason
+        }
+    }
+
+    private func vaultContextMessage(for query: String) async -> (message: ChatMessage, documentIDs: [UUID])? {
+        guard let vaultRepository = services.vaultRepository,
+              let settings = try? await services.settingsRepository?.loadSettings(),
+              let embeddingModelID = settings.embeddingModelID,
+              let embeddingResult = try? await services.mlxRuntime.embed(
+                  EmbeddingRequest(modelID: embeddingModelID, inputs: [query])
+              ),
+              let queryEmbedding = embeddingResult.vectors.first,
+              let results = try? await vaultRepository.search(
+                  query: query,
+                  embedding: queryEmbedding,
+                  embeddingModelID: embeddingModelID,
+                  limit: 4
+              ),
+              !results.isEmpty
+        else {
+            return nil
+        }
+
+        let context = results.enumerated().map { index, result in
+            "[\(index + 1)] \(result.document.title): \(result.snippet)"
+        }.joined(separator: "\n")
+        return (
+            ChatMessage(
+                role: .system,
+                content: """
+                Use this private local vault context when it is relevant. Cite entries by bracket number.
+                \(context)
+                """
+            ),
+            uniqueDocumentIDs(from: results)
+        )
+    }
+
+    private func uniqueDocumentIDs(from results: [VaultSearchResult]) -> [UUID] {
+        var seen = Set<UUID>()
+        var ids = [UUID]()
+        for id in results.map(\.document.id) where seen.insert(id).inserted {
+            ids.append(id)
+        }
+        return ids
+    }
+
+    private func markCancelled(
+        assistantMessage: ChatMessage?,
+        conversationID: UUID?,
+        selectedModelID: ModelID?,
+        selectedProviderID: ProviderID?,
+        accumulated: String,
+        tokenCount: Int
+    ) async {
+        guard let repository = services.conversationRepository,
+              let assistantMessage,
+              conversationID != nil
+        else {
+            return
+        }
+
+        try? await repository.updateMessage(
+            id: assistantMessage.id,
+            content: accumulated,
+            status: .cancelled,
+            tokenCount: tokenCount
+        )
+
+        _ = selectedModelID
+        _ = selectedProviderID
+    }
+
+    private func phoneStatus() -> WatchPhoneStatus {
+        WatchPhoneStatus(
+            reachable: true,
+            runtimeReady: services.mlxRuntime.isLinked,
+            summary: services.mlxRuntime.isLinked ? "iPhone runtime ready" : "Open Pines on iPhone to resolve the runtime"
+        )
+    }
+
+    private static func summary(from record: ConversationRecord, messages: [ChatMessage]) -> WatchConversationSummary {
+        let lastMessage = messages.last?.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return WatchConversationSummary(
+            id: record.id,
+            title: record.title,
+            lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
+            updatedAt: record.updatedAt,
+            modelName: record.defaultModelID?.rawValue.components(separatedBy: "/").last ?? "Local model",
+            archived: record.archived
+        )
+    }
+
+    private static func watchMessage(from message: ChatMessage) -> WatchChatMessage {
+        WatchChatMessage(
+            id: message.id,
+            role: WatchChatRole(rawValue: message.role.rawValue) ?? .assistant,
+            content: message.content,
+            createdAt: message.createdAt
+        )
+    }
+
+    private static func title(from text: String) -> String {
+        let title = text
+            .split(separator: " ")
+            .prefix(6)
+            .joined(separator: " ")
+        return title.isEmpty ? "Watch chat" : title
+    }
+}
+
+private struct ProviderSelection {
+    let provider: any InferenceProvider
+    let providerID: ProviderID
+    let modelID: ModelID
+}
+
+private enum WatchChatError: LocalizedError {
+    case unavailable(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .unavailable(message):
+            message
+        }
+    }
+}

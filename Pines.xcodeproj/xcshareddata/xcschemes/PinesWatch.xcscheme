@@ -14,20 +14,6 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "5ABD42396BC25E46F453A6A1"
-               BuildableName = "pines.app"
-               BlueprintName = "Pines"
-               ReferencedContainer = "container:Pines.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
                BlueprintIdentifier = "82648A6E9285BDBBB41FA8FB"
                BuildableName = "Pines Watch.app"
                BlueprintName = "PinesWatch"
@@ -40,14 +26,13 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES"
-      codeCoverageEnabled = "YES">
+      shouldUseLaunchSchemeArgsEnv = "YES">
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5ABD42396BC25E46F453A6A1"
-            BuildableName = "pines.app"
-            BlueprintName = "Pines"
+            BlueprintIdentifier = "82648A6E9285BDBBB41FA8FB"
+            BuildableName = "Pines Watch.app"
+            BlueprintName = "PinesWatch"
             ReferencedContainer = "container:Pines.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -68,9 +53,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5ABD42396BC25E46F453A6A1"
-            BuildableName = "pines.app"
-            BlueprintName = "Pines"
+            BlueprintIdentifier = "82648A6E9285BDBBB41FA8FB"
+            BuildableName = "Pines Watch.app"
+            BlueprintName = "PinesWatch"
             ReferencedContainer = "container:Pines.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -85,9 +70,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5ABD42396BC25E46F453A6A1"
-            BuildableName = "pines.app"
-            BlueprintName = "Pines"
+            BlueprintIdentifier = "82648A6E9285BDBBB41FA8FB"
+            BuildableName = "Pines Watch.app"
+            BlueprintName = "PinesWatch"
             ReferencedContainer = "container:Pines.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
