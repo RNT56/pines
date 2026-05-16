@@ -91,7 +91,7 @@ private struct SettingsSectionRow: View {
             isSelected: isSelected
         )
         .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
-        .listRowBackground(Color.clear)
+        .listRowBackground(theme.colors.sidebarBackground)
     }
 }
 

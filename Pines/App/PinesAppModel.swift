@@ -889,7 +889,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             } else {
                 isShowingModelDiscoveryResults = true
                 let token = try await services.huggingFaceCredentialService.readToken()
-                let filters = ModelSearchFilters(query: trimmed, task: task, limit: 50)
+                let filters = ModelSearchFilters(query: trimmed, task: task, limit: 100)
                 let remoteModels = try await services.modelCatalog.search(filters: filters, accessToken: token)
                 let installed = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
                 let installedByRepository = Dictionary(uniqueKeysWithValues: installed.map { ($0.repository.lowercased(), $0) })

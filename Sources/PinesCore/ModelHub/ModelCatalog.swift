@@ -180,16 +180,21 @@ extension URLSession: HTTPClient {
 }
 
 public struct HuggingFaceModelCatalogService: Sendable {
+    public static let defaultModelAuthor = "mlx-community"
+
     private let client: any HTTPClient
     private let baseURL: URL
+    private let modelAuthor: String
     private let decoder: JSONDecoder
 
     public init(
         client: any HTTPClient = URLSession.shared,
-        baseURL: URL = URL(string: "https://huggingface.co")!
+        baseURL: URL = URL(string: "https://huggingface.co")!,
+        modelAuthor: String = Self.defaultModelAuthor
     ) {
         self.client = client
         self.baseURL = baseURL
+        self.modelAuthor = modelAuthor
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
@@ -205,6 +210,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
     public func search(filters: ModelSearchFilters, accessToken: String? = nil) async throws -> [RemoteModelSummary] {
         var components = URLComponents(url: baseURL.appending(path: "/api/models"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
+            URLQueryItem(name: "author", value: modelAuthor),
             URLQueryItem(name: "filter", value: "mlx"),
             URLQueryItem(name: "full", value: "true"),
             URLQueryItem(name: "config", value: "true"),

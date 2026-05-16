@@ -188,7 +188,7 @@ private struct ModelSidebarList: View {
                     isSearching: isSearching
                 )
                 .listRowInsets(EdgeInsets(top: theme.spacing.small, leading: theme.spacing.medium, bottom: theme.spacing.small, trailing: theme.spacing.medium))
-                .listRowBackground(Color.clear)
+                .listRowBackground(theme.colors.sidebarBackground)
             }
 
             Section {
@@ -434,7 +434,7 @@ private struct ModelRow: View {
             }
         }
         .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
-        .listRowBackground(Color.clear)
+        .listRowBackground(theme.colors.sidebarBackground)
     }
 }
 

@@ -140,6 +140,22 @@ struct PinesCoreTestRunner {
             )
         )
         try expectEqual(missingVLMProcessor.verification, .unsupported)
+
+        let gemma4 = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/gemma-4-e2b-it-8bit",
+                configJSON: #"{"model_type":"gemma4"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model-00001-of-00002.safetensors", size: 5_367_135_201),
+                    .init(path: "model-00002-of-00002.safetensors", size: 532_432_577),
+                    .init(path: "tokenizer.json", size: 32_169_626),
+                    .init(path: "processor_config.json", size: 902),
+                ],
+                tags: ["mlx", "gemma4", "any-to-any"]
+            )
+        )
+        try expectEqual(gemma4.verification, .installable)
+        try expectEqual(gemma4.modalities, [.text, .vision])
     }
 
     private static func testModelCatalogSearch() async throws {
@@ -168,6 +184,7 @@ struct PinesCoreTestRunner {
         let requestURL = try await client.lastURL()
         let queryItems = Dictionary(uniqueKeysWithValues: URLComponents(url: requestURL, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
 
+        try expectEqual(queryItems["author"], "mlx-community")
         try expectEqual(queryItems["filter"], "mlx")
         try expectEqual(queryItems["full"], "true")
         try expectEqual(queryItems["config"], "true")

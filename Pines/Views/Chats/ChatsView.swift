@@ -106,7 +106,7 @@ private struct ChatThreadRow: View {
             )
         }
         .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
-        .listRowBackground(Color.clear)
+        .listRowBackground(theme.colors.sidebarBackground)
     }
 }
 
@@ -205,11 +205,6 @@ private struct ChatTranscriptView: View {
             }
             .padding(.top, theme.spacing.xsmall)
             .padding(.bottom, theme.spacing.small)
-            .background {
-                Rectangle()
-                    .fill(theme.colors.backgroundWash)
-                    .ignoresSafeArea()
-            }
             .animation(theme.motion.standard, value: appModel.chatError)
         }
     }

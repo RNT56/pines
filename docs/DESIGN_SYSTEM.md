@@ -11,7 +11,8 @@ The current templates are:
 - `Aurora`: cooler research surface with brighter blue/violet accents.
 - `Paper`: warmer reading and vault-focused layout.
 - `Slate`: technical blue-gray workspace with quiet precision.
-- `Porcelain`: crisp minimal surface with refined airy contrast.
+- `Porcelain`: warm ceramic minimalism with fine editorial contrast.
+- `Sunset`: Bitcoin-orange workspace with warm copper glass.
 - `Obsidian`: dark-first pro console with restrained luminous accents.
 
 ## Interface Modes

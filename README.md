@@ -34,7 +34,7 @@ The app is split into production seams:
 
 `PinesDesignSystem.swift` defines the complete app style surface:
 
-- User-selectable templates: Evergreen, Graphite, Aurora, Paper, Slate, Porcelain, and Obsidian.
+- User-selectable templates: Evergreen, Graphite, Aurora, Paper, Slate, Porcelain, Sunset, and Obsidian.
 - Interface modes: System, Light, and Dark.
 - Semantic colors, typography, spacing, radii, strokes, shadows, materials, and motion curves.
 - Environment injection through `\.pinesTheme`, so every screen inherits the selected template.

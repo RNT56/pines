@@ -667,6 +667,8 @@ private actor SyntaxHighlightingService {
             highlightTheme = .grayscale
         case PinesThemeTemplate.paper.rawValue:
             highlightTheme = .papercolor
+        case PinesThemeTemplate.sunset.rawValue:
+            highlightTheme = .papercolor
         case PinesThemeTemplate.porcelain.rawValue:
             highlightTheme = .github
         default:

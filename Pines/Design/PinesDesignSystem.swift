@@ -7,6 +7,7 @@ enum PinesThemeTemplate: String, CaseIterable, Identifiable {
     case paper
     case slate
     case porcelain
+    case sunset
     case obsidian
 
     var id: String { rawValue }
@@ -25,6 +26,8 @@ enum PinesThemeTemplate: String, CaseIterable, Identifiable {
             "Slate"
         case .porcelain:
             "Porcelain"
+        case .sunset:
+            "Sunset"
         case .obsidian:
             "Obsidian"
         }
@@ -43,7 +46,9 @@ enum PinesThemeTemplate: String, CaseIterable, Identifiable {
         case .slate:
             "Technical blue-gray workspace with quiet precision."
         case .porcelain:
-            "Crisp minimal surface with refined airy contrast."
+            "Warm ceramic minimalism with fine editorial contrast."
+        case .sunset:
+            "Bitcoin-orange workspace with warm copper glass."
         case .obsidian:
             "Dark-first pro console with restrained luminous accents."
         }
@@ -208,61 +213,75 @@ struct PinesThemeColors {
             chartB = Color(hex: dark ? 0x8AB4F8 : 0x2563EB)
             chartC = Color(hex: dark ? 0xA7F3D0 : 0x059669)
         case .aurora:
-            appBackground = dark ? Color(hex: 0x070B1C) : Color(hex: 0xF5F8FF)
-            secondaryBackground = dark ? Color(hex: 0x0F1530) : Color(hex: 0xE8F0FF)
-            surface = dark ? Color(hex: 0x131B38) : Color(hex: 0xFFFFFF)
-            elevatedSurface = dark ? Color(hex: 0x1A264D) : Color(hex: 0xFAFCFF)
-            accent = dark ? Color(hex: 0x88E7F8) : Color(hex: 0x1B69C8)
-            accentSoft = accent.opacity(dark ? 0.18 : 0.11)
+            appBackground = dark ? Color(hex: 0x080D20) : Color(hex: 0xF5F8FF)
+            secondaryBackground = dark ? Color(hex: 0x0D1430) : Color(hex: 0xE8F0FF)
+            surface = dark ? Color(hex: 0x121A35) : Color(hex: 0xFFFFFF)
+            elevatedSurface = dark ? Color(hex: 0x182142) : Color(hex: 0xFAFCFF)
+            accent = dark ? Color(hex: 0x72D8F4) : Color(hex: 0x1B69C8)
+            accentSoft = accent.opacity(dark ? 0.16 : 0.11)
             success = Color(hex: dark ? 0x7BE1B4 : 0x0F766E)
-            warning = Color(hex: dark ? 0xFFD166 : 0xB45309)
-            danger = Color(hex: dark ? 0xFF8FA3 : 0xBE123C)
-            info = Color(hex: dark ? 0xA78BFA : 0x6D28D9)
+            warning = Color(hex: dark ? 0xE8C66A : 0xB45309)
+            danger = Color(hex: dark ? 0xF58CA5 : 0xBE123C)
+            info = Color(hex: dark ? 0xA99BFF : 0x6D28D9)
             chartA = accent
-            chartB = Color(hex: dark ? 0xB6A2FF : 0x7C3AED)
+            chartB = Color(hex: dark ? 0xA99BFF : 0x7C3AED)
             chartC = Color(hex: dark ? 0x7BE1B4 : 0x0D9488)
         case .paper:
-            appBackground = dark ? Color(hex: 0x171513) : Color(hex: 0xFAF7F0)
-            secondaryBackground = dark ? Color(hex: 0x211C17) : Color(hex: 0xEFE7D8)
-            surface = dark ? Color(hex: 0x29231C) : Color(hex: 0xFFFDF8)
-            elevatedSurface = dark ? Color(hex: 0x342C22) : Color(hex: 0xFFFFFF)
-            accent = dark ? Color(hex: 0xB9D8BE) : Color(hex: 0x376B4F)
+            appBackground = dark ? Color(hex: 0x111412) : Color(hex: 0xFAF6EC)
+            secondaryBackground = dark ? Color(hex: 0x181D19) : Color(hex: 0xEFE6D6)
+            surface = dark ? Color(hex: 0x20251F) : Color(hex: 0xFFF9EE)
+            elevatedSurface = dark ? Color(hex: 0x292F28) : Color(hex: 0xFFFDF7)
+            accent = dark ? Color(hex: 0xBBD8C1) : Color(hex: 0x376B4F)
             accentSoft = accent.opacity(dark ? 0.20 : 0.12)
             success = Color(hex: dark ? 0xA7D7A4 : 0x397A3E)
-            warning = Color(hex: dark ? 0xEBC56D : 0x9A6415)
-            danger = Color(hex: dark ? 0xE89A8D : 0xA33A2C)
+            warning = Color(hex: dark ? 0xDDC17A : 0x9A6415)
+            danger = Color(hex: dark ? 0xDF9B90 : 0xA33A2C)
             info = Color(hex: dark ? 0x9FBCEB : 0x315E9E)
             chartA = accent
-            chartB = Color(hex: dark ? 0xD6B676 : 0xA16C19)
+            chartB = Color(hex: dark ? 0xC9B073 : 0xA16C19)
             chartC = Color(hex: dark ? 0xA7B8D8 : 0x476B9E)
         case .slate:
-            appBackground = dark ? Color(hex: 0x071216) : Color(hex: 0xF3F7F8)
-            secondaryBackground = dark ? Color(hex: 0x0D1D24) : Color(hex: 0xE4EBEF)
-            surface = dark ? Color(hex: 0x142B34) : Color(hex: 0xFCFEFF)
-            elevatedSurface = dark ? Color(hex: 0x1C3944) : Color(hex: 0xFFFFFF)
-            accent = dark ? Color(hex: 0x7DD6E8) : Color(hex: 0x1F6673)
-            accentSoft = accent.opacity(dark ? 0.20 : 0.11)
+            appBackground = dark ? Color(hex: 0x071216) : Color(hex: 0xEEF4F7)
+            secondaryBackground = dark ? Color(hex: 0x0C1C23) : Color(hex: 0xD8E6EC)
+            surface = dark ? Color(hex: 0x132A34) : Color(hex: 0xF7FBFD)
+            elevatedSurface = dark ? Color(hex: 0x1B3844) : Color(hex: 0xFFFFFF)
+            accent = dark ? Color(hex: 0x7DD6E8) : Color(hex: 0x205F74)
+            accentSoft = accent.opacity(dark ? 0.20 : 0.12)
             success = Color(hex: dark ? 0x83D7A6 : 0x207A52)
-            warning = Color(hex: dark ? 0xEAC36A : 0x9F6515)
+            warning = Color(hex: dark ? 0xEAC36A : 0x996016)
             danger = Color(hex: dark ? 0xF09389 : 0xB43A31)
-            info = Color(hex: dark ? 0x91B8FF : 0x285FC7)
+            info = Color(hex: dark ? 0x91B8FF : 0x315E9C)
             chartA = accent
-            chartB = Color(hex: dark ? 0x91B8FF : 0x285FC7)
-            chartC = Color(hex: dark ? 0x83D7A6 : 0x21846F)
+            chartB = Color(hex: dark ? 0x91B8FF : 0x315E9C)
+            chartC = Color(hex: dark ? 0x83D7A6 : 0x1E7F6D)
         case .porcelain:
-            appBackground = dark ? Color(hex: 0x101316) : Color(hex: 0xF8FAFB)
-            secondaryBackground = dark ? Color(hex: 0x171C20) : Color(hex: 0xEEF3F5)
-            surface = dark ? Color(hex: 0x1F262B) : Color(hex: 0xFFFFFF)
-            elevatedSurface = dark ? Color(hex: 0x293137) : Color(hex: 0xFDFEFF)
-            accent = dark ? Color(hex: 0xA9D7EA) : Color(hex: 0x326E8A)
-            accentSoft = accent.opacity(dark ? 0.18 : 0.10)
-            success = Color(hex: dark ? 0x9ED9B6 : 0x247A56)
-            warning = Color(hex: dark ? 0xE8C678 : 0xA26618)
-            danger = Color(hex: dark ? 0xEFA092 : 0xAD3E32)
-            info = Color(hex: dark ? 0x9CBFFF : 0x2E63C6)
+            appBackground = dark ? Color(hex: 0x121111) : Color(hex: 0xFAF9F5)
+            secondaryBackground = dark ? Color(hex: 0x1B191A) : Color(hex: 0xF0ECE3)
+            surface = dark ? Color(hex: 0x242223) : Color(hex: 0xFFFDF8)
+            elevatedSurface = dark ? Color(hex: 0x302D2F) : Color(hex: 0xFFFFFF)
+            accent = dark ? Color(hex: 0xD9B9CC) : Color(hex: 0x7B5B70)
+            accentSoft = accent.opacity(dark ? 0.18 : 0.095)
+            success = Color(hex: dark ? 0x9ED9B6 : 0x33775B)
+            warning = Color(hex: dark ? 0xE8C678 : 0xA16622)
+            danger = Color(hex: dark ? 0xEFA092 : 0xA84239)
+            info = Color(hex: dark ? 0xAFC2EA : 0x486795)
             chartA = accent
-            chartB = Color(hex: dark ? 0x9CBFFF : 0x2E63C6)
-            chartC = Color(hex: dark ? 0x9ED9B6 : 0x23806B)
+            chartB = Color(hex: dark ? 0xAFC2EA : 0x486795)
+            chartC = Color(hex: dark ? 0x9ED9B6 : 0x33775B)
+        case .sunset:
+            appBackground = dark ? Color(hex: 0x130B05) : Color(hex: 0xFFF5EA)
+            secondaryBackground = dark ? Color(hex: 0x211208) : Color(hex: 0xF4E0C8)
+            surface = dark ? Color(hex: 0x2A180C) : Color(hex: 0xFFF9F2)
+            elevatedSurface = dark ? Color(hex: 0x382111) : Color(hex: 0xFFFFFF)
+            accent = dark ? Color(hex: 0xFFB15B) : Color(hex: 0xD66B00)
+            accentSoft = accent.opacity(dark ? 0.20 : 0.11)
+            success = Color(hex: dark ? 0xA4D98F : 0x3F7C31)
+            warning = Color(hex: dark ? 0xFFD071 : 0xB86A00)
+            danger = Color(hex: dark ? 0xFF987D : 0xB83B25)
+            info = Color(hex: dark ? 0x8DB7FF : 0x315E9E)
+            chartA = accent
+            chartB = Color(hex: dark ? 0xFFD071 : 0xF7931A)
+            chartC = Color(hex: dark ? 0x8DB7FF : 0x315E9E)
         case .obsidian:
             appBackground = dark ? Color(hex: 0x050607) : Color(hex: 0xF2F4F4)
             secondaryBackground = dark ? Color(hex: 0x0A0D0E) : Color(hex: 0xE3E7E7)
@@ -292,6 +311,8 @@ struct PinesThemeColors {
             glassSurface = AnyShapeStyle(dark ? .regularMaterial : .thinMaterial)
         case .porcelain:
             glassSurface = AnyShapeStyle(dark ? .regularMaterial : .thickMaterial)
+        case .sunset:
+            glassSurface = AnyShapeStyle(dark ? .regularMaterial : .thinMaterial)
         case .obsidian:
             glassSurface = AnyShapeStyle(dark ? .thinMaterial : .regularMaterial)
         }
@@ -306,16 +327,16 @@ struct PinesThemeColors {
                 endPoint: .bottomTrailing
             )
         )
-        surfaceHighlight = dark ? Color.white.opacity(template == .graphite || template == .obsidian ? 0.05 : 0.08) : Color.white.opacity(template == .paper || template == .porcelain ? 0.90 : 0.72)
+        surfaceHighlight = dark ? Color.white.opacity(template == .graphite || template == .obsidian ? 0.05 : 0.08) : Color.white.opacity(template == .paper || template == .porcelain || template == .sunset ? 0.90 : 0.72)
         primaryText = dark ? Color(hex: 0xF5F7F6) : Color(hex: 0x151A18)
         secondaryText = dark ? Color(hex: 0xBAC5C1) : Color(hex: 0x4B5652)
         tertiaryText = dark ? Color(hex: 0x87938F) : Color(hex: 0x75807C)
         placeholderText = tertiaryText.opacity(dark ? 0.88 : 0.92)
         disabledText = tertiaryText.opacity(dark ? 0.58 : 0.64)
-        separator = dark ? Color.white.opacity(template == .graphite || template == .obsidian ? 0.16 : 0.13) : Color.black.opacity(template == .paper || template == .porcelain ? 0.10 : 0.11)
+        separator = dark ? Color.white.opacity(template == .graphite || template == .obsidian ? 0.16 : 0.13) : Color.black.opacity(template == .paper || template == .porcelain || template == .sunset ? 0.10 : 0.11)
         link = info
-        codeBackground = dark ? Color.black.opacity(template == .aurora ? 0.36 : 0.30) : Color.black.opacity(template == .paper || template == .porcelain ? 0.035 : 0.045)
-        codeHeaderBackground = dark ? Color.white.opacity(0.06) : Color.black.opacity(template == .paper || template == .porcelain ? 0.025 : 0.035)
+        codeBackground = dark ? Color.black.opacity(template == .aurora ? 0.34 : 0.30) : Color.black.opacity(template == .paper || template == .porcelain || template == .sunset ? 0.035 : 0.045)
+        codeHeaderBackground = dark ? Color.white.opacity(0.06) : Color.black.opacity(template == .paper || template == .porcelain || template == .sunset ? 0.025 : 0.035)
         inlineCodeBackground = dark ? Color.white.opacity(0.10) : Color.black.opacity(0.07)
         quoteBackground = accent.opacity(dark ? 0.13 : 0.08)
         tableHeaderBackground = dark ? Color.white.opacity(0.07) : Color.black.opacity(0.04)
@@ -323,16 +344,16 @@ struct PinesThemeColors {
         warningSoft = warning.opacity(dark ? 0.18 : 0.10)
         dangerSoft = danger.opacity(dark ? 0.17 : 0.09)
         infoSoft = info.opacity(dark ? 0.18 : 0.10)
-        userBubble = dark ? info.opacity(template == .aurora ? 0.28 : 0.22) : info.opacity(template == .graphite || template == .obsidian ? 0.08 : 0.10)
+        userBubble = dark ? info.opacity(template == .aurora ? 0.20 : 0.22) : info.opacity(template == .graphite || template == .obsidian ? 0.08 : 0.10)
         assistantBubble = dark ? accent.opacity(template == .paper || template == .porcelain ? 0.15 : 0.18) : accent.opacity(template == .paper || template == .porcelain ? 0.075 : 0.09)
         toolBubble = dark ? warning.opacity(0.18) : warning.opacity(0.10)
-        sidebarSelection = accent.opacity(dark ? 0.26 : 0.13)
-        listRowHover = accent.opacity(dark ? 0.12 : 0.07)
-        listRowPressed = accent.opacity(dark ? 0.18 : 0.11)
-        controlFill = dark ? Color.white.opacity(template == .graphite || template == .obsidian ? 0.06 : 0.08) : Color.black.opacity(template == .paper || template == .porcelain ? 0.035 : 0.05)
+        sidebarSelection = accent.opacity(dark ? (template == .aurora ? 0.18 : 0.26) : 0.13)
+        listRowHover = accent.opacity(dark ? (template == .aurora ? 0.08 : 0.12) : 0.07)
+        listRowPressed = accent.opacity(dark ? (template == .aurora ? 0.13 : 0.18) : 0.11)
+        controlFill = dark ? Color.white.opacity(template == .graphite || template == .obsidian ? 0.06 : 0.08) : Color.black.opacity(template == .paper || template == .porcelain || template == .sunset ? 0.035 : 0.05)
         disabledFill = controlFill.opacity(dark ? 0.58 : 0.62)
         controlPressed = dark ? Color.white.opacity(template == .graphite || template == .obsidian ? 0.12 : 0.14) : Color.black.opacity(0.10)
-        controlBorder = dark ? Color.white.opacity(template == .graphite || template == .obsidian ? 0.18 : 0.14) : Color.black.opacity(template == .paper || template == .porcelain ? 0.08 : 0.10)
+        controlBorder = dark ? Color.white.opacity(template == .graphite || template == .obsidian ? 0.18 : 0.14) : Color.black.opacity(template == .paper || template == .porcelain || template == .sunset ? 0.08 : 0.10)
         focusRing = accent.opacity(0.72)
         modalScrim = Color.black.opacity(dark ? 0.48 : 0.28)
         contentBackground = appBackground
@@ -340,6 +361,52 @@ struct PinesThemeColors {
         sheetBackground = dark ? surface : elevatedSurface
         cardBackground = surface
         cardBorder = separator
+
+        switch template {
+        case .aurora where dark:
+            contentBackground = Color(hex: 0x080D20)
+            sidebarBackground = Color(hex: 0x0B1028)
+            sheetBackground = Color(hex: 0x121A35)
+            cardBackground = Color(hex: 0x121A35)
+            cardBorder = Color.white.opacity(0.105)
+            controlFill = Color.white.opacity(0.065)
+            controlBorder = Color.white.opacity(0.12)
+            toolBubble = warning.opacity(0.14)
+        case .paper where dark:
+            contentBackground = Color(hex: 0x111412)
+            sidebarBackground = Color(hex: 0x171B17)
+            sheetBackground = Color(hex: 0x20251F)
+            cardBackground = Color(hex: 0x20251F)
+            cardBorder = Color.white.opacity(0.11)
+            controlFill = Color.white.opacity(0.07)
+            controlBorder = Color.white.opacity(0.12)
+        case .paper:
+            contentBackground = Color(hex: 0xFAF6EC)
+            sidebarBackground = Color(hex: 0xEFE6D6)
+            sheetBackground = Color(hex: 0xFFF9EE)
+            cardBackground = Color(hex: 0xFFF8EC)
+            cardBorder = Color.black.opacity(0.085)
+        case .slate where !dark:
+            sidebarBackground = Color(hex: 0xD8E6EC)
+            cardBackground = Color(hex: 0xF6FBFD)
+            cardBorder = Color(hex: 0x9BB5C1).opacity(0.34)
+        case .porcelain where !dark:
+            sidebarBackground = Color(hex: 0xF0ECE3)
+            cardBackground = Color(hex: 0xFFFDF8)
+            cardBorder = Color(hex: 0xD8CEC2).opacity(0.48)
+        case .sunset where dark:
+            sidebarBackground = Color(hex: 0x1D1008)
+            cardBackground = Color(hex: 0x2A180C)
+            cardBorder = Color(hex: 0xFFB15B).opacity(0.16)
+            controlFill = Color.white.opacity(0.075)
+            controlBorder = Color(hex: 0xFFB15B).opacity(0.18)
+        case .sunset:
+            sidebarBackground = Color(hex: 0xF4E0C8)
+            cardBackground = Color(hex: 0xFFF3E5)
+            cardBorder = Color(hex: 0xD66B00).opacity(0.16)
+        default:
+            break
+        }
     }
 }
 
@@ -387,6 +454,8 @@ struct PinesThemeSpacing: Equatable {
             xxsmall = 5; xsmall = 8; small = 12; medium = 16; large = 24; xlarge = 34; xxlarge = 44; contentMaxWidth = 720
         case .slate:
             xxsmall = 4; xsmall = 6; small = 10; medium = 14; large = 20; xlarge = 28; xxlarge = 36; contentMaxWidth = 800
+        case .sunset:
+            xxsmall = 4; xsmall = 7; small = 11; medium = 15; large = 22; xlarge = 30; xxlarge = 40; contentMaxWidth = 760
         default:
             xxsmall = 4; xsmall = 6; small = 10; medium = 14; large = 20; xlarge = 28; xxlarge = 38; contentMaxWidth = 760
         }
@@ -409,6 +478,8 @@ struct PinesThemeRadius: Equatable {
             control = 10; panel = 10; sheet = 16
         case .porcelain:
             control = 10; panel = 12; sheet = 18
+        case .sunset:
+            control = 10; panel = 11; sheet = 18
         case .slate:
             control = 8; panel = 10; sheet = 16
         case .aurora:
@@ -452,6 +523,10 @@ struct PinesThemeShadow: Equatable {
             panelColor = scheme == .dark ? Color.black.opacity(0.30) : Color.black.opacity(0.06)
             panelRadius = 16
             panelY = 7
+        case .sunset:
+            panelColor = scheme == .dark ? Color.black.opacity(0.36) : Color(hex: 0x7A3A00).opacity(0.08)
+            panelRadius = 17
+            panelY = 8
         case .slate, .evergreen:
             panelColor = scheme == .dark ? Color.black.opacity(0.32) : Color.black.opacity(0.09)
             panelRadius = 15
@@ -491,7 +566,7 @@ struct PinesThemeRow: Equatable {
         switch template {
         case .graphite, .obsidian:
             minHeight = 66; iconTile = 36; trailingWidth = 74; horizontalPadding = 10; verticalPadding = 8
-        case .paper, .porcelain:
+        case .paper, .porcelain, .sunset:
             minHeight = 78; iconTile = 40; trailingWidth = 82; horizontalPadding = 12; verticalPadding = 10
         case .aurora, .slate:
             minHeight = 74; iconTile = 40; trailingWidth = 82; horizontalPadding = 12; verticalPadding = 10
@@ -511,7 +586,7 @@ struct PinesThemeCard: Equatable {
         switch template {
         case .graphite, .obsidian:
             minHeight = 96; headerIconSize = 34; sectionSpacing = 12; gridMinWidth = 154
-        case .paper, .porcelain:
+        case .paper, .porcelain, .sunset:
             minHeight = 116; headerIconSize = 40; sectionSpacing = 18; gridMinWidth = 174
         case .aurora, .slate:
             minHeight = 110; headerIconSize = 40; sectionSpacing = 16; gridMinWidth = 168
@@ -533,7 +608,7 @@ struct PinesThemeDashboard: Equatable {
         switch template {
         case .graphite, .obsidian:
             tileMinHeight = 86; tileMinWidth = 138; compactGridMinWidth = 132; wideGridMinWidth = 196; actionMinHeight = 38; chipHeight = 28
-        case .paper, .porcelain:
+        case .paper, .porcelain, .sunset:
             tileMinHeight = 108; tileMinWidth = 156; compactGridMinWidth = 150; wideGridMinWidth = 220; actionMinHeight = 42; chipHeight = 30
         case .aurora, .slate:
             tileMinHeight = 104; tileMinWidth = 150; compactGridMinWidth = 144; wideGridMinWidth = 212; actionMinHeight = 42; chipHeight = 30
@@ -564,6 +639,8 @@ struct PinesThemeAmbient: Equatable {
             lineOpacity = dark ? 0.15 : 0.09; glowOpacity = dark ? 0.13 : 0.07; markOpacity = dark ? 0.07 : 0.05; drift = 8
         case .porcelain:
             lineOpacity = dark ? 0.10 : 0.07; glowOpacity = dark ? 0.08 : 0.05; markOpacity = dark ? 0.05 : 0.035; drift = 5
+        case .sunset:
+            lineOpacity = dark ? 0.14 : 0.08; glowOpacity = dark ? 0.16 : 0.09; markOpacity = dark ? 0.07 : 0.045; drift = 8
         case .obsidian:
             lineOpacity = dark ? 0.18 : 0.10; glowOpacity = dark ? 0.16 : 0.06; markOpacity = dark ? 0.08 : 0.04; drift = 4
         }
@@ -1609,6 +1686,19 @@ struct PinesAmbientBackground: View {
                     control2: CGPoint(x: size.width * 0.72, y: y - 12)
                 )
             }
+        case .sunset:
+            path.move(to: CGPoint(x: -20, y: size.height * 0.22))
+            path.addCurve(
+                to: CGPoint(x: size.width + 20, y: size.height * 0.34),
+                control1: CGPoint(x: size.width * 0.24, y: size.height * 0.04),
+                control2: CGPoint(x: size.width * 0.62, y: size.height * 0.52)
+            )
+            path.move(to: CGPoint(x: -20, y: size.height * 0.72))
+            path.addCurve(
+                to: CGPoint(x: size.width + 20, y: size.height * 0.60),
+                control1: CGPoint(x: size.width * 0.30, y: size.height * 0.54),
+                control2: CGPoint(x: size.width * 0.68, y: size.height * 0.82)
+            )
         case .obsidian:
             for index in 0..<7 {
                 let x = CGFloat(index) * max(1, size.width / 6)
@@ -1744,7 +1834,11 @@ struct PinesSidebarRow<Accessory: View>: View {
         .padding(.horizontal, theme.row.horizontalPadding)
         .padding(.vertical, theme.row.verticalPadding)
         .frame(minHeight: theme.row.minHeight)
-        .background(isSelected ? theme.colors.sidebarSelection : Color.clear, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
+                .strokeBorder(rowBorder, lineWidth: theme.stroke.hairline)
+        }
         .overlay(alignment: .leading) {
             if isSelected {
                 Capsule()
@@ -1756,6 +1850,20 @@ struct PinesSidebarRow<Accessory: View>: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
         .animation(reduceMotion ? nil : theme.motion.selection, value: isSelected)
+    }
+
+    private var rowBackground: Color {
+        if isSelected {
+            return theme.colors.sidebarSelection
+        }
+        return theme.colors.cardBackground.opacity(theme.colorScheme == .dark ? 0.34 : 0.72)
+    }
+
+    private var rowBorder: Color {
+        if isSelected {
+            return (tint ?? theme.colors.accent).opacity(0.18)
+        }
+        return theme.colors.cardBorder.opacity(theme.colorScheme == .dark ? 0.70 : 0.58)
     }
 }
 

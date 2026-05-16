@@ -119,7 +119,7 @@ private struct VaultItemRow: View {
             isActive: item.sensitivity == .locked
         )
         .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
-        .listRowBackground(Color.clear)
+        .listRowBackground(theme.colors.sidebarBackground)
     }
 }
 
