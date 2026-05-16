@@ -10,6 +10,14 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>de</string>
+		<string>en</string>
+		<string>zh-Hans</string>
+		<string>ar</string>
+		<string>ru</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>pines</string>
 	<key>CFBundlePackageType</key>

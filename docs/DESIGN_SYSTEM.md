@@ -12,7 +12,7 @@ The current templates are:
 - `Paper`: warmer reading and vault-focused layout.
 - `Slate`: technical blue-gray workspace with quiet precision.
 - `Porcelain`: warm ceramic minimalism with fine editorial contrast.
-- `Sunset`: Bitcoin-orange workspace with warm copper glass.
+- `Sunset`: copper-orange workspace with warm glass.
 - `Obsidian`: dark-first pro console with restrained luminous accents.
 
 ## Interface Modes
@@ -24,6 +24,28 @@ Each template supports:
 - `Dark`
 
 The selected mode is applied through `preferredColorScheme`, while the resolved theme is injected through the SwiftUI environment.
+
+## Theme Depth
+
+Each template defines a full light and dark schema for:
+
+- app, content, sidebar, sheet, card, list, chrome, control, code, quote, table, and modal surfaces
+- primary, secondary, tertiary, placeholder, disabled, separator, link, and focus roles
+- success, warning, danger, info, soft semantic fills, chat bubbles, selection, hover, and pressed states
+- six chart/accent swatches used by previews and analytics surfaces
+- material choice, background wash, and surface highlight behavior
+
+Graphite intentionally stays closest to the original dense neutral system. The other themes carry stronger identity in both light and dark modes:
+
+| Theme | Light mode | Dark mode |
+| --- | --- | --- |
+| Evergreen | botanical sage, ivory surfaces, pine ink | deep forest glass, mint highlights, moss/gold support |
+| Aurora | blue-lilac research surfaces, violet/cyan charts | night-sky navy, cyan/violet glow, saturated data colors |
+| Paper | parchment, book ink, muted green and ochre | archival charcoal paper, warm text, olive and brass accents |
+| Slate | steel-blue operational UI, crisp cool surfaces | instrument-panel blue-gray, cyan edge light |
+| Porcelain | ceramic whites, mauve/cobalt editorial accents | glazed plum-black, rose porcelain highlights |
+| Sunset | copper, clay, and warm paper surfaces | ember-black console, copper and rose heat |
+| Obsidian | smoke-glass light mode with teal contrast | near-black console with restrained cyan luminous accents |
 
 ## Covered Style Surface
 
@@ -39,6 +61,7 @@ The selected mode is applied through `preferredColorScheme`, while the resolved 
 - materials
 - motion curves
 - semantic soft fills for success, warning, danger, and info states
+- expanded chart swatches
 - panel styling
 - empty states
 - metric pills

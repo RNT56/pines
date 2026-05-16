@@ -213,6 +213,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
 
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         let envelopeData = try? WatchChatCodec.envelopeData(from: applicationContext)
+        guard envelopeData != nil else { return }
         Task { @MainActor in
             self.handleEnvelopeData(envelopeData)
         }

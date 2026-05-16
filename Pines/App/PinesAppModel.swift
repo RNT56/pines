@@ -282,7 +282,6 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             }
 
             try await refreshModelPreviews(services: services)
-            await refreshCloudModelCatalog(services: services)
             await normalizeDefaultModelIfNeeded(services: services)
             setIfChanged(\.serviceError, nil)
         } catch {
@@ -1779,13 +1778,22 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 for await downloads in downloadRepository.observeDownloads() {
                     await MainActor.run {
                         guard let self else { return }
+                        let previousDownloads = self.modelDownloads
                         self.setIfChanged(\.modelDownloads, downloads)
+                        let previousDownloadByRepository = Self.latestDownloadByRepository(previousDownloads)
                         let downloadByRepository = Self.latestDownloadByRepository(downloads)
+                        let changedRepositories = Set(previousDownloadByRepository.keys)
+                            .union(downloadByRepository.keys)
+                            .filter { previousDownloadByRepository[$0] != downloadByRepository[$0] }
+                        guard !changedRepositories.isEmpty else { return }
+
                         let previews = self.models.map { preview in
-                            Self.modelPreview(
+                            let key = preview.install.repository.lowercased()
+                            guard changedRepositories.contains(key) else { return preview }
+                            return Self.modelPreview(
                                 from: preview.install,
                                 runtime: services.mlxRuntime,
-                                download: downloadByRepository[preview.install.repository.lowercased()]
+                                download: downloadByRepository[key]
                             )
                         }
                         self.setIfChanged(\.models, Self.downloadingFirst(previews))

@@ -3,21 +3,26 @@ import Foundation
 import PinesCore
 
 enum ModelDownloadLiveActivityController {
+    private static let throttle = ModelDownloadLiveActivityThrottle()
+
     static func update(progress: ModelDownloadProgress) async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
         switch progress.status {
         case .queued, .downloading, .verifying, .installing:
+            guard await throttle.shouldUpdate(progress) else { return }
             let activity = activity(for: progress.repository)
                 ?? startActivity(for: progress)
             await activity?.update(content(progress: progress))
         case .installed, .failed, .cancelled:
+            await throttle.remove(repository: progress.repository)
             guard let activity = activity(for: progress.repository) else { return }
             await activity.end(content(progress: progress), dismissalPolicy: .after(Date(timeIntervalSinceNow: 30)))
         }
     }
 
     static func end(repository: String) async {
+        await throttle.remove(repository: repository)
         guard let activity = activity(for: repository) else { return }
         let state = ModelDownloadActivityAttributes.ContentState(
             status: "Removed",
@@ -67,6 +72,50 @@ enum ModelDownloadLiveActivityController {
             ),
             staleDate: Date(timeIntervalSinceNow: 60)
         )
+    }
+}
+
+private actor ModelDownloadLiveActivityThrottle {
+    private struct Snapshot {
+        var status: ModelDownloadStatus
+        var currentFile: String?
+        var fraction: Double?
+        var updatedAt: Date
+    }
+
+    private let minimumInterval: TimeInterval = 15
+    private let minimumFractionDelta = 0.05
+    private var snapshots: [String: Snapshot] = [:]
+
+    func shouldUpdate(_ progress: ModelDownloadProgress, now: Date = Date()) -> Bool {
+        let key = progress.repository.lowercased()
+        let fraction = fraction(for: progress)
+
+        guard let previous = snapshots[key] else {
+            snapshots[key] = Snapshot(status: progress.status, currentFile: progress.currentFile, fraction: fraction, updatedAt: now)
+            return true
+        }
+
+        let statusChanged = previous.status != progress.status
+        let fileChanged = previous.currentFile != progress.currentFile
+        let fractionChanged = abs((fraction ?? 0) - (previous.fraction ?? 0)) >= minimumFractionDelta
+        let intervalElapsed = now.timeIntervalSince(previous.updatedAt) >= minimumInterval
+
+        guard statusChanged || fileChanged || fractionChanged || intervalElapsed else {
+            return false
+        }
+
+        snapshots[key] = Snapshot(status: progress.status, currentFile: progress.currentFile, fraction: fraction, updatedAt: now)
+        return true
+    }
+
+    func remove(repository: String) {
+        snapshots[repository.lowercased()] = nil
+    }
+
+    private func fraction(for progress: ModelDownloadProgress) -> Double? {
+        guard let totalBytes = progress.totalBytes, totalBytes > 0 else { return nil }
+        return min(1, max(0, Double(progress.bytesReceived) / Double(totalBytes)))
     }
 }
 

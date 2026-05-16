@@ -49,26 +49,28 @@ struct SettingsDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: theme.spacing.large) {
-                settingsHeader
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: theme.spacing.large) {
+                    settingsHeader(scrollProxy: proxy)
 
-                switch section.destination {
-                case .design:
-                    designDashboard
-                case .inference:
-                    inferenceDashboard
-                case .privacy:
-                    privacyDashboard
-                case .tools:
-                    toolsDashboard
-                case .system:
-                    systemDashboard
+                    switch section.destination {
+                    case .design:
+                        designDashboard
+                    case .inference:
+                        inferenceDashboard
+                    case .privacy:
+                        privacyDashboard
+                    case .tools:
+                        toolsDashboard
+                    case .system:
+                        systemDashboard
+                    }
                 }
+                .padding(theme.spacing.large)
+                .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .topLeading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(theme.spacing.large)
-            .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .topLeading)
-            .frame(maxWidth: .infinity)
         }
         .navigationTitle(section.title)
         .task(id: section.destination) {
@@ -84,11 +86,21 @@ struct SettingsDetailView: View {
         [GridItem(.adaptive(minimum: theme.dashboard.compactGridMinWidth), spacing: theme.spacing.small)]
     }
 
-    private var settingsHeader: some View {
+    private func settingsHeader(scrollProxy: ScrollViewProxy) -> some View {
         PinesCardSection(section.title, subtitle: section.subtitle, systemImage: section.systemImage, kind: .glass) {
             LazyVGrid(columns: dashboardColumns, spacing: theme.spacing.small) {
                 ForEach(section.rows) { row in
-                    PinesInfoTile(title: row.title, value: row.detail, systemImage: row.systemImage)
+                    Button {
+                        guard let anchor = section.detailAnchor(for: row) else { return }
+                        haptics.play(.navigationSelected)
+                        withAnimation(theme.motion.standard) {
+                            scrollProxy.scrollTo(anchor, anchor: .top)
+                        }
+                    } label: {
+                        PinesInfoTile(title: row.title, value: row.detail, systemImage: row.systemImage)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Jumps to this settings section")
                 }
             }
         }
@@ -112,7 +124,10 @@ struct SettingsDetailView: View {
                 Task { await appModel.saveSettings(services: services) }
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.card.gridMinWidth), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: PinesThemePickerLayout.gridMinWidth), spacing: PinesThemePickerLayout.gridSpacing)],
+                spacing: PinesThemePickerLayout.gridSpacing
+            ) {
                 ForEach(PinesThemeTemplate.allCases) { template in
                     Button {
                         withAnimation(theme.motion.selection) {
@@ -127,6 +142,7 @@ struct SettingsDetailView: View {
                 }
             }
         }
+        .id(SettingsDetailAnchor.appearance)
 
         PinesCardSection("Haptics and Motion", subtitle: "A compact preview of feedback intensity and motion handling.", systemImage: "hand.tap") {
             Picker("Feedback", selection: $haptics.mode) {
@@ -146,6 +162,7 @@ struct SettingsDetailView: View {
                 detail: haptics.mode.subtitle
             )
         }
+        .id(SettingsDetailAnchor.hapticsAndMotion)
     }
 
     @ViewBuilder
@@ -160,6 +177,7 @@ struct SettingsDetailView: View {
                 Task { await appModel.saveSettings(services: services) }
             }
         }
+        .id(SettingsDetailAnchor.execution)
 
         runtimeDiagnosticsCard
         huggingFaceCard
@@ -198,6 +216,7 @@ struct SettingsDetailView: View {
         return PinesCardSection("Runtime Diagnostics", subtitle: "Live MLX and device routing state.", systemImage: "gauge.with.dots.needle.67percent") {
             PinesKeyValueGrid(items: items)
         }
+        .id(SettingsDetailAnchor.runtimeDiagnostics)
     }
 
     private var huggingFaceCard: some View {
@@ -239,6 +258,7 @@ struct SettingsDetailView: View {
                 .pinesButtonStyle(.destructive, fillWidth: true)
             }
         }
+        .id(SettingsDetailAnchor.huggingFace)
     }
 
     @ViewBuilder
@@ -277,6 +297,7 @@ struct SettingsDetailView: View {
             ))
             .disabled(!iCloudSyncAvailable || !appModel.storeConfiguration.iCloudSyncEnabled)
         }
+        .id(SettingsDetailAnchor.storageAndSync)
 
         cloudProviderCard
     }
@@ -327,6 +348,7 @@ struct SettingsDetailView: View {
                 providerRow(provider)
             }
         }
+        .id(SettingsDetailAnchor.cloudBYOK)
     }
 
     private func providerRow(_ provider: CloudProviderConfiguration) -> some View {
@@ -405,6 +427,7 @@ struct SettingsDetailView: View {
                 .pinesButtonStyle(.destructive, fillWidth: true)
             }
         }
+        .id(SettingsDetailAnchor.toolKeys)
     }
 
     private var mcpEditorCard: some View {
@@ -475,6 +498,7 @@ struct SettingsDetailView: View {
                 .pinesButtonStyle(.secondary, fillWidth: true)
             }
         }
+        .id(SettingsDetailAnchor.mcpEditor)
     }
 
     private var oauthFields: some View {
@@ -512,6 +536,7 @@ struct SettingsDetailView: View {
                 }
             }
         }
+        .id(SettingsDetailAnchor.mcpServers)
     }
 
     private func mcpServerCard(_ server: MCPServerConfiguration) -> some View {
@@ -971,6 +996,7 @@ struct SettingsDetailView: View {
                 .pinesSurface(.inset, padding: theme.spacing.small)
             }
         }
+        .id(SettingsDetailAnchor.architectureHealth)
 
         PinesCardSection("Audit Timeline", subtitle: "Recent privacy-preserving system events.", systemImage: "clock.arrow.circlepath") {
             if appModel.auditEvents.isEmpty {
@@ -987,6 +1013,7 @@ struct SettingsDetailView: View {
                 })
             }
         }
+        .id(SettingsDetailAnchor.auditTimeline)
     }
 
     private func saveMCPServer() async {
@@ -1139,6 +1166,21 @@ private enum SettingsDestination: Hashable {
     case system
 }
 
+private enum SettingsDetailAnchor: Hashable {
+    case appearance
+    case hapticsAndMotion
+    case execution
+    case runtimeDiagnostics
+    case huggingFace
+    case storageAndSync
+    case cloudBYOK
+    case toolKeys
+    case mcpEditor
+    case mcpServers
+    case architectureHealth
+    case auditTimeline
+}
+
 private extension PinesSettingsSection {
     var destination: SettingsDestination {
         switch title {
@@ -1154,6 +1196,33 @@ private extension PinesSettingsSection {
             .system
         default:
             .design
+        }
+    }
+
+    func detailAnchor(for row: PinesSettingsRow) -> SettingsDetailAnchor? {
+        switch (destination, row.title) {
+        case (.design, "Theme template"):
+            .appearance
+        case (.design, "Interaction feel"):
+            .hapticsAndMotion
+        case (.inference, "Execution policy"):
+            .execution
+        case (.inference, "Runtime diagnostics"):
+            .runtimeDiagnostics
+        case (.privacy, "Vault storage"):
+            .storageAndSync
+        case (.privacy, "Provider keys"):
+            .cloudBYOK
+        case (.tools, "Tool approval"):
+            .toolKeys
+        case (.tools, "MCP servers"):
+            .mcpServers
+        case (.system, "Architecture health"):
+            .architectureHealth
+        case (.system, "Audit trail"):
+            .auditTimeline
+        default:
+            nil
         }
     }
 }
