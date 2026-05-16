@@ -10,8 +10,8 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 - iOS memory warnings stop the active local run and unload transient MLX containers through the runtime bridge.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. These are the currently reachable Schtack-maintained forks from this environment.
 - Current pins:
-  - `RNT56/mlx-swift`: `dd13c2b55a743473d458058e9d9fb028233065ec`
-  - `RNT56/mlx-swift-lm`: `4bb7cbc6aafdf6abec4c34bf36f9e649444539f7`
+  - `RNT56/mlx-swift`: `a63a5b1b412c979b91e4e0347b35845d2bb236c0`
+  - `RNT56/mlx-swift-lm`: `85fc3225237fb41cc24f5d97eab0a92f2fef1a44`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, a tiled online fused decode path, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
 - `mlx-swift-lm` exposes `KVCacheStrategy.turboQuant`, `TurboQuantKVCache`, a raw-free physical-slot `RotatingTurboQuantKVCache` for supported `.metalPolarQJL` `maxKVSize` paths, prompt-cache serialization hooks, `TurboQuantCompressedKVCacheProtocol`, and `GenerateParameters` fields for cache strategy, preset, requested backend selection, device-adaptive optimization policy, and compressed-attention diagnostics.
 - Pine requests the paper-exact `metalPolarQJL` backend by default. Devices with Metal compressed-attention support report the direct compressed attention path; unsupported shapes or devices use the existing MLX packed quantized-matmul fallback.

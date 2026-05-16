@@ -8,8 +8,8 @@ This inventory is based on `project.yml`, `Package.swift`, dependency manifests,
 
 | Package | Source | Version or revision | Products used | License | Notice |
 | --- | --- | --- | --- | --- | --- |
-| MLXSwift | <https://github.com/RNT56/mlx-swift> | `dd13c2b55a743473d458058e9d9fb028233065ec` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
-| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `4bb7cbc6aafdf6abec4c34bf36f9e649444539f7` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
+| MLXSwift | <https://github.com/RNT56/mlx-swift> | `a63a5b1b412c979b91e4e0347b35845d2bb236c0` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
+| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `85fc3225237fb41cc24f5d97eab0a92f2fef1a44` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
 | SwiftHuggingFace | <https://github.com/huggingface/swift-huggingface.git> | `0.9.0`, with `Xet` trait enabled through `PinesHubXetSupport` | `HuggingFace` | Apache-2.0 | See Apache-2.0 text below. |
 | SwiftTransformers | <https://github.com/huggingface/swift-transformers> | `1.3.2` | `Tokenizers` | Apache-2.0 | See Apache-2.0 text below. |
 | GRDB | <https://github.com/groue/GRDB.swift.git> | `7.10.0` | `GRDB` | MIT | Copyright (C) 2015-2025 Gwendal Roué |
