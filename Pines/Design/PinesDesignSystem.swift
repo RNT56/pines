@@ -726,15 +726,15 @@ struct PinesThemeColors {
         case .paper:
             appBackground = Color(hex: 0xFAF4E7)
             contentBackground = Color(hex: 0xFCF7EA)
-            sidebarBackground = Color(hex: 0xEDE0C8)
-            sheetBackground = Color(hex: 0xFFF9ED)
-            surface = Color(hex: 0xFFF8EA)
-            elevatedSurface = Color(hex: 0xFFFDF6)
-            cardBackground = Color(hex: 0xFFF6E6)
-            cardBorder = Color(hex: 0xB89C67).opacity(0.22)
-            listSectionBackground = Color(hex: 0xF6E6CC)
-            listRowBackground = Color(hex: 0xFFF8EA)
-            chromeBackground = Color(hex: 0xFFF8EA).opacity(0.96)
+            sidebarBackground = Color(hex: 0xEBDDC2)
+            sheetBackground = Color(hex: 0xFFF8EB)
+            surface = Color(hex: 0xFFF7E8)
+            elevatedSurface = Color(hex: 0xFFFBF2)
+            cardBackground = Color(hex: 0xFFF4E1)
+            cardBorder = Color(hex: 0xB89C67).opacity(0.26)
+            listSectionBackground = Color(hex: 0xF2DFC0)
+            listRowBackground = Color(hex: 0xFFF5E4)
+            chromeBackground = Color(hex: 0xFFF4E1).opacity(0.96)
             primaryText = Color(hex: 0x2A2418)
             secondaryText = Color(hex: 0x665841)
             tertiaryText = Color(hex: 0x8B7A5E)
@@ -762,10 +762,11 @@ struct PinesThemeColors {
             sidebarSelection = Color(hex: 0x376B4F).opacity(0.11)
             listRowHover = Color(hex: 0x376B4F).opacity(0.055)
             listRowPressed = Color(hex: 0xA16C19).opacity(0.08)
-            controlFill = Color(hex: 0x2A2418).opacity(0.035)
-            controlPressed = Color(hex: 0xA16C19).opacity(0.08)
-            controlBorder = Color(hex: 0x3A2E1A).opacity(0.075)
+            controlFill = Color(hex: 0xE8D6B7).opacity(0.44)
+            controlPressed = Color(hex: 0xC49A58).opacity(0.18)
+            controlBorder = Color(hex: 0x8A6E4A).opacity(0.18)
             focusRing = Color(hex: 0x376B4F).opacity(0.70)
+            glassSurface = AnyShapeStyle(Color(hex: 0xFFF6E6).opacity(0.94))
             backgroundWash = AnyShapeStyle(LinearGradient(
                 colors: [Color(hex: 0xFCF7EA), Color(hex: 0xEFE0C4), Color(hex: 0xF8EFD6), Color(hex: 0xFCF7EA)],
                 startPoint: .topLeading,
@@ -958,10 +959,11 @@ struct PinesThemeColors {
             sidebarSelection = Color(hex: 0x7B5B70).opacity(0.10)
             listRowHover = Color(hex: 0x7B5B70).opacity(0.05)
             listRowPressed = Color(hex: 0x486795).opacity(0.08)
-            controlFill = Color(hex: 0x211D1E).opacity(0.032)
-            controlPressed = Color(hex: 0x486795).opacity(0.08)
-            controlBorder = Color(hex: 0x2A2225).opacity(0.075)
+            controlFill = Color(hex: 0xEFE6DE).opacity(0.58)
+            controlPressed = Color(hex: 0xD9C5D0).opacity(0.26)
+            controlBorder = Color(hex: 0x9F8F97).opacity(0.18)
             focusRing = Color(hex: 0x7B5B70).opacity(0.70)
+            glassSurface = AnyShapeStyle(Color(hex: 0xFFFDF8).opacity(0.94))
             backgroundWash = AnyShapeStyle(LinearGradient(
                 colors: [Color(hex: 0xFDFBF8), Color(hex: 0xEFE9E0), Color(hex: 0xF7EEF2), Color(hex: 0xFDFBF8)],
                 startPoint: .topLeading,
@@ -1056,10 +1058,11 @@ struct PinesThemeColors {
             sidebarSelection = Color(hex: 0xC95F00).opacity(0.11)
             listRowHover = Color(hex: 0xC95F00).opacity(0.055)
             listRowPressed = Color(hex: 0xF7931A).opacity(0.085)
-            controlFill = Color(hex: 0x2F1A0D).opacity(0.035)
-            controlPressed = Color(hex: 0xF7931A).opacity(0.085)
-            controlBorder = Color(hex: 0x3E1F0A).opacity(0.075)
+            controlFill = Color(hex: 0xF2D5B5).opacity(0.46)
+            controlPressed = Color(hex: 0xE08A2E).opacity(0.18)
+            controlBorder = Color(hex: 0xA45A18).opacity(0.18)
             focusRing = Color(hex: 0xC95F00).opacity(0.70)
+            glassSurface = AnyShapeStyle(Color(hex: 0xFFF3E5).opacity(0.94))
             backgroundWash = AnyShapeStyle(LinearGradient(
                 colors: [Color(hex: 0xFFF7ED), Color(hex: 0xF8D7B5), Color(hex: 0xFFE8D4), Color(hex: 0xFFF7ED)],
                 startPoint: .topLeading,

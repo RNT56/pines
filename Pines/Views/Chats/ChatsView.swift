@@ -28,7 +28,7 @@ struct ChatsView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedThreadID) {
-                Section("Recent") {
+                Section {
                     ForEach(appModel.threads) { thread in
                         NavigationLink(value: thread.id) {
                             ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
@@ -63,6 +63,11 @@ struct ChatsView: View {
                             .tint(theme.colors.warning)
                         }
                     }
+                } header: {
+                    Text("Recent")
+                        .font(theme.typography.section)
+                        .foregroundStyle(theme.colors.tertiaryText)
+                        .textCase(nil)
                 }
             }
             .navigationTitle("Chats")
@@ -128,10 +133,11 @@ private struct ChatModelPickerButton: View {
 
     var body: some View {
         let sections = appModel.modelPickerSections(services: services)
+        let currentModelLabel = currentModelLabel(in: sections)
 
         Group {
             if sections.isEmpty {
-                pickerLabel(showsDisclosure: false)
+                pickerLabel(showsDisclosure: false, currentModelLabel: currentModelLabel)
                     .accessibilityValue("No models installed")
             } else {
                 Menu {
@@ -155,17 +161,14 @@ private struct ChatModelPickerButton: View {
                         }
                     }
                 } label: {
-                    pickerLabel(showsDisclosure: true)
+                    pickerLabel(showsDisclosure: true, currentModelLabel: currentModelLabel)
                 }
             }
         }
         .accessibilityLabel(accessibilityLabel)
-        .task {
-            await appModel.refreshCloudModelCatalog(services: services)
-        }
     }
 
-    private func pickerLabel(showsDisclosure: Bool) -> some View {
+    private func pickerLabel(showsDisclosure: Bool, currentModelLabel: String) -> some View {
         HStack(spacing: theme.spacing.xsmall) {
             Text(currentModelLabel)
                 .lineLimit(1)
@@ -183,7 +186,7 @@ private struct ChatModelPickerButton: View {
         .foregroundStyle(showsDisclosure ? theme.colors.accent : theme.colors.secondaryText)
         .padding(.horizontal, theme.spacing.medium)
         .frame(maxWidth: fillWidth ? .infinity : maxWidth, minHeight: 44)
-        .background(theme.colors.glassSurface, in: Capsule())
+        .background(pickerBackgroundStyle, in: Capsule())
         .overlay {
             Capsule()
                 .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
@@ -197,8 +200,14 @@ private struct ChatModelPickerButton: View {
         .contentShape(Capsule())
     }
 
-    private var currentModelLabel: String {
-        let sections = appModel.modelPickerSections(services: services)
+    private var pickerBackgroundStyle: AnyShapeStyle {
+        if theme.template == .paper && theme.colorScheme == .light {
+            return AnyShapeStyle(theme.colors.elevatedSurface.opacity(0.96))
+        }
+        return theme.colors.glassSurface
+    }
+
+    private func currentModelLabel(in sections: [ModelPickerSection]) -> String {
         let options = sections.flatMap(\.models)
         guard !options.isEmpty else { return "None" }
 
@@ -523,7 +532,7 @@ private struct ChatRunState: View {
 
             Spacer()
         }
-        .pinesSurface(.glass)
+        .pinesSurface(theme.template == .paper && theme.colorScheme == .light ? .panel : .glass)
     }
 }
 

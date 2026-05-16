@@ -128,6 +128,7 @@ struct SettingsDetailView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .pinesSegmentedPickerChrome()
             .onChange(of: interfaceMode) { _, _ in
                 Task { await appModel.saveSettings(services: services) }
             }
@@ -160,6 +161,7 @@ struct SettingsDetailView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .pinesSegmentedPickerChrome()
             .onChange(of: haptics.mode) { _, newMode in
                 if newMode != .off { haptics.play(.primaryAction) }
             }
@@ -652,6 +654,7 @@ struct SettingsDetailView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .pinesSegmentedPickerChrome()
 
             switch selectedTab.wrappedValue {
             case .tools:

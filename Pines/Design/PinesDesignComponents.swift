@@ -1600,6 +1600,21 @@ private struct PinesFieldChromeModifier: ViewModifier {
     }
 }
 
+private struct PinesSegmentedPickerChromeModifier: ViewModifier {
+    @Environment(\.pinesTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .tint(theme.colors.accent)
+            .padding(2)
+            .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control + 6, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.radius.control + 6, style: .continuous)
+                    .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+            }
+    }
+}
+
 private struct PinesSidebarListChromeModifier: ViewModifier {
     @Environment(\.pinesTheme) private var theme
 
@@ -1645,6 +1660,10 @@ extension View {
 
     func pinesFieldChrome() -> some View {
         modifier(PinesFieldChromeModifier())
+    }
+
+    func pinesSegmentedPickerChrome() -> some View {
+        modifier(PinesSegmentedPickerChromeModifier())
     }
 
     func pinesButtonStyle(_ kind: PinesButtonKind = .secondary, fillWidth: Bool = false) -> some View {
