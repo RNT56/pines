@@ -273,22 +273,35 @@ struct PinesCoreTestRunner {
         try expectEqual(glmOCR.verification, .installable)
         try expectEqual(glmOCR.modalities, [.text, .vision])
 
-        let unsupportedRuntimeType = ModelPreflightClassifier().classify(
+        let llama4 = ModelPreflightClassifier().classify(
             ModelPreflightInput(
                 repository: "mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit",
-                configJSON: #"{"model_type":"llama4"}"#.data(using: .utf8)!,
+                configJSON: #"{"model_type":"llama4","text_config":{"model_type":"llama4_text"}}"#.data(using: .utf8)!,
+                processorConfigJSON: #"{"processor_class":"Llama4Processor"}"#.data(using: .utf8)!,
                 files: [
                     .init(path: "model.safetensors", size: 40_000_000_000),
                     .init(path: "tokenizer.json", size: 300_000),
+                    .init(path: "processor_config.json", size: 5_000),
                 ],
-                tags: ["mlx", "llama4"]
+                tags: ["mlx", "llama4", "any-to-any"]
             )
         )
-        try expectEqual(unsupportedRuntimeType.verification, .unsupported)
-        try expect(
-            unsupportedRuntimeType.reasons.contains("model_type llama4 is not registered in the linked MLX runtime."),
-            "unsupported runtime factory reason should be surfaced"
+        try expectEqual(llama4.verification, .installable)
+        try expectEqual(llama4.modalities, [.text])
+
+        let deepseekV4 = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/DeepSeek-V4-Flash-4bit",
+                configJSON: #"{"model_type":"deepseek_v4"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 151_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "deepseek_v4"]
+            )
         )
+        try expectEqual(deepseekV4.verification, .installable)
+        try expectEqual(deepseekV4.modalities, [.text])
 
         let unsupportedMoEType = ModelPreflightClassifier().classify(
             ModelPreflightInput(
@@ -369,7 +382,7 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_tools"), "missing MCP tool table")
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_resources"), "missing MCP resources table")
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_prompts"), "missing MCP prompts table")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 5)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 7)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")

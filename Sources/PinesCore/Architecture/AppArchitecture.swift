@@ -101,7 +101,7 @@ public protocol ConversationRepository: Sendable {
     func listConversationPreviews() async throws -> [ConversationPreviewRecord]
     func observeConversations() -> AsyncStream<[ConversationRecord]>
     func observeConversationPreviews() -> AsyncStream<[ConversationPreviewRecord]>
-    func createConversation(title: String, defaultModelID: ModelID?) async throws -> ConversationRecord
+    func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?) async throws -> ConversationRecord
     func updateConversationTitle(_ title: String, conversationID: UUID) async throws
     func setConversationArchived(_ archived: Bool, conversationID: UUID) async throws
     func deleteConversation(id: UUID) async throws
@@ -116,6 +116,7 @@ public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {
     public var title: String
     public var updatedAt: Date
     public var defaultModelID: ModelID?
+    public var defaultProviderID: ProviderID?
     public var archived: Bool
     public var pinned: Bool
 
@@ -124,6 +125,7 @@ public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {
         title: String,
         updatedAt: Date = Date(),
         defaultModelID: ModelID? = nil,
+        defaultProviderID: ProviderID? = nil,
         archived: Bool = false,
         pinned: Bool = false
     ) {
@@ -131,6 +133,7 @@ public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {
         self.title = title
         self.updatedAt = updatedAt
         self.defaultModelID = defaultModelID
+        self.defaultProviderID = defaultProviderID
         self.archived = archived
         self.pinned = pinned
     }
@@ -141,6 +144,7 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
     public var title: String
     public var updatedAt: Date
     public var defaultModelID: ModelID?
+    public var defaultProviderID: ProviderID?
     public var archived: Bool
     public var pinned: Bool
     public var lastMessage: String?
@@ -152,6 +156,7 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
         title: String,
         updatedAt: Date = Date(),
         defaultModelID: ModelID? = nil,
+        defaultProviderID: ProviderID? = nil,
         archived: Bool = false,
         pinned: Bool = false,
         lastMessage: String? = nil,
@@ -162,6 +167,7 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
         self.title = title
         self.updatedAt = updatedAt
         self.defaultModelID = defaultModelID
+        self.defaultProviderID = defaultProviderID
         self.archived = archived
         self.pinned = pinned
         self.lastMessage = lastMessage

@@ -50,8 +50,7 @@ public struct ModelPreflightClassifier: Sendable {
             modalities.insert(.text)
         }
         if let modelType,
-           (supportedVLMTypes.contains(modelType) && (!supportedLLMTypes.contains(modelType) || hasVisionSignal))
-            || processorClass?.localizedCaseInsensitiveContains("processor") == true {
+           supportedVLMTypes.contains(modelType) && (!supportedLLMTypes.contains(modelType) || hasVisionSignal) {
             modalities.insert(.text)
             modalities.insert(.vision)
         }
@@ -118,10 +117,10 @@ public struct ModelPreflightClassifier: Sendable {
     }
 
     public static let defaultSupportedLLMTypes: Set<String> = [
-        "llama", "mistral", "qwen2", "qwen3", "qwen3_moe", "gemma", "gemma2",
+        "llama", "llama4", "llama4_text", "mistral", "qwen2", "qwen3", "qwen3_moe", "gemma", "gemma2",
         "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant",
         "qwen3_next", "qwen3_5", "qwen3_5_moe", "qwen3_5_text",
-        "phi", "phi3", "phimoe", "deepseek_v3", "deepseek_v32", "glm4", "glm4_moe",
+        "phi", "phi3", "phimoe", "deepseek_v3", "deepseek_v32", "deepseek_v4", "glm4", "glm4_moe",
         "glm4_moe_lite", "starcoder2", "cohere", "openelm", "internlm2",
         "granite", "granitemoehybrid", "mimo", "mimo_v2_flash", "minimax",
         "minimax_m2", "mistral3", "bitnet", "smollm3", "ernie4_5", "lfm2", "lfm2_moe",

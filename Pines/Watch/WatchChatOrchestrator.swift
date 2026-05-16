@@ -53,7 +53,11 @@ struct WatchChatOrchestrator {
         }
 
         let modelID = try await defaultModelID()
-        let conversation = try await repository.createConversation(title: "New chat", defaultModelID: modelID)
+        let conversation = try await repository.createConversation(
+            title: "New chat",
+            defaultModelID: modelID,
+            defaultProviderID: modelID == nil ? nil : services.mlxRuntime.localProviderID
+        )
         return try await snapshot(selectedConversationID: conversation.id)
     }
 
@@ -108,9 +112,11 @@ struct WatchChatOrchestrator {
                     }
 
                     if conversationID == nil {
+                        let modelID = try await defaultModelID()
                         let conversation = try await repository.createConversation(
                             title: Self.title(from: trimmed),
-                            defaultModelID: try await defaultModelID()
+                            defaultModelID: modelID,
+                            defaultProviderID: modelID == nil ? nil : services.mlxRuntime.localProviderID
                         )
                         conversationID = conversation.id
                     }
@@ -175,7 +181,8 @@ struct WatchChatOrchestrator {
                     )
 
                     var messages = try await repository.messages(in: conversationID)
-                    if let vaultContext = await vaultContextMessage(for: trimmed) {
+                    let isLocalProvider = providerSelection.providerID == services.mlxRuntime.localProviderID
+                    if isLocalProvider, let vaultContext = await vaultContextMessage(for: trimmed) {
                         messages.insert(vaultContext.message, at: 0)
                     }
 
@@ -194,7 +201,7 @@ struct WatchChatOrchestrator {
                             executionMode: settings?.executionMode ?? .preferLocal,
                             requiresConsentForNetwork: false,
                             requiresConsentForBrowser: false,
-                            allowsCloudContext: providerSelection.providerID != services.mlxRuntime.localProviderID
+                            allowsCloudContext: false
                         ),
                         providerID: providerSelection.providerID
                     )
@@ -434,9 +441,10 @@ struct WatchChatOrchestrator {
                     BYOKCloudInferenceProvider(configuration: configuration, secretStore: services.secretStore)
                 )
             }
+        let localCandidate = localRoutingCandidate(for: localInstall)
         let route = services.executionRouter.routeChat(
             mode: settings?.executionMode ?? .preferLocal,
-            local: (services.mlxRuntime.localProviderID, services.mlxRuntime.capabilities),
+            local: localCandidate,
             cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
             requiresVision: false,
             requiresTools: false
@@ -468,6 +476,21 @@ struct WatchChatOrchestrator {
         case let .denied(reason):
             throw reason
         }
+    }
+
+    private func localRoutingCandidate(for install: ModelInstall?) -> (id: ProviderID, capabilities: ProviderCapabilities)? {
+        guard services.mlxRuntime.isLinked,
+              let install,
+              install.state == .installed,
+              install.modalities.contains(.text),
+              install.localURL != nil
+        else {
+            return nil
+        }
+        var capabilities = services.mlxRuntime.capabilities
+        capabilities.vision = capabilities.vision && install.modalities.contains(.vision)
+        capabilities.embeddings = capabilities.embeddings && install.modalities.contains(.embeddings)
+        return (services.mlxRuntime.localProviderID, capabilities)
     }
 
     private func vaultContextMessage(for query: String) async -> (message: ChatMessage, documentIDs: [UUID])? {

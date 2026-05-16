@@ -17,7 +17,6 @@ actor GRDBPinesStore:
     private let database: DatabasePool
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    private let deviceMonitor = DeviceRuntimeMonitor()
 
     init(configuration: LocalStoreConfiguration = .init()) throws {
         let url = try Self.databaseURL(fileName: configuration.databaseFileName)
@@ -61,7 +60,7 @@ actor GRDBPinesStore:
             try Row.fetchAll(
                 db,
                 sql: """
-                SELECT id, title, updated_at, default_model_id, archived_at, pinned
+                SELECT id, title, updated_at, default_model_id, default_provider_id, archived_at, pinned
                 FROM conversations
                 WHERE deleted_at IS NULL
                 ORDER BY pinned DESC, updated_at DESC
@@ -80,6 +79,7 @@ actor GRDBPinesStore:
                     c.title,
                     c.updated_at,
                     c.default_model_id,
+                    c.default_provider_id,
                     c.archived_at,
                     c.pinned,
                     lm.content AS last_message,
@@ -120,14 +120,14 @@ actor GRDBPinesStore:
         pollingStream { try await self.listConversationPreviews() }
     }
 
-    func createConversation(title: String, defaultModelID: ModelID?) async throws -> ConversationRecord {
-        let record = ConversationRecord(title: title, defaultModelID: defaultModelID)
+    func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?) async throws -> ConversationRecord {
+        let record = ConversationRecord(title: title, defaultModelID: defaultModelID, defaultProviderID: defaultProviderID)
         let now = Date()
         try await database.write { db in
             try db.execute(
                 sql: """
-                INSERT INTO conversations (id, title, created_at, updated_at, default_model_id, sync_state)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO conversations (id, title, created_at, updated_at, default_model_id, default_provider_id, sync_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 arguments: [
                     record.id.uuidString,
@@ -135,6 +135,7 @@ actor GRDBPinesStore:
                     now.timeIntervalSinceReferenceDate,
                     now.timeIntervalSinceReferenceDate,
                     record.defaultModelID?.rawValue,
+                    record.defaultProviderID?.rawValue,
                     SyncState.local.rawValue,
                 ]
             )
@@ -537,7 +538,6 @@ actor GRDBPinesStore:
     }
 
     private func vectorSearch(embedding: [Float], embeddingModelID: ModelID?, limit: Int) async throws -> [VaultSearchResult] {
-        let scanLimit = max(limit * 16, deviceMonitor.currentProfile().recommendedVectorScanLimit)
         return try await database.read { db in
             let rows: [Row]
             if let embeddingModelID {
@@ -552,10 +552,9 @@ actor GRDBPinesStore:
                     JOIN vault_chunks c ON c.id = e.chunk_id
                     JOIN vault_documents d ON d.id = e.document_id
                     WHERE e.dimensions = ? AND e.embedding_model_id = ? AND d.sync_state != ?
-                    ORDER BY e.created_at DESC
-                    LIMIT ?
+                    ORDER BY e.chunk_id ASC
                     """,
-                    arguments: [embedding.count, embeddingModelID.rawValue, SyncState.deleted.rawValue, scanLimit]
+                    arguments: [embedding.count, embeddingModelID.rawValue, SyncState.deleted.rawValue]
                 )
             } else {
                 rows = try Row.fetchAll(
@@ -569,10 +568,9 @@ actor GRDBPinesStore:
                     JOIN vault_chunks c ON c.id = e.chunk_id
                     JOIN vault_documents d ON d.id = e.document_id
                     WHERE e.dimensions = ? AND d.sync_state != ?
-                    ORDER BY e.created_at DESC
-                    LIMIT ?
+                    ORDER BY e.chunk_id ASC
                     """,
-                    arguments: [embedding.count, SyncState.deleted.rawValue, scanLimit]
+                    arguments: [embedding.count, SyncState.deleted.rawValue]
                 )
             }
 
@@ -622,8 +620,9 @@ actor GRDBPinesStore:
     private func fullTextSearch(query: String, limit: Int) async throws -> [VaultSearchResult] {
         return try await database.read { db in
             let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            let ftsQuery = Self.safeFTSQuery(from: normalizedQuery)
             let rows: [Row]
-            if normalizedQuery.isEmpty {
+            if ftsQuery == nil {
                 rows = try Row.fetchAll(
                     db,
                     sql: """
@@ -648,12 +647,24 @@ actor GRDBPinesStore:
                     ORDER BY bm25(vault_chunks_fts)
                     LIMIT ?
                     """,
-                    arguments: [normalizedQuery, SyncState.deleted.rawValue, limit]
+                    arguments: [ftsQuery!, SyncState.deleted.rawValue, limit]
                 )
             }
 
             return rows.map { Self.vaultSearchResult(from: $0, score: 1) }
         }
+    }
+
+    private static func safeFTSQuery(from query: String) -> String? {
+        let tokens = query
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .prefix(12)
+        guard !tokens.isEmpty else { return nil }
+        return tokens.map { token in
+            "\"\(token.replacingOccurrences(of: "\"", with: "\"\""))\""
+        }.joined(separator: " AND ")
     }
 
     // MARK: - Settings
@@ -1123,6 +1134,7 @@ actor GRDBPinesStore:
             title: row["title"],
             updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
             defaultModelID: (row["default_model_id"] as String?).map(ModelID.init(rawValue:)),
+            defaultProviderID: (row["default_provider_id"] as String?).map(ProviderID.init(rawValue:)),
             archived: (row["archived_at"] as Double?) != nil,
             pinned: (row["pinned"] as Int) == 1
         )
@@ -1134,6 +1146,7 @@ actor GRDBPinesStore:
             title: row["title"],
             updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
             defaultModelID: (row["default_model_id"] as String?).map(ModelID.init(rawValue:)),
+            defaultProviderID: (row["default_provider_id"] as String?).map(ProviderID.init(rawValue:)),
             archived: (row["archived_at"] as Double?) != nil,
             pinned: (row["pinned"] as Int) == 1,
             lastMessage: row["last_message"] as String?,

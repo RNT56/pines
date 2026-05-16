@@ -28,6 +28,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var mcpResourceTemplates: [MCPResourceTemplateRecord] = []
     @Published var mcpPrompts: [MCPPromptRecord] = []
     @Published var pendingToolApproval: ToolApprovalRequest?
+    @Published var pendingCloudContextApproval: CloudContextApprovalRequest?
     @Published var pendingMCPSamplingRequest: MCPSamplingRequest?
     @Published var pendingMCPSamplingResultReview: MCPSamplingResultReview?
     @Published var mcpSamplingPromptDraft = ""
@@ -35,7 +36,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var modelDownloads: [ModelDownloadProgress] = []
     @Published var isSearchingModels = false
     @Published var modelSearchError: String?
+    @Published var defaultProviderID: ProviderID?
     @Published var defaultModelID: ModelID?
+    @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:]
+    @Published var isRefreshingCloudModels = false
     @Published var huggingFaceCredentialStatus = "Not configured"
     @Published var braveSearchCredentialStatus = "Not configured"
     private var didBootstrap = false
@@ -45,7 +49,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private var didStartMCPServers = false
     private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
+    private var currentRunToken: UUID?
     private var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
+    private var cloudContextContinuation: CheckedContinuation<CloudContextApprovalDecision, Never>?
     private var samplingContinuation: CheckedContinuation<Bool, Never>?
     private var samplingResultContinuation: CheckedContinuation<Bool, Never>?
     private var mcpSamplingRequestCountByServer: [MCPServerID: Int] = [:]
@@ -73,11 +79,21 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         setIfChanged(\.serviceError, nil)
     }
 
-    private func failPendingChatStart(_ message: String) {
-        activeRunID = nil
-        currentRunTask = nil
+    private func failPendingChatStart(_ message: String, runToken: UUID? = nil) {
+        if runToken == nil || currentRunToken == runToken {
+            activeRunID = nil
+            currentRunTask = nil
+            currentRunToken = nil
+        }
         setChatError(message)
         emitHaptic(.runFailed)
+    }
+
+    private func clearRunStateIfCurrent(_ runToken: UUID) {
+        guard currentRunToken == runToken else { return }
+        activeRunID = nil
+        currentRunTask = nil
+        currentRunToken = nil
     }
 
     private func upsertThreadPreview(_ preview: PinesThreadPreview, moveToFront: Bool) {
@@ -226,6 +242,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         currentRunTask?.cancel()
         repositoryObservationTasks.forEach { $0.cancel() }
         approvalContinuation?.resume(returning: .denied)
+        cloudContextContinuation?.resume(returning: .cancel)
         samplingContinuation?.resume(returning: false)
         samplingResultContinuation?.resume(returning: false)
     }
@@ -260,7 +277,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 applySettings(settings)
             }
 
+            if let cloudProviderRepository = services.cloudProviderRepository {
+                setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
+            }
+
             try await refreshModelPreviews(services: services)
+            await refreshCloudModelCatalog(services: services)
             await normalizeDefaultModelIfNeeded(services: services)
             setIfChanged(\.serviceError, nil)
         } catch {
@@ -281,6 +303,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private func refreshPostBootstrapState(services: PinesAppServices) async {
         do {
             try await refreshModelPreviews(services: services)
+            await refreshCloudModelCatalog(services: services)
             await normalizeDefaultModelIfNeeded(services: services)
             await refreshCredentialStatuses(services: services)
             setIfChanged(\.serviceError, nil)
@@ -315,6 +338,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             if let cloudProviderRepository = services.cloudProviderRepository {
                 setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
             }
+
+            await refreshCloudModelCatalog(services: services)
 
             if let mcpServerRepository = services.mcpServerRepository {
                 setIfChanged(\.mcpServers, try await mcpServerRepository.listMCPServers())
@@ -358,6 +383,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 title: preview.title,
                 modelName: preview.modelName,
                 modelID: preview.modelID,
+                providerID: preview.providerID,
                 lastMessage: preview.lastMessage,
                 messages: existing.messages,
                 status: preview.status,
@@ -383,16 +409,28 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private func applySettings(_ settings: AppSettingsSnapshot) {
         setIfChanged(\.executionMode, settings.executionMode)
         setIfChanged(\.storeConfiguration, settings.storeConfiguration)
+        setIfChanged(\.defaultProviderID, settings.defaultProviderID)
         setIfChanged(\.defaultModelID, settings.defaultModelID)
         setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
         setIfChanged(\.interfaceMode, PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode)
     }
 
     private func normalizeDefaultModelIfNeeded(services: PinesAppServices) async {
-        guard defaultModelID.flatMap(installedModel(for:)) == nil else { return }
+        if let providerID = defaultProviderID,
+           providerID != services.mlxRuntime.localProviderID {
+            return
+        }
+        guard defaultModelID.flatMap(installedModel(for:)) == nil else {
+            if defaultProviderID == nil {
+                defaultProviderID = services.mlxRuntime.localProviderID
+                await saveSettings(services: services)
+            }
+            return
+        }
         let normalizedDefault = preferredInstalledTextModel()?.modelID
-        guard defaultModelID != normalizedDefault else { return }
+        guard defaultModelID != normalizedDefault || defaultProviderID != services.mlxRuntime.localProviderID else { return }
         defaultModelID = normalizedDefault
+        defaultProviderID = normalizedDefault == nil ? nil : services.mlxRuntime.localProviderID
         await saveSettings(services: services)
     }
 
@@ -402,8 +440,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 serviceError = "Conversation repository is unavailable."
                 return nil
             }
-            let modelID = preferredInstalledTextModel()?.modelID
-            let conversation = try await repository.createConversation(title: "New chat", defaultModelID: modelID)
+            let selection = preferredModelSelection(services: services)
+            let conversation = try await repository.createConversation(
+                title: "New chat",
+                defaultModelID: selection?.modelID,
+                defaultProviderID: selection?.providerID
+            )
             upsertThreadPreview(
                 Self.threadPreview(from: conversation, messages: []),
                 moveToFront: true
@@ -422,17 +464,21 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         clearChatError()
         emitHaptic(.sendCommitted)
         currentRunTask?.cancel()
+        let runToken = UUID()
+        currentRunToken = runToken
         currentRunTask = Task { [weak self] in
-            await self?.sendMessage(draft, in: threadID, services: services)
+            await self?.sendMessage(draft, in: threadID, services: services, runToken: runToken)
         }
     }
 
     func stopCurrentRun() {
         currentRunTask?.cancel()
         currentRunTask = nil
+        currentRunToken = nil
         activeRunID = nil
         emitHaptic(.runCancelled)
         resolvePendingToolApproval(.denied)
+        resolvePendingCloudContextApproval(.cancel)
         resolvePendingMCPSampling(false)
         resolvePendingMCPSamplingResultReview(false)
     }
@@ -442,7 +488,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         startSending(lastUser.content, in: thread.id, services: services)
     }
 
-    private func sendMessage(_ draft: String, in threadID: UUID?, services: PinesAppServices) async {
+    private func sendMessage(_ draft: String, in threadID: UUID?, services: PinesAppServices, runToken: UUID) async {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         var runRepository: (any ConversationRepository)?
@@ -458,7 +504,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
         do {
             guard let repository = services.conversationRepository else {
-                failPendingChatStart("Conversation repository is unavailable.")
+                failPendingChatStart("Conversation repository is unavailable.", runToken: runToken)
                 return
             }
             runRepository = repository
@@ -469,7 +515,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             } else if let created = await createChat(services: services) {
                 conversationID = created
             } else {
-                failPendingChatStart(serviceError ?? "Unable to create a chat.")
+                failPendingChatStart(serviceError ?? "Unable to create a chat.", runToken: runToken)
                 return
             }
             runConversationID = conversationID
@@ -478,52 +524,75 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: nil, providerID: nil)
             appendThreadMessage(userMessage, conversationID: conversationID, status: .local, moveToFront: true)
 
-            let localInstall = preferredInstalledTextModel(for: conversationID)
             // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
             let availableTools: [AnyToolSpec] = []
-            let cloudCandidate = cloudProviders
-                .first { $0.enabledForAgents }
-                .map { configuration in
-                    (
-                        configuration,
-                        BYOKCloudInferenceProvider(configuration: configuration, secretStore: services.secretStore)
-                    )
-                }
-            let route = services.executionRouter.routeChat(
-                mode: executionMode,
-                local: (services.mlxRuntime.localProviderID, services.mlxRuntime.capabilities),
-                cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
-                requiresVision: false,
-                requiresTools: false
-            )
+            let requestedSelection = selection(for: conversationID, services: services)
             let selectedProvider: any InferenceProvider
             let selectedProviderID: ProviderID
             let selectedModelID: ModelID
-            switch route.destination {
-            case .local:
-                guard let localInstall else {
-                    failPendingChatStart("Download and select a local text model before starting local chat.")
+            if let requestedSelection {
+                if requestedSelection.providerID == services.mlxRuntime.localProviderID {
+                    guard let localInstall = installedModel(for: requestedSelection.modelID) else {
+                        failPendingChatStart("Download the selected local text model before starting chat.", runToken: runToken)
+                        return
+                    }
+                    try await services.mlxRuntime.load(localInstall)
+                    selectedProvider = services.mlxRuntime
+                    selectedProviderID = services.mlxRuntime.localProviderID
+                    selectedModelID = localInstall.modelID
+                } else {
+                    guard let cloudProvider = cloudProviders.first(where: { $0.id == requestedSelection.providerID }) else {
+                        failPendingChatStart("The selected cloud provider is no longer configured.", runToken: runToken)
+                        return
+                    }
+                    selectedProvider = BYOKCloudInferenceProvider(configuration: cloudProvider, secretStore: services.secretStore)
+                    selectedProviderID = cloudProvider.id
+                    selectedModelID = requestedSelection.modelID
+                }
+            } else {
+                let localInstall = preferredInstalledTextModel(for: conversationID)
+                let cloudCandidate = cloudProviders
+                    .first { $0.enabledForAgents }
+                    .map { configuration in
+                        (
+                            configuration,
+                            BYOKCloudInferenceProvider(configuration: configuration, secretStore: services.secretStore)
+                        )
+                    }
+                let localCandidate = localRoutingCandidate(for: localInstall, services: services)
+                let route = services.executionRouter.routeChat(
+                    mode: executionMode,
+                    local: localCandidate,
+                    cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
+                    requiresVision: false,
+                    requiresTools: false
+                )
+                switch route.destination {
+                case .local:
+                    guard let localInstall else {
+                        failPendingChatStart("Download and select a local text model before starting local chat.", runToken: runToken)
+                        return
+                    }
+                    try await services.mlxRuntime.load(localInstall)
+                    selectedProvider = services.mlxRuntime
+                    selectedProviderID = services.mlxRuntime.localProviderID
+                    selectedModelID = localInstall.modelID
+                case let .cloud(providerID):
+                    guard let cloudCandidate else {
+                        failPendingChatStart("No enabled cloud provider is configured for agents.", runToken: runToken)
+                        return
+                    }
+                    guard let cloudModelID = cloudCandidate.0.defaultModelID ?? localInstall?.modelID else {
+                        failPendingChatStart("Configure a default model for the selected cloud provider.", runToken: runToken)
+                        return
+                    }
+                    selectedProvider = cloudCandidate.1
+                    selectedProviderID = providerID
+                    selectedModelID = cloudModelID
+                case let .denied(reason):
+                    failPendingChatStart("\(reason)", runToken: runToken)
                     return
                 }
-                try await services.mlxRuntime.load(localInstall)
-                selectedProvider = services.mlxRuntime
-                selectedProviderID = services.mlxRuntime.localProviderID
-                selectedModelID = localInstall.modelID
-            case let .cloud(providerID):
-                guard let cloudCandidate else {
-                    failPendingChatStart("No enabled cloud provider is configured for agents.")
-                    return
-                }
-                guard let cloudModelID = cloudCandidate.0.defaultModelID ?? localInstall?.modelID else {
-                    failPendingChatStart("Configure a default model for the selected cloud provider.")
-                    return
-                }
-                selectedProvider = cloudCandidate.1
-                selectedProviderID = providerID
-                selectedModelID = cloudModelID
-            case let .denied(reason):
-                failPendingChatStart("\(reason)")
-                return
             }
 
             let assistantMessage = ChatMessage(role: .assistant, content: "")
@@ -563,10 +632,18 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             let vaultContext = await vaultContextMessage(for: trimmed, services: services)
             let mcpContext = await mcpResourceContextMessages(services: services)
             var requestMessages = messages.filter { $0.id != assistantMessage.id }
-            if let vaultContext {
+            let cloudContextDecision = try await resolveCloudContextDecision(
+                providerID: selectedProviderID,
+                modelID: selectedModelID,
+                vaultContext: vaultContext,
+                mcpContext: mcpContext,
+                services: services
+            )
+            let includePrivateContext = selectedProviderID == services.mlxRuntime.localProviderID || cloudContextDecision == .sendWithContext
+            if includePrivateContext, let vaultContext {
                 requestMessages.insert(vaultContext.message, at: 0)
             }
-            if !mcpContext.isEmpty {
+            if includePrivateContext, !mcpContext.isEmpty {
                 requestMessages.insert(contentsOf: mcpContext, at: 0)
             }
             let request = ChatRequest(
@@ -574,7 +651,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 messages: requestMessages,
                 allowsTools: !availableTools.isEmpty,
                 availableTools: availableTools,
-                vaultContextIDs: vaultContext?.documentIDs ?? []
+                vaultContextIDs: includePrivateContext ? (vaultContext?.documentIDs ?? []) : []
             )
             let settings = try? await services.settingsRepository?.loadSettings()
             let session = AgentSession(
@@ -583,7 +660,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     executionMode: settings?.executionMode ?? executionMode,
                     requiresConsentForNetwork: false,
                     requiresConsentForBrowser: false,
-                    allowsCloudContext: selectedProviderID != services.mlxRuntime.localProviderID
+                    allowsCloudContext: selectedProviderID != services.mlxRuntime.localProviderID && includePrivateContext
                 ),
                 providerID: selectedProviderID
             )
@@ -660,8 +737,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 outputTokens: tokenCount,
                 elapsedSeconds: Date().timeIntervalSince(generationStartedAt)
             )
-            activeRunID = nil
-            currentRunTask = nil
+            clearRunStateIfCurrent(runToken)
             await refreshThread(conversationID: conversationID, repository: repository, status: .local)
         } catch InferenceError.cancelled {
             if let runRepository, let assistantMessageID {
@@ -680,9 +756,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     status: .local
                 )
             }
-            activeRunID = nil
-            currentRunTask = nil
-            emitHaptic(.runCancelled)
+            if currentRunToken == runToken {
+                clearRunStateIfCurrent(runToken)
+                emitHaptic(.runCancelled)
+            }
             if let runRepository, let runConversationID {
                 await refreshThread(conversationID: runConversationID, repository: runRepository, status: .local)
             }
@@ -704,13 +781,16 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     status: .local
                 )
             }
-            activeRunID = nil
-            currentRunTask = nil
-            emitHaptic(.runFailed)
+            if currentRunToken == runToken {
+                clearRunStateIfCurrent(runToken)
+                emitHaptic(.runFailed)
+            }
             if let runRepository, let runConversationID {
                 await refreshThread(conversationID: runConversationID, repository: runRepository, status: .local)
             }
-            setChatError(message)
+            if currentRunToken == nil || currentRunToken == runToken {
+                setChatError(message)
+            }
         }
     }
 
@@ -812,6 +892,68 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return messages
     }
 
+    private func localRoutingCandidate(
+        for install: ModelInstall?,
+        services: PinesAppServices
+    ) -> (id: ProviderID, capabilities: ProviderCapabilities)? {
+        guard services.mlxRuntime.isLinked,
+              let install,
+              install.state == .installed,
+              install.modalities.contains(.text),
+              install.localURL != nil
+        else {
+            return nil
+        }
+
+        var capabilities = services.mlxRuntime.capabilities
+        capabilities.vision = capabilities.vision && install.modalities.contains(.vision)
+        capabilities.embeddings = capabilities.embeddings && install.modalities.contains(.embeddings)
+        return (services.mlxRuntime.localProviderID, capabilities)
+    }
+
+    private func resolveCloudContextDecision(
+        providerID: ProviderID,
+        modelID: ModelID,
+        vaultContext: (message: ChatMessage, documentIDs: [UUID])?,
+        mcpContext: [ChatMessage],
+        services: PinesAppServices
+    ) async throws -> CloudContextApprovalDecision {
+        guard providerID != services.mlxRuntime.localProviderID else {
+            return .sendWithContext
+        }
+
+        let documentIDs = vaultContext?.documentIDs ?? []
+        let mcpResourceIDs = Array(mcpResources.filter(\.selectedForContext).prefix(4).map(\.id))
+        guard !documentIDs.isEmpty || !mcpContext.isEmpty else {
+            return .sendWithoutContext
+        }
+
+        let estimatedBytes = (vaultContext?.message.content.utf8.count ?? 0)
+            + mcpContext.reduce(0) { total, message in
+                total + message.content.utf8.count + message.attachments.reduce(0) { $0 + Int($1.byteCount) }
+            }
+        let request = CloudContextApprovalRequest(
+            providerID: providerID,
+            modelID: modelID,
+            documentIDs: documentIDs,
+            mcpResourceIDs: mcpResourceIDs,
+            estimatedContextBytes: estimatedBytes
+        )
+        let decision = await requestCloudContextApproval(request)
+        if decision == .cancel {
+            throw InferenceError.cancelled
+        }
+        if decision == .sendWithoutContext {
+            try? await services.auditRepository?.append(
+                AuditEvent(
+                    category: .security,
+                    summary: "Sent cloud chat without selected local vault or MCP context."
+                )
+            )
+        }
+        return decision
+    }
+
     private func preferredInstalledTextModel(for conversationID: UUID? = nil) -> ModelInstall? {
         let installedTextModels = models
             .map(\.install)
@@ -833,12 +975,61 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return installedTextModels.first
     }
 
+    private func preferredModelSelection(services: PinesAppServices) -> ModelPickerOption? {
+        if let defaultModelID,
+           let providerID = defaultProviderID ?? (installedModel(for: defaultModelID) == nil ? nil : services.mlxRuntime.localProviderID) {
+            return ModelPickerOption(
+                providerID: providerID,
+                providerName: providerDisplayName(for: providerID, services: services),
+                providerKind: providerKind(for: providerID, services: services),
+                modelID: defaultModelID,
+                displayName: displayName(for: defaultModelID, providerID: providerID),
+                isLocal: providerID == services.mlxRuntime.localProviderID,
+                rank: 0
+            )
+        }
+
+        if let local = preferredInstalledTextModel() {
+            return ModelPickerOption(
+                providerID: services.mlxRuntime.localProviderID,
+                providerName: "Local",
+                providerKind: nil,
+                modelID: local.modelID,
+                displayName: Self.localModelDisplayName(local),
+                isLocal: true,
+                rank: 0
+            )
+        }
+
+        return modelPickerSections(services: services).flatMap(\.models).first
+    }
+
+    private func selection(for conversationID: UUID, services: PinesAppServices) -> ModelPickerOption? {
+        if let thread = threads.first(where: { $0.id == conversationID }),
+           let providerID = thread.providerID {
+            return ModelPickerOption(
+                providerID: providerID,
+                providerName: providerDisplayName(for: providerID, services: services),
+                providerKind: providerKind(for: providerID, services: services),
+                modelID: thread.modelID,
+                displayName: displayName(for: thread.modelID, providerID: providerID),
+                isLocal: providerID == services.mlxRuntime.localProviderID,
+                rank: 0
+            )
+        }
+        return preferredModelSelection(services: services)
+    }
+
     func saveSettings(services: PinesAppServices) async {
         do {
+            let resolvedDefaultModelID = defaultModelID ?? preferredInstalledTextModel()?.modelID
+            let resolvedProviderID = defaultProviderID
+                ?? resolvedDefaultModelID.flatMap { installedModel(for: $0) == nil ? nil : services.mlxRuntime.localProviderID }
             let snapshot = AppSettingsSnapshot(
                 executionMode: executionMode,
                 storeConfiguration: storeConfiguration,
-                defaultModelID: defaultModelID ?? preferredInstalledTextModel()?.modelID,
+                defaultProviderID: resolvedProviderID,
+                defaultModelID: resolvedDefaultModelID,
                 embeddingModelID: models.first(where: { $0.install.modalities.contains(.embeddings) })?.install.modelID,
                 requireToolApproval: true,
                 braveSearchEnabled: braveSearchCredentialStatus.hasPrefix("Configured"),
@@ -869,6 +1060,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 if let installed = installs.first(where: { $0.repository.caseInsensitiveCompare(repository) == .orderedSame && $0.state == .installed }),
                    installed.modalities.contains(.text) {
                     setIfChanged(\.defaultModelID, installed.modelID)
+                    setIfChanged(\.defaultProviderID, services.mlxRuntime.localProviderID)
                     await saveSettings(services: services)
                 }
             }
@@ -897,6 +1089,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             try await lifecycle.delete(repository: repository)
             if defaultModelID?.rawValue.lowercased() == repository.lowercased() {
                 setIfChanged(\.defaultModelID, nil)
+                setIfChanged(\.defaultProviderID, nil)
                 await saveSettings(services: services)
             }
             if !isShowingModelDiscoveryResults {
@@ -965,6 +1158,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             return
         }
         setIfChanged(\.defaultModelID, model.install.modelID)
+        setIfChanged(\.defaultProviderID, services.mlxRuntime.localProviderID)
         await saveSettings(services: services)
     }
 
@@ -1086,6 +1280,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             try await service.saveProvider(provider, apiKey: apiKey.isEmpty ? nil : apiKey)
             _ = try? await service.validate(provider)
             await refreshAll(services: services)
+            await refreshCloudModelCatalog(services: services)
         } catch {
             serviceError = error.localizedDescription
         }
@@ -1099,6 +1294,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             }
             _ = try await service.validate(provider)
             await refreshAll(services: services)
+            await refreshCloudModelCatalog(services: services)
         } catch {
             serviceError = error.localizedDescription
         }
@@ -1111,10 +1307,95 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 return
             }
             try await service.deleteProvider(provider)
+            if defaultProviderID == provider.id {
+                setIfChanged(\.defaultProviderID, nil)
+                setIfChanged(\.defaultModelID, nil)
+                await saveSettings(services: services)
+            }
             await refreshAll(services: services)
         } catch {
             serviceError = error.localizedDescription
         }
+    }
+
+    func refreshCloudModelCatalog(services: PinesAppServices) async {
+        guard !isRefreshingCloudModels else { return }
+        setIfChanged(\.isRefreshingCloudModels, true)
+        defer { setIfChanged(\.isRefreshingCloudModels, false) }
+
+        var nextCatalog: [ProviderID: [CloudProviderModel]] = [:]
+        for provider in cloudProviders {
+            do {
+                guard let apiKey = try await services.secretStore.read(
+                    service: provider.keychainService,
+                    account: provider.keychainAccount
+                ), !apiKey.isEmpty else {
+                    continue
+                }
+                let inferenceProvider = BYOKCloudInferenceProvider(configuration: provider, secretStore: services.secretStore)
+                let models = try await inferenceProvider.listTextModels()
+                if !models.isEmpty {
+                    nextCatalog[provider.id] = models
+                }
+            } catch {
+                continue
+            }
+        }
+        setIfChanged(\.cloudModelCatalog, nextCatalog)
+    }
+
+    func modelPickerSections(services: PinesAppServices) -> [ModelPickerSection] {
+        var sections = [ModelPickerSection]()
+        let localModels = models
+            .map(\.install)
+            .filter { $0.state == .installed && $0.modalities.contains(.text) }
+            .sorted { lhs, rhs in
+                localModelScore(lhs) > localModelScore(rhs)
+            }
+            .map { install in
+                ModelPickerOption(
+                    providerID: services.mlxRuntime.localProviderID,
+                    providerName: "Local",
+                    providerKind: nil,
+                    modelID: install.modelID,
+                    displayName: Self.localModelDisplayName(install),
+                    isLocal: true,
+                    rank: localModelScore(install)
+                )
+            }
+        if !localModels.isEmpty {
+            sections.append(ModelPickerSection(title: "Local", models: localModels))
+        }
+
+        for provider in cloudProviders.sorted(by: { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }) {
+            let providerModels = (cloudModelCatalog[provider.id] ?? [])
+                .map { model in
+                    ModelPickerOption(
+                        providerID: provider.id,
+                        providerName: provider.displayName,
+                        providerKind: provider.kind,
+                        modelID: model.id,
+                        displayName: model.displayName,
+                        isLocal: false,
+                        rank: model.rank
+                    )
+                }
+            guard !providerModels.isEmpty else { continue }
+            sections.append(ModelPickerSection(title: provider.displayName, models: providerModels))
+        }
+
+        return sections
+    }
+
+    func selectModel(_ option: ModelPickerOption, services: PinesAppServices, createNewChat: Bool = false) async -> UUID? {
+        setIfChanged(\.defaultProviderID, option.providerID)
+        setIfChanged(\.defaultModelID, option.modelID)
+        await saveSettings(services: services)
+        emitHaptic(.primaryAction)
+        if createNewChat {
+            return await createChat(services: services)
+        }
+        return nil
     }
 
     func saveMCPServer(
@@ -1577,6 +1858,22 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         approvalContinuation = nil
     }
 
+    func requestCloudContextApproval(_ request: CloudContextApprovalRequest) async -> CloudContextApprovalDecision {
+        cloudContextContinuation?.resume(returning: .cancel)
+        pendingCloudContextApproval = request
+        emitHaptic(.toolApprovalNeeded)
+        return await withCheckedContinuation { continuation in
+            cloudContextContinuation = continuation
+        }
+    }
+
+    func resolvePendingCloudContextApproval(_ decision: CloudContextApprovalDecision) {
+        pendingCloudContextApproval = nil
+        emitHaptic(decision == .sendWithContext ? .primaryAction : .runCancelled)
+        cloudContextContinuation?.resume(returning: decision)
+        cloudContextContinuation = nil
+    }
+
     func resolvePendingMCPSampling(_ approved: Bool) {
         pendingMCPSamplingRequest = nil
         samplingContinuation?.resume(returning: approved)
@@ -1748,6 +2045,36 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             .first { install in
                 install.modelID == modelID && install.state == .installed
             }
+    }
+
+    private func providerDisplayName(for providerID: ProviderID, services: PinesAppServices) -> String {
+        if providerID == services.mlxRuntime.localProviderID {
+            return "Local"
+        }
+        return cloudProviders.first(where: { $0.id == providerID })?.displayName ?? providerID.rawValue
+    }
+
+    private func providerKind(for providerID: ProviderID, services: PinesAppServices) -> CloudProviderKind? {
+        if providerID == services.mlxRuntime.localProviderID {
+            return nil
+        }
+        return cloudProviders.first(where: { $0.id == providerID })?.kind
+    }
+
+    private func displayName(for modelID: ModelID, providerID: ProviderID) -> String {
+        if let install = installedModel(for: modelID), install.modelID == modelID {
+            return Self.localModelDisplayName(install)
+        }
+        if let model = cloudModelCatalog[providerID]?.first(where: { $0.id == modelID }) {
+            return model.displayName
+        }
+        return Self.friendlyModelName(modelID.rawValue)
+    }
+
+    private func localModelScore(_ install: ModelInstall) -> Double {
+        let parameterScale = min(Double(install.parameterCount ?? 0) / 10_000_000_000, 10)
+        let byteScale = min(Double(install.estimatedBytes ?? 0) / 10_000_000_000, 10)
+        return parameterScale * 10 + byteScale
     }
 
     private func rankedCloudProvider(for request: MCPSamplingRequest, requiresVision: Bool, requiresTools: Bool) -> CloudProviderConfiguration? {
@@ -2082,8 +2409,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return PinesThreadPreview(
             id: record.id,
             title: record.title,
-            modelName: record.defaultModelID?.rawValue.components(separatedBy: "/").last ?? "No model selected",
+            modelName: record.defaultModelID.map { friendlyModelName($0.rawValue) } ?? "No model selected",
             modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
+            providerID: record.defaultProviderID,
             lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
             messages: messages,
             status: record.archived ? .archived : (status ?? .local),
@@ -2092,14 +2420,31 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         )
     }
 
+    private static func localModelDisplayName(_ install: ModelInstall) -> String {
+        friendlyModelName(install.displayName.isEmpty ? install.repository : install.displayName)
+    }
+
+    private static func friendlyModelName(_ rawValue: String) -> String {
+        var name = rawValue
+            .replacingOccurrences(of: "mlx-community/", with: "", options: [.caseInsensitive])
+            .replacingOccurrences(of: "mlx-community", with: "", options: [.caseInsensitive])
+        if name.contains("/") {
+            name = name.split(separator: "/").last.map(String.init) ?? name
+        }
+        return name
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-/ ").union(.whitespacesAndNewlines))
+    }
+
     private static func threadPreview(from record: ConversationPreviewRecord) -> PinesThreadPreview {
         let lastMessage = record.lastMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
         let status: PinesThreadStatus = record.archived ? .archived : .local
         return PinesThreadPreview(
             id: record.id,
             title: record.title,
-            modelName: record.defaultModelID?.rawValue.components(separatedBy: "/").last ?? "No model selected",
+            modelName: record.defaultModelID.map { friendlyModelName($0.rawValue) } ?? "No model selected",
             modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
+            providerID: record.defaultProviderID,
             lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
             messages: [],
             status: status,
@@ -2121,6 +2466,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             title: existing.title,
             modelName: existing.modelName,
             modelID: existing.modelID,
+            providerID: existing.providerID,
             lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
             messages: messages,
             status: resolvedStatus,
@@ -2355,6 +2701,7 @@ struct PinesThreadPreview: Identifiable, Hashable {
     let title: String
     let modelName: String
     let modelID: ModelID
+    let providerID: ProviderID?
     let lastMessage: String
     let messages: [ChatMessage]
     let status: PinesThreadStatus
@@ -2369,6 +2716,23 @@ struct PinesThreadPreview: Identifiable, Hashable {
             vaultContextIDs: []
         )
     }
+}
+
+struct ModelPickerSection: Identifiable, Hashable {
+    var id: String { title }
+    let title: String
+    let models: [ModelPickerOption]
+}
+
+struct ModelPickerOption: Identifiable, Hashable {
+    var id: String { "\(providerID.rawValue)::\(modelID.rawValue)" }
+    let providerID: ProviderID
+    let providerName: String
+    let providerKind: CloudProviderKind?
+    let modelID: ModelID
+    let displayName: String
+    let isLocal: Bool
+    let rank: Double
 }
 
 enum PinesThreadStatus: String, Hashable {

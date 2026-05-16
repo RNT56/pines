@@ -103,6 +103,7 @@ struct CloudKitSyncService {
         record["title"] = conversation.title as CKRecordValue
         record["updatedAt"] = conversation.updatedAt as CKRecordValue
         record["defaultModelID"] = conversation.defaultModelID?.rawValue as CKRecordValue?
+        record["defaultProviderID"] = conversation.defaultProviderID?.rawValue as CKRecordValue?
         record["archived"] = conversation.archived as CKRecordValue
         record["pinned"] = conversation.pinned as CKRecordValue
         return record

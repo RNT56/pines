@@ -302,8 +302,22 @@ private actor MLXRuntimeState {
             creator: Self.llmCreator(Gemma4Configuration.self, Gemma4Model.init)
         )
         await LLMTypeRegistry.shared.registerModelType(
+            "llama4",
+            creator: Self.llmCreator(PinesLlama4Configuration.self, PinesLlama4Model.init)
+        )
+        await LLMTypeRegistry.shared.registerModelType(
+            "llama4_text",
+            creator: Self.llmCreator(PinesLlama4TextConfiguration.self, PinesLlama4TextModel.init)
+        )
+        await LLMTypeRegistry.shared.registerModelType(
             "deepseek_v32",
-            creator: Self.llmCreator(DeepseekV3Configuration.self, DeepseekV3Model.init)
+            creator: { _ in
+                throw InferenceError.unsupportedCapability("deepseek_v32 is recognized, but the linked MLX runtime does not expose a public DeepSeek V3.2 initializer.")
+            }
+        )
+        await LLMTypeRegistry.shared.registerModelType(
+            "deepseek_v4",
+            creator: Self.llmCreator(PinesDeepseekV4Configuration.self, PinesDeepseekV4Model.init)
         )
         await LLMTypeRegistry.shared.registerModelType(
             "minimax_m2",
@@ -311,7 +325,7 @@ private actor MLXRuntimeState {
         )
     }
 
-    private nonisolated static func llmCreator<C: Codable, M: LanguageModel>(
+    private nonisolated static func llmCreator<C: Decodable, M: LanguageModel>(
         _ configurationType: C.Type,
         _ modelInit: @escaping (C) -> M
     ) -> (Data) throws -> LanguageModel {

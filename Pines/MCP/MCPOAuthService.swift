@@ -18,7 +18,7 @@ final class MCPOAuthPresentationContextProvider: NSObject, ASWebAuthenticationPr
         if let scene = scenes.first {
             return ASPresentationAnchor(windowScene: scene)
         }
-        preconditionFailure("OAuth authentication requires an active window scene.")
+        return ASPresentationAnchor()
     }
 }
 
@@ -119,7 +119,11 @@ struct MCPOAuthService {
             session.presentationContextProvider = presentationContextProvider
             session.prefersEphemeralWebBrowserSession = true
             presentationContextProvider.activeSession = session
-            session.start()
+            guard session.start() else {
+                presentationContextProvider.activeSession = nil
+                continuation.resume(throwing: InferenceError.invalidRequest("OAuth authentication could not start without an active presentation scene."))
+                return
+            }
         }
     }
 

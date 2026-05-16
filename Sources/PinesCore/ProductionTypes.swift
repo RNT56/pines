@@ -271,6 +271,40 @@ public struct ToolApprovalRequest: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public enum CloudContextApprovalDecision: String, Hashable, Codable, Sendable, CaseIterable {
+    case sendWithContext
+    case sendWithoutContext
+    case cancel
+}
+
+public struct CloudContextApprovalRequest: Identifiable, Hashable, Codable, Sendable {
+    public var id: UUID
+    public var providerID: ProviderID
+    public var modelID: ModelID
+    public var documentIDs: [UUID]
+    public var mcpResourceIDs: [String]
+    public var estimatedContextBytes: Int
+    public var createdAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        providerID: ProviderID,
+        modelID: ModelID,
+        documentIDs: [UUID],
+        mcpResourceIDs: [String],
+        estimatedContextBytes: Int,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.modelID = modelID
+        self.documentIDs = documentIDs
+        self.mcpResourceIDs = mcpResourceIDs
+        self.estimatedContextBytes = estimatedContextBytes
+        self.createdAt = createdAt
+    }
+}
+
 public enum BrowserActionKind: String, Hashable, Codable, Sendable, CaseIterable {
     case observe
     case navigate
@@ -309,6 +343,7 @@ public struct BrowserAction: Identifiable, Hashable, Codable, Sendable {
 public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var executionMode: AgentExecutionMode
     public var storeConfiguration: LocalStoreConfiguration
+    public var defaultProviderID: ProviderID?
     public var defaultModelID: ModelID?
     public var embeddingModelID: ModelID?
     public var requireToolApproval: Bool
@@ -320,6 +355,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public init(
         executionMode: AgentExecutionMode = .preferLocal,
         storeConfiguration: LocalStoreConfiguration = .init(),
+        defaultProviderID: ProviderID? = nil,
         defaultModelID: ModelID? = nil,
         embeddingModelID: ModelID? = nil,
         requireToolApproval: Bool = true,
@@ -330,6 +366,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     ) {
         self.executionMode = executionMode
         self.storeConfiguration = storeConfiguration
+        self.defaultProviderID = defaultProviderID
         self.defaultModelID = defaultModelID
         self.embeddingModelID = embeddingModelID
         self.requireToolApproval = requireToolApproval

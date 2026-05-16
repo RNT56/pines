@@ -93,6 +93,23 @@ struct PinesRootView: View {
             }
         }
         .sheet(item: Binding(
+            get: { appModel.pendingCloudContextApproval },
+            set: { request in
+                if request == nil {
+                    appModel.resolvePendingCloudContextApproval(.cancel)
+                }
+            }
+        )) { request in
+            CloudContextApprovalSheet(
+                request: request,
+                cancel: { appModel.resolvePendingCloudContextApproval(.cancel) },
+                sendWithoutContext: { appModel.resolvePendingCloudContextApproval(.sendWithoutContext) },
+                sendWithContext: { appModel.resolvePendingCloudContextApproval(.sendWithContext) }
+            )
+            .environmentObject(haptics)
+            .pinesTheme(theme)
+        }
+        .sheet(item: Binding(
             get: { appModel.pendingMCPSamplingRequest },
             set: { request in
                 if request == nil {
@@ -154,6 +171,53 @@ struct PinesRootView: View {
         }
         .onChange(of: selectedTab) { _, _ in
             haptics.play(.tabChanged)
+        }
+    }
+}
+
+private struct CloudContextApprovalSheet: View {
+    @Environment(\.pinesTheme) private var theme
+    let request: CloudContextApprovalRequest
+    let cancel: () -> Void
+    let sendWithoutContext: () -> Void
+    let sendWithContext: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Cloud Context") {
+                    LabeledContent("Provider", value: request.providerID.rawValue)
+                    LabeledContent("Model", value: request.modelID.rawValue)
+                    LabeledContent("Vault documents", value: "\(request.documentIDs.count)")
+                    LabeledContent("MCP resources", value: "\(request.mcpResourceIDs.count)")
+                    LabeledContent(
+                        "Context size",
+                        value: ByteCountFormatter.string(
+                            fromByteCount: Int64(request.estimatedContextBytes),
+                            countStyle: .file
+                        )
+                    )
+                }
+
+                Section("Privacy") {
+                    Text("Selected local vault and MCP resource context can be sent to this cloud provider for this turn.")
+                        .font(theme.typography.body)
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+            }
+            .pinesExpressiveScrollHaptics()
+            .navigationTitle("Send Local Context?")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel, action: cancel)
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Without Context", action: sendWithoutContext)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Send Context", action: sendWithContext)
+                }
+            }
         }
     }
 }

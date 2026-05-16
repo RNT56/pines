@@ -105,10 +105,10 @@ private struct SettingsDetailView: View {
     let storeConfiguration: LocalStoreConfiguration
     @Binding var selectedThemeTemplate: PinesThemeTemplate
     @Binding var interfaceMode: PinesInterfaceMode
-    @State private var providerKind: CloudProviderKind = .openAICompatible
+    @State private var providerKind: CloudProviderKind = .openAI
     @State private var providerName = "OpenAI"
     @State private var providerBaseURL = "https://api.openai.com/v1"
-    @State private var providerModelID = "gpt-4.1-mini"
+    @State private var providerModelID = "gpt-5.2"
     @State private var providerAPIKey = ""
     @State private var providerEnabled = false
     @State private var mcpName = "Local MCP"
@@ -1313,6 +1313,8 @@ private extension QuantizationAlgorithm {
 private extension CloudProviderKind {
     var title: String {
         switch self {
+        case .openAI:
+            "OpenAI"
         case .openAICompatible:
             "OpenAI-compatible"
         case .anthropic:
@@ -1328,8 +1330,10 @@ private extension CloudProviderKind {
 
     var defaultDisplayName: String {
         switch self {
-        case .openAICompatible:
+        case .openAI:
             "OpenAI"
+        case .openAICompatible:
+            "OpenAI-compatible"
         case .anthropic:
             "Anthropic"
         case .gemini:
@@ -1343,8 +1347,10 @@ private extension CloudProviderKind {
 
     var defaultBaseURL: String {
         switch self {
-        case .openAICompatible:
+        case .openAI:
             "https://api.openai.com/v1"
+        case .openAICompatible:
+            "https://"
         case .anthropic:
             "https://api.anthropic.com"
         case .gemini:
@@ -1358,8 +1364,10 @@ private extension CloudProviderKind {
 
     var defaultModelID: String {
         switch self {
+        case .openAI:
+            "gpt-5.2"
         case .openAICompatible:
-            "gpt-4.1-mini"
+            ""
         case .anthropic:
             "claude-3-5-haiku-latest"
         case .gemini:

@@ -47,6 +47,7 @@ targets:
         INFOPLIST_FILE: Pines/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Pines/Pines.entitlements
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PINES_CLOUDKIT_ENABLED"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WLDMWQ963U
         CURRENT_PROJECT_VERSION: 1
@@ -79,8 +80,29 @@ targets:
         product: Markdown
       - package: HighlightSwift
         product: HighlightSwift
+      - target: PinesLiveActivities
+        embed: true
       - target: PinesWatch
         embed: true
+  PinesLiveActivities:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: PinesLiveActivities
+      - path: Pines/Runtime/ModelDownloadActivityAttributes.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.schtack.pines.liveactivities
+        PRODUCT_NAME: PinesLiveActivities
+        INFOPLIST_FILE: PinesLiveActivities/Info.plist
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: WLDMWQ963U
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        GENERATE_INFOPLIST_FILE: NO
   PinesWatch:
     type: application
     platform: watchOS

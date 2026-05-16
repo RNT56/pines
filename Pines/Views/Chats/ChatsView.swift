@@ -40,14 +40,7 @@ struct ChatsView: View {
             .pinesExpressiveScrollHaptics()
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        Task {
-                            selectedThreadID = await appModel.createChat(services: services)
-                        }
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                    }
-                    .accessibilityLabel("New chat")
+                    ChatModelPickerButton(selectedThreadID: $selectedThreadID)
                 }
             }
             .onAppear(perform: selectDefaultThreadIfNeeded)
@@ -84,6 +77,63 @@ struct ChatsView: View {
     }
 }
 
+private struct ChatModelPickerButton: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @Binding var selectedThreadID: PinesThreadPreview.ID?
+
+    var body: some View {
+        Menu {
+            let sections = appModel.modelPickerSections(services: services)
+            if sections.isEmpty {
+                Text("No text models available")
+            } else {
+                ForEach(sections) { section in
+                    Section(section.title) {
+                        ForEach(section.models) { option in
+                            Button {
+                                Task {
+                                    selectedThreadID = await appModel.selectModel(option, services: services, createNewChat: true)
+                                }
+                            } label: {
+                                Label {
+                                    Text(option.displayName)
+                                } icon: {
+                                    Image(systemName: option.systemImage)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: theme.spacing.xsmall) {
+                Image(systemName: "sparkles.rectangle.stack")
+                Text(currentModelLabel)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.76)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+        }
+        .accessibilityLabel("New chat model")
+        .pinesButtonStyle(.secondary)
+        .task {
+            await appModel.refreshCloudModelCatalog(services: services)
+        }
+    }
+
+    private var currentModelLabel: String {
+        let sections = appModel.modelPickerSections(services: services)
+        let options = sections.flatMap(\.models)
+        if let match = options.first(where: { $0.providerID == appModel.defaultProviderID && $0.modelID == appModel.defaultModelID }) {
+            return match.displayName
+        }
+        return options.first?.displayName ?? "Model"
+    }
+}
+
 private struct ChatThreadRow: View {
     @Environment(\.pinesTheme) private var theme
     let thread: PinesThreadPreview
@@ -107,6 +157,26 @@ private struct ChatThreadRow: View {
         }
         .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
         .listRowBackground(theme.colors.sidebarBackground)
+    }
+}
+
+private extension ModelPickerOption {
+    var systemImage: String {
+        if isLocal {
+            return "cpu"
+        }
+        switch providerKind {
+        case .openAI:
+            return "sparkles"
+        case .anthropic:
+            return "brain.head.profile"
+        case .gemini:
+            return "diamond"
+        case .openRouter:
+            return "arrow.triangle.branch"
+        case .openAICompatible, .custom, nil:
+            return "network"
+        }
     }
 }
 

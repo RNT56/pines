@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 5
+    public static let currentVersion = 7
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -405,6 +405,16 @@ public enum PinesDatabaseSchema {
             """,
             "CREATE INDEX IF NOT EXISTS idx_mcp_resources_server ON mcp_resources(server_id);",
             "CREATE INDEX IF NOT EXISTS idx_mcp_prompts_server ON mcp_prompts(server_id);",
+        ]),
+        DatabaseMigration(version: 6, name: "retrieval-and-sync-indexes", sql: [
+            "CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_conversations_list ON conversations(deleted_at, pinned DESC, updated_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_documents_sync_updated ON vault_documents(sync_state, updated_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_scan ON vault_embeddings(dimensions, embedding_model_id, chunk_id);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_chunks_document_ordinal ON vault_chunks(document_id, ordinal);",
+        ]),
+        DatabaseMigration(version: 7, name: "conversation-provider-selection", sql: [
+            "ALTER TABLE conversations ADD COLUMN default_provider_id TEXT;",
         ]),
     ]
 }

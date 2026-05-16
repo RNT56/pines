@@ -1,11 +1,31 @@
 import Foundation
 
 public enum CloudProviderKind: String, Codable, Sendable, CaseIterable {
+    case openAI
     case openAICompatible
     case anthropic
     case gemini
     case openRouter
     case custom
+}
+
+public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
+    public var id: ModelID
+    public var displayName: String
+    public var createdAt: Date?
+    public var rank: Double
+
+    public init(
+        id: ModelID,
+        displayName: String,
+        createdAt: Date? = nil,
+        rank: Double = 0
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.createdAt = createdAt
+        self.rank = rank
+    }
 }
 
 public struct CloudProviderConfiguration: Identifiable, Hashable, Codable, Sendable {

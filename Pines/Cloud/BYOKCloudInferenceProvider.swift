@@ -21,9 +21,6 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
-        guard configuration.enabledForAgents else {
-            throw CloudProviderError.disabledForAgents
-        }
         guard let apiKey = try await secretStore.read(
             service: configuration.keychainService,
             account: configuration.keychainAccount
@@ -40,19 +37,20 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                         throw CloudProviderError.invalidResponse
                     }
 
-                    var buffer = ""
+                    var dataLines = [String]()
                     var toolState = CloudToolCallStreamState()
-                    for try await byte in bytes {
+                    for try await rawLine in bytes.lines {
                         guard !Task.isCancelled else { throw InferenceError.cancelled }
-                        if byte == 10 {
-                            handleSSELine(buffer, state: &toolState, continuation: continuation)
-                            buffer.removeAll(keepingCapacity: true)
-                        } else {
-                            buffer.append(Character(UnicodeScalar(byte)))
+                        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if line.isEmpty {
+                            handleSSEDataLines(dataLines, state: &toolState, continuation: continuation)
+                            dataLines.removeAll(keepingCapacity: true)
+                        } else if line.hasPrefix("data:") {
+                            dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
                         }
                     }
-                    if !buffer.isEmpty {
-                        handleSSELine(buffer, state: &toolState, continuation: continuation)
+                    if !dataLines.isEmpty {
+                        handleSSEDataLines(dataLines, state: &toolState, continuation: continuation)
                     }
                     continuation.yield(.finish(InferenceFinish(reason: .stop)))
                     continuation.finish()
@@ -83,14 +81,26 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         throw InferenceError.unsupportedCapability("Cloud embeddings are disabled for v1 local-first vault indexing.")
     }
 
+    func listTextModels() async throws -> [CloudProviderModel] {
+        guard let apiKey = try await secretStore.read(
+            service: configuration.keychainService,
+            account: configuration.keychainAccount
+        ), !apiKey.isEmpty else {
+            throw CloudProviderError.missingAPIKey
+        }
+        return try await listTextModels(apiKey: apiKey)
+    }
+
     func validate(modelID: ModelID?) async throws -> ProviderValidationResult {
         guard let apiKey = try await secretStore.read(service: configuration.keychainService, account: configuration.keychainAccount), !apiKey.isEmpty else {
             return ProviderValidationResult(providerID: configuration.id, status: .invalid, message: "Missing API key.")
         }
 
+        let availableModels = (try? await listTextModels(apiKey: apiKey).map(\.id)) ?? []
+
         var request: URLRequest
         switch configuration.kind {
-        case .openAICompatible, .openRouter, .custom:
+        case .openAI, .openAICompatible, .openRouter, .custom:
             request = URLRequest(url: configuration.baseURL.appending(path: "models"))
             request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         case .anthropic:
@@ -116,19 +126,20 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             ])
         }
 
+        try applyExtraHeaders(to: &request)
         let (_, http) = try await URLSession.shared.data(for: request)
         if (200..<300).contains(http.statusCode) {
-            return ProviderValidationResult(providerID: configuration.id, status: .valid, message: "Provider validated.")
+            return ProviderValidationResult(providerID: configuration.id, status: .valid, message: "Provider validated.", availableModels: availableModels)
         }
         if http.statusCode == 429 {
-            return ProviderValidationResult(providerID: configuration.id, status: .rateLimited, message: "Provider rate limited validation.")
+            return ProviderValidationResult(providerID: configuration.id, status: .rateLimited, message: "Provider rate limited validation.", availableModels: availableModels)
         }
-        return ProviderValidationResult(providerID: configuration.id, status: .invalid, message: "Validation failed with HTTP \(http.statusCode).")
+        return ProviderValidationResult(providerID: configuration.id, status: .invalid, message: "Validation failed with HTTP \(http.statusCode).", availableModels: availableModels)
     }
 
     private func buildStreamingRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
         switch configuration.kind {
-        case .openAICompatible, .openRouter, .custom:
+        case .openAI, .openAICompatible, .openRouter, .custom:
             return try openAICompatibleRequest(apiKey: apiKey, chatRequest: chatRequest)
         case .anthropic:
             return try anthropicRequest(apiKey: apiKey, chatRequest: chatRequest)
@@ -156,7 +167,35 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             body["tool_choice"] = "auto"
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        try applyExtraHeaders(to: &request)
         return request
+    }
+
+    private func listTextModels(apiKey: String) async throws -> [CloudProviderModel] {
+        var request: URLRequest
+        switch configuration.kind {
+        case .openAI, .openAICompatible, .openRouter, .custom:
+            request = URLRequest(url: configuration.baseURL.appending(path: "models"))
+            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        case .anthropic:
+            request = URLRequest(url: configuration.baseURL.appending(path: "v1/models"))
+            request.addValue(apiKey, forHTTPHeaderField: "x-api-key")
+            request.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        case .gemini:
+            var components = URLComponents(url: configuration.baseURL.appending(path: "v1beta/models"), resolvingAgainstBaseURL: false)!
+            components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
+            request = URLRequest(url: components.url!)
+        }
+
+        try applyExtraHeaders(to: &request)
+        let (data, http) = try await URLSession.shared.data(for: request)
+        guard (200..<300).contains(http.statusCode) else {
+            throw CloudProviderError.invalidResponse
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CloudProviderError.invalidResponse
+        }
+        return Self.parseModels(json, providerKind: configuration.kind)
     }
 
     private func anthropicRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
@@ -178,6 +217,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.anthropicToolObject()) }
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        try applyExtraHeaders(to: &request)
         return request
     }
 
@@ -205,6 +245,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             ]]
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        try applyExtraHeaders(to: &request)
         return request
     }
 
@@ -317,19 +358,177 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return try? JSONSerialization.jsonObject(with: data)
     }
 
-    private func handleSSELine(
-        _ rawLine: String,
+    private func handleSSEDataLines(
+        _ dataLines: [String],
         state: inout CloudToolCallStreamState,
         continuation: AsyncThrowingStream<InferenceStreamEvent, Error>.Continuation
     ) {
-        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard line.hasPrefix("data:") else { return }
-        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        let payload = dataLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         guard payload != "[DONE]", let data = payload.data(using: .utf8) else { return }
 
         for event in Self.extractEvents(from: data, providerKind: configuration.kind, state: &state) {
             continuation.yield(event)
         }
+    }
+
+    private func applyExtraHeaders(to request: inout URLRequest) throws {
+        guard let json = configuration.extraHeadersJSON?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !json.isEmpty
+        else {
+            return
+        }
+        guard let data = json.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            throw InferenceError.invalidRequest("Cloud provider extra headers must be a JSON object.")
+        }
+        let blockedHeaders = Set(["authorization", "content-type", "x-api-key"])
+        for (rawName, rawValue) in object {
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            guard !blockedHeaders.contains(name.lowercased()) else {
+                throw InferenceError.invalidRequest("Cloud provider extra headers cannot override \(name).")
+            }
+            guard let value = rawValue as? String else {
+                throw InferenceError.invalidRequest("Cloud provider extra header \(name) must be a string.")
+            }
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+    }
+
+    private static func parseModels(_ json: [String: Any], providerKind: CloudProviderKind) -> [CloudProviderModel] {
+        let rawItems: [[String: Any]]
+        switch providerKind {
+        case .gemini:
+            rawItems = json["models"] as? [[String: Any]] ?? []
+        default:
+            rawItems = json["data"] as? [[String: Any]] ?? []
+        }
+
+        let parsed = rawItems.compactMap { item -> CloudProviderModel? in
+            let rawID: String?
+            if providerKind == .gemini {
+                rawID = (item["name"] as? String)?.replacingOccurrences(of: "models/", with: "")
+            } else {
+                rawID = item["id"] as? String
+            }
+            guard let id = rawID, isTextOutputModel(id: id, providerKind: providerKind, metadata: item) else {
+                return nil
+            }
+
+            let displayName = (item["display_name"] as? String)
+                ?? readableModelName(id)
+            let createdAt = createdDate(from: item)
+            return CloudProviderModel(
+                id: ModelID(rawValue: id),
+                displayName: displayName,
+                createdAt: createdAt,
+                rank: modelRank(id: id, providerKind: providerKind, createdAt: createdAt)
+            )
+        }
+
+        return parsed
+            .sorted {
+                if $0.rank == $1.rank {
+                    return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+                }
+                return $0.rank > $1.rank
+            }
+            .uniqued(by: \.id)
+            .prefix(24)
+            .map { $0 }
+    }
+
+    private static func isTextOutputModel(id rawID: String, providerKind: CloudProviderKind, metadata: [String: Any]) -> Bool {
+        let id = rawID.lowercased()
+        let blocked = [
+            "embedding", "embed", "moderation", "image", "imagen", "dall-e", "sora",
+            "tts", "transcribe", "whisper", "audio", "realtime", "vision-preview"
+        ]
+        guard !blocked.contains(where: { id.contains($0) }) else { return false }
+
+        if providerKind == .gemini {
+            let methods = metadata["supportedGenerationMethods"] as? [String] ?? []
+            guard methods.contains(where: { $0 == "generateContent" || $0 == "streamGenerateContent" }) else {
+                return false
+            }
+        }
+
+        switch providerKind {
+        case .openAI:
+            return id.hasPrefix("gpt-") || id.hasPrefix("o")
+        case .anthropic:
+            return id.hasPrefix("claude-")
+        case .gemini:
+            return id.hasPrefix("gemini-")
+        case .openAICompatible, .openRouter, .custom:
+            return true
+        }
+    }
+
+    private static func createdDate(from item: [String: Any]) -> Date? {
+        if let created = item["created"] as? TimeInterval {
+            return Date(timeIntervalSince1970: created)
+        }
+        if let created = item["created_at"] as? String {
+            return ISO8601DateFormatter().date(from: created)
+        }
+        return nil
+    }
+
+    private static func readableModelName(_ rawID: String) -> String {
+        rawID
+            .split(separator: "/")
+            .last
+            .map(String.init) ?? rawID
+    }
+
+    private static func modelRank(id rawID: String, providerKind: CloudProviderKind, createdAt: Date?) -> Double {
+        let id = rawID.lowercased()
+        var score = createdAt.map { $0.timeIntervalSince1970 / 1_000_000_000 } ?? 0
+        score += numericVersionScore(id) * 100
+
+        switch providerKind {
+        case .openAI, .openAICompatible, .openRouter, .custom:
+            if id.contains("gpt-5") { score += 900 }
+            if id.contains("gpt-4.1") { score += 650 }
+            if id.contains("gpt-4o") { score += 560 }
+            if id.hasPrefix("o") { score += 600 }
+            if id.contains("pro") { score += 80 }
+            if id.contains("mini") { score -= 35 }
+            if id.contains("nano") { score -= 70 }
+        case .anthropic:
+            if id.contains("opus") { score += 900 }
+            if id.contains("sonnet") { score += 760 }
+            if id.contains("haiku") { score += 520 }
+            if id.contains("4-1") { score += 140 }
+            if id.contains("-4-") { score += 110 }
+            if id.contains("3-7") { score += 70 }
+        case .gemini:
+            if id.contains("pro") { score += 850 }
+            if id.contains("flash") { score += 700 }
+            if id.contains("flash-lite") { score -= 60 }
+            if id.contains("preview") { score += 20 }
+        }
+        return score
+    }
+
+    private static func numericVersionScore(_ id: String) -> Double {
+        let pattern = #"(\d+(?:[\.-]\d+)*)"#
+        guard
+            let regex = try? NSRegularExpression(pattern: pattern),
+            let match = regex.firstMatch(in: id, range: NSRange(id.startIndex..., in: id)),
+            let range = Range(match.range(at: 1), in: id)
+        else {
+            return 0
+        }
+        return id[range]
+            .split { $0 == "." || $0 == "-" }
+            .prefix(3)
+            .enumerated()
+            .reduce(0) { partial, item in
+                partial + (Double(item.element) ?? 0) / pow(10, Double(item.offset * 2))
+            }
     }
 
     private static func extractEvents(
@@ -401,7 +600,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                     )
                 }
             }
-        case .openAICompatible, .openRouter, .custom:
+        case .openAI, .openAICompatible, .openRouter, .custom:
             let choices = json["choices"] as? [[String: Any]]
             let delta = choices?.first?["delta"] as? [String: Any]
             if let text = delta?["content"] as? String, !text.isEmpty {
@@ -475,5 +674,16 @@ private struct CloudToolCallStreamState {
         anthropicToolID = nil
         anthropicToolName = nil
         anthropicArguments.removeAll(keepingCapacity: true)
+    }
+}
+
+private extension Sequence {
+    func uniqued<ID: Hashable>(by keyPath: KeyPath<Element, ID>) -> [Element] {
+        var seen = Set<ID>()
+        var values = [Element]()
+        for element in self where seen.insert(element[keyPath: keyPath]).inserted {
+            values.append(element)
+        }
+        return values
     }
 }
