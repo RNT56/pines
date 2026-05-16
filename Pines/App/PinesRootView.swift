@@ -34,6 +34,9 @@ struct PinesRootView: View {
                 .environmentObject(appModel)
                 .environmentObject(haptics)
                 .environment(\.pinesServices, services)
+                .environment(\.openPinesModelsPage, PinesOpenModelsPageAction {
+                    selectedTab = .models
+                })
                 .pinesTheme(theme)
 
             if showsBootMark {
@@ -43,6 +46,14 @@ struct PinesRootView: View {
                     .ignoresSafeArea()
                     .zIndex(1)
             }
+
+            #if canImport(UIKit)
+            PinesKeyboardWarmupView()
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            #endif
         }
         .preferredColorScheme(appModel.interfaceMode.colorScheme)
         .task {
@@ -174,6 +185,78 @@ struct PinesRootView: View {
         }
     }
 }
+
+struct PinesOpenModelsPageAction: Sendable {
+    var action: @MainActor @Sendable () -> Void
+
+    @MainActor
+    func callAsFunction() {
+        action()
+    }
+}
+
+private struct PinesOpenModelsPageKey: EnvironmentKey {
+    static let defaultValue = PinesOpenModelsPageAction {}
+}
+
+extension EnvironmentValues {
+    var openPinesModelsPage: PinesOpenModelsPageAction {
+        get { self[PinesOpenModelsPageKey.self] }
+        set { self[PinesOpenModelsPageKey.self] = newValue }
+    }
+}
+
+#if canImport(UIKit)
+private struct PinesKeyboardWarmupView: UIViewRepresentable {
+    final class Coordinator {
+        var didWarm = false
+        var retryCount = 0
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField(frame: .zero)
+        textField.inputView = UIView(frame: .zero)
+        textField.textColor = .clear
+        textField.tintColor = .clear
+        textField.backgroundColor = .clear
+        textField.isAccessibilityElement = false
+        textField.autocorrectionType = .no
+        textField.spellCheckingType = .no
+        textField.smartDashesType = .no
+        textField.smartQuotesType = .no
+        textField.smartInsertDeleteType = .no
+        return textField
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        guard !context.coordinator.didWarm else { return }
+        context.coordinator.didWarm = true
+        warmKeyboardInput(uiView, coordinator: context.coordinator)
+    }
+
+    private func warmKeyboardInput(_ textField: UITextField, coordinator: Coordinator) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            guard textField.window != nil else {
+                guard coordinator.retryCount < 8 else { return }
+                coordinator.retryCount += 1
+                warmKeyboardInput(textField, coordinator: coordinator)
+                return
+            }
+
+            guard !textField.isFirstResponder else { return }
+            if textField.becomeFirstResponder() {
+                DispatchQueue.main.async {
+                    textField.resignFirstResponder()
+                }
+            }
+        }
+    }
+}
+#endif
 
 private struct CloudContextApprovalSheet: View {
     @Environment(\.pinesTheme) private var theme

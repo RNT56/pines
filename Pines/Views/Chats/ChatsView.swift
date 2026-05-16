@@ -120,9 +120,11 @@ struct ChatsView: View {
 }
 
 private struct ChatModelPickerButton: View {
+    @Environment(\.openPinesModelsPage) private var openModelsPage
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
     let currentProviderID: ProviderID?
     let currentModelID: ModelID?
     let fallbackLabel: String?
@@ -137,8 +139,15 @@ private struct ChatModelPickerButton: View {
 
         Group {
             if sections.isEmpty {
-                pickerLabel(showsDisclosure: false, currentModelLabel: currentModelLabel)
-                    .accessibilityValue("No models installed")
+                Button {
+                    haptics.play(.navigationSelected)
+                    openModelsPage()
+                } label: {
+                    pickerLabel(showsDisclosure: false, currentModelLabel: currentModelLabel)
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue("No models installed")
+                .accessibilityHint("Opens Models")
             } else {
                 Menu {
                     ForEach(sections) { section in
