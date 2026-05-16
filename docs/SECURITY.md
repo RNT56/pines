@@ -39,6 +39,8 @@ Web and browser outputs should be treated as untrusted content. Browser automati
 
 Optional iCloud sync may sync conversations, tags, vault metadata, settings, and source documents after user opt-in.
 
+CloudKit repository merge/apply code lives in `GRDBPinesStore+CloudKit.swift` so the sync boundary stays isolated from the base local-store implementation.
+
 Do not sync:
 
 - API keys
@@ -46,3 +48,5 @@ Do not sync:
 - prompt caches
 - generated embeddings by default
 - transient tool/browser state
+
+MCP bearer tokens and OAuth access/refresh tokens follow the same Keychain-only rule as BYOK provider keys.

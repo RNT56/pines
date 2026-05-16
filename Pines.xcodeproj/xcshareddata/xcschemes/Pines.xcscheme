@@ -1,14 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
    LastUpgradeVersion = "1430"
-   version = "1.7">
+   version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
-      buildImplicitDependencies = "YES"
-      runPostActionsOnFailure = "NO">
+      buildImplicitDependencies = "YES">
       <BuildActionEntries>
          <BuildActionEntry
-            buildForTesting = "YES"
+            buildForTesting = "NO"
             buildForRunning = "YES"
             buildForProfiling = "YES"
             buildForArchiving = "YES"
@@ -16,13 +15,27 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "5ABD42396BC25E46F453A6A1"
-               BuildableName = "Pines.app"
+               BuildableName = "pines.app"
                BlueprintName = "Pines"
                ReferencedContainer = "container:Pines.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
             buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "9C0C5645F73C831E8B61CB9F"
+               BuildableName = "PinesTests.xctest"
+               BlueprintName = "PinesTests"
+               ReferencedContainer = "container:Pines.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "NO"
             buildForRunning = "YES"
             buildForProfiling = "YES"
             buildForArchiving = "YES"
@@ -30,7 +43,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "82648A6E9285BDBBB41FA8FB"
-               BuildableName = "PinesWatch.app"
+               BuildableName = "Pines Watch.app"
                BlueprintName = "PinesWatch"
                ReferencedContainer = "container:Pines.xcodeproj">
             </BuildableReference>
@@ -42,21 +55,29 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
-      codeCoverageEnabled = "YES"
-      onlyGenerateCoverageForSpecifiedTargets = "NO">
+      codeCoverageEnabled = "YES">
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5ABD42396BC25E46F453A6A1"
-            BuildableName = "Pines.app"
-            BlueprintName = "Pines"
+            BlueprintIdentifier = "9C0C5645F73C831E8B61CB9F"
+            BuildableName = "PinesTests.xctest"
+            BlueprintName = "PinesTests"
             ReferencedContainer = "container:Pines.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "9C0C5645F73C831E8B61CB9F"
+               BuildableName = "PinesTests.xctest"
+               BlueprintName = "PinesTests"
+               ReferencedContainer = "container:Pines.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
-      <CommandLineArguments>
-      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -73,13 +94,11 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "5ABD42396BC25E46F453A6A1"
-            BuildableName = "Pines.app"
+            BuildableName = "pines.app"
             BlueprintName = "Pines"
             ReferencedContainer = "container:Pines.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <CommandLineArguments>
-      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -92,7 +111,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "5ABD42396BC25E46F453A6A1"
-            BuildableName = "Pines.app"
+            BuildableName = "pines.app"
             BlueprintName = "Pines"
             ReferencedContainer = "container:Pines.xcodeproj">
          </BuildableReference>

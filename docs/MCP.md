@@ -2,6 +2,12 @@
 
 Pines can connect to remote MCP servers over Streamable HTTP and expose server capabilities to local or BYOK-backed chat flows. The implementation is intentionally user-driven: tools, resources, prompts, and sampling are enabled per server from Settings.
 
+Implementation ownership:
+
+- `MCPStreamableHTTPClient.swift` handles transport state, session headers, JSON-RPC request/notification flow, OAuth exchange, event parsing, and local-network HTTP policy.
+- `MCPStreamableHTTPPayloads.swift` contains wire DTOs and JSON helper conversions.
+- `MCPServerService.swift` coordinates configured servers, discovered tools/resources/prompts, subscriptions, selected resources, and sampling review state.
+
 ## Supported Transport And Auth
 
 - Transport: MCP Streamable HTTP.

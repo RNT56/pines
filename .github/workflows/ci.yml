@@ -39,6 +39,9 @@ jobs:
       - name: Build Swift package
         run: swift build
 
+      - name: Run Swift package tests
+        run: swift test
+
       - name: Run core verification
         run: swift run PinesCoreTestRunner
 

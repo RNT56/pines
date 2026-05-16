@@ -1,6 +1,6 @@
 # Design System
 
-The app uses a single environment-driven design system in `PinesDesignSystem.swift`. Screens should not hard-code palette, spacing, material, or motion choices. They should consume `\.pinesTheme`.
+The app uses a single environment-driven design system. `PinesDesignSystem.swift` owns tokens, templates, theme resolution, and environment injection. `PinesDesignComponents.swift` owns reusable SwiftUI surfaces, rows, empty states, cards, panels, pills, haptics modifiers, and convenience view modifiers. Screens should not hard-code palette, spacing, material, or motion choices. They should consume `\.pinesTheme`.
 
 ## Theme Templates
 
@@ -46,6 +46,13 @@ The selected mode is applied through `preferredColorScheme`, while the resolved 
 - theme preview cards
 
 This means new screens should be visually complete by default if they use the provided components and environment values.
+
+## File Ownership
+
+- Add palette, typography, spacing, radius, stroke, shadow, material, or motion values in `PinesDesignSystem.swift`.
+- Add reusable views and modifiers in `PinesDesignComponents.swift`.
+- Keep feature-specific layouts in their feature folders, for example `Views/Models` or `Views/Settings`.
+- Avoid rebuilding card, row, pill, and panel styles inside feature views unless the design system is missing a primitive.
 
 ## Usage
 

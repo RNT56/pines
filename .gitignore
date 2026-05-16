@@ -6,11 +6,11 @@ build/
 *.moved-aside
 *.xcscmblueprint
 xcuserdata/
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # SwiftPM
 .build/
 .swiftpm/
-Package.resolved
 
 # macOS
 .DS_Store

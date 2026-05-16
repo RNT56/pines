@@ -9,16 +9,17 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-informational" alt="License: PolyForm Noncommercial 1.0.0"></a>
 </p>
 
-`pines` is an iOS 26-only, local-first AI workbench scaffolded for MLX Swift inference.
+`pines` is an iOS 26-only, local-first AI workbench scaffolded for MLX Swift inference and pinned Schtack-maintained MLX forks.
 
 The repository contains:
 
-- `Pines/`: SwiftUI iOS application shell, design system, app icon assets, and runtime bridge points.
+- `Pines/`: SwiftUI iOS application shell, design system, app icon assets, runtime bridge points, GRDB store, CloudKit sync, MCP client, and feature views.
 - `Sources/PinesCore/`: testable core domain, routing, model catalog, tools, vault, persistence schema, and cloud/BYOK abstractions.
 - `Sources/PinesCore/Architecture/`: module ownership and repository contracts for production feature boundaries.
 - `Sources/PinesCoreTestRunner/`: framework-free checks for the non-UI production contracts.
 - `.github/workflows/`: CI and GitHub Release automation.
 - `project.yml`: XcodeGen configuration for the iOS project.
+- `Package.resolved`: committed SwiftPM lockfile for the package/test graph. The iOS app MLX fork pins live in `project.yml` as exact revisions.
 
 ## Architecture
 
@@ -28,11 +29,21 @@ The app is split into production seams:
 - `PinesArchitecture.modules` documents feature ownership for Chats, Models, Vault, Agents, and Settings, including database tables and dependencies.
 - Repository protocols in `PinesCore` isolate persistence from SwiftUI and let GRDB/CloudKit implementations replace seed data without changing views.
 - Agent/cloud routing remains explicit: cloud execution is opt-in through `AgentPolicy` and is never a silent fallback.
+- App-level implementation files are split by concern: app model DTOs live in `PinesAppModelTypes.swift`, CloudKit persistence merge logic lives in `GRDBPinesStore+CloudKit.swift`, design components live in `PinesDesignComponents.swift`, MCP wire payloads live in `MCPStreamableHTTPPayloads.swift`, model download support lives in `ModelDownloadSupport.swift`, and MLX compatibility models are split by model family.
 - TurboQuant is the requested default local KV-cache strategy. Pine requests the paper-exact Metal backend, reports native Metal codec and compressed-attention availability, falls back to MLX packed attention when needed, and stores compressed vault embeddings locally for approximate search plus FP16 rerank. Runtime defaults adapt to iOS memory/thermal state, including compact 6 GB device guardrails. See `docs/TURBOQUANT.md`.
+
+## MLX Fork Pins
+
+The iOS app links the maintained MLX forks through `project.yml` and the generated Xcode project:
+
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `cf6d72f54e8619e52a746b88a0fb00f172e4ba10`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `f3479d989a606c1d1a959c1dacf184f7fb812734`
+
+These pins are intentional because the app consumes additive TurboQuant and compatibility APIs that are not assumed to exist in upstream package releases yet.
 
 ## Design System
 
-`PinesDesignSystem.swift` defines the complete app style surface:
+`PinesDesignSystem.swift` defines theme tokens and environment plumbing. `PinesDesignComponents.swift` contains reusable SwiftUI components and modifiers.
 
 - User-selectable templates: Evergreen, Graphite, Aurora, Paper, Slate, Porcelain, Sunset, and Obsidian.
 - Interface modes: System, Light, and Dark.
@@ -49,14 +60,15 @@ xcodegen generate
 Run available local core checks:
 
 ```sh
+swift test
 swift run PinesCoreTestRunner
 ```
 
-The active Command Line Tools install on this machine does not expose XCTest or Swift Testing, so the repository includes a framework-free executable test runner. Full iOS compilation requires a full Xcode install selected via `xcode-select`; this machine currently exposes Command Line Tools only.
+The repository keeps `PinesCoreTestRunner` as a framework-light smoke runner for CI and constrained developer environments. Full iOS compilation requires a full Xcode install selected via `xcode-select`.
 
 ## CI And Releases
 
-CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, builds the Swift package, runs `PinesCoreTestRunner`, regenerates the Xcode project, and builds the iOS app without signing on the `macos-26` runner.
+CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, builds the Swift package, runs `swift test`, runs `PinesCoreTestRunner`, regenerates the Xcode project, and builds the iOS app without signing on the `macos-26` runner.
 
 GitHub Releases are tag-driven. Push a semantic tag such as `v0.1.0` to run release validation and publish a source/developer-preview release with checksums:
 

@@ -2,14 +2,14 @@
 
 This file documents third-party software dependencies used by Pines. The Pines repository license does not relicense third-party software. Each dependency remains available under its own license.
 
-This inventory is based on `project.yml`, `Package.swift`, dependency manifests, and the package graph resolved by `xcodebuild -resolvePackageDependencies` on May 15, 2026. No `Package.resolved` file is currently committed; when dependency resolution is pinned, update this file against the committed resolved package versions.
+This inventory is based on `project.yml`, `Package.swift`, dependency manifests, the committed package lockfile, and the package graph resolved by `xcodebuild -resolvePackageDependencies` on May 16, 2026. The Swift package lockfile covers package/test dependencies; the iOS app MLX fork dependencies are exact revision pins in `project.yml`.
 
 ## Direct Swift Package Dependencies
 
 | Package | Source | Version or revision | Products used | License | Notice |
 | --- | --- | --- | --- | --- | --- |
-| MLXSwift | <https://github.com/RNT56/mlx-swift> | `a7641c6e195ef4ff7f02bdd68970e4fb86e9fa2e` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
-| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `e489fb10ec0a6d204769fe4faebb9c8e4229e5dc` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
+| MLXSwift | <https://github.com/RNT56/mlx-swift> | `cf6d72f54e8619e52a746b88a0fb00f172e4ba10` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
+| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `f3479d989a606c1d1a959c1dacf184f7fb812734` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
 | SwiftHuggingFace | <https://github.com/huggingface/swift-huggingface.git> | `0.9.0`, with `Xet` trait enabled through `PinesHubXetSupport` | `HuggingFace` | Apache-2.0 | See Apache-2.0 text below. |
 | SwiftTransformers | <https://github.com/huggingface/swift-transformers> | `1.3.2` | `Tokenizers` | Apache-2.0 | See Apache-2.0 text below. |
 | GRDB | <https://github.com/groue/GRDB.swift.git> | `7.10.0` | `GRDB` | MIT | Copyright (C) 2015-2025 Gwendal Roué |

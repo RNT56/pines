@@ -5,6 +5,7 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 ## Implemented
 
 - XcodeGen iOS app project.
+- Committed SwiftPM package lockfile for package/test dependency reproducibility.
 - SwiftUI app shell with Chats, Models, Vault, and Settings surfaces.
 - Custom app icon assets.
 - Environment-driven design system with selectable templates and light/dark modes.
@@ -19,6 +20,8 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Keychain-backed secret store for iOS.
 - GRDB-backed app store/repository implementation.
 - MLX runtime bridge that loads MLX LLM/VLM/embedder containers when linked.
+- Exact app-level pins to the maintained `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` forks for TurboQuant and compatibility APIs.
+- Split MLX compatibility implementations for Llama 4 and DeepSeek V4 model families.
 - Hugging Face preflight and resumable model install/delete service.
 - BYOK cloud streaming adapters for OpenAI-compatible, OpenRouter, Anthropic, and Gemini.
 - Brave Search BYOK tool and WKWebView browser observe/action runtime.
@@ -27,18 +30,18 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - iOS runtime guardrails: memory/thermal adaptive profiles, compact 6 GB device defaults, memory-warning unload, bounded vector scans, and batched vault embedding ingestion.
 - Read-only runtime diagnostics and OSLog/MetricKit hooks for generation speed, vault retrieval, and memory pressure.
 - CloudKit private database sync service for opt-in settings, conversations, vault chunks, and explicitly enabled embedding/code blobs.
-- Settings persistence, cloud provider settings flow, and audit event UI.
+- MCP Streamable HTTP support for tools, resources, prompts, user-approved sampling, bearer tokens, OAuth PKCE, subscriptions, and safe resource previews.
+- Settings persistence, cloud provider settings flow, MCP server settings, and audit event UI.
 - Layered `.icon` source for the app icon.
-- Framework-free verification runner.
+- Swift Testing core contract tests, iOS app surface tests, and framework-free verification runner.
+- App architecture cleanup that splits large files into app model types, GRDB CloudKit sync, design components, MCP payloads, model download support, Settings detail, Models components, and MLX model-family files.
 
 ## Not Complete
 
 - Real-device TurboQuant acceptance on the A16 through A19 Pro hardware matrix.
 - Production UX hardening for stop/retry/regenerate controls, provider deletion/editing, CloudKit conflict UI, and detailed model compatibility messaging.
 - App Store privacy manifest validation against the final resolved package graph.
-- Fused TurboQuant compressed-attention APIs are implemented in the Schtack MLX forks: row-wise attention code blobs, direct compressed `QK^T`, direct compressed `AV`, tiled online fused decode, runtime capability/self-test probes, and selected kernel profiles. Unsupported devices or shapes still fall back to MLX packed quantized attention.
-- The supported `.metalPolarQJL` rotating path is raw-free for active compressed storage. Prompt caches persist compressed blobs plus layout/ring metadata, while runtime kernel profile selection is recomputed on load.
-- Pines now has a device-adaptive TurboQuant policy layer for A16, A17 Pro, A18, A18 Pro, A19, A19 Pro thin, A19 Pro sustained, and future verified devices. Real-device acceptance remains open for jetsam traces and final quality/throughput thresholds.
+- Remaining monolith candidates are semantic rather than mechanical: `PinesAppModel` still owns high-level orchestration, `SettingsDetailView` owns the full settings editor, and `ModelsViewComponents` owns model list/detail presentation. Split these further only alongside focused feature changes.
 
 ## Verification
 
@@ -46,6 +49,7 @@ Available in this environment:
 
 ```sh
 swift build
+swift test
 swift run PinesCoreTestRunner
 xcodegen generate
 ```

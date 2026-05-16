@@ -8,10 +8,12 @@ CI runs on pull requests, pushes to `main`, and manual dispatch.
 
 Jobs:
 
-- `swift-core`: public-repo hygiene, Swift package build, and `PinesCoreTestRunner`.
+- `swift-core`: public-repo hygiene, Swift package build, `swift test`, and `PinesCoreTestRunner`.
 - `xcode-project`: XcodeGen project generation, generated-project drift check, package resolution, and unsigned generic iOS build.
 
 The iOS job uses the `macos-26` GitHub-hosted runner so Xcode 26 and iOS 26 SDKs are available.
+
+The release workflow mirrors the same package verification before packaging source artifacts. Keep `ci.yml` and `release.yml` aligned when adding required checks.
 
 ## Release Tags
 

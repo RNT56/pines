@@ -3,7 +3,7 @@ import Foundation
 import PinesCore
 
 protocol CloudKitSyncRepository: Sendable {
-    func cloudKitLocalSnapshot(includeVault: Bool, includeEmbeddings: Bool) async throws -> CloudKitLocalSnapshot
+    func cloudKitLocalSnapshot(includeVault: Bool, includeEmbeddings: Bool, includeClean: Bool) async throws -> CloudKitLocalSnapshot
     func applyCloudKitSnapshot(_ snapshot: CloudKitRemoteSnapshot) async throws
     func cloudKitServerChangeTokenData(zoneName: String) async throws -> Data?
     func saveCloudKitServerChangeTokenData(_ data: Data?, zoneName: String) async throws
@@ -160,6 +160,7 @@ struct CloudKitSyncService {
 
         try await ensureZone()
 
+        let hadServerChangeToken = try await syncRepository.cloudKitServerChangeTokenData(zoneName: zoneID.zoneName) != nil
         let remoteBeforeUpload = try await fetchRemoteSnapshot(using: syncRepository)
         if !remoteBeforeUpload.isEmpty {
             try await syncRepository.applyCloudKitSnapshot(remoteBeforeUpload)
@@ -171,7 +172,8 @@ struct CloudKitSyncService {
         let mergedSettings = try await settingsRepository.loadSettings()
         let localSnapshot = try await syncRepository.cloudKitLocalSnapshot(
             includeVault: mergedSettings.storeConfiguration.syncsSourceDocuments,
-            includeEmbeddings: mergedSettings.storeConfiguration.syncsEmbeddings
+            includeEmbeddings: mergedSettings.storeConfiguration.syncsEmbeddings,
+            includeClean: !hadServerChangeToken
         )
         try await save(records(from: localSnapshot))
 

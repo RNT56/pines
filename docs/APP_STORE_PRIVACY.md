@@ -18,4 +18,4 @@ Current manifest entries:
 - `NSPrivacyAccessedAPICategoryFileTimestamp` with reason `C617.1` for local file import, model download resume, SQLite/GRDB file management, and vault source metadata.
 - `NSPrivacyAccessedAPICategoryDiskSpace` with reason `E174.1` for model install preflight, resumable downloads, and user-visible storage/runtime readiness.
 
-Final App Store submission must re-run this review after Xcode resolves the complete package graph for GRDB, MLX, Swift Hugging Face, Swift Transformers, PDFKit, Vision, WebKit, and CloudKit.
+Final App Store submission must re-run this review after Xcode resolves the complete package graph for GRDB, the pinned MLX forks, Swift Hugging Face, Swift Transformers, PDFKit, Vision, WebKit, and CloudKit.

@@ -198,6 +198,27 @@ public struct VaultSearchResult: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public struct VaultSearchOptions: Hashable, Codable, Sendable {
+    public var lexicalCandidateCount: Int
+    public var semanticBatchSize: Int
+    public var semanticRerankCount: Int
+    public var timeoutMilliseconds: Int?
+
+    public init(
+        lexicalCandidateCount: Int = 64,
+        semanticBatchSize: Int = 256,
+        semanticRerankCount: Int = 64,
+        timeoutMilliseconds: Int? = nil
+    ) {
+        self.lexicalCandidateCount = max(1, lexicalCandidateCount)
+        self.semanticBatchSize = max(32, semanticBatchSize)
+        self.semanticRerankCount = max(1, semanticRerankCount)
+        self.timeoutMilliseconds = timeoutMilliseconds
+    }
+
+    public static let `default` = VaultSearchOptions()
+}
+
 public enum AgentRunStatus: String, Hashable, Codable, Sendable, CaseIterable {
     case queued
     case thinking

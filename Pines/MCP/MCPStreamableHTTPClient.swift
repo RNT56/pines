@@ -51,15 +51,56 @@ enum MCPServerEvent: Sendable {
     case request(id: JSONValue, method: String, params: JSONValue?)
 }
 
-final class MCPStreamableHTTPClient: @unchecked Sendable {
-    static let currentProtocolVersion = "2025-11-25"
-
-    private var server: MCPServerConfiguration
-    private let secretStore: any SecretStore
-    private let urlSession: URLSession
+private actor MCPStreamableHTTPClientState {
+    private(set) var server: MCPServerConfiguration
     private var sessionID: String?
     private var negotiatedProtocolVersion: String?
     private var nextID = 1
+
+    init(server: MCPServerConfiguration) {
+        self.server = server
+    }
+
+    func update(server: MCPServerConfiguration) {
+        self.server = server
+    }
+
+    func setNegotiatedProtocolVersion(_ version: String) {
+        negotiatedProtocolVersion = version
+    }
+
+    func setSessionID(_ sessionID: String?) {
+        self.sessionID = sessionID
+    }
+
+    func hasSessionID() -> Bool {
+        sessionID != nil
+    }
+
+    func nextRequestID(expectsResponse: Bool) -> Int? {
+        guard expectsResponse else { return nil }
+        defer { nextID += 1 }
+        return nextID
+    }
+
+    func baseHeaders() -> [(String, String)] {
+        var headers = [(String, String)]()
+        if let negotiatedProtocolVersion {
+            headers.append(("MCP-Protocol-Version", negotiatedProtocolVersion))
+        }
+        if let sessionID {
+            headers.append(("Mcp-Session-Id", sessionID))
+        }
+        return headers
+    }
+}
+
+final class MCPStreamableHTTPClient: Sendable {
+    static let currentProtocolVersion = "2025-11-25"
+
+    private let state: MCPStreamableHTTPClientState
+    private let secretStore: any SecretStore
+    private let urlSession: URLSession
     private let featurePolicy: MCPClientFeaturePolicy
 
     init(
@@ -68,7 +109,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         featurePolicy: MCPClientFeaturePolicy? = nil,
         urlSession: URLSession = .shared
     ) {
-        self.server = server
+        state = MCPStreamableHTTPClientState(server: server)
         self.secretStore = secretStore
         self.urlSession = urlSession
         self.featurePolicy = featurePolicy ?? MCPClientFeaturePolicy(
@@ -79,8 +120,8 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         )
     }
 
-    func update(server: MCPServerConfiguration) {
-        self.server = server
+    func update(server: MCPServerConfiguration) async {
+        await state.update(server: server)
     }
 
     func initialize() async throws -> MCPInitializeResult {
@@ -93,7 +134,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
             ]),
         ])
         let result: MCPInitializeResult = try await sendRequest(method: "initialize", params: params)
-        negotiatedProtocolVersion = result.protocolVersion
+        await state.setNegotiatedProtocolVersion(result.protocolVersion)
         try await sendNotification(method: "notifications/initialized", params: nil)
         return result
     }
@@ -115,10 +156,11 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     func listResources() async throws -> [MCPResourceRecord] {
         var cursor: String?
         var records = [MCPResourceRecord]()
+        let serverID = await state.server.id
         repeat {
             let params = cursor.map { JSONValue.object(["cursor": .string($0)]) }
             let result: MCPResourcesListResult = try await sendRequest(method: "resources/list", params: params)
-            records.append(contentsOf: result.resources.map { $0.record(serverID: server.id) })
+            records.append(contentsOf: result.resources.map { $0.record(serverID: serverID) })
             cursor = result.nextCursor
         } while cursor != nil
         return records
@@ -135,10 +177,11 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     func listResourceTemplates() async throws -> [MCPResourceTemplateRecord] {
         var cursor: String?
         var records = [MCPResourceTemplateRecord]()
+        let serverID = await state.server.id
         repeat {
             let params = cursor.map { JSONValue.object(["cursor": .string($0)]) }
             let result: MCPResourceTemplatesListResult = try await sendRequest(method: "resources/templates/list", params: params)
-            records.append(contentsOf: result.resourceTemplates.map { $0.record(serverID: server.id) })
+            records.append(contentsOf: result.resourceTemplates.map { $0.record(serverID: serverID) })
             cursor = result.nextCursor
         } while cursor != nil
         return records
@@ -155,10 +198,11 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     func listPrompts() async throws -> [MCPPromptRecord] {
         var cursor: String?
         var records = [MCPPromptRecord]()
+        let serverID = await state.server.id
         repeat {
             let params = cursor.map { JSONValue.object(["cursor": .string($0)]) }
             let result: MCPPromptsListResult = try await sendRequest(method: "prompts/list", params: params)
-            records.append(contentsOf: result.prompts.map { $0.record(serverID: server.id) })
+            records.append(contentsOf: result.prompts.map { $0.record(serverID: serverID) })
             cursor = result.nextCursor
         } while cursor != nil
         return records
@@ -194,12 +238,13 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     }
 
     func terminateSession() async {
-        guard sessionID != nil else { return }
+        guard await state.hasSessionID() else { return }
+        let server = await state.server
         var request = URLRequest(url: server.endpointURL)
         request.httpMethod = "DELETE"
-        applyBaseHeaders(to: &request)
+        await applyBaseHeaders(to: &request)
         _ = try? await urlSession.data(for: request)
-        sessionID = nil
+        await state.setSessionID(nil)
     }
 
     func notificationStream() -> AsyncThrowingStream<MCPServerNotification, Error> {
@@ -225,13 +270,14 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
+                    let server = await self.state.server
                     var request = URLRequest(url: server.endpointURL)
                     request.httpMethod = "GET"
                     request.addValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    try await applyAuthHeader(to: &request)
-                    applyBaseHeaders(to: &request)
+                    try await self.applyAuthHeader(to: &request, server: server)
+                    await self.applyBaseHeaders(to: &request)
 
-                    let (bytes, response) = try await urlSession.bytes(for: request)
+                    let (bytes, response) = try await self.urlSession.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else {
                         throw MCPTransportError.invalidHTTPResponse
                     }
@@ -239,7 +285,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
                         throw MCPTransportError.httpStatus(http.statusCode, "")
                     }
                     if let headerSessionID = http.value(forHTTPHeaderField: "Mcp-Session-Id"), !headerSessionID.isEmpty {
-                        sessionID = headerSessionID
+                        await self.state.setSessionID(headerSessionID)
                     }
 
                     var dataLines = [String]()
@@ -277,6 +323,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     }
 
     private func sendJSONRPCResponse(id: JSONValue, result: JSONValue? = nil, error: JSONValue? = nil) async throws {
+        let server = await state.server
         var body: [String: Any] = [
             "jsonrpc": "2.0",
             "id": id.jsonObject,
@@ -292,8 +339,8 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        try await applyAuthHeader(to: &request)
-        applyBaseHeaders(to: &request)
+        try await applyAuthHeader(to: &request, server: server)
+        await applyBaseHeaders(to: &request)
         let (_, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw MCPTransportError.invalidHTTPResponse
@@ -301,11 +348,9 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
     }
 
     private func sendJSONRPC(method: String, params: JSONValue?, expectsResponse: Bool) async throws -> Data {
-        try validateEndpoint(server.endpointURL)
-        let id = expectsResponse ? nextID : nil
-        if expectsResponse {
-            nextID += 1
-        }
+        let server = await state.server
+        try validateEndpoint(server.endpointURL, server: server)
+        let id = await state.nextRequestID(expectsResponse: expectsResponse)
         var body: [String: Any] = [
             "jsonrpc": "2.0",
             "method": method,
@@ -318,9 +363,9 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         }
 
         let bodyData = try JSONSerialization.data(withJSONObject: body)
-        let (data, http) = try await postJSONRPC(bodyData: bodyData, method: method, forceOAuthRefresh: false)
+        let (data, http) = try await postJSONRPC(bodyData: bodyData, method: method, server: server, forceOAuthRefresh: false)
         if http.statusCode == 401, server.authMode == .oauthPKCE {
-            let (retryData, retryHTTP) = try await postJSONRPC(bodyData: bodyData, method: method, forceOAuthRefresh: true)
+            let (retryData, retryHTTP) = try await postJSONRPC(bodyData: bodyData, method: method, server: server, forceOAuthRefresh: true)
             guard (200..<300).contains(retryHTTP.statusCode) else {
                 throw Self.httpError(data: retryData, response: retryHTTP)
             }
@@ -332,19 +377,24 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         return try decodeResponseData(data, response: http, expectsResponse: expectsResponse)
     }
 
-    private func postJSONRPC(bodyData: Data, method: String, forceOAuthRefresh: Bool) async throws -> (Data, HTTPURLResponse) {
+    private func postJSONRPC(
+        bodyData: Data,
+        method: String,
+        server: MCPServerConfiguration,
+        forceOAuthRefresh: Bool
+    ) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: server.endpointURL)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = method == "tools/call" ? 60 : 15
         request.httpBody = bodyData
-        try await applyAuthHeader(to: &request, forceOAuthRefresh: forceOAuthRefresh)
-        applyBaseHeaders(to: &request)
+        try await applyAuthHeader(to: &request, server: server, forceOAuthRefresh: forceOAuthRefresh)
+        await applyBaseHeaders(to: &request)
 
         let (data, http) = try await urlSession.data(for: request)
         if let headerSessionID = http.value(forHTTPHeaderField: "Mcp-Session-Id"), !headerSessionID.isEmpty {
-            sessionID = headerSessionID
+            await state.setSessionID(headerSessionID)
         }
         return (data, http)
     }
@@ -360,7 +410,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         return data
     }
 
-    private func validateEndpoint(_ url: URL) throws {
+    private func validateEndpoint(_ url: URL, server: MCPServerConfiguration) throws {
         guard url.scheme?.lowercased() == "http" else { return }
         if server.allowInsecureLocalHTTP, Self.isLocalHTTPHost(url.host(percentEncoded: false)) {
             return
@@ -368,16 +418,17 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         throw MCPTransportError.insecureHTTPNotAllowed(url)
     }
 
-    private func applyBaseHeaders(to request: inout URLRequest) {
-        if let negotiatedProtocolVersion {
-            request.addValue(negotiatedProtocolVersion, forHTTPHeaderField: "MCP-Protocol-Version")
-        }
-        if let sessionID {
-            request.addValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id")
+    private func applyBaseHeaders(to request: inout URLRequest) async {
+        for (field, value) in await state.baseHeaders() {
+            request.addValue(value, forHTTPHeaderField: field)
         }
     }
 
-    private func applyAuthHeader(to request: inout URLRequest, forceOAuthRefresh: Bool = false) async throws {
+    private func applyAuthHeader(
+        to request: inout URLRequest,
+        server: MCPServerConfiguration,
+        forceOAuthRefresh: Bool = false
+    ) async throws {
         switch server.authMode {
         case .none:
             break
@@ -389,7 +440,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
             }
             request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         case .oauthPKCE:
-            guard let token = try await oauthAccessToken(forceRefresh: forceOAuthRefresh),
+            guard let token = try await oauthAccessToken(forceRefresh: forceOAuthRefresh, server: server),
                   !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else {
                 throw MCPTransportError.missingBearerToken
@@ -398,7 +449,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         }
     }
 
-    private func oauthAccessToken(forceRefresh: Bool) async throws -> String? {
+    private func oauthAccessToken(forceRefresh: Bool, server: MCPServerConfiguration) async throws -> String? {
         if !forceRefresh,
            let token = try await secretStore.read(service: server.keychainService, account: "\(server.keychainAccount).access_token"),
            !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -421,7 +472,7 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
             "resource": server.oauthResource ?? server.endpointURL.absoluteString,
         ]
         request.httpBody = fields
-            .map { "\($0.key.urlFormEncoded)=\($0.value.urlFormEncoded)" }
+            .map { "\($0.key.mcpStreamURLFormEncoded)=\($0.value.mcpStreamURLFormEncoded)" }
             .joined(separator: "&")
             .data(using: .utf8)
         let (data, response) = try await urlSession.data(for: request)
@@ -538,159 +589,5 @@ final class MCPStreamableHTTPClient: @unchecked Sendable {
         }
         let parts = host.split(separator: ".").compactMap { Int($0) }
         return parts.count == 4 && parts[0] == 172 && (16...31).contains(parts[1])
-    }
-}
-
-private struct MCPResponseEnvelope<Result: Decodable>: Decodable {
-    var jsonrpc: String
-    var id: JSONValue?
-    var result: Result?
-    var error: MCPJSONRPCError?
-}
-
-private struct MCPEmptyResult: Decodable {}
-
-private struct MCPResourcesListResult: Decodable {
-    var resources: [RemoteResource]
-    var nextCursor: String?
-}
-
-private struct MCPResourceReadResult: Decodable {
-    var contents: [MCPResourceContent]
-}
-
-private struct MCPResourceTemplatesListResult: Decodable {
-    var resourceTemplates: [RemoteResourceTemplate]
-    var nextCursor: String?
-}
-
-private struct MCPPromptsListResult: Decodable {
-    var prompts: [RemotePrompt]
-    var nextCursor: String?
-}
-
-private struct RemoteResource: Decodable {
-    var uri: String
-    var name: String
-    var title: String?
-    var description: String?
-    var mimeType: String?
-    var size: Int64?
-    var icons: [MCPIcon]?
-    var annotations: MCPAnnotations?
-
-    func record(serverID: MCPServerID) -> MCPResourceRecord {
-        MCPResourceRecord(
-            serverID: serverID,
-            uri: uri,
-            name: name,
-            title: title,
-            description: description,
-            mimeType: mimeType,
-            size: size,
-            icons: icons ?? [],
-            annotations: annotations
-        )
-    }
-}
-
-private struct RemoteResourceTemplate: Decodable {
-    var uriTemplate: String
-    var name: String
-    var title: String?
-    var description: String?
-    var mimeType: String?
-    var icons: [MCPIcon]?
-    var annotations: MCPAnnotations?
-
-    func record(serverID: MCPServerID) -> MCPResourceTemplateRecord {
-        MCPResourceTemplateRecord(
-            serverID: serverID,
-            uriTemplate: uriTemplate,
-            name: name,
-            title: title,
-            description: description,
-            mimeType: mimeType,
-            icons: icons ?? [],
-            annotations: annotations
-        )
-    }
-}
-
-private struct RemotePrompt: Decodable {
-    var name: String
-    var title: String?
-    var description: String?
-    var arguments: [MCPPromptArgument]?
-    var icons: [MCPIcon]?
-
-    func record(serverID: MCPServerID) -> MCPPromptRecord {
-        MCPPromptRecord(
-            serverID: serverID,
-            name: name,
-            title: title,
-            description: description,
-            arguments: arguments ?? [],
-            icons: icons ?? []
-        )
-    }
-}
-
-private struct MCPSamplingCreateMessageParams: Decodable {
-    var messages: [MCPPromptMessage]
-    var modelPreferences: JSONValue?
-    var systemPrompt: String?
-    var includeContext: String?
-    var maxTokens: Int?
-    var temperature: Double?
-    var stopSequences: [String]?
-    var tools: [MCPToolDefinition]?
-}
-
-private struct MCPOAuthTokenResponse: Decodable {
-    var accessToken: String
-    var refreshToken: String?
-
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
-        case refreshToken = "refresh_token"
-    }
-}
-
-private extension String {
-    var urlFormEncoded: String {
-        addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? self
-    }
-}
-
-private extension JSONValue {
-    var stableString: String {
-        switch self {
-        case let .string(value):
-            value
-        case let .number(value):
-            String(value)
-        case let .bool(value):
-            String(value)
-        default:
-            String(decoding: (try? JSONEncoder().encode(self)) ?? Data(), as: UTF8.self)
-        }
-    }
-
-    var jsonObject: Any {
-        switch self {
-        case let .object(value):
-            value.mapValues(\.jsonObject)
-        case let .array(value):
-            value.map(\.jsonObject)
-        case let .string(value):
-            value
-        case let .number(value):
-            value
-        case let .bool(value):
-            value
-        case .null:
-            NSNull()
-        }
     }
 }

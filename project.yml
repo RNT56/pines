@@ -46,8 +46,11 @@ targets:
         PRODUCT_NAME: pines
         INFOPLIST_FILE: Pines/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGN_ENTITLEMENTS: Pines/Pines.entitlements
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PINES_CLOUDKIT_ENABLED"
+        CODE_SIGN_ENTITLEMENTS: "$(PINES_CODE_SIGN_ENTITLEMENTS)"
+        PINES_CODE_SIGN_ENTITLEMENTS: Pines/Pines.entitlements
+        PINES_ICLOUD_SWIFT_FLAGS: "-D PINES_CLOUDKIT_ENABLED"
+        OTHER_SWIFT_FLAGS: "$(inherited) $(PINES_ICLOUD_SWIFT_FLAGS)"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited)"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WLDMWQ963U
         CURRENT_PROJECT_VERSION: 1
@@ -122,17 +125,35 @@ targets:
     dependencies:
       - package: PinesCore
         product: PinesWatchSupport
+  PinesTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: PinesTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.schtack.pines.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: WLDMWQ963U
+    dependencies:
+      - package: PinesCore
+        product: PinesCore
 schemes:
   Pines:
     build:
       targets:
-        Pines: all
-        PinesWatch: all
+        Pines: [run, profile, analyze, archive]
+        PinesWatch: [run, profile, analyze, archive]
+        PinesTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       gatherCoverageData: true
+      targets:
+        - PinesTests
   PinesWatch:
     build:
       targets:

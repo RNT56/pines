@@ -54,6 +54,10 @@ let package = Package(
             dependencies: ["PinesCore"]
         ),
         .testTarget(
+            name: "PinesCoreTests",
+            dependencies: ["PinesCore"]
+        ),
+        .testTarget(
             name: "PinesWatchSupportTests",
             dependencies: ["PinesWatchSupport"]
         ),
