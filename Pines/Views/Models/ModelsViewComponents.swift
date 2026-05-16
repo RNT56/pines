@@ -274,7 +274,7 @@ private struct ModelRow: View {
                 )
             }
             if let progress = model.downloadProgress, progress.isActive {
-                PinesProgressBar(value: progress.fractionCompleted)
+                PinesProgressBar(value: progress.fractionCompleted, animates: false)
                     .padding(.horizontal, theme.spacing.small)
                 Text(progress.currentFile ?? progress.status.title)
                     .font(theme.typography.caption)
@@ -426,8 +426,7 @@ struct ModelDetailView: View {
 
                 if let progress = model.downloadProgress, progress.isActive {
                     VStack(alignment: .leading, spacing: theme.spacing.small) {
-                        PinesProgressBar(value: progress.fractionCompleted, tint: model.status.tint(in: theme))
-                            .animation(theme.motion.progressUpdate, value: progress.fractionCompleted)
+                        PinesProgressBar(value: progress.fractionCompleted, tint: model.status.tint(in: theme), animates: false)
 
                         Text(progress.progressLabel)
                             .font(theme.typography.caption)
@@ -577,8 +576,7 @@ struct ModelDetailView: View {
     private var readinessCard: some View {
         PinesCardSection("Install Timeline", subtitle: model.downloadProgress?.progressLabel ?? model.install.state.title, systemImage: "arrow.down.doc") {
             if let progress = model.downloadProgress, progress.isActive {
-                PinesProgressBar(value: progress.fractionCompleted)
-                    .animation(theme.motion.progressUpdate, value: progress.fractionCompleted)
+                PinesProgressBar(value: progress.fractionCompleted, animates: false)
             }
 
             PinesTimeline(items: installTimelineItems)

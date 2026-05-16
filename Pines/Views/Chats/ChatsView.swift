@@ -101,7 +101,7 @@ private struct ChatModelPickerButton: View {
         Menu {
             let sections = appModel.modelPickerSections(services: services)
             if sections.isEmpty {
-                Text("No text models available")
+                Text("No model installed")
             } else {
                 ForEach(sections) { section in
                     Section(section.title) {
@@ -123,7 +123,6 @@ private struct ChatModelPickerButton: View {
             }
         } label: {
             HStack(spacing: theme.spacing.xsmall) {
-                Image(systemName: "sparkles.rectangle.stack")
                 Text(currentModelLabel)
                     .lineLimit(1)
                     .minimumScaleFactor(0.76)
@@ -133,9 +132,24 @@ private struct ChatModelPickerButton: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
             }
+            .font(theme.typography.callout.weight(.semibold))
+            .foregroundStyle(theme.colors.accent)
+            .padding(.horizontal, theme.spacing.medium)
+            .frame(maxWidth: fillWidth ? .infinity : nil, minHeight: 44)
+            .background(theme.colors.glassSurface, in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+            }
+            .overlay {
+                Capsule()
+                    .strokeBorder(theme.colors.surfaceHighlight.opacity(0.68), lineWidth: theme.stroke.hairline)
+                    .blendMode(.plusLighter)
+            }
+            .shadow(color: theme.shadow.panelColor.opacity(0.22), radius: theme.shadow.panelRadius * 0.24, x: 0, y: theme.shadow.panelY * 0.18)
+            .contentShape(Capsule())
         }
         .accessibilityLabel(accessibilityLabel)
-        .pinesButtonStyle(.secondary, fillWidth: fillWidth)
         .task {
             await appModel.refreshCloudModelCatalog(services: services)
         }
@@ -144,6 +158,8 @@ private struct ChatModelPickerButton: View {
     private var currentModelLabel: String {
         let sections = appModel.modelPickerSections(services: services)
         let options = sections.flatMap(\.models)
+        guard !options.isEmpty else { return "No model installed" }
+
         if let currentProviderID,
            let currentModelID,
            let match = options.first(where: { $0.providerID == currentProviderID && $0.modelID == currentModelID }) {
@@ -156,7 +172,7 @@ private struct ChatModelPickerButton: View {
         if let match = options.first(where: { $0.providerID == appModel.defaultProviderID && $0.modelID == appModel.defaultModelID }) {
             return match.displayName
         }
-        return fallbackLabel ?? options.first?.displayName ?? "No text models available"
+        return fallbackLabel == "No model selected" ? "Select model" : (fallbackLabel ?? "Select model")
     }
 }
 

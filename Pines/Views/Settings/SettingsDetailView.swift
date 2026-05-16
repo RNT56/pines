@@ -124,7 +124,10 @@ struct SettingsDetailView: View {
                 Task { await appModel.saveSettings(services: services) }
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.card.gridMinWidth), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: PinesThemePickerLayout.gridMinWidth), spacing: PinesThemePickerLayout.gridSpacing)],
+                spacing: PinesThemePickerLayout.gridSpacing
+            ) {
                 ForEach(PinesThemeTemplate.allCases) { template in
                     Button {
                         withAnimation(theme.motion.selection) {

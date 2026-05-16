@@ -223,6 +223,8 @@ final class PinesHaptics: ObservableObject {
 
     #if canImport(CoreHaptics)
     private var hapticEngine: CHHapticEngine?
+    private var hapticEngineRunning = false
+    private var lastHapticEngineStartAttempt = Date.distantPast
     #endif
 
     init() {
@@ -396,23 +398,35 @@ final class PinesHaptics: ObservableObject {
     private func prepareCoreHaptics() {
         #if canImport(CoreHaptics)
         guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
-        guard hapticEngine == nil else { return }
+        if hapticEngineRunning { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastHapticEngineStartAttempt) > 0.4 else { return }
+        lastHapticEngineStartAttempt = now
+
         do {
-            let engine = try CHHapticEngine()
+            let engine: CHHapticEngine
+            if let hapticEngine {
+                engine = hapticEngine
+            } else {
+                engine = try CHHapticEngine()
+            }
             engine.stoppedHandler = { [weak self] _ in
                 Task { @MainActor in
+                    self?.hapticEngineRunning = false
                     self?.hapticEngine = nil
                 }
             }
             engine.resetHandler = { [weak self] in
                 Task { @MainActor in
+                    self?.hapticEngineRunning = false
                     self?.hapticEngine = nil
-                    self?.prepareCoreHaptics()
                 }
             }
-            try engine.start()
             hapticEngine = engine
+            try engine.start()
+            hapticEngineRunning = true
         } catch {
+            hapticEngineRunning = false
             hapticEngine = nil
         }
         #endif
@@ -433,7 +447,7 @@ final class PinesHaptics: ObservableObject {
     ) {
         #if canImport(CoreHaptics)
         prepareCoreHaptics()
-        guard let hapticEngine else {
+        guard let hapticEngine, hapticEngineRunning else {
             impact(fallback, intensity: fallbackIntensity)
             return
         }
@@ -467,27 +481,40 @@ private struct PinesScrollHapticSnapshot: Equatable {
     var maxOffset: CGFloat?
 }
 
+private final class PinesScrollHapticCoordinator {
+    private var gate = PinesScrollHapticGate()
+
+    func reset() {
+        gate.reset()
+    }
+
+    func event(for snapshot: PinesScrollHapticSnapshot) -> PinesHapticEvent? {
+        gate.event(offset: snapshot.offset, minOffset: snapshot.minOffset, maxOffset: snapshot.maxOffset)
+    }
+}
+
 private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
     @EnvironmentObject private var haptics: PinesHaptics
-    @State private var gate = PinesScrollHapticGate()
+    @State private var coordinator = PinesScrollHapticCoordinator()
 
     func body(content: Content) -> some View {
         content
             .onScrollGeometryChange(for: PinesScrollHapticSnapshot.self) { geometry in
                 let minOffset = -geometry.contentInsets.top
                 let maxOffset = max(minOffset, geometry.contentSize.height - geometry.containerSize.height + geometry.contentInsets.bottom)
+                let offset = (geometry.contentOffset.y / 8).rounded() * 8
                 return PinesScrollHapticSnapshot(
-                    offset: geometry.contentOffset.y,
+                    offset: offset,
                     minOffset: minOffset,
                     maxOffset: maxOffset > minOffset ? maxOffset : nil
                 )
             } action: { _, snapshot in
                 guard haptics.mode == .expressive else {
-                    gate.reset()
+                    coordinator.reset()
                     return
                 }
 
-                if let event = gate.event(offset: snapshot.offset, minOffset: snapshot.minOffset, maxOffset: snapshot.maxOffset) {
+                if let event = coordinator.event(for: snapshot) {
                     haptics.play(event)
                 }
             }

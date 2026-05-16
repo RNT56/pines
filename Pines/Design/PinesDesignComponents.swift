@@ -480,78 +480,80 @@ struct PinesThemePreviewCard: View {
 
     var body: some View {
         let preview = PinesTheme.resolve(template: template, mode: currentTheme.mode, systemScheme: currentTheme.colorScheme)
-        VStack(alignment: .leading, spacing: preview.spacing.small) {
+        VStack(alignment: .leading, spacing: PinesThemePickerLayout.cardSpacing) {
             HStack {
                 Text(template.title)
-                    .font(preview.typography.headline)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(preview.colors.primaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
 
                 Spacer()
 
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(preview.colors.accent)
-                        .transition(.scale.combined(with: .opacity))
-                }
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(preview.colors.accent)
+                    .opacity(isSelected ? 1 : 0)
+                    .frame(width: 18, height: 18)
             }
 
             VStack(spacing: 6) {
-                RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                RoundedRectangle(cornerRadius: PinesThemePickerLayout.previewRadius, style: .continuous)
                     .fill(preview.colors.secondaryBackground)
                     .frame(height: 16)
                     .overlay(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                        RoundedRectangle(cornerRadius: PinesThemePickerLayout.previewRadius, style: .continuous)
                             .fill(preview.colors.sidebarSelection)
                             .frame(width: 72, height: 10)
                             .padding(.leading, 8)
                     }
 
                 HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                    RoundedRectangle(cornerRadius: PinesThemePickerLayout.previewRadius, style: .continuous)
                         .fill(preview.colors.assistantBubble)
 
-                    RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                    RoundedRectangle(cornerRadius: PinesThemePickerLayout.previewRadius, style: .continuous)
                         .fill(preview.colors.userBubble)
 
-                    RoundedRectangle(cornerRadius: preview.radius.control, style: .continuous)
+                    RoundedRectangle(cornerRadius: PinesThemePickerLayout.previewRadius, style: .continuous)
                         .fill(preview.colors.toolBubble)
                 }
                 .frame(height: 28)
             }
             .padding(8)
-            .background(preview.colors.elevatedSurface, in: RoundedRectangle(cornerRadius: preview.radius.panel, style: .continuous))
+            .background(preview.colors.elevatedSurface, in: RoundedRectangle(cornerRadius: PinesThemePickerLayout.previewRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: preview.radius.panel, style: .continuous)
-                    .strokeBorder(preview.colors.separator, lineWidth: preview.stroke.hairline)
+                RoundedRectangle(cornerRadius: PinesThemePickerLayout.previewRadius, style: .continuous)
+                    .strokeBorder(preview.colors.separator, lineWidth: PinesThemePickerLayout.hairline)
             }
 
             HStack(spacing: 5) {
-                ForEach([preview.colors.accent, preview.colors.info, preview.colors.warning, preview.colors.chartC], id: \.description) { color in
+                ForEach(Array([preview.colors.accent, preview.colors.info, preview.colors.warning, preview.colors.chartC, preview.colors.chartD, preview.colors.chartF].enumerated()), id: \.offset) { _, color in
                     Circle()
                         .fill(color)
-                        .frame(width: 15, height: 15)
-                        .overlay(Circle().strokeBorder(preview.colors.separator, lineWidth: preview.stroke.hairline))
+                        .frame(width: PinesThemePickerLayout.swatchSize, height: PinesThemePickerLayout.swatchSize)
+                        .overlay(Circle().strokeBorder(preview.colors.separator, lineWidth: PinesThemePickerLayout.hairline))
                 }
             }
             .frame(height: 18)
 
             Text(template.subtitle)
-                .font(preview.typography.caption)
+                .font(.caption)
                 .foregroundStyle(preview.colors.secondaryText)
                 .lineLimit(2)
                 .minimumScaleFactor(0.82)
         }
-        .padding(preview.spacing.medium)
-        .background(preview.colors.surface, in: RoundedRectangle(cornerRadius: preview.radius.sheet, style: .continuous))
+        .padding(PinesThemePickerLayout.cardPadding)
+        .frame(maxWidth: .infinity, minHeight: PinesThemePickerLayout.cardHeight, maxHeight: PinesThemePickerLayout.cardHeight, alignment: .topLeading)
+        .background(preview.colors.surface, in: RoundedRectangle(cornerRadius: PinesThemePickerLayout.cardRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: preview.radius.sheet, style: .continuous)
-                .strokeBorder(isSelected ? preview.colors.accent : preview.colors.separator, lineWidth: isSelected ? preview.stroke.selected : preview.stroke.hairline)
+            RoundedRectangle(cornerRadius: PinesThemePickerLayout.cardRadius, style: .continuous)
+                .strokeBorder(
+                    isSelected ? preview.colors.accent : preview.colors.separator,
+                    lineWidth: PinesThemePickerLayout.selectedStroke
+                )
         }
-        .shadow(color: preview.shadow.panelColor.opacity(isSelected ? 1 : 0.45), radius: isSelected ? preview.shadow.panelRadius * 0.45 : preview.shadow.panelRadius * 0.22, x: 0, y: isSelected ? preview.shadow.panelY * 0.45 : preview.shadow.panelY * 0.20)
-        .scaleEffect(isSelected && !reduceMotion ? 1.015 : 1)
-        .animation(reduceMotion ? nil : preview.motion.standard, value: isSelected)
+        .shadow(color: preview.shadow.panelColor.opacity(isSelected ? 0.42 : 0.20), radius: isSelected ? 6 : 3, x: 0, y: isSelected ? 3 : 1)
+        .animation(reduceMotion ? nil : currentTheme.motion.standard, value: isSelected)
     }
 }
 
@@ -869,6 +871,7 @@ struct PinesProgressBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let value: Double
     var tint: Color?
+    var animates = true
 
     private var clampedValue: Double {
         min(1, max(0, value))
@@ -893,7 +896,7 @@ struct PinesProgressBar: View {
             }
         }
         .frame(height: 7)
-        .animation(reduceMotion ? nil : theme.motion.standard, value: clampedValue)
+        .animation(reduceMotion || !animates ? nil : theme.motion.standard, value: clampedValue)
     }
 }
 
@@ -1135,6 +1138,7 @@ struct PinesSidebarRow<Accessory: View>: View {
         }
         .padding(.horizontal, theme.row.horizontalPadding)
         .padding(.vertical, theme.row.verticalPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: theme.row.minHeight)
         .background(rowBackground, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
         .overlay {
@@ -1580,6 +1584,7 @@ private struct PinesSidebarListChromeModifier: ViewModifier {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(theme.colors.sidebarBackground)
+            .environment(\.defaultMinListRowHeight, theme.row.minHeight + theme.spacing.small)
     }
 }
 
@@ -1591,12 +1596,13 @@ private struct PinesSidebarListRowModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .listRowInsets(insets ?? EdgeInsets(
-                top: theme.spacing.xxsmall,
-                leading: theme.spacing.xsmall,
-                bottom: theme.spacing.xxsmall,
-                trailing: theme.spacing.xsmall
+                top: theme.spacing.xsmall,
+                leading: theme.spacing.small,
+                bottom: theme.spacing.xsmall,
+                trailing: theme.spacing.small
             ))
-            .listRowBackground(background ?? theme.colors.listSectionBackground)
+            .listRowSeparator(.hidden)
+            .listRowBackground(background ?? Color.clear)
     }
 }
 

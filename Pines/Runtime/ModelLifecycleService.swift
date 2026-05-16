@@ -2,6 +2,49 @@ import CryptoKit
 import Foundation
 import PinesCore
 
+private struct ModelDownloadProgressWriteGate {
+    private static let minimumInterval: TimeInterval = 1.25
+    private static let minimumFractionDelta = 0.01
+    private static let minimumByteDelta: Int64 = 16 * 1024 * 1024
+
+    private var lastPersistedAt = Date.distantPast
+    private var lastPersistedBytes: Int64 = 0
+    private var lastPersistedFraction: Double?
+    private var lastPersistedTotalBytes: Int64?
+
+    mutating func shouldPersist(_ progress: ModelDownloadProgress, now: Date = Date()) -> Bool {
+        guard progress.status == .downloading else { return true }
+
+        let elapsed = now.timeIntervalSince(lastPersistedAt)
+        guard elapsed >= Self.minimumInterval else { return false }
+
+        let byteDelta = progress.bytesReceived - lastPersistedBytes
+        guard byteDelta >= Self.minimumByteDelta else {
+            if progress.totalBytes != lastPersistedTotalBytes {
+                return true
+            }
+
+            guard let fraction = fraction(for: progress) else {
+                return byteDelta > 0
+            }
+            return abs(fraction - (lastPersistedFraction ?? 0)) >= Self.minimumFractionDelta
+        }
+
+        return true
+    }
+
+    mutating func record(_ progress: ModelDownloadProgress, now: Date = Date()) {
+        lastPersistedAt = now
+        lastPersistedBytes = progress.bytesReceived
+        lastPersistedFraction = fraction(for: progress)
+        lastPersistedTotalBytes = progress.totalBytes
+    }
+
+    private func fraction(for progress: ModelDownloadProgress) -> Double? {
+        guard let totalBytes = progress.totalBytes, totalBytes > 0 else { return nil }
+        return min(1, max(0, Double(progress.bytesReceived) / Double(totalBytes)))
+    }
+}
 
 struct ModelLifecycleService: Sendable {
     private static let downloadTasks = ModelDownloadTaskCoordinator()
@@ -215,7 +258,7 @@ struct ModelLifecycleService: Sendable {
 
         do {
             var received: Int64 = 0
-            var lastProgressWrite = Date.distantPast
+            var progressWriteGate = ModelDownloadProgressWriteGate()
 
             for file in files {
                 try Task.checkCancellation()
@@ -223,7 +266,7 @@ struct ModelLifecycleService: Sendable {
                 progress.currentFile = file.path
                 progress.bytesReceived = received
                 progress.updatedAt = Date()
-                try await upsertDownloadProgress(progress)
+                try await upsertDownloadProgress(progress, gate: &progressWriteGate, force: true)
 
                 let destination = stagingURL.appending(path: file.path)
                 try FileManager.default.createDirectory(
@@ -256,10 +299,8 @@ struct ModelLifecycleService: Sendable {
                         }
                     }
                     let now = Date()
-                    guard now.timeIntervalSince(lastProgressWrite) > 0.4 else { return }
-                    lastProgressWrite = now
                     progress.updatedAt = now
-                    try await upsertDownloadProgress(progress)
+                    try await upsertDownloadProgress(progress, gate: &progressWriteGate)
                 }
 
                 if let oid = file.oid, oid.count == 64 {
@@ -267,8 +308,10 @@ struct ModelLifecycleService: Sendable {
                     progress.status = .verifying
                     progress.checksum = oid
                     progress.updatedAt = Date()
-                    try await upsertDownloadProgress(progress)
-                    let digest = try Self.sha256Hex(url: destination)
+                    try await upsertDownloadProgress(progress, gate: &progressWriteGate, force: true)
+                    let digest = try await Task.detached(priority: .utility) {
+                        try Self.sha256Hex(url: destination)
+                    }.value
                     guard digest.caseInsensitiveCompare(oid) == .orderedSame else {
                         throw URLError(.cannotDecodeContentData)
                     }
@@ -279,7 +322,7 @@ struct ModelLifecycleService: Sendable {
             progress.bytesReceived = received
             progress.localURL = finalURL
             progress.updatedAt = Date()
-            try await upsertDownloadProgress(progress)
+            try await upsertDownloadProgress(progress, gate: &progressWriteGate, force: true)
 
             try Task.checkCancellation()
             if FileManager.default.fileExists(atPath: finalURL.path) {
@@ -300,7 +343,7 @@ struct ModelLifecycleService: Sendable {
             progress.status = .installed
             progress.bytesReceived = progress.totalBytes ?? received
             progress.updatedAt = Date()
-            try await upsertDownloadProgress(progress)
+            try await upsertDownloadProgress(progress, gate: &progressWriteGate, force: true)
             try await auditRepository?.append(
                 AuditEvent(category: .modelDownload, summary: "Installed \(repository)", modelID: ModelID(rawValue: repository))
             )
@@ -386,6 +429,16 @@ struct ModelLifecycleService: Sendable {
     private func upsertDownloadProgress(_ progress: ModelDownloadProgress) async throws {
         try await downloadRepository.upsertDownload(progress)
         await ModelDownloadLiveActivityController.update(progress: progress)
+    }
+
+    private func upsertDownloadProgress(
+        _ progress: ModelDownloadProgress,
+        gate: inout ModelDownloadProgressWriteGate,
+        force: Bool = false
+    ) async throws {
+        guard force || gate.shouldPersist(progress) else { return }
+        gate.record(progress)
+        try await upsertDownloadProgress(progress)
     }
 
     @discardableResult

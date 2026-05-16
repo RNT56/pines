@@ -297,6 +297,12 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
         sequence: Int,
         payload: Payload
     ) {
+        guard WCSession.isSupported(),
+              session.activationState == .activated,
+              session.isPaired,
+              session.isWatchAppInstalled
+        else { return }
+
         guard let message = try? WatchChatCodec.message(
             kind: kind,
             requestID: requestID,
@@ -352,6 +358,7 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
 
     private func publishPhoneStatus() {
         guard WCSession.isSupported(), session.activationState == .activated else { return }
+        guard session.isPaired, session.isWatchAppInstalled else { return }
         guard let message = try? WatchChatCodec.message(kind: .phoneStatus, payload: phoneStatus()) else { return }
         try? session.updateApplicationContext(message)
     }
