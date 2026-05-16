@@ -36,8 +36,8 @@ The app is split into production seams:
 
 The iOS app links the maintained MLX forks through `project.yml` and the generated Xcode project:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `cf6d72f54e8619e52a746b88a0fb00f172e4ba10`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `f3479d989a606c1d1a959c1dacf184f7fb812734`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `dd13c2b55a743473d458058e9d9fb028233065ec`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `4bb7cbc6aafdf6abec4c34bf36f9e649444539f7`
 
 These pins are intentional because the app consumes additive TurboQuant and compatibility APIs that are not assumed to exist in upstream package releases yet.
 
