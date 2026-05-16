@@ -98,7 +98,9 @@ public enum PinesArchitecture {
 
 public protocol ConversationRepository: Sendable {
     func listConversations() async throws -> [ConversationRecord]
+    func listConversationPreviews() async throws -> [ConversationPreviewRecord]
     func observeConversations() -> AsyncStream<[ConversationRecord]>
+    func observeConversationPreviews() -> AsyncStream<[ConversationPreviewRecord]>
     func createConversation(title: String, defaultModelID: ModelID?) async throws -> ConversationRecord
     func updateConversationTitle(_ title: String, conversationID: UUID) async throws
     func setConversationArchived(_ archived: Bool, conversationID: UUID) async throws
@@ -131,6 +133,40 @@ public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {
         self.defaultModelID = defaultModelID
         self.archived = archived
         self.pinned = pinned
+    }
+}
+
+public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: UUID
+    public var title: String
+    public var updatedAt: Date
+    public var defaultModelID: ModelID?
+    public var archived: Bool
+    public var pinned: Bool
+    public var lastMessage: String?
+    public var lastMessageStatus: MessageStatus?
+    public var tokenCount: Int
+
+    public init(
+        id: UUID = UUID(),
+        title: String,
+        updatedAt: Date = Date(),
+        defaultModelID: ModelID? = nil,
+        archived: Bool = false,
+        pinned: Bool = false,
+        lastMessage: String? = nil,
+        lastMessageStatus: MessageStatus? = nil,
+        tokenCount: Int = 0
+    ) {
+        self.id = id
+        self.title = title
+        self.updatedAt = updatedAt
+        self.defaultModelID = defaultModelID
+        self.archived = archived
+        self.pinned = pinned
+        self.lastMessage = lastMessage
+        self.lastMessageStatus = lastMessageStatus
+        self.tokenCount = tokenCount
     }
 }
 

@@ -43,6 +43,12 @@ final class PinesRuntimeMetrics: NSObject, @unchecked Sendable {
             "memory_pressure physical=\(counters.physicalMemoryBytes ?? 0, privacy: .public) available=\(counters.availableMemoryBytes ?? -1, privacy: .public) thermal=\(counters.thermalState ?? "unknown", privacy: .public)"
         )
     }
+
+    func recordStartupPhase(_ phase: String, elapsedSeconds: TimeInterval) {
+        logger.info(
+            "startup_phase phase=\(phase, privacy: .public) elapsed=\(elapsedSeconds, privacy: .public)"
+        )
+    }
 }
 
 #if canImport(MetricKit)

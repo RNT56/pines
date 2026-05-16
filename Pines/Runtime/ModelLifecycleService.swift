@@ -60,10 +60,10 @@ struct ModelLifecycleService: Sendable {
         return classifier.classify(try await catalog.preflight(repository: repository, revision: revision, accessToken: token))
     }
 
-    func install(repository: String, revision: String = "main") async throws {
+    func install(repository: String, revision: String = "main", mode: ModelInstallMode = .automatic) async throws {
         let taskID = UUID()
         guard let task = await Self.downloadTasks.start(repository: repository, id: taskID, operation: { [self] in
-            try await performInstall(repository: repository, revision: revision)
+            try await performInstall(repository: repository, revision: revision, mode: mode)
         }) else {
             return
         }
@@ -162,7 +162,7 @@ struct ModelLifecycleService: Sendable {
         }
     }
 
-    private func performInstall(repository: String, revision: String = "main") async throws {
+    private func performInstall(repository: String, revision: String = "main", mode: ModelInstallMode = .automatic) async throws {
         try await markInterruptedActiveDownloadsCancelled(for: repository)
         let existingInstalls = try await installRepository.listInstalledAndCuratedModels()
         if let existing = existingInstalls
@@ -171,12 +171,16 @@ struct ModelLifecycleService: Sendable {
             case .installed:
                 if let localURL = existing.localURL,
                    let resolvedURL = Self.resolvedModelDirectory(from: localURL, modalities: existing.modalities) {
-                    if resolvedURL != localURL {
-                        var repaired = existing
-                        repaired.localURL = resolvedURL
-                        try await installRepository.upsertInstall(repaired)
+                    if mode == .full, !existing.modalities.contains(.vision) {
+                        try? Self.removeInstalledDirectory(for: repository, localURL: existing.localURL)
+                    } else {
+                        if resolvedURL != localURL {
+                            var repaired = existing
+                            repaired.localURL = resolvedURL
+                            try await installRepository.upsertInstall(repaired)
+                        }
+                        return
                     }
-                    return
                 }
                 try? Self.removeInstalledDirectory(for: repository, localURL: existing.localURL)
             case .downloading, .remote, .failed, .unsupported:
@@ -187,14 +191,15 @@ struct ModelLifecycleService: Sendable {
         try Task.checkCancellation()
         let accessToken = try await huggingFaceToken()
         let input = try await catalog.preflight(repository: repository, revision: revision, accessToken: accessToken)
-        let result = classifier.classify(input)
+        var result = classifier.classify(input)
         guard result.verification != .unsupported else {
             throw InferenceError.unsupportedCapability(result.reasons.joined(separator: "\n"))
         }
+        result.modalities = try mode.resolvedModalities(from: result.modalities)
         try Task.checkCancellation()
         try Self.validateAvailableDiskSpace(for: result.estimatedBytes)
 
-        let files = input.files.filter(Self.shouldDownload)
+        let files = input.files.filter { Self.shouldDownload($0, modalities: result.modalities) }
         try Self.validateDownloadManifest(files, repository: repository, modalities: result.modalities)
         var resolvedFileSizes = Dictionary(
             uniqueKeysWithValues: files.compactMap { file -> (String, Int64)? in
@@ -399,6 +404,18 @@ struct ModelLifecycleService: Sendable {
         // ["*.safetensors", "*.json", "*.jinja"]. The extra tokenizer extensions
         // are retained for imported or legacy local repositories.
         return ["safetensors", "json", "jinja", "model", "txt", "tiktoken"].contains(pathExtension)
+    }
+
+    private static func shouldDownload(_ file: ModelFileInfo, modalities: Set<ModelModality>) -> Bool {
+        guard shouldDownload(file) else { return false }
+        guard !modalities.contains(.vision) else { return true }
+
+        switch filename(file.path) {
+        case "processor_config.json", "preprocessor_config.json", "image_processor_config.json", "video_preprocessor_config.json":
+            return false
+        default:
+            return true
+        }
     }
 
     private func hasActiveDownload(for repository: String) async throws -> Bool {
@@ -790,6 +807,24 @@ struct ModelLifecycleService: Sendable {
             hasher.update(data: data)
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+enum ModelInstallMode: Hashable, Sendable {
+    case automatic
+    case textOnly
+    case full
+
+    func resolvedModalities(from available: Set<ModelModality>) throws -> Set<ModelModality> {
+        switch self {
+        case .automatic, .full:
+            return available
+        case .textOnly:
+            guard available.contains(.text) else {
+                throw InferenceError.unsupportedCapability("This model does not expose a text-only runtime path.")
+            }
+            return [.text]
+        }
     }
 }
 

@@ -42,6 +42,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private var didLoadStartupState = false
     private var isBootstrapping = false
     private var bootstrapBackgroundTask: Task<Void, Never>?
+    private var didStartMCPServers = false
     private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
     private var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
@@ -230,6 +231,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     }
 
     func bootstrap(services: PinesAppServices) async {
+        let startedAt = Date()
         guard !didBootstrap else {
             await refreshAll(services: services)
             return
@@ -238,7 +240,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         isBootstrapping = true
 
         if !didLoadStartupState {
+            let startupStateStartedAt = Date()
             await refreshStartupState(services: services)
+            services.runtimeMetrics.recordStartupPhase("startup_state", elapsedSeconds: Date().timeIntervalSince(startupStateStartedAt))
             didLoadStartupState = true
         }
 
@@ -246,6 +250,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         bootstrapBackgroundTask = Task { [weak self] in
             await self?.finishBackgroundBootstrap(services: services)
         }
+        services.runtimeMetrics.recordStartupPhase("bootstrap_visible", elapsedSeconds: Date().timeIntervalSince(startedAt))
     }
 
     private func refreshStartupState(services: PinesAppServices) async {
@@ -264,17 +269,24 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     }
 
     private func finishBackgroundBootstrap(services: PinesAppServices) async {
+        let startedAt = Date()
         await services.bootstrap()
         try? await services.modelLifecycleService?.reconcileInterruptedDownloads()
-        await refreshAll(services: services)
-        await services.mcpServerService?.start { [weak self] request, server in
-            guard let self else {
-                throw InferenceError.cancelled
-            }
-            return try await self.handleMCPSampling(request, server: server, services: services)
-        }
+        await refreshPostBootstrapState(services: services)
         didBootstrap = true
         isBootstrapping = false
+        services.runtimeMetrics.recordStartupPhase("background_bootstrap", elapsedSeconds: Date().timeIntervalSince(startedAt))
+    }
+
+    private func refreshPostBootstrapState(services: PinesAppServices) async {
+        do {
+            try await refreshModelPreviews(services: services)
+            await normalizeDefaultModelIfNeeded(services: services)
+            await refreshCredentialStatuses(services: services)
+            setIfChanged(\.serviceError, nil)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
     }
 
     func refreshAll(services: PinesAppServices) async {
@@ -288,14 +300,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             await normalizeDefaultModelIfNeeded(services: services)
 
             if let conversationRepository = services.conversationRepository {
-                let conversations = try await conversationRepository.listConversations()
-                var previews = [PinesThreadPreview]()
-                previews.reserveCapacity(conversations.count)
-                for conversation in conversations {
-                    let messages = try await conversationRepository.messages(in: conversation.id)
-                    previews.append(Self.threadPreview(from: conversation, messages: messages))
-                }
-                setIfChanged(\.threads, previews)
+                let previews = try await conversationRepository.listConversationPreviews()
+                setIfChanged(\.threads, mergeThreadPreviews(previews.map(Self.threadPreview(from:))))
             }
 
             if let vaultRepository = services.vaultRepository {
@@ -323,6 +329,55 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    func loadThreadMessages(threadID: UUID, services: PinesAppServices, force: Bool = false) async {
+        guard let repository = services.conversationRepository else { return }
+        guard let existing = threads.first(where: { $0.id == threadID }) else { return }
+        guard force || existing.messages.isEmpty else { return }
+        guard existing.status != .streaming else { return }
+
+        await refreshThread(conversationID: threadID, repository: repository)
+    }
+
+    private func mergeThreadPreviews(_ previews: [PinesThreadPreview]) -> [PinesThreadPreview] {
+        previews.map { preview in
+            guard let existing = threads.first(where: { $0.id == preview.id }) else {
+                return preview
+            }
+            if existing.status == .streaming,
+               let activeRunID,
+               existing.messages.contains(where: { $0.id == activeRunID }) {
+                return Self.threadPreview(from: existing, messages: existing.messages, status: .streaming)
+            }
+            guard !existing.messages.isEmpty else {
+                return preview
+            }
+            return PinesThreadPreview(
+                id: preview.id,
+                title: preview.title,
+                modelName: preview.modelName,
+                modelID: preview.modelID,
+                lastMessage: preview.lastMessage,
+                messages: existing.messages,
+                status: preview.status,
+                updatedLabel: preview.updatedLabel,
+                tokenCount: preview.tokenCount
+            )
+        }
+    }
+
+    func startMCPServersIfNeeded(services: PinesAppServices) async {
+        guard !didStartMCPServers else { return }
+        didStartMCPServers = true
+        let startedAt = Date()
+        await services.mcpServerService?.start { [weak self] request, server in
+            guard let self else {
+                throw InferenceError.cancelled
+            }
+            return try await self.handleMCPSampling(request, server: server, services: services)
+        }
+        services.runtimeMetrics.recordStartupPhase("mcp_servers_start", elapsedSeconds: Date().timeIntervalSince(startedAt))
     }
 
     private func applySettings(_ settings: AppSettingsSnapshot) {
@@ -710,6 +765,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private func mcpResourceContextMessages(services: PinesAppServices) async -> [ChatMessage] {
         let selected = mcpResources.filter(\.selectedForContext).prefix(4)
         guard !selected.isEmpty else { return [] }
+        await startMCPServersIfNeeded(services: services)
         var sections = [String]()
         var attachments = [ChatAttachment]()
         for resource in selected {
@@ -796,14 +852,18 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
-    func installModel(repository: String, services: PinesAppServices) async {
+    func installModel(
+        repository: String,
+        mode: ModelInstallMode = .automatic,
+        services: PinesAppServices
+    ) async {
         do {
             guard let lifecycle = services.modelLifecycleService else {
                 setIfChanged(\.serviceError, "Model lifecycle service is unavailable.")
                 return
             }
             markModelDownloadQueued(repository: repository, services: services)
-            try await lifecycle.install(repository: repository)
+            try await lifecycle.install(repository: repository, mode: mode)
             if defaultModelID == nil {
                 let installs = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
                 if let installed = installs.first(where: { $0.repository.caseInsensitiveCompare(repository) == .orderedSame && $0.state == .installed }),
@@ -1431,25 +1491,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
         if let conversationRepository = services.conversationRepository {
             repositoryObservationTasks.append(Task { [weak self] in
-                for await conversations in conversationRepository.observeConversations() {
-                    var previews = [PinesThreadPreview]()
-                    previews.reserveCapacity(conversations.count)
-                    for conversation in conversations {
-                        guard let messages = try? await conversationRepository.messages(in: conversation.id) else { continue }
-                        let preview = await MainActor.run {
-                            if let self,
-                               let activeRunID = self.activeRunID,
-                               let existing = self.threads.first(where: { $0.id == conversation.id }),
-                               existing.status == .streaming,
-                               existing.messages.contains(where: { $0.id == activeRunID }) {
-                                return Self.threadPreview(from: existing, messages: existing.messages, status: .streaming)
-                            }
-                            return Self.threadPreview(from: conversation, messages: messages)
-                        }
-                        previews.append(preview)
-                    }
+                for await records in conversationRepository.observeConversationPreviews() {
                     await MainActor.run {
-                        self?.setIfChanged(\.threads, previews)
+                        guard let self else { return }
+                        self.setIfChanged(\.threads, self.mergeThreadPreviews(records.map(Self.threadPreview(from:))))
                     }
                 }
             })
@@ -2044,6 +2089,22 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             status: record.archived ? .archived : (status ?? .local),
             updatedLabel: RelativeDateTimeFormatter.shortLabel(for: updatedAt ?? record.updatedAt),
             tokenCount: threadTokenCount(messages)
+        )
+    }
+
+    private static func threadPreview(from record: ConversationPreviewRecord) -> PinesThreadPreview {
+        let lastMessage = record.lastMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let status: PinesThreadStatus = record.archived ? .archived : .local
+        return PinesThreadPreview(
+            id: record.id,
+            title: record.title,
+            modelName: record.defaultModelID?.rawValue.components(separatedBy: "/").last ?? "No model selected",
+            modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
+            lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
+            messages: [],
+            status: status,
+            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt),
+            tokenCount: record.tokenCount
         )
     }
 

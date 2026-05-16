@@ -70,6 +70,11 @@ public struct ModelPreflightClassifier: Sendable {
         }
         if modelType == nil {
             reasons.append("config.json does not expose model_type.")
+        } else if let modelType,
+                  !supportedLLMTypes.contains(modelType),
+                  !supportedVLMTypes.contains(modelType),
+                  !supportedEmbedderTypes.contains(modelType) {
+            reasons.append("model_type \(modelType) is not registered in the linked MLX runtime.")
         }
 
         let hasExperimentalOneBitSignal = lowerRepository.contains("1bit")
@@ -114,12 +119,12 @@ public struct ModelPreflightClassifier: Sendable {
 
     public static let defaultSupportedLLMTypes: Set<String> = [
         "llama", "mistral", "qwen2", "qwen3", "qwen3_moe", "gemma", "gemma2",
-        "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text",
+        "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant",
         "qwen3_next", "qwen3_5", "qwen3_5_moe", "qwen3_5_text",
-        "phi", "phi3", "phimoe", "deepseek_v3", "glm4", "glm4_moe",
+        "phi", "phi3", "phimoe", "deepseek_v3", "deepseek_v32", "glm4", "glm4_moe",
         "glm4_moe_lite", "starcoder2", "cohere", "openelm", "internlm2",
         "granite", "granitemoehybrid", "mimo", "mimo_v2_flash", "minimax",
-        "mistral3", "bitnet", "smollm3", "ernie4_5", "lfm2", "lfm2_moe",
+        "minimax_m2", "mistral3", "bitnet", "smollm3", "ernie4_5", "lfm2", "lfm2_moe",
         "baichuan_m1", "exaone4", "olmo2", "olmo3", "olmoe", "falcon_h1",
         "jamba", "gpt_oss", "nanochat", "nemotron_h", "apertus", "afmoe",
         "bailing_moe", "minicpm", "lille-130m", "acereason",

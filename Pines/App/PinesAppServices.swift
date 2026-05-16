@@ -109,7 +109,7 @@ final class PinesAppServices: @unchecked Sendable {
             ServiceHealth(
                 name: "Tool Registry",
                 readiness: .ready,
-                summary: "Built-in tools and enabled MCP tools are registered at boot."
+                summary: "Built-in tools register after first frame; enabled MCP tools start when Tools or MCP context needs them."
             ),
             ServiceHealth(
                 name: "MCP Servers",

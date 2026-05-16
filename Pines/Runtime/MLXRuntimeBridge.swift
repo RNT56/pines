@@ -254,6 +254,7 @@ extension MLXRuntimeBridge: InferenceProvider {
 private actor MLXRuntimeState {
     private var activeInstall: ModelInstall?
     private var activeProfile = RuntimeProfile()
+    private var didRegisterModelAliases = false
 
     #if canImport(MLXLMCommon)
     private var textContainer: MLXLMCommon.ModelContainer?
@@ -269,6 +270,7 @@ private actor MLXRuntimeState {
         activeProfile = profile
 
         #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
+        await registerModelAliasesIfNeeded()
         let configuration = try Self.lmConfiguration(for: install)
         if install.modalities.contains(.vision) {
             visionContainer = try await VLMModelFactory.shared.loadContainer(
@@ -289,6 +291,36 @@ private actor MLXRuntimeState {
         throw InferenceError.providerUnavailable("mlx-local")
         #endif
     }
+
+    #if canImport(MLXLLM) && canImport(MLXLMCommon)
+    private func registerModelAliasesIfNeeded() async {
+        guard !didRegisterModelAliases else { return }
+        didRegisterModelAliases = true
+
+        await LLMTypeRegistry.shared.registerModelType(
+            "gemma4_assistant",
+            creator: Self.llmCreator(Gemma4Configuration.self, Gemma4Model.init)
+        )
+        await LLMTypeRegistry.shared.registerModelType(
+            "deepseek_v32",
+            creator: Self.llmCreator(DeepseekV3Configuration.self, DeepseekV3Model.init)
+        )
+        await LLMTypeRegistry.shared.registerModelType(
+            "minimax_m2",
+            creator: Self.llmCreator(MiniMaxConfiguration.self, MiniMaxModel.init)
+        )
+    }
+
+    private nonisolated static func llmCreator<C: Codable, M: LanguageModel>(
+        _ configurationType: C.Type,
+        _ modelInit: @escaping (C) -> M
+    ) -> (Data) throws -> LanguageModel {
+        { data in
+            let configuration = try JSONDecoder.json5().decode(configurationType, from: data)
+            return modelInit(configuration)
+        }
+    }
+    #endif
 
     func unload() async {
         activeInstall = nil

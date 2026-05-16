@@ -603,19 +603,50 @@ private struct ModelDetailView: View {
                     .disabled(pendingAction != nil)
                 } else {
                     HStack(spacing: theme.spacing.small) {
-                        Button {
-                            runAction(.download) {
-                                await appModel.installModel(repository: model.install.repository, services: services)
+                        if model.canChooseInstallMode {
+                            Menu {
+                                Button("Text only", systemImage: "text.bubble") {
+                                    runAction(.download) {
+                                        await appModel.installModel(
+                                            repository: model.install.repository,
+                                            mode: .textOnly,
+                                            services: services
+                                        )
+                                    }
+                                }
+                                Button("Text + Vision", systemImage: "eye") {
+                                    runAction(.download) {
+                                        await appModel.installModel(
+                                            repository: model.install.repository,
+                                            mode: .full,
+                                            services: services
+                                        )
+                                    }
+                                }
+                            } label: {
+                                ModelActionLabel(
+                                    title: pendingAction == .download ? "Starting" : "Download",
+                                    systemImage: "arrow.down.circle",
+                                    isPending: pendingAction == .download
+                                )
                             }
-                        } label: {
-                            ModelActionLabel(
-                                title: pendingAction == .download ? "Starting" : "Download",
-                                systemImage: "arrow.down.circle",
-                                isPending: pendingAction == .download
-                            )
+                            .pinesButtonStyle(.primary, fillWidth: true)
+                            .disabled(model.install.state == .installed || model.status == .unsupported || pendingAction != nil)
+                        } else {
+                            Button {
+                                runAction(.download) {
+                                    await appModel.installModel(repository: model.install.repository, services: services)
+                                }
+                            } label: {
+                                ModelActionLabel(
+                                    title: pendingAction == .download ? "Starting" : "Download",
+                                    systemImage: "arrow.down.circle",
+                                    isPending: pendingAction == .download
+                                )
+                            }
+                            .pinesButtonStyle(.primary, fillWidth: true)
+                            .disabled(model.install.state == .installed || model.status == .unsupported || pendingAction != nil)
                         }
-                        .pinesButtonStyle(.primary, fillWidth: true)
-                        .disabled(model.install.state == .installed || model.status == .unsupported || pendingAction != nil)
 
                         Button {
                             runAction(.use) {
@@ -967,6 +998,13 @@ private extension PinesModelPreview {
 
     var canStartDownload: Bool {
         install.state != .installed && !hasActiveDownload && status != .unsupported
+    }
+
+    var canChooseInstallMode: Bool {
+        canStartDownload
+            && install.modalities.contains(.text)
+            && install.modalities.contains(.vision)
+            && !install.modalities.contains(.embeddings)
     }
 }
 

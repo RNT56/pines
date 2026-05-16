@@ -165,6 +165,10 @@ private struct SettingsDetailView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(section.title)
+        .task(id: section.destination) {
+            guard section.destination == .tools else { return }
+            await appModel.startMCPServersIfNeeded(services: services)
+        }
         .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .pinesAppBackground()
@@ -1221,7 +1225,7 @@ private struct MCPDisabledCapabilityView: View {
     }
 }
 
-private enum SettingsDestination {
+private enum SettingsDestination: Hashable {
     case design
     case inference
     case privacy

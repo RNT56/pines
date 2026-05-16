@@ -162,6 +162,13 @@ private struct ChatTranscriptView: View {
             }
         }
         .navigationTitle(thread.title)
+        .task(id: "\(thread.id.uuidString)-\(thread.lastMessage)") {
+            await appModel.loadThreadMessages(
+                threadID: thread.id,
+                services: services,
+                force: !thread.messages.isEmpty
+            )
+        }
         .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .toolbar {

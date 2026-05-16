@@ -70,8 +70,54 @@ actor GRDBPinesStore:
         }
     }
 
+    func listConversationPreviews() async throws -> [ConversationPreviewRecord] {
+        try await database.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                SELECT
+                    c.id,
+                    c.title,
+                    c.updated_at,
+                    c.default_model_id,
+                    c.archived_at,
+                    c.pinned,
+                    lm.content AS last_message,
+                    lm.status AS last_message_status,
+                    COALESCE(stats.token_count, 0) AS token_count
+                FROM conversations c
+                LEFT JOIN messages lm ON lm.id = (
+                    SELECT id
+                    FROM messages
+                    WHERE conversation_id = c.id
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
+                LEFT JOIN (
+                    SELECT
+                        conversation_id,
+                        SUM(
+                            CASE
+                                WHEN TRIM(content) = '' THEN 0
+                                ELSE LENGTH(TRIM(content)) - LENGTH(REPLACE(TRIM(content), ' ', '')) + 1
+                            END
+                        ) AS token_count
+                    FROM messages
+                    GROUP BY conversation_id
+                ) stats ON stats.conversation_id = c.id
+                WHERE c.deleted_at IS NULL
+                ORDER BY c.pinned DESC, c.updated_at DESC
+                """
+            ).map(Self.conversationPreview(from:))
+        }
+    }
+
     nonisolated func observeConversations() -> AsyncStream<[ConversationRecord]> {
         pollingStream { try await self.listConversations() }
+    }
+
+    nonisolated func observeConversationPreviews() -> AsyncStream<[ConversationPreviewRecord]> {
+        pollingStream { try await self.listConversationPreviews() }
     }
 
     func createConversation(title: String, defaultModelID: ModelID?) async throws -> ConversationRecord {
@@ -1079,6 +1125,20 @@ actor GRDBPinesStore:
             defaultModelID: (row["default_model_id"] as String?).map(ModelID.init(rawValue:)),
             archived: (row["archived_at"] as Double?) != nil,
             pinned: (row["pinned"] as Int) == 1
+        )
+    }
+
+    private static func conversationPreview(from row: Row) -> ConversationPreviewRecord {
+        ConversationPreviewRecord(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            title: row["title"],
+            updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
+            defaultModelID: (row["default_model_id"] as String?).map(ModelID.init(rawValue:)),
+            archived: (row["archived_at"] as Double?) != nil,
+            pinned: (row["pinned"] as Int) == 1,
+            lastMessage: row["last_message"] as String?,
+            lastMessageStatus: (row["last_message_status"] as String?).flatMap(MessageStatus.init(rawValue:)),
+            tokenCount: row["token_count"] as Int
         )
     }
 

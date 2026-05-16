@@ -215,6 +215,48 @@ struct PinesCoreTestRunner {
         try expectEqual(ministral3.verification, .installable)
         try expectEqual(ministral3.modalities, [.text])
 
+        let gemma4Assistant = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/gemma-4-E2B-it-assistant-bf16",
+                configJSON: #"{"model_type":"gemma4_assistant","text_config":{"model_type":"gemma4_text"}}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 4_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "gemma4_assistant"]
+            )
+        )
+        try expectEqual(gemma4Assistant.verification, .installable)
+        try expectEqual(gemma4Assistant.modalities, [.text])
+
+        let deepseekV32 = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/DeepSeek-V3.2-4bit",
+                configJSON: #"{"model_type":"deepseek_v32"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 300_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "deepseek_v32"]
+            )
+        )
+        try expectEqual(deepseekV32.verification, .installable)
+        try expectEqual(deepseekV32.modalities, [.text])
+
+        let miniMaxM2 = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/MiniMax-M2.1-4bit",
+                configJSON: #"{"model_type":"minimax_m2"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 120_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "minimax_m2"]
+            )
+        )
+        try expectEqual(miniMaxM2.verification, .installable)
+        try expectEqual(miniMaxM2.modalities, [.text])
+
         let glmOCR = ModelPreflightClassifier().classify(
             ModelPreflightInput(
                 repository: "mlx-community/GLM-OCR-8bit",
@@ -230,6 +272,40 @@ struct PinesCoreTestRunner {
         )
         try expectEqual(glmOCR.verification, .installable)
         try expectEqual(glmOCR.modalities, [.text, .vision])
+
+        let unsupportedRuntimeType = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit",
+                configJSON: #"{"model_type":"llama4"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 40_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "llama4"]
+            )
+        )
+        try expectEqual(unsupportedRuntimeType.verification, .unsupported)
+        try expect(
+            unsupportedRuntimeType.reasons.contains("model_type llama4 is not registered in the linked MLX runtime."),
+            "unsupported runtime factory reason should be surfaced"
+        )
+
+        let unsupportedMoEType = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/ERNIE-4.5-21B-A3B-PT-4bit",
+                configJSON: #"{"model_type":"ernie4_5_moe"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 12_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "ernie4_5_moe"]
+            )
+        )
+        try expectEqual(unsupportedMoEType.verification, .unsupported)
+        try expect(
+            unsupportedMoEType.reasons.contains("model_type ernie4_5_moe is not registered in the linked MLX runtime."),
+            "unsupported runtime factory reason should be surfaced"
+        )
     }
 
     private static func testModelCatalogSearch() async throws {
