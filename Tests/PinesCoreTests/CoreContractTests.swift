@@ -41,12 +41,15 @@ struct CoreContractTests {
 
     @Test
     func redactorRemovesCommonCredentialShapes() {
-        let text = "openai=sk-1234567890abcdef hf=hf_1234567890abcdef bearer=Bearer abcdefghijklmnop"
+        let openAIKey = "sk-" + "1234567890abcdef"
+        let huggingFaceKey = "hf_" + "1234567890abcdef"
+        let bearerToken = "Bearer " + "abcdefghijklmnop"
+        let text = "openai=\(openAIKey) hf=\(huggingFaceKey) bearer=\(bearerToken)"
         let redacted = Redactor().redact(text)
 
-        #expect(!redacted.contains("sk-1234567890abcdef"))
-        #expect(!redacted.contains("hf_1234567890abcdef"))
-        #expect(!redacted.contains("Bearer abcdefghijklmnop"))
+        #expect(!redacted.contains(openAIKey))
+        #expect(!redacted.contains(huggingFaceKey))
+        #expect(!redacted.contains(bearerToken))
         #expect(redacted.contains("[redacted-key]"))
         #expect(redacted.contains("Bearer [redacted-token]"))
     }

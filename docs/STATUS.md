@@ -30,6 +30,7 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - iOS runtime guardrails: memory/thermal adaptive profiles, compact 6 GB device defaults, memory-warning unload, bounded vector scans, and batched vault embedding ingestion.
 - Read-only runtime diagnostics and OSLog/MetricKit hooks for generation speed, vault retrieval, and memory pressure.
 - CloudKit private database sync service for opt-in settings, conversations, vault chunks, and explicitly enabled embedding/code blobs.
+- Personal-team-safe default signing: generated Xcode builds omit iCloud entitlements and keep CloudKit runtime activation disabled unless a paid-team build overrides both iCloud settings.
 - MCP Streamable HTTP support for tools, resources, prompts, user-approved sampling, bearer tokens, OAuth PKCE, subscriptions, and safe resource previews.
 - Settings persistence, cloud provider settings flow, MCP server settings, and audit event UI.
 - Layered `.icon` source for the app icon.

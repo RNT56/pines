@@ -47,8 +47,10 @@ targets:
         INFOPLIST_FILE: Pines/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: "$(PINES_CODE_SIGN_ENTITLEMENTS)"
-        PINES_CODE_SIGN_ENTITLEMENTS: Pines/Pines.entitlements
-        PINES_ICLOUD_SWIFT_FLAGS: "-D PINES_CLOUDKIT_ENABLED"
+        # Personal Apple Developer teams cannot provision iCloud. Keep iCloud
+        # signing and CloudKit runtime activation opt-in for paid-team builds.
+        PINES_CODE_SIGN_ENTITLEMENTS: ""
+        PINES_ICLOUD_SWIFT_FLAGS: ""
         OTHER_SWIFT_FLAGS: "$(inherited) $(PINES_ICLOUD_SWIFT_FLAGS)"
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited)"
         CODE_SIGN_STYLE: Automatic

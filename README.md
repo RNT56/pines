@@ -57,6 +57,20 @@ Generate the Xcode project:
 xcodegen generate
 ```
 
+The generated app target is personal Apple Developer account safe by default:
+`PINES_CODE_SIGN_ENTITLEMENTS` and `PINES_ICLOUD_SWIFT_FLAGS` are empty, so
+Xcode does not request iCloud provisioning. Paid-team CloudKit builds must
+override both settings together:
+
+```sh
+xcodebuild \
+  -project Pines.xcodeproj \
+  -scheme Pines \
+  PINES_CODE_SIGN_ENTITLEMENTS=Pines/Pines.entitlements \
+  PINES_ICLOUD_SWIFT_FLAGS="-D PINES_CLOUDKIT_ENABLED" \
+  build
+```
+
 Run available local core checks:
 
 ```sh

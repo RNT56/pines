@@ -76,6 +76,19 @@ The app links MLX through exact fork pins in `project.yml`:
 
 Compatibility implementations for model families not yet present in linked MLX packages are split into `MLXCompatibleModels+Llama4.swift` and `MLXCompatibleModels+DeepseekV4.swift`.
 
+## Signing And iCloud
+
+The generated app target is safe for personal Apple Developer teams by default. `PINES_CODE_SIGN_ENTITLEMENTS` and `PINES_ICLOUD_SWIFT_FLAGS` are empty in `project.yml`, so Xcode does not ask a personal team to provision the iCloud capability.
+
+Paid-team CloudKit builds must opt in by overriding both build settings together:
+
+```sh
+PINES_CODE_SIGN_ENTITLEMENTS=Pines/Pines.entitlements
+PINES_ICLOUD_SWIFT_FLAGS="-D PINES_CLOUDKIT_ENABLED"
+```
+
+The entitlement file alone is not enough: `PINES_CLOUDKIT_ENABLED` is the runtime guard that makes `CloudKitSyncService.hasRequiredEntitlements()` return true.
+
 ## Model Discovery
 
 `ModelHubKit` primitives query Hugging Face MLX-tagged models, fetch preflight metadata, and drive resumable model install/delete:
