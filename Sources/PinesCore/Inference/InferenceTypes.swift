@@ -361,6 +361,25 @@ public enum InferenceError: Error, Equatable, Sendable {
     case cancelled
 }
 
+extension InferenceError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case let .providerUnavailable(providerID):
+            "Provider \(providerID.rawValue) is unavailable."
+        case let .modelNotLoaded(modelID):
+            "Model \(modelID.rawValue) is not loaded."
+        case let .unsupportedCapability(message):
+            message
+        case .cloudNotAllowed:
+            "Cloud inference is not allowed for this request."
+        case let .invalidRequest(message):
+            message
+        case .cancelled:
+            "The inference request was cancelled."
+        }
+    }
+}
+
 public protocol InferenceProvider: Sendable {
     var id: ProviderID { get }
     var capabilities: ProviderCapabilities { get }

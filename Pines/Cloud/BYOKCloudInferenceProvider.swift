@@ -2,6 +2,8 @@ import Foundation
 import PinesCore
 
 struct BYOKCloudInferenceProvider: InferenceProvider {
+    private static let openAIReasoningDefaultMaxCompletionTokens = 16_384
+
     let configuration: CloudProviderConfiguration
     let secretStore: any SecretStore
 
@@ -21,10 +23,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
-        guard let apiKey = try await secretStore.read(
-            service: configuration.keychainService,
-            account: configuration.keychainAccount
-        ), !apiKey.isEmpty else {
+        guard let apiKey = try await readAPIKey() else {
             throw CloudProviderError.missingAPIKey
         }
 
@@ -33,26 +32,38 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             let task = Task {
                 do {
                     let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
-                    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                    guard let http = response as? HTTPURLResponse else {
                         throw CloudProviderError.invalidResponse
+                    }
+                    guard (200..<300).contains(http.statusCode) else {
+                        var body = Data()
+                        for try await byte in bytes {
+                            body.append(contentsOf: [byte])
+                            if body.count >= 8192 { break }
+                        }
+                        throw CloudProviderError.providerRejectedRequest(
+                            statusCode: http.statusCode,
+                            message: Self.providerErrorMessage(from: body) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+                        )
                     }
 
                     var dataLines = [String]()
                     var toolState = CloudToolCallStreamState()
+                    var pendingFinish: InferenceFinish?
                     for try await rawLine in bytes.lines {
                         guard !Task.isCancelled else { throw InferenceError.cancelled }
                         let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
                         if line.isEmpty {
-                            handleSSEDataLines(dataLines, state: &toolState, continuation: continuation)
+                            handleSSEDataLines(dataLines, state: &toolState, pendingFinish: &pendingFinish, continuation: continuation)
                             dataLines.removeAll(keepingCapacity: true)
                         } else if line.hasPrefix("data:") {
                             dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
                         }
                     }
                     if !dataLines.isEmpty {
-                        handleSSEDataLines(dataLines, state: &toolState, continuation: continuation)
+                        handleSSEDataLines(dataLines, state: &toolState, pendingFinish: &pendingFinish, continuation: continuation)
                     }
-                    continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                    continuation.yield(.finish(pendingFinish ?? InferenceFinish(reason: .stop)))
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
@@ -82,17 +93,14 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     func listTextModels() async throws -> [CloudProviderModel] {
-        guard let apiKey = try await secretStore.read(
-            service: configuration.keychainService,
-            account: configuration.keychainAccount
-        ), !apiKey.isEmpty else {
+        guard let apiKey = try await readAPIKey() else {
             throw CloudProviderError.missingAPIKey
         }
         return try await listTextModels(apiKey: apiKey)
     }
 
     func validate(modelID: ModelID?) async throws -> ProviderValidationResult {
-        guard let apiKey = try await secretStore.read(service: configuration.keychainService, account: configuration.keychainAccount), !apiKey.isEmpty else {
+        guard let apiKey = try await readAPIKey() else {
             return ProviderValidationResult(providerID: configuration.id, status: .invalid, message: "Missing API key.")
         }
 
@@ -127,14 +135,15 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
 
         try applyExtraHeaders(to: &request)
-        let (_, http) = try await URLSession.shared.data(for: request)
+        let (data, http) = try await URLSession.shared.data(for: request)
         if (200..<300).contains(http.statusCode) {
             return ProviderValidationResult(providerID: configuration.id, status: .valid, message: "Provider validated.", availableModels: availableModels)
         }
+        let message = Self.providerErrorMessage(from: data) ?? "Validation failed with HTTP \(http.statusCode)."
         if http.statusCode == 429 {
-            return ProviderValidationResult(providerID: configuration.id, status: .rateLimited, message: "Provider rate limited validation.", availableModels: availableModels)
+            return ProviderValidationResult(providerID: configuration.id, status: .rateLimited, message: message, availableModels: availableModels)
         }
-        return ProviderValidationResult(providerID: configuration.id, status: .invalid, message: "Validation failed with HTTP \(http.statusCode).", availableModels: availableModels)
+        return ProviderValidationResult(providerID: configuration.id, status: .invalid, message: message, availableModels: availableModels)
     }
 
     private func buildStreamingRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
@@ -148,20 +157,37 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
     }
 
+    private func readAPIKey() async throws -> String? {
+        let apiKey = try await secretStore.read(
+            service: configuration.keychainService,
+            account: configuration.keychainAccount
+        )?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        return apiKey?.isEmpty == false ? apiKey : nil
+    }
+
     private func openAICompatibleRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
         let url = configuration.baseURL.appending(path: "chat/completions")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let usesOpenAIReasoningParameters = usesOpenAIReasoningChatParameters(modelID: chatRequest.modelID)
         var body: [String: Any] = [
             "model": chatRequest.modelID.rawValue,
             "stream": true,
             "messages": chatRequest.messages.map(Self.openAIMessageObject),
-            "temperature": chatRequest.sampling.temperature,
-            "top_p": chatRequest.sampling.topP,
-            "max_tokens": chatRequest.sampling.maxTokens ?? 1024,
         ]
+        body[usesOpenAIReasoningParameters ? "max_completion_tokens" : "max_tokens"] = openAICompletionTokenLimit(
+            for: chatRequest,
+            usesReasoningParameters: usesOpenAIReasoningParameters
+        )
+        if !usesOpenAIReasoningParameters {
+            body["temperature"] = chatRequest.sampling.temperature
+            body["top_p"] = chatRequest.sampling.topP
+        } else {
+            body["reasoning_effort"] = "low"
+        }
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
             body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.openAIFunctionToolObject()) }
             body["tool_choice"] = "auto"
@@ -190,7 +216,10 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         try applyExtraHeaders(to: &request)
         let (data, http) = try await URLSession.shared.data(for: request)
         guard (200..<300).contains(http.statusCode) else {
-            throw CloudProviderError.invalidResponse
+            throw CloudProviderError.providerRejectedRequest(
+                statusCode: http.statusCode,
+                message: Self.providerErrorMessage(from: data) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+            )
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CloudProviderError.invalidResponse
@@ -219,6 +248,18 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try applyExtraHeaders(to: &request)
         return request
+    }
+
+    private func usesOpenAIReasoningChatParameters(modelID: ModelID) -> Bool {
+        guard configuration.kind == .openAI else { return false }
+        let id = modelID.rawValue.lowercased()
+        return id.hasPrefix("o") || id.hasPrefix("gpt-5")
+    }
+
+    private func openAICompletionTokenLimit(for chatRequest: ChatRequest, usesReasoningParameters: Bool) -> Int {
+        let requested = chatRequest.sampling.maxTokens ?? 1024
+        guard usesReasoningParameters else { return requested }
+        return max(requested, Self.openAIReasoningDefaultMaxCompletionTokens)
     }
 
     private func geminiRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
@@ -358,15 +399,39 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return try? JSONSerialization.jsonObject(with: data)
     }
 
+    private static func providerErrorMessage(from data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = json["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                return message
+            }
+            if let message = json["message"] as? String {
+                return message
+            }
+            if let detail = json["detail"] as? String {
+                return detail
+            }
+            if let errors = json["errors"] as? [[String: Any]],
+               let message = errors.compactMap({ $0["message"] as? String }).first {
+                return message
+            }
+        }
+        let fallback = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback?.isEmpty == false ? fallback : nil
+    }
+
     private func handleSSEDataLines(
         _ dataLines: [String],
         state: inout CloudToolCallStreamState,
+        pendingFinish: inout InferenceFinish?,
         continuation: AsyncThrowingStream<InferenceStreamEvent, Error>.Continuation
     ) {
         let payload = dataLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         guard payload != "[DONE]", let data = payload.data(using: .utf8) else { return }
 
-        for event in Self.extractEvents(from: data, providerKind: configuration.kind, state: &state) {
+        for event in Self.extractEvents(from: data, providerKind: configuration.kind, state: &state, pendingFinish: &pendingFinish) {
             continuation.yield(event)
         }
     }
@@ -412,7 +477,14 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             } else {
                 rawID = item["id"] as? String
             }
-            guard let id = rawID, isTextOutputModel(id: id, providerKind: providerKind, metadata: item) else {
+            let supportedGenerationMethods = item["supportedGenerationMethods"] as? [String] ?? []
+            guard let id = rawID,
+                  CloudProviderModelEligibility.isTextOutputModel(
+                      id: id,
+                      providerKind: providerKind,
+                      supportedGenerationMethods: supportedGenerationMethods
+                  )
+            else {
                 return nil
             }
 
@@ -435,35 +507,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 return $0.rank > $1.rank
             }
             .uniqued(by: \.id)
-            .prefix(24)
+            .prefix(providerKind == .openAI ? 64 : 24)
             .map { $0 }
-    }
-
-    private static func isTextOutputModel(id rawID: String, providerKind: CloudProviderKind, metadata: [String: Any]) -> Bool {
-        let id = rawID.lowercased()
-        let blocked = [
-            "embedding", "embed", "moderation", "image", "imagen", "dall-e", "sora",
-            "tts", "transcribe", "whisper", "audio", "realtime", "vision-preview"
-        ]
-        guard !blocked.contains(where: { id.contains($0) }) else { return false }
-
-        if providerKind == .gemini {
-            let methods = metadata["supportedGenerationMethods"] as? [String] ?? []
-            guard methods.contains(where: { $0 == "generateContent" || $0 == "streamGenerateContent" }) else {
-                return false
-            }
-        }
-
-        switch providerKind {
-        case .openAI:
-            return id.hasPrefix("gpt-") || id.hasPrefix("o")
-        case .anthropic:
-            return id.hasPrefix("claude-")
-        case .gemini:
-            return id.hasPrefix("gemini-")
-        case .openAICompatible, .openRouter, .custom:
-            return true
-        }
     }
 
     private static func createdDate(from item: [String: Any]) -> Date? {
@@ -493,8 +538,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             if id.contains("gpt-5") { score += 900 }
             if id.contains("gpt-4.1") { score += 650 }
             if id.contains("gpt-4o") { score += 560 }
-            if id.hasPrefix("o") { score += 600 }
             if id.contains("pro") { score += 80 }
+            if id.contains("gpt-5") && id.contains("mini") { score += 45 }
+            if id.contains("gpt-5") && id.contains("nano") { score += 30 }
             if id.contains("mini") { score -= 35 }
             if id.contains("nano") { score -= 70 }
         case .anthropic:
@@ -534,7 +580,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     private static func extractEvents(
         from data: Data,
         providerKind: CloudProviderKind,
-        state: inout CloudToolCallStreamState
+        state: inout CloudToolCallStreamState,
+        pendingFinish: inout InferenceFinish?
     ) -> [InferenceStreamEvent] {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return []
@@ -622,6 +669,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                     }
                 }
             }
+            if let finish = choices?.first?["finish_reason"] as? String {
+                pendingFinish = openAIFinish(from: finish)
+            }
             if let finish = choices?.first?["finish_reason"] as? String, finish == "tool_calls" {
                 for index in state.openAIToolNames.keys.sorted() {
                     guard let name = state.openAIToolNames[index] else { continue }
@@ -641,6 +691,22 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
 
         return events
+    }
+
+    private static func openAIFinish(from finishReason: String) -> InferenceFinish {
+        switch finishReason {
+        case "length":
+            return InferenceFinish(
+                reason: .length,
+                message: "The selected OpenAI model used its completion token budget before producing visible output. Try again; Pines now reserves more completion tokens for GPT-5 reasoning models."
+            )
+        case "tool_calls":
+            return InferenceFinish(reason: .toolCall)
+        case "content_filter":
+            return InferenceFinish(reason: .error, message: "The provider stopped the response because of its content filter.")
+        default:
+            return InferenceFinish(reason: .stop)
+        }
     }
 
     private static func jsonString(from value: Any?) -> String? {

@@ -1,3 +1,4 @@
+import Foundation
 import PinesCore
 import Testing
 
@@ -52,6 +53,43 @@ struct CoreContractTests {
         #expect(!redacted.contains(bearerToken))
         #expect(redacted.contains("[redacted-key]"))
         #expect(redacted.contains("Bearer [redacted-token]"))
+    }
+
+    @Test
+    func openAIReasoningChatRequestsUseCompatibleTokenParameters() throws {
+        let request = ChatRequest(
+            modelID: "gpt-5.5",
+            messages: [ChatMessage(role: .user, content: "Hello")],
+            sampling: ChatSampling(maxTokens: 256, temperature: 0.6, topP: 1)
+        )
+
+        let urlRequest = try OpenAICompatibleRequestBuilder().chatRequest(
+            baseURL: URL(string: "https://api.openai.com")!,
+            apiKey: "test",
+            request: request
+        )
+        let body = try #require(urlRequest.httpBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        #expect(json["max_completion_tokens"] as? Int == 16_384)
+        #expect(json["max_tokens"] == nil)
+        #expect(json["reasoning_effort"] as? String == "low")
+        #expect(json["temperature"] == nil)
+        #expect(json["top_p"] == nil)
+    }
+
+    @Test
+    func openAICloudModelEligibilityKeepsGPT5MiniNanoAndFiltersOSeries() {
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-mini", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-nano", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.1-mini", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.1-nano", providerKind: .openAI))
+
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o1", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o3", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o4-mini", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "openai/o3-mini", providerKind: .openRouter))
     }
 
     @Test

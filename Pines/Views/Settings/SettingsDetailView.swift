@@ -22,7 +22,6 @@ struct SettingsDetailView: View {
     @State private var providerKind: CloudProviderKind = .openAI
     @State private var providerName = "OpenAI"
     @State private var providerBaseURL = "https://api.openai.com/v1"
-    @State private var providerModelID = "gpt-5.2"
     @State private var providerAPIKey = ""
     @State private var providerEnabled = false
     @State private var mcpName = "Local MCP"
@@ -328,10 +327,6 @@ struct SettingsDetailView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .pinesFieldChrome()
-            TextField("Default model", text: $providerModelID)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .pinesFieldChrome()
             SecureField("API key", text: $providerAPIKey)
                 .textContentType(.password)
                 .pinesFieldChrome()
@@ -343,7 +338,6 @@ struct SettingsDetailView: View {
                         kind: providerKind,
                         displayName: providerName,
                         baseURLString: providerBaseURL,
-                        defaultModelID: providerModelID,
                         apiKey: providerAPIKey,
                         enabledForAgents: providerEnabled,
                         services: services
@@ -351,9 +345,24 @@ struct SettingsDetailView: View {
                     providerAPIKey = ""
                 }
             } label: {
-                Label("Save and validate", systemImage: "key")
+                if appModel.isSavingCloudProvider {
+                    Label("Saving", systemImage: "hourglass")
+                } else {
+                    Label("Save provider", systemImage: "key")
+                }
             }
+            .disabled(
+                appModel.isSavingCloudProvider
+                    || providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
             .pinesButtonStyle(.primary, fillWidth: true)
+
+            if appModel.isRefreshingCloudModels {
+                Label("Refreshing cloud models", systemImage: "arrow.triangle.2.circlepath")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+            }
 
             ForEach(appModel.cloudProviders) { provider in
                 providerRow(provider)
@@ -363,7 +372,8 @@ struct SettingsDetailView: View {
     }
 
     private func providerRow(_ provider: CloudProviderConfiguration) -> some View {
-        HStack(spacing: theme.spacing.medium) {
+        let isValidating = appModel.validatingCloudProviderIDs.contains(provider.id)
+        return HStack(spacing: theme.spacing.medium) {
             VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
                 Text(provider.displayName)
                     .font(theme.typography.headline)
@@ -384,9 +394,14 @@ struct SettingsDetailView: View {
             Button {
                 Task { await appModel.validateCloudProvider(provider, services: services) }
             } label: {
-                Image(systemName: "checkmark.seal")
+                if isValidating {
+                    ProgressView()
+                } else {
+                    Image(systemName: "checkmark.seal")
+                }
             }
             .accessibilityLabel("Validate \(provider.displayName)")
+            .disabled(isValidating)
             .pinesButtonStyle(.icon)
 
             Button(role: .destructive) {
@@ -1085,7 +1100,6 @@ struct SettingsDetailView: View {
     private func applyProviderDefaults(_ kind: CloudProviderKind) {
         providerName = kind.defaultDisplayName
         providerBaseURL = kind.defaultBaseURL
-        providerModelID = kind.defaultModelID
     }
 
     private func loadMCPServer(_ server: MCPServerConfiguration) {
@@ -1409,22 +1423,6 @@ private extension CloudProviderKind {
         }
     }
 
-    var defaultModelID: String {
-        switch self {
-        case .openAI:
-            "gpt-5.2"
-        case .openAICompatible:
-            ""
-        case .anthropic:
-            "claude-3-5-haiku-latest"
-        case .gemini:
-            "gemini-2.0-flash"
-        case .openRouter:
-            "openai/gpt-4.1-mini"
-        case .custom:
-            ""
-        }
-    }
 }
 
 private extension MCPAuthMode {

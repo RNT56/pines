@@ -40,6 +40,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var defaultModelID: ModelID?
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:]
     @Published var isRefreshingCloudModels = false
+    @Published var isSavingCloudProvider = false
+    @Published var validatingCloudProviderIDs: Set<ProviderID> = []
     @Published var huggingFaceCredentialStatus = "Not configured"
     @Published var braveSearchCredentialStatus = "Not configured"
     private var didBootstrap = false
@@ -353,6 +355,25 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    private func refreshCloudProviders(services: PinesAppServices) async {
+        do {
+            guard let cloudProviderRepository = services.cloudProviderRepository else { return }
+            setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    private func upsertCloudProvider(_ provider: CloudProviderConfiguration) {
+        var providers = cloudProviders
+        if let index = providers.firstIndex(where: { $0.id == provider.id }) {
+            providers[index] = provider
+        } else {
+            providers.append(provider)
+        }
+        setIfChanged(\.cloudProviders, providers)
     }
 
     func loadThreadMessages(threadID: UUID, services: PinesAppServices, force: Bool = false) async {
@@ -1302,47 +1323,69 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         kind: CloudProviderKind,
         displayName: String,
         baseURLString: String,
-        defaultModelID: String,
         apiKey: String,
         enabledForAgents: Bool,
         services: PinesAppServices
     ) async {
+        setIfChanged(\.isSavingCloudProvider, true)
+        defer { setIfChanged(\.isSavingCloudProvider, false) }
+
         do {
             guard let service = services.cloudProviderService else {
                 serviceError = "Cloud provider service is unavailable."
                 return
             }
-            guard let baseURL = URL(string: baseURLString) else {
+            let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedDisplayName.isEmpty else {
+                serviceError = "Cloud provider display name is required."
+                return
+            }
+            guard let baseURL = URL(string: baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
                 serviceError = "Cloud provider base URL is invalid."
                 return
             }
+            let providerID = ProviderID(rawValue: trimmedDisplayName.lowercased().replacingOccurrences(of: " ", with: "-"))
+            let existing = cloudProviders.first(where: { $0.id == providerID })
+            let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             let provider = CloudProviderConfiguration(
-                id: ProviderID(rawValue: displayName.lowercased().replacingOccurrences(of: " ", with: "-")),
+                id: providerID,
                 kind: kind,
-                displayName: displayName,
+                displayName: trimmedDisplayName,
                 baseURL: baseURL,
-                defaultModelID: defaultModelID.isEmpty ? nil : ModelID(rawValue: defaultModelID),
-                keychainAccount: displayName.lowercased().replacingOccurrences(of: " ", with: "-"),
+                defaultModelID: existing?.defaultModelID,
+                validationStatus: .unvalidated,
+                extraHeadersJSON: existing?.extraHeadersJSON,
+                keychainService: existing?.keychainService ?? "com.schtack.pines.cloud",
+                keychainAccount: existing?.keychainAccount ?? providerID.rawValue,
                 enabledForAgents: enabledForAgents
             )
-            try await service.saveProvider(provider, apiKey: apiKey.isEmpty ? nil : apiKey)
-            _ = try? await service.validate(provider)
-            await refreshAll(services: services)
-            await refreshCloudModelCatalog(services: services)
+            try await service.saveProvider(provider, apiKey: trimmedAPIKey.isEmpty ? nil : trimmedAPIKey)
+            upsertCloudProvider(provider)
+            await refreshCloudProviders(services: services)
+            setIfChanged(\.serviceError, nil)
+            Task { [weak self] in
+                await self?.refreshCloudModelCatalog(services: services)
+            }
         } catch {
             serviceError = error.localizedDescription
         }
     }
 
     func validateCloudProvider(_ provider: CloudProviderConfiguration, services: PinesAppServices) async {
+        validatingCloudProviderIDs.insert(provider.id)
+        defer { validatingCloudProviderIDs.remove(provider.id) }
+
         do {
             guard let service = services.cloudProviderService else {
                 serviceError = "Cloud provider service is unavailable."
                 return
             }
             _ = try await service.validate(provider)
-            await refreshAll(services: services)
-            await refreshCloudModelCatalog(services: services)
+            await refreshCloudProviders(services: services)
+            setIfChanged(\.serviceError, nil)
+            Task { [weak self] in
+                await self?.refreshCloudModelCatalog(services: services)
+            }
         } catch {
             serviceError = error.localizedDescription
         }
@@ -1377,7 +1420,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 guard let apiKey = try await services.secretStore.read(
                     service: provider.keychainService,
                     account: provider.keychainAccount
-                ), !apiKey.isEmpty else {
+                )?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
                     continue
                 }
                 let inferenceProvider = BYOKCloudInferenceProvider(configuration: provider, secretStore: services.secretStore)
@@ -1438,6 +1481,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     func selectModel(_ option: ModelPickerOption, services: PinesAppServices, createNewChat: Bool = false) async -> UUID? {
         setIfChanged(\.defaultProviderID, option.providerID)
         setIfChanged(\.defaultModelID, option.modelID)
+        await recordCloudDefaultModelIfNeeded(option, services: services)
         await saveSettings(services: services)
         emitHaptic(.primaryAction)
         if createNewChat {
@@ -1449,6 +1493,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     func selectModel(_ option: ModelPickerOption, for threadID: UUID, services: PinesAppServices) async {
         setIfChanged(\.defaultProviderID, option.providerID)
         setIfChanged(\.defaultModelID, option.modelID)
+        await recordCloudDefaultModelIfNeeded(option, services: services)
         await saveSettings(services: services)
 
         guard let repository = services.conversationRepository else {
@@ -1486,6 +1531,23 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
+        }
+    }
+
+    private func recordCloudDefaultModelIfNeeded(_ option: ModelPickerOption, services: PinesAppServices) async {
+        guard option.providerID != services.mlxRuntime.localProviderID,
+              let repository = services.cloudProviderRepository,
+              var provider = cloudProviders.first(where: { $0.id == option.providerID }),
+              provider.defaultModelID != option.modelID
+        else {
+            return
+        }
+        provider.defaultModelID = option.modelID
+        do {
+            try await repository.upsertProvider(provider)
+            upsertCloudProvider(provider)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
         }
     }
 
