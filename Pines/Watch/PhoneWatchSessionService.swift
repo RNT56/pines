@@ -15,6 +15,7 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
     private var completedRequestOrder: [UUID] = []
     private var suppressApplicationContextUpdates = false
     private static let completedRequestLimit = 64
+    private static let simulatorWatchConnectivityFlag = "PINES_ENABLE_WATCH_SIMULATOR"
 
     init(services: PinesAppServices, session: WCSession = .default) {
         self.services = services
@@ -29,6 +30,9 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
 
     func start() {
         guard WCSession.isSupported() else { return }
+        #if targetEnvironment(simulator)
+        guard ProcessInfo.processInfo.environment[Self.simulatorWatchConnectivityFlag] == "1" else { return }
+        #endif
         session.delegate = self
         session.activate()
         publishPhoneStatus()

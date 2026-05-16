@@ -472,6 +472,11 @@ struct PinesEmptyState: View {
     }
 }
 
+private struct PinesThemeSwatch: Identifiable {
+    let id: String
+    let color: Color
+}
+
 struct PinesThemePreviewCard: View {
     @Environment(\.pinesTheme) private var currentTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -480,6 +485,15 @@ struct PinesThemePreviewCard: View {
 
     var body: some View {
         let preview = PinesTheme.resolve(template: template, mode: currentTheme.mode, systemScheme: currentTheme.colorScheme)
+        let swatches = [
+            PinesThemeSwatch(id: "accent", color: preview.colors.accent),
+            PinesThemeSwatch(id: "info", color: preview.colors.info),
+            PinesThemeSwatch(id: "warning", color: preview.colors.warning),
+            PinesThemeSwatch(id: "chart-c", color: preview.colors.chartC),
+            PinesThemeSwatch(id: "chart-d", color: preview.colors.chartD),
+            PinesThemeSwatch(id: "chart-f", color: preview.colors.chartF),
+        ]
+
         VStack(alignment: .leading, spacing: PinesThemePickerLayout.cardSpacing) {
             HStack {
                 Text(template.title)
@@ -527,9 +541,9 @@ struct PinesThemePreviewCard: View {
             }
 
             HStack(spacing: 5) {
-                ForEach(Array([preview.colors.accent, preview.colors.info, preview.colors.warning, preview.colors.chartC, preview.colors.chartD, preview.colors.chartF].enumerated()), id: \.offset) { _, color in
+                ForEach(swatches) { swatch in
                     Circle()
-                        .fill(color)
+                        .fill(swatch.color)
                         .frame(width: PinesThemePickerLayout.swatchSize, height: PinesThemePickerLayout.swatchSize)
                         .overlay(Circle().strokeBorder(preview.colors.separator, lineWidth: PinesThemePickerLayout.hairline))
                 }

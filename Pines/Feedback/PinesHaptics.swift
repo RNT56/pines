@@ -236,6 +236,10 @@ final class PinesHaptics: ObservableObject {
     }
 
     func play(_ event: PinesHapticEvent) {
+        #if targetEnvironment(simulator)
+        return
+        #endif
+
         guard mode != .off else { return }
         guard event.allowsLowPowerPlayback || !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
 
@@ -337,6 +341,10 @@ final class PinesHaptics: ObservableObject {
     }
 
     func prepare() {
+        #if targetEnvironment(simulator)
+        return
+        #endif
+
         #if canImport(UIKit)
         selection.prepare()
         notification.prepare()
@@ -398,6 +406,9 @@ final class PinesHaptics: ObservableObject {
     }
 
     private func prepareCoreHaptics() {
+        #if targetEnvironment(simulator)
+        return
+        #else
         #if canImport(CoreHaptics)
         guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
         if hapticEngineRunning { return }
@@ -436,6 +447,7 @@ final class PinesHaptics: ObservableObject {
             hapticEngine = nil
             disableCoreHapticsTemporarily()
         }
+        #endif
         #endif
     }
 
@@ -514,27 +526,33 @@ private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
     @State private var coordinator = PinesScrollHapticCoordinator()
 
     func body(content: Content) -> some View {
+        #if targetEnvironment(simulator)
         content
-            .onScrollGeometryChange(for: PinesScrollHapticSnapshot.self) { geometry in
-                let minOffset = quantizedScrollOffset(-geometry.contentInsets.top)
-                let rawMaxOffset = geometry.contentSize.height - geometry.containerSize.height + geometry.contentInsets.bottom
-                let maxOffset = max(minOffset, quantizedScrollOffset(rawMaxOffset))
-                let offset = quantizedScrollOffset(geometry.contentOffset.y)
-                return PinesScrollHapticSnapshot(
-                    offset: offset,
-                    minOffset: minOffset,
-                    maxOffset: maxOffset > minOffset ? maxOffset : nil
-                )
-            } action: { _, snapshot in
-                guard haptics.mode == .expressive else {
+        #else
+        if haptics.mode == .expressive {
+            content
+                .onScrollGeometryChange(for: PinesScrollHapticSnapshot.self) { geometry in
+                    let minOffset = quantizedScrollOffset(-geometry.contentInsets.top)
+                    let rawMaxOffset = geometry.contentSize.height - geometry.containerSize.height + geometry.contentInsets.bottom
+                    let maxOffset = max(minOffset, quantizedScrollOffset(rawMaxOffset))
+                    let offset = quantizedScrollOffset(geometry.contentOffset.y)
+                    return PinesScrollHapticSnapshot(
+                        offset: offset,
+                        minOffset: minOffset,
+                        maxOffset: maxOffset > minOffset ? maxOffset : nil
+                    )
+                } action: { _, snapshot in
+                    if let event = coordinator.event(for: snapshot) {
+                        haptics.play(event)
+                    }
+                }
+        } else {
+            content
+                .onAppear {
                     coordinator.reset()
-                    return
                 }
-
-                if let event = coordinator.event(for: snapshot) {
-                    haptics.play(event)
-                }
-            }
+        }
+        #endif
     }
 
     private func quantizedScrollOffset(_ value: CGFloat) -> CGFloat {
