@@ -189,8 +189,50 @@ struct SettingsDetailView: View {
         }
         .id(SettingsDetailAnchor.execution)
 
+        generationLimitsCard
         runtimeDiagnosticsCard
         huggingFaceCard
+    }
+
+    private var generationLimitsCard: some View {
+        PinesCardSection("Generation Limits", subtitle: "Completion and local context budgets used for chat and sampling.", systemImage: "slider.horizontal.3") {
+            Stepper(
+                "Cloud completion tokens: \(appModel.cloudMaxCompletionTokens.formatted())",
+                value: $appModel.cloudMaxCompletionTokens,
+                in: AppSettingsSnapshot.minCompletionTokens...AppSettingsSnapshot.maxCompletionTokens,
+                step: 1024
+            )
+            .onChange(of: appModel.cloudMaxCompletionTokens) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+
+            Stepper(
+                "Local completion tokens: \(appModel.localMaxCompletionTokens.formatted())",
+                value: $appModel.localMaxCompletionTokens,
+                in: AppSettingsSnapshot.minCompletionTokens...AppSettingsSnapshot.maxCompletionTokens,
+                step: 256
+            )
+            .onChange(of: appModel.localMaxCompletionTokens) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+
+            Stepper(
+                "Local context tokens: \(appModel.localMaxContextTokens.formatted())",
+                value: $appModel.localMaxContextTokens,
+                in: AppSettingsSnapshot.minLocalContextTokens...AppSettingsSnapshot.maxLocalContextTokens,
+                step: 1024
+            )
+            .onChange(of: appModel.localMaxContextTokens) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+
+            PinesKeyValueGrid(items: [
+                .init("Cloud completion", "\(appModel.cloudMaxCompletionTokens.formatted()) tokens", systemImage: "cloud"),
+                .init("Local completion", "\(appModel.localMaxCompletionTokens.formatted()) tokens", systemImage: "cpu"),
+                .init("Local context", "\(appModel.localMaxContextTokens.formatted()) tokens", systemImage: "text.word.spacing")
+            ])
+        }
+        .id(SettingsDetailAnchor.generationLimits)
     }
 
     private var runtimeDiagnosticsCard: some View {
@@ -1256,6 +1298,7 @@ private enum SettingsDetailAnchor: Hashable {
     case appearance
     case hapticsAndMotion
     case execution
+    case generationLimits
     case runtimeDiagnostics
     case huggingFace
     case storageAndSync
@@ -1293,6 +1336,8 @@ private extension PinesSettingsSection {
             .hapticsAndMotion
         case (.inference, "Execution policy"):
             .execution
+        case (.inference, "Generation limits"):
+            .generationLimits
         case (.inference, "Runtime diagnostics"):
             .runtimeDiagnostics
         case (.privacy, "Vault storage"):

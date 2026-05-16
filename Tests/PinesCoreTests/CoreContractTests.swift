@@ -93,6 +93,25 @@ struct CoreContractTests {
     }
 
     @Test
+    func appSettingsDecodesGenerationDefaultsAndClampsLimits() throws {
+        let legacyJSON = #"{"executionMode":"cloudAllowed","themeTemplate":"graphite","interfaceMode":"dark"}"#
+        let decoded = try JSONDecoder().decode(AppSettingsSnapshot.self, from: Data(legacyJSON.utf8))
+
+        #expect(decoded.cloudMaxCompletionTokens == AppSettingsSnapshot.defaultCloudMaxCompletionTokens)
+        #expect(decoded.localMaxCompletionTokens == AppSettingsSnapshot.defaultLocalMaxCompletionTokens)
+        #expect(decoded.localMaxContextTokens == AppSettingsSnapshot.defaultLocalMaxContextTokens)
+
+        let clamped = AppSettingsSnapshot(
+            cloudMaxCompletionTokens: 1,
+            localMaxCompletionTokens: 1_000_000,
+            localMaxContextTokens: 1
+        )
+        #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
+        #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
+        #expect(clamped.localMaxContextTokens == AppSettingsSnapshot.minLocalContextTokens)
+    }
+
+    @Test
     func calculatorHonorsOperatorPrecedenceAndRejectsDivisionByZero() throws {
         let evaluator = SafeCalculatorEvaluator()
 

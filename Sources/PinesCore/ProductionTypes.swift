@@ -362,16 +362,43 @@ public struct BrowserAction: Identifiable, Hashable, Codable, Sendable {
 }
 
 public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
+    public static let defaultCloudMaxCompletionTokens = 16_384
+    public static let defaultLocalMaxCompletionTokens = 1_024
+    public static let defaultLocalMaxContextTokens = 16_384
+    public static let minCompletionTokens = 128
+    public static let maxCompletionTokens = 128_000
+    public static let minLocalContextTokens = 1_024
+    public static let maxLocalContextTokens = 262_144
+
     public var executionMode: AgentExecutionMode
     public var storeConfiguration: LocalStoreConfiguration
     public var defaultProviderID: ProviderID?
     public var defaultModelID: ModelID?
     public var embeddingModelID: ModelID?
+    public var cloudMaxCompletionTokens: Int
+    public var localMaxCompletionTokens: Int
+    public var localMaxContextTokens: Int
     public var requireToolApproval: Bool
     public var braveSearchEnabled: Bool
     public var onboardingCompleted: Bool
     public var themeTemplate: String
     public var interfaceMode: String
+
+    private enum CodingKeys: String, CodingKey {
+        case executionMode
+        case storeConfiguration
+        case defaultProviderID
+        case defaultModelID
+        case embeddingModelID
+        case cloudMaxCompletionTokens
+        case localMaxCompletionTokens
+        case localMaxContextTokens
+        case requireToolApproval
+        case braveSearchEnabled
+        case onboardingCompleted
+        case themeTemplate
+        case interfaceMode
+    }
 
     public init(
         executionMode: AgentExecutionMode = .preferLocal,
@@ -379,6 +406,9 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         defaultProviderID: ProviderID? = nil,
         defaultModelID: ModelID? = nil,
         embeddingModelID: ModelID? = nil,
+        cloudMaxCompletionTokens: Int = Self.defaultCloudMaxCompletionTokens,
+        localMaxCompletionTokens: Int = Self.defaultLocalMaxCompletionTokens,
+        localMaxContextTokens: Int = Self.defaultLocalMaxContextTokens,
         requireToolApproval: Bool = true,
         braveSearchEnabled: Bool = false,
         onboardingCompleted: Bool = false,
@@ -390,10 +420,44 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         self.defaultProviderID = defaultProviderID
         self.defaultModelID = defaultModelID
         self.embeddingModelID = embeddingModelID
+        self.cloudMaxCompletionTokens = Self.normalizedCompletionTokens(cloudMaxCompletionTokens)
+        self.localMaxCompletionTokens = Self.normalizedCompletionTokens(localMaxCompletionTokens)
+        self.localMaxContextTokens = Self.normalizedLocalContextTokens(localMaxContextTokens)
         self.requireToolApproval = requireToolApproval
         self.braveSearchEnabled = braveSearchEnabled
         self.onboardingCompleted = onboardingCompleted
         self.themeTemplate = themeTemplate
         self.interfaceMode = interfaceMode
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        executionMode = try container.decodeIfPresent(AgentExecutionMode.self, forKey: .executionMode) ?? .preferLocal
+        storeConfiguration = try container.decodeIfPresent(LocalStoreConfiguration.self, forKey: .storeConfiguration) ?? .init()
+        defaultProviderID = try container.decodeIfPresent(ProviderID.self, forKey: .defaultProviderID)
+        defaultModelID = try container.decodeIfPresent(ModelID.self, forKey: .defaultModelID)
+        embeddingModelID = try container.decodeIfPresent(ModelID.self, forKey: .embeddingModelID)
+        cloudMaxCompletionTokens = Self.normalizedCompletionTokens(
+            try container.decodeIfPresent(Int.self, forKey: .cloudMaxCompletionTokens) ?? Self.defaultCloudMaxCompletionTokens
+        )
+        localMaxCompletionTokens = Self.normalizedCompletionTokens(
+            try container.decodeIfPresent(Int.self, forKey: .localMaxCompletionTokens) ?? Self.defaultLocalMaxCompletionTokens
+        )
+        localMaxContextTokens = Self.normalizedLocalContextTokens(
+            try container.decodeIfPresent(Int.self, forKey: .localMaxContextTokens) ?? Self.defaultLocalMaxContextTokens
+        )
+        requireToolApproval = try container.decodeIfPresent(Bool.self, forKey: .requireToolApproval) ?? true
+        braveSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .braveSearchEnabled) ?? false
+        onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
+        themeTemplate = try container.decodeIfPresent(String.self, forKey: .themeTemplate) ?? "evergreen"
+        interfaceMode = try container.decodeIfPresent(String.self, forKey: .interfaceMode) ?? "system"
+    }
+
+    public static func normalizedCompletionTokens(_ value: Int) -> Int {
+        min(max(value, minCompletionTokens), maxCompletionTokens)
+    }
+
+    public static func normalizedLocalContextTokens(_ value: Int) -> Int {
+        min(max(value, minLocalContextTokens), maxLocalContextTokens)
     }
 }

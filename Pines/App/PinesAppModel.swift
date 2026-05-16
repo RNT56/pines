@@ -38,6 +38,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var modelSearchError: String?
     @Published var defaultProviderID: ProviderID?
     @Published var defaultModelID: ModelID?
+    @Published var cloudMaxCompletionTokens = AppSettingsSnapshot.defaultCloudMaxCompletionTokens
+    @Published var localMaxCompletionTokens = AppSettingsSnapshot.defaultLocalMaxCompletionTokens
+    @Published var localMaxContextTokens = AppSettingsSnapshot.defaultLocalMaxContextTokens
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:]
     @Published var isRefreshingCloudModels = false
     @Published var isSavingCloudProvider = false
@@ -432,6 +435,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         setIfChanged(\.storeConfiguration, settings.storeConfiguration)
         setIfChanged(\.defaultProviderID, settings.defaultProviderID)
         setIfChanged(\.defaultModelID, settings.defaultModelID)
+        setIfChanged(\.cloudMaxCompletionTokens, settings.cloudMaxCompletionTokens)
+        setIfChanged(\.localMaxCompletionTokens, settings.localMaxCompletionTokens)
+        setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
         setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
         setIfChanged(\.interfaceMode, PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode)
     }
@@ -588,6 +594,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 return
             }
             runConversationID = conversationID
+            let settings = try? await services.settingsRepository?.loadSettings()
 
             let userMessage = ChatMessage(role: .user, content: trimmed)
             try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: nil, providerID: nil)
@@ -605,7 +612,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         failPendingChatStart("Download the selected local text model before starting chat.", runToken: runToken)
                         return
                     }
-                    try await services.mlxRuntime.load(localInstall)
+                    try await services.mlxRuntime.load(
+                        localInstall,
+                        profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                    )
                     selectedProvider = services.mlxRuntime
                     selectedProviderID = services.mlxRuntime.localProviderID
                     selectedModelID = localInstall.modelID
@@ -642,7 +652,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         failPendingChatStart("Download and select a local text model before starting local chat.", runToken: runToken)
                         return
                     }
-                    try await services.mlxRuntime.load(localInstall)
+                    try await services.mlxRuntime.load(
+                        localInstall,
+                        profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                    )
                     selectedProvider = services.mlxRuntime
                     selectedProviderID = services.mlxRuntime.localProviderID
                     selectedModelID = localInstall.modelID
@@ -718,11 +731,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             let request = ChatRequest(
                 modelID: selectedModelID,
                 messages: requestMessages,
+                sampling: chatSampling(for: selectedProviderID, settings: settings, services: services),
                 allowsTools: !availableTools.isEmpty,
                 availableTools: availableTools,
                 vaultContextIDs: includePrivateContext ? (vaultContext?.documentIDs ?? []) : []
             )
-            let settings = try? await services.settingsRepository?.loadSettings()
             let session = AgentSession(
                 title: "Chat",
                 policy: AgentPolicy(
@@ -1091,6 +1104,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
     func saveSettings(services: PinesAppServices) async {
         do {
+            cloudMaxCompletionTokens = AppSettingsSnapshot.normalizedCompletionTokens(cloudMaxCompletionTokens)
+            localMaxCompletionTokens = AppSettingsSnapshot.normalizedCompletionTokens(localMaxCompletionTokens)
+            localMaxContextTokens = AppSettingsSnapshot.normalizedLocalContextTokens(localMaxContextTokens)
             let resolvedDefaultModelID = defaultModelID ?? preferredInstalledTextModel()?.modelID
             let resolvedProviderID = defaultProviderID
                 ?? resolvedDefaultModelID.flatMap { installedModel(for: $0) == nil ? nil : services.mlxRuntime.localProviderID }
@@ -1100,6 +1116,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 defaultProviderID: resolvedProviderID,
                 defaultModelID: resolvedDefaultModelID,
                 embeddingModelID: models.first(where: { $0.install.modalities.contains(.embeddings) })?.install.modelID,
+                cloudMaxCompletionTokens: cloudMaxCompletionTokens,
+                localMaxCompletionTokens: localMaxCompletionTokens,
+                localMaxContextTokens: localMaxContextTokens,
                 requireToolApproval: true,
                 braveSearchEnabled: braveSearchCredentialStatus.hasPrefix("Configured"),
                 onboardingCompleted: true,
@@ -1110,6 +1129,37 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         } catch {
             serviceError = error.localizedDescription
         }
+    }
+
+    private func chatSampling(
+        for providerID: ProviderID,
+        settings: AppSettingsSnapshot?,
+        services: PinesAppServices,
+        requestedMaxTokens: Int? = nil,
+        temperature: Float = 0.6
+    ) -> ChatSampling {
+        let fallback = providerID == services.mlxRuntime.localProviderID
+            ? localMaxCompletionTokens
+            : cloudMaxCompletionTokens
+        let settingsMaxTokens = providerID == services.mlxRuntime.localProviderID
+            ? settings?.localMaxCompletionTokens
+            : settings?.cloudMaxCompletionTokens
+        return ChatSampling(
+            maxTokens: AppSettingsSnapshot.normalizedCompletionTokens(requestedMaxTokens ?? settingsMaxTokens ?? fallback),
+            temperature: temperature
+        )
+    }
+
+    private func localRuntimeProfile(
+        for install: ModelInstall,
+        settings: AppSettingsSnapshot?,
+        services: PinesAppServices
+    ) -> RuntimeProfile {
+        var profile = services.mlxRuntime.defaultRuntimeProfile(for: install)
+        profile.quantization.maxKVSize = AppSettingsSnapshot.normalizedLocalContextTokens(
+            settings?.localMaxContextTokens ?? localMaxContextTokens
+        )
+        return profile
     }
 
     func installModel(
@@ -1919,8 +1969,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 for await settings in settingsRepository.observeSettings() {
                     await MainActor.run {
                         self?.setIfChanged(\.defaultModelID, settings.defaultModelID)
+                        self?.setIfChanged(\.defaultProviderID, settings.defaultProviderID)
                         self?.setIfChanged(\.executionMode, settings.executionMode)
                         self?.setIfChanged(\.storeConfiguration, settings.storeConfiguration)
+                        self?.setIfChanged(\.cloudMaxCompletionTokens, settings.cloudMaxCompletionTokens)
+                        self?.setIfChanged(\.localMaxCompletionTokens, settings.localMaxCompletionTokens)
+                        self?.setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
                         if let theme = PinesThemeTemplate(rawValue: settings.themeTemplate) {
                             self?.setIfChanged(\.selectedThemeTemplate, theme)
                         }
@@ -2119,14 +2173,21 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         let requiresVision = messages.contains { message in
             message.attachments.contains { $0.kind == .image }
         }
-        let sampling = ChatSampling(
-            maxTokens: request.maxTokens ?? 512,
-            temperature: Float(request.temperature ?? 0.6)
-        )
+        let settings = try? await services.settingsRepository?.loadSettings()
 
         if let localModelID = rankedLocalModelID(for: request, requiresVision: requiresVision),
            let localInstall = installedModel(for: localModelID) {
-            try await services.mlxRuntime.load(localInstall)
+            try await services.mlxRuntime.load(
+                localInstall,
+                profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
+            )
+            let sampling = chatSampling(
+                for: services.mlxRuntime.localProviderID,
+                settings: settings,
+                services: services,
+                requestedMaxTokens: request.maxTokens,
+                temperature: Float(request.temperature ?? 0.6)
+            )
             let localChatRequest = ChatRequest(
                 modelID: localModelID,
                 messages: messages,
@@ -2159,6 +2220,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         guard let cloudModelID = cloudProvider.defaultModelID else {
             throw InferenceError.invalidRequest("The selected cloud provider does not define a default model.")
         }
+        let sampling = chatSampling(
+            for: cloudProvider.id,
+            settings: settings,
+            services: services,
+            requestedMaxTokens: request.maxTokens,
+            temperature: Float(request.temperature ?? 0.6)
+        )
         let cloudChatRequest = ChatRequest(
             modelID: cloudModelID,
             messages: messages,

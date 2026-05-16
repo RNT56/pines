@@ -188,13 +188,14 @@ struct WatchChatOrchestrator {
 
                     // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
                     let availableTools: [AnyToolSpec] = []
+                    let settings = try? await services.settingsRepository?.loadSettings()
                     let request = ChatRequest(
                         modelID: providerSelection.modelID,
                         messages: messages,
+                        sampling: chatSampling(for: providerSelection.providerID, settings: settings),
                         allowsTools: !availableTools.isEmpty,
                         availableTools: availableTools
                     )
-                    let settings = try? await services.settingsRepository?.loadSettings()
                     let session = AgentSession(
                         title: "Watch Chat",
                         policy: AgentPolicy(
@@ -455,7 +456,10 @@ struct WatchChatOrchestrator {
             guard let localInstall else {
                 throw WatchChatError.unavailable("Download and select a local text model before starting local chat.")
             }
-            try await services.mlxRuntime.load(localInstall)
+            try await services.mlxRuntime.load(
+                localInstall,
+                profile: localRuntimeProfile(for: localInstall, settings: settings)
+            )
             return ProviderSelection(
                 provider: services.mlxRuntime,
                 providerID: services.mlxRuntime.localProviderID,
@@ -476,6 +480,21 @@ struct WatchChatOrchestrator {
         case let .denied(reason):
             throw reason
         }
+    }
+
+    private func chatSampling(for providerID: ProviderID, settings: AppSettingsSnapshot?) -> ChatSampling {
+        let maxTokens = providerID == services.mlxRuntime.localProviderID
+            ? settings?.localMaxCompletionTokens ?? AppSettingsSnapshot.defaultLocalMaxCompletionTokens
+            : settings?.cloudMaxCompletionTokens ?? AppSettingsSnapshot.defaultCloudMaxCompletionTokens
+        return ChatSampling(maxTokens: AppSettingsSnapshot.normalizedCompletionTokens(maxTokens))
+    }
+
+    private func localRuntimeProfile(for install: ModelInstall, settings: AppSettingsSnapshot?) -> RuntimeProfile {
+        var profile = services.mlxRuntime.defaultRuntimeProfile(for: install)
+        profile.quantization.maxKVSize = AppSettingsSnapshot.normalizedLocalContextTokens(
+            settings?.localMaxContextTokens ?? AppSettingsSnapshot.defaultLocalMaxContextTokens
+        )
+        return profile
     }
 
     private func localRoutingCandidate(for install: ModelInstall?) -> (id: ProviderID, capabilities: ProviderCapabilities)? {

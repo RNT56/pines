@@ -277,6 +277,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         var body: [String: Any] = [
             "contents": chatRequest.messages.filter { $0.role != .system }.map(Self.geminiContentObject),
+            "generationConfig": [
+                "maxOutputTokens": chatRequest.sampling.maxTokens ?? AppSettingsSnapshot.defaultCloudMaxCompletionTokens,
+                "temperature": chatRequest.sampling.temperature,
+                "topP": chatRequest.sampling.topP,
+            ],
         ]
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
             body["tools"] = [[

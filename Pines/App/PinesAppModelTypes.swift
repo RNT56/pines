@@ -372,6 +372,12 @@ enum PinesStaticSettings {
                     systemImage: "sparkles"
                 ),
                 PinesSettingsRow(
+                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A21003")!,
+                    title: "Generation limits",
+                    detail: "Completion and context budgets",
+                    systemImage: "slider.horizontal.3"
+                ),
+                PinesSettingsRow(
                     id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A21002")!,
                     title: "Runtime diagnostics",
                     detail: "MLX and memory state",

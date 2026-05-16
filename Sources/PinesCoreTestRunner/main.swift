@@ -398,6 +398,9 @@ struct PinesCoreTestRunner {
             executionMode: .cloudAllowed,
             storeConfiguration: .init(iCloudSyncEnabled: true),
             defaultModelID: "local-model",
+            cloudMaxCompletionTokens: 32768,
+            localMaxCompletionTokens: 2048,
+            localMaxContextTokens: 32768,
             requireToolApproval: true,
             braveSearchEnabled: true,
             onboardingCompleted: true,
@@ -407,6 +410,9 @@ struct PinesCoreTestRunner {
         let decoded = try JSONDecoder().decode(AppSettingsSnapshot.self, from: JSONEncoder().encode(settings))
         try expectEqual(decoded.executionMode, .cloudAllowed)
         try expectEqual(decoded.themeTemplate, "graphite")
+        try expectEqual(decoded.cloudMaxCompletionTokens, 32768)
+        try expectEqual(decoded.localMaxCompletionTokens, 2048)
+        try expectEqual(decoded.localMaxContextTokens, 32768)
 
         let runtimeProfile = RuntimeProfile()
         try expectEqual(runtimeProfile.quantization.algorithm, .turboQuant)
