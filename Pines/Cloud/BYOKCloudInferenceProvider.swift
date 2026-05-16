@@ -288,13 +288,13 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     private func usesOpenAIReasoningChatParameters(modelID: ModelID) -> Bool {
-        guard configuration.kind == .openAI else { return false }
+        guard usesOfficialOpenAIAPI else { return false }
         let id = modelID.rawValue.lowercased()
         return id.hasPrefix("o") || id.hasPrefix("gpt-5")
     }
 
     private func usesOpenAIResponsesAPI(chatRequest: ChatRequest) -> Bool {
-        guard configuration.kind == .openAI,
+        guard usesOfficialOpenAIAPI,
               usesOpenAIReasoningChatParameters(modelID: chatRequest.modelID),
               !chatRequest.allowsTools,
               chatRequest.availableTools.isEmpty
@@ -304,6 +304,16 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return !chatRequest.messages.contains { message in
             message.role == .tool || !message.toolCalls.isEmpty
         }
+    }
+
+    private var usesOfficialOpenAIAPI: Bool {
+        if configuration.kind == .openAI {
+            return true
+        }
+        guard let host = configuration.baseURL.host(percentEncoded: false)?.lowercased() else {
+            return false
+        }
+        return host == "api.openai.com"
     }
 
     private func openAICompletionTokenLimit(for chatRequest: ChatRequest, usesReasoningParameters: Bool) -> Int {
@@ -771,6 +781,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         pendingFinish: inout InferenceFinish?
     ) -> [InferenceStreamEvent] {
         let type = json["type"] as? String
+        if let type {
+            state.openAIResponsesEventTypes.insert(type)
+        }
         switch type {
         case "response.output_text.delta":
             if let delta = json["delta"] as? String, !delta.isEmpty {
@@ -798,15 +811,19 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 return [.token(TokenDelta(kind: .token, text: delta, tokenCount: 1))]
             }
         case "response.completed":
+            let response = json["response"] as? [String: Any]
             if !state.openAIResponsesTextEmitted,
-               let response = json["response"] as? [String: Any],
+               let response,
                let text = openAIResponsesOutputText(from: response),
                !text.isEmpty {
                 state.openAIResponsesTextEmitted = true
                 pendingFinish = InferenceFinish(reason: .stop)
                 return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
             }
-            pendingFinish = InferenceFinish(reason: .stop)
+            pendingFinish = InferenceFinish(
+                reason: .stop,
+                message: openAIResponsesEmptyOutputMessage(response: response, eventTypes: state.openAIResponsesEventTypes)
+            )
         case "response.incomplete":
             let response = json["response"] as? [String: Any]
             let details = response?["incomplete_details"] as? [String: Any]
@@ -844,6 +861,26 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return text.isEmpty ? nil : text
     }
 
+    private static func openAIResponsesEmptyOutputMessage(
+        response: [String: Any]?,
+        eventTypes: Set<String>
+    ) -> String {
+        let status = response?["status"] as? String
+        let outputCount = (response?["output"] as? [[String: Any]])?.count
+        var details = [String]()
+        if let status {
+            details.append("status: \(status)")
+        }
+        if let outputCount {
+            details.append("output items: \(outputCount)")
+        }
+        if !eventTypes.isEmpty {
+            details.append("events: \(eventTypes.sorted().joined(separator: ", "))")
+        }
+        let suffix = details.isEmpty ? "" : " (\(details.joined(separator: "; ")))."
+        return "OpenAI completed the Responses stream without visible output text\(suffix)"
+    }
+
     private static func openAIFinish(from finishReason: String) -> InferenceFinish {
         switch finishReason {
         case "length":
@@ -875,6 +912,7 @@ private struct CloudToolCallStreamState {
     var openAIToolNames: [Int: String] = [:]
     var openAIArguments: [Int: String] = [:]
     var openAIResponsesTextEmitted = false
+    var openAIResponsesEventTypes = Set<String>()
 
     var anthropicToolIndex: Int?
     var anthropicToolID: String?

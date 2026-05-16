@@ -245,7 +245,7 @@ struct WatchChatOrchestrator {
                                 let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                                 let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if status == .complete && finalText.isEmpty {
-                                    let message = finish.message ?? "The selected model finished without producing output."
+                                    let message = finish.message ?? "The selected model finished without producing output. If this is an OpenAI GPT-5 cloud chat, rebuild from the latest main so Pines uses the OpenAI Responses API."
                                     didFail = true
                                     try await repository.updateMessage(
                                         id: pendingAssistant.id,

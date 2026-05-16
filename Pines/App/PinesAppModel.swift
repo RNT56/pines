@@ -775,7 +775,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     if failureMessage == nil {
                         let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                         if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            let message = finish.message ?? "The selected model finished without producing output."
+                            let message = finish.message ?? emptyCloudOutputMessage(
+                                providerID: selectedProviderID,
+                                modelID: selectedModelID,
+                                services: services
+                            )
                             failureMessage = message
                             try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true)
                             setChatError(message)
@@ -2282,6 +2286,18 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             return "Local"
         }
         return cloudProviders.first(where: { $0.id == providerID })?.displayName ?? providerID.rawValue
+    }
+
+    private func emptyCloudOutputMessage(
+        providerID: ProviderID,
+        modelID: ModelID,
+        services: PinesAppServices
+    ) -> String {
+        guard providerID != services.mlxRuntime.localProviderID else {
+            return "The selected model finished without producing output."
+        }
+        let providerName = providerDisplayName(for: providerID, services: services)
+        return "\(providerName) returned a successful stream for \(modelID.rawValue), but Pines did not receive visible text. If this provider points to api.openai.com, rebuild from the latest main so Pines uses the OpenAI Responses API for GPT-5 models."
     }
 
     private func providerKind(for providerID: ProviderID, services: PinesAppServices) -> CloudProviderKind? {
