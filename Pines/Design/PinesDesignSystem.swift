@@ -1442,6 +1442,10 @@ struct PinesThemeChart: Equatable {
 enum PinesThemePickerLayout {
     static let gridMinWidth: CGFloat = 174
     static let gridSpacing: CGFloat = 10
+    static let gridColumns: [GridItem] = [
+        GridItem(.flexible(minimum: 0), spacing: gridSpacing),
+        GridItem(.flexible(minimum: 0), spacing: gridSpacing),
+    ]
     static let cardHeight: CGFloat = 172
     static let cardPadding: CGFloat = 14
     static let cardSpacing: CGFloat = 10

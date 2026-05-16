@@ -1,6 +1,14 @@
 import SwiftUI
 import PinesCore
 
+private enum PinesSettingsDetailLayout {
+    static let contentSpacing: CGFloat = 20
+    static let contentPadding: CGFloat = 20
+    static let contentMaxWidth: CGFloat = 760
+    static let dashboardGridMinWidth: CGFloat = 144
+    static let dashboardGridSpacing: CGFloat = 10
+}
+
 struct SettingsDetailView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
@@ -51,7 +59,7 @@ struct SettingsDetailView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: theme.spacing.large) {
+                VStack(alignment: .leading, spacing: PinesSettingsDetailLayout.contentSpacing) {
                     settingsHeader(scrollProxy: proxy)
 
                     switch section.destination {
@@ -67,8 +75,8 @@ struct SettingsDetailView: View {
                         systemDashboard
                     }
                 }
-                .padding(theme.spacing.large)
-                .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .topLeading)
+                .padding(PinesSettingsDetailLayout.contentPadding)
+                .frame(maxWidth: PinesSettingsDetailLayout.contentMaxWidth, alignment: .topLeading)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -83,12 +91,12 @@ struct SettingsDetailView: View {
     }
 
     private var dashboardColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: theme.dashboard.compactGridMinWidth), spacing: theme.spacing.small)]
+        [GridItem(.adaptive(minimum: PinesSettingsDetailLayout.dashboardGridMinWidth), spacing: PinesSettingsDetailLayout.dashboardGridSpacing)]
     }
 
     private func settingsHeader(scrollProxy: ScrollViewProxy) -> some View {
         PinesCardSection(section.title, subtitle: section.subtitle, systemImage: section.systemImage, kind: .glass) {
-            LazyVGrid(columns: dashboardColumns, spacing: theme.spacing.small) {
+            LazyVGrid(columns: dashboardColumns, spacing: PinesSettingsDetailLayout.dashboardGridSpacing) {
                 ForEach(section.rows) { row in
                     Button {
                         guard let anchor = section.detailAnchor(for: row) else { return }
@@ -113,7 +121,7 @@ struct SettingsDetailView: View {
 
     @ViewBuilder
     private var designDashboard: some View {
-        PinesCardSection("Appearance", subtitle: "Theme, contrast, and interface behavior.", systemImage: "paintpalette") {
+        StableSettingsCardSection("Appearance", subtitle: "Theme, contrast, and interface behavior.", systemImage: "paintpalette") {
             Picker("Interface mode", selection: $interfaceMode) {
                 ForEach(PinesInterfaceMode.allCases) { mode in
                     Text(mode.title).tag(mode)
@@ -125,14 +133,12 @@ struct SettingsDetailView: View {
             }
 
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: PinesThemePickerLayout.gridMinWidth), spacing: PinesThemePickerLayout.gridSpacing)],
+                columns: PinesThemePickerLayout.gridColumns,
                 spacing: PinesThemePickerLayout.gridSpacing
             ) {
                 ForEach(PinesThemeTemplate.allCases) { template in
                     Button {
-                        withAnimation(theme.motion.selection) {
-                            selectedThemeTemplate = template
-                        }
+                        selectedThemeTemplate = template
                         haptics.play(.navigationSelected)
                         Task { await appModel.saveSettings(services: services) }
                     } label: {
@@ -140,6 +146,9 @@ struct SettingsDetailView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            }
+            .transaction { transaction in
+                transaction.animation = nil
             }
         }
         .id(SettingsDetailAnchor.appearance)
@@ -1116,6 +1125,66 @@ struct SettingsDetailView: View {
         mcpBYOKSamplingEnabled = false
         mcpSubscriptionsEnabled = false
         mcpMaxSamplingRequests = 3
+    }
+}
+
+private struct StableSettingsCardSection<Content: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let subtitle: String?
+    let systemImage: String
+    @ViewBuilder var content: () -> Content
+
+    init(
+        _ title: String,
+        subtitle: String? = nil,
+        systemImage: String,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.content = content
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 38, height: 38)
+                    .background(theme.colors.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                        .pinesFittingText()
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.86)
+                    }
+                }
+            }
+
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 104, alignment: .topLeading)
+        .background(theme.colors.surface, in: shape)
+        .overlay {
+            shape
+                .strokeBorder(theme.colors.cardBorder, lineWidth: 1)
+        }
+        .shadow(color: theme.shadow.panelColor.opacity(0.24), radius: 8, x: 0, y: 4)
     }
 }
 
