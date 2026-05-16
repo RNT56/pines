@@ -382,7 +382,11 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_tools"), "missing MCP tool table")
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_resources"), "missing MCP resources table")
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS mcp_prompts"), "missing MCP prompts table")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 7)
+        try expect(sql.contains("ALTER TABLE messages ADD COLUMN updated_at"), "missing message sync timestamp")
+        try expect(sql.contains("ALTER TABLE messages ADD COLUMN deleted_at"), "missing message tombstone column")
+        try expect(sql.contains("ALTER TABLE messages ADD COLUMN sync_state"), "missing message sync state")
+        try expect(sql.contains("PRIMARY KEY(chunk_id, embedding_model_id)"), "missing stable embedding merge key")
+        try expectEqual(PinesDatabaseSchema.currentVersion, 8)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")

@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 7
+    public static let currentVersion = 8
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -415,6 +415,41 @@ public enum PinesDatabaseSchema {
         ]),
         DatabaseMigration(version: 7, name: "conversation-provider-selection", sql: [
             "ALTER TABLE conversations ADD COLUMN default_provider_id TEXT;",
+        ]),
+        DatabaseMigration(version: 8, name: "cloudkit-message-and-embedding-merge-keys", sql: [
+            "ALTER TABLE messages ADD COLUMN updated_at REAL;",
+            "ALTER TABLE messages ADD COLUMN deleted_at REAL;",
+            "ALTER TABLE messages ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'local';",
+            "UPDATE messages SET updated_at = created_at WHERE updated_at IS NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_messages_sync_updated ON messages(sync_state, updated_at DESC);",
+            """
+            CREATE TABLE IF NOT EXISTS vault_embeddings_v2 (
+                chunk_id TEXT NOT NULL REFERENCES vault_chunks(id) ON DELETE CASCADE,
+                document_id TEXT NOT NULL REFERENCES vault_documents(id) ON DELETE CASCADE,
+                embedding_model_id TEXT NOT NULL,
+                dimensions INTEGER NOT NULL,
+                fp16_embedding BLOB NOT NULL,
+                turboquant_code BLOB NOT NULL,
+                norm REAL NOT NULL,
+                codec_version INTEGER NOT NULL,
+                checksum TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY(chunk_id, embedding_model_id)
+            );
+            """,
+            """
+            INSERT OR REPLACE INTO vault_embeddings_v2
+                (chunk_id, document_id, embedding_model_id, dimensions, fp16_embedding,
+                 turboquant_code, norm, codec_version, checksum, created_at)
+            SELECT chunk_id, document_id, embedding_model_id, dimensions, fp16_embedding,
+                   turboquant_code, norm, codec_version, checksum, created_at
+            FROM vault_embeddings;
+            """,
+            "DROP TABLE vault_embeddings;",
+            "ALTER TABLE vault_embeddings_v2 RENAME TO vault_embeddings;",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_model ON vault_embeddings(embedding_model_id, dimensions);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_document ON vault_embeddings(document_id);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_scan ON vault_embeddings(dimensions, embedding_model_id, chunk_id);",
         ]),
     ]
 }

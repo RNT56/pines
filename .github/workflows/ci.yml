@@ -88,8 +88,8 @@ jobs:
           fi
           xcodebuild -showsdks
 
-      - name: Report generated project drift
-        run: git diff -- Pines.xcodeproj project.yml || true
+      - name: Check generated project drift
+        run: git diff --exit-code -- Pines.xcodeproj project.yml
 
       - name: Resolve package dependencies
         run: |
