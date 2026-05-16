@@ -50,14 +50,13 @@ struct PinesRootView: View {
             isBootstrapping = true
             defer { isBootstrapping = false }
 
-            await services.bootstrap()
+            await services.prepareForFirstFrame()
             #if canImport(WatchConnectivity)
             let watchSessionService = PhoneWatchSessionService(services: services)
             watchSessionService.start()
             self.watchSessionService = watchSessionService
             #endif
             await appModel.bootstrap(services: services)
-            try? await Task.sleep(nanoseconds: 950_000_000)
             withAnimation(theme.motion.emphasized) {
                 showsBootMark = false
             }

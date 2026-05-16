@@ -39,7 +39,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var huggingFaceCredentialStatus = "Not configured"
     @Published var braveSearchCredentialStatus = "Not configured"
     private var didBootstrap = false
+    private var didLoadStartupState = false
     private var isBootstrapping = false
+    private var bootstrapBackgroundTask: Task<Void, Never>?
     private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
     private var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
@@ -219,6 +221,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     }
 
     deinit {
+        bootstrapBackgroundTask?.cancel()
         currentRunTask?.cancel()
         repositoryObservationTasks.forEach { $0.cancel() }
         approvalContinuation?.resume(returning: .denied)
@@ -233,11 +236,37 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
         guard !isBootstrapping else { return }
         isBootstrapping = true
-        defer { isBootstrapping = false }
 
+        if !didLoadStartupState {
+            await refreshStartupState(services: services)
+            didLoadStartupState = true
+        }
+
+        observeRepositories(services: services)
+        bootstrapBackgroundTask = Task { [weak self] in
+            await self?.finishBackgroundBootstrap(services: services)
+        }
+    }
+
+    private func refreshStartupState(services: PinesAppServices) async {
+        do {
+            if let settingsRepository = services.settingsRepository {
+                let settings = try await settingsRepository.loadSettings()
+                applySettings(settings)
+            }
+
+            try await refreshModelPreviews(services: services)
+            await normalizeDefaultModelIfNeeded(services: services)
+            setIfChanged(\.serviceError, nil)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    private func finishBackgroundBootstrap(services: PinesAppServices) async {
+        await services.bootstrap()
         try? await services.modelLifecycleService?.reconcileInterruptedDownloads()
         await refreshAll(services: services)
-        observeRepositories(services: services)
         await services.mcpServerService?.start { [weak self] request, server in
             guard let self else {
                 throw InferenceError.cancelled
@@ -245,27 +274,18 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             return try await self.handleMCPSampling(request, server: server, services: services)
         }
         didBootstrap = true
+        isBootstrapping = false
     }
 
     func refreshAll(services: PinesAppServices) async {
         do {
             if let settingsRepository = services.settingsRepository {
                 let settings = try await settingsRepository.loadSettings()
-                setIfChanged(\.executionMode, settings.executionMode)
-                setIfChanged(\.storeConfiguration, settings.storeConfiguration)
-                setIfChanged(\.defaultModelID, settings.defaultModelID)
-                setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
-                setIfChanged(\.interfaceMode, PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode)
+                applySettings(settings)
             }
 
             try await refreshModelPreviews(services: services)
-            if defaultModelID.flatMap(installedModel(for:)) == nil {
-                let normalizedDefault = preferredInstalledTextModel()?.modelID
-                if defaultModelID != normalizedDefault {
-                    defaultModelID = normalizedDefault
-                    await saveSettings(services: services)
-                }
-            }
+            await normalizeDefaultModelIfNeeded(services: services)
 
             if let conversationRepository = services.conversationRepository {
                 let conversations = try await conversationRepository.listConversations()
@@ -303,6 +323,22 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    private func applySettings(_ settings: AppSettingsSnapshot) {
+        setIfChanged(\.executionMode, settings.executionMode)
+        setIfChanged(\.storeConfiguration, settings.storeConfiguration)
+        setIfChanged(\.defaultModelID, settings.defaultModelID)
+        setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
+        setIfChanged(\.interfaceMode, PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode)
+    }
+
+    private func normalizeDefaultModelIfNeeded(services: PinesAppServices) async {
+        guard defaultModelID.flatMap(installedModel(for:)) == nil else { return }
+        let normalizedDefault = preferredInstalledTextModel()?.modelID
+        guard defaultModelID != normalizedDefault else { return }
+        defaultModelID = normalizedDefault
+        await saveSettings(services: services)
     }
 
     func createChat(services: PinesAppServices) async -> UUID? {

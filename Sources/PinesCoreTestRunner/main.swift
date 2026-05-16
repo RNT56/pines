@@ -156,6 +156,80 @@ struct PinesCoreTestRunner {
         )
         try expectEqual(gemma4.verification, .installable)
         try expectEqual(gemma4.modalities, [.text, .vision])
+
+        let qwen35 = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
+                configJSON: #"{"model_type":"qwen3_5"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 400_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "qwen3_5"]
+            )
+        )
+        try expectEqual(qwen35.verification, .installable)
+        try expectEqual(qwen35.modalities, [.text])
+
+        let qwen35MoEVLM = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen3.5-122B-A10B-mxfp8",
+                configJSON: #"{"model_type":"qwen3_5_moe"}"#.data(using: .utf8)!,
+                processorConfigJSON: #"{"processor_class":"Qwen2VLProcessor"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 35_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                    .init(path: "processor_config.json", size: 5_000),
+                ],
+                tags: ["mlx", "qwen3_5_moe", "image-text-to-text"]
+            )
+        )
+        try expectEqual(qwen35MoEVLM.verification, .installable)
+        try expectEqual(qwen35MoEVLM.modalities, [.text, .vision])
+
+        let qwen3Next = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen3-Coder-Next-mxfp8",
+                configJSON: #"{"model_type":"qwen3_next"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 80_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "qwen3_next"]
+            )
+        )
+        try expectEqual(qwen3Next.verification, .installable)
+        try expectEqual(qwen3Next.modalities, [.text])
+
+        let ministral3 = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Ministral-3-14B-Instruct-2512-4bit",
+                configJSON: #"{"model_type":"mistral3"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 8_420_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                ],
+                tags: ["mlx", "mistral3"]
+            )
+        )
+        try expectEqual(ministral3.verification, .installable)
+        try expectEqual(ministral3.modalities, [.text])
+
+        let glmOCR = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/GLM-OCR-8bit",
+                configJSON: #"{"model_type":"glm_ocr"}"#.data(using: .utf8)!,
+                processorConfigJSON: #"{"processor_class":"GLMOCRProcessor"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 1_200_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                    .init(path: "processor_config.json", size: 5_000),
+                ],
+                tags: ["mlx", "glm_ocr", "image-text-to-text"]
+            )
+        )
+        try expectEqual(glmOCR.verification, .installable)
+        try expectEqual(glmOCR.modalities, [.text, .vision])
     }
 
     private static func testModelCatalogSearch() async throws {
@@ -659,9 +733,9 @@ struct PinesCoreTestRunner {
         return dictionary
     }
 
-    private static func expectEqual<T: Equatable>(_ actual: T, _ expected: T) throws {
+    private static func expectEqual<T: Equatable>(_ actual: T, _ expected: T, line: UInt = #line) throws {
         if actual != expected {
-            throw TestFailure("Expected \(expected), received \(actual)")
+            throw TestFailure("Line \(line): expected \(expected), received \(actual)")
         }
     }
 

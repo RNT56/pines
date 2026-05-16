@@ -36,6 +36,12 @@ public struct ModelPreflightClassifier: Sendable {
                     || lowerTag == "sentence-transformers"
                     || lowerTag == "embeddings"
             }
+        let hasVisionSignal = hasProcessorConfig
+            || processorClass?.localizedCaseInsensitiveContains("processor") == true
+            || input.tags.contains { tag in
+                let lowerTag = tag.lowercased()
+                return lowerTag == "image-text-to-text" || lowerTag == "any-to-any"
+            }
 
         var modalities = Set<ModelModality>()
         var reasons = [String]()
@@ -43,7 +49,9 @@ public struct ModelPreflightClassifier: Sendable {
         if let modelType, supportedLLMTypes.contains(modelType), !hasEmbeddingSignal {
             modalities.insert(.text)
         }
-        if let modelType, supportedVLMTypes.contains(modelType) || processorClass?.localizedCaseInsensitiveContains("processor") == true {
+        if let modelType,
+           (supportedVLMTypes.contains(modelType) && (!supportedLLMTypes.contains(modelType) || hasVisionSignal))
+            || processorClass?.localizedCaseInsensitiveContains("processor") == true {
             modalities.insert(.text)
             modalities.insert(.vision)
         }
@@ -106,19 +114,21 @@ public struct ModelPreflightClassifier: Sendable {
 
     public static let defaultSupportedLLMTypes: Set<String> = [
         "llama", "mistral", "qwen2", "qwen3", "qwen3_moe", "gemma", "gemma2",
-        "gemma3", "gemma3_text", "gemma3n", "gemma4", "phi", "phi3", "phimoe", "deepseek_v3",
-        "glm4", "glm4_moe", "glm4_moe_lite", "starcoder2", "cohere", "openelm",
-        "internlm2", "granite", "granitemoehybrid", "mimo", "mimo_v2_flash",
-        "minimax", "bitnet", "smollm3", "ernie4_5", "lfm2", "lfm2_moe",
-        "exaone4", "olmo2", "olmo3", "olmoe", "falcon_h1", "jamba", "jamba_3b",
-        "gpt_oss", "nanochat", "nemotron_h", "apertus", "afmoe", "bailing_moe",
-        "minicpm",
+        "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text",
+        "qwen3_next", "qwen3_5", "qwen3_5_moe", "qwen3_5_text",
+        "phi", "phi3", "phimoe", "deepseek_v3", "glm4", "glm4_moe",
+        "glm4_moe_lite", "starcoder2", "cohere", "openelm", "internlm2",
+        "granite", "granitemoehybrid", "mimo", "mimo_v2_flash", "minimax",
+        "mistral3", "bitnet", "smollm3", "ernie4_5", "lfm2", "lfm2_moe",
+        "baichuan_m1", "exaone4", "olmo2", "olmo3", "olmoe", "falcon_h1",
+        "jamba", "gpt_oss", "nanochat", "nemotron_h", "apertus", "afmoe",
+        "bailing_moe", "minicpm", "lille-130m", "acereason",
     ]
 
     public static let defaultSupportedVLMTypes: Set<String> = [
-        "qwen2_vl", "qwen2_5_vl", "qwen3_vl", "gemma3", "gemma4", "paligemma",
-        "idefics3", "smolvlm", "fastvlm", "llava_qwen2", "pixtral", "mistral3",
-        "lfm2_vl", "lfm2-vl",
+        "qwen2_vl", "qwen2_5_vl", "qwen3_vl", "qwen3_5", "qwen3_5_moe",
+        "gemma3", "gemma4", "paligemma", "idefics3", "smolvlm", "fastvlm",
+        "llava_qwen2", "pixtral", "mistral3", "lfm2_vl", "lfm2-vl", "glm_ocr",
     ]
 
     public static let defaultSupportedEmbedderTypes: Set<String> = [

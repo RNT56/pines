@@ -30,6 +30,7 @@ final class PinesAppServices: @unchecked Sendable {
     let mcpServerRepository: (any MCPServerRepository)?
     let modelDownloadRepository: (any ModelDownloadRepository)?
     let auditRepository: (any AuditEventRepository)?
+    private var didBootstrapTools = false
 
     init(
         secretStore: any SecretStore = KeychainSecretStore(),
@@ -63,8 +64,15 @@ final class PinesAppServices: @unchecked Sendable {
         auditRepository = liveStore
     }
 
-    func bootstrap() async {
+    func prepareForFirstFrame() async {
         runtimeMetrics.start()
+    }
+
+    func bootstrap() async {
+        await prepareForFirstFrame()
+        guard !didBootstrapTools else { return }
+        didBootstrapTools = true
+
         try? await toolRegistry.register(CalculatorTool.spec())
         try? await toolRegistry.register(BraveSearchTool.spec(secretStore: secretStore))
         #if canImport(WebKit) && canImport(UIKit)
