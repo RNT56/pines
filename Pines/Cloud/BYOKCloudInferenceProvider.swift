@@ -64,7 +64,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                     if !dataLines.isEmpty {
                         handleSSEDataLines(dataLines, format: streamingFormat, state: &toolState, pendingFinish: &pendingFinish, continuation: continuation)
                     }
-                    continuation.yield(.finish(pendingFinish ?? InferenceFinish(reason: .stop)))
+                    continuation.yield(.finish(pendingFinish ?? fallbackFinish(format: streamingFormat, state: toolState, chatRequest: request)))
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
@@ -301,9 +301,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         else {
             return false
         }
-        return !chatRequest.messages.contains { message in
-            message.role == .tool || !message.toolCalls.isEmpty
-        }
+        return true
     }
 
     private var usesOfficialOpenAIAPI: Bool {
@@ -320,6 +318,30 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         let requested = chatRequest.sampling.maxTokens ?? 1024
         guard usesReasoningParameters else { return requested }
         return max(requested, Self.openAIReasoningDefaultMaxCompletionTokens)
+    }
+
+    private func fallbackFinish(
+        format: CloudStreamingFormat,
+        state: CloudToolCallStreamState,
+        chatRequest: ChatRequest
+    ) -> InferenceFinish {
+        switch format {
+        case .openAIResponses:
+            return InferenceFinish(
+                reason: .stop,
+                message: Self.openAIResponsesEmptyOutputMessage(response: nil, eventTypes: state.openAIResponsesEventTypes)
+            )
+        case .chatCompletions:
+            guard usesOfficialOpenAIAPI,
+                  usesOpenAIReasoningChatParameters(modelID: chatRequest.modelID)
+            else {
+                return InferenceFinish(reason: .stop)
+            }
+            return InferenceFinish(
+                reason: .stop,
+                message: "Pines received an empty OpenAI Chat Completions stream for \(chatRequest.modelID.rawValue). Official OpenAI GPT-5 chats should use the Responses API; check that the provider base URL is api.openai.com and retry from the latest build."
+            )
+        }
     }
 
     private func geminiRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
