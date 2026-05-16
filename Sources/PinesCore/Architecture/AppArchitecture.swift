@@ -103,6 +103,7 @@ public protocol ConversationRepository: Sendable {
     func observeConversationPreviews() -> AsyncStream<[ConversationPreviewRecord]>
     func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?) async throws -> ConversationRecord
     func updateConversationTitle(_ title: String, conversationID: UUID) async throws
+    func updateConversationModel(modelID: ModelID?, providerID: ProviderID?, conversationID: UUID) async throws
     func setConversationArchived(_ archived: Bool, conversationID: UUID) async throws
     func deleteConversation(id: UUID) async throws
     func messages(in conversationID: UUID) async throws -> [ChatMessage]

@@ -140,6 +140,10 @@ struct PinesThemeColors {
     var elevatedSurface: Color
     var cardBackground: Color
     var cardBorder: Color
+    var listSectionBackground: Color
+    var listRowBackground: Color
+    var chromeBackground: Color
+    var chromeBorder: Color
     var glassSurface: AnyShapeStyle
     var backgroundWash: AnyShapeStyle
     var surfaceHighlight: Color
@@ -361,6 +365,45 @@ struct PinesThemeColors {
         sheetBackground = dark ? surface : elevatedSurface
         cardBackground = surface
         cardBorder = separator
+        listSectionBackground = cardBackground
+        listRowBackground = cardBackground.opacity(dark ? 0.46 : 0.72)
+        chromeBackground = elevatedSurface.opacity(dark ? 0.88 : 0.94)
+        chromeBorder = controlBorder
+
+        switch template {
+        case .evergreen:
+            listSectionBackground = dark ? Color(hex: 0x0C211B) : Color(hex: 0xEAF2EB)
+            listRowBackground = dark ? Color(hex: 0x112A23) : Color(hex: 0xFAFCFA)
+            chromeBackground = dark ? Color(hex: 0x122A23).opacity(0.92) : Color(hex: 0xFBFCFA).opacity(0.96)
+        case .graphite:
+            listSectionBackground = dark ? Color(hex: 0x15181D) : Color(hex: 0xECEFF3)
+            listRowBackground = dark ? Color(hex: 0x1C2026) : Color(hex: 0xFCFCFD)
+            chromeBackground = dark ? Color(hex: 0x20242B).opacity(0.92) : Color(hex: 0xFFFFFF).opacity(0.95)
+        case .aurora:
+            listSectionBackground = dark ? Color(hex: 0x101735) : Color(hex: 0xE8F0FF)
+            listRowBackground = dark ? Color(hex: 0x151E3B) : Color(hex: 0xFAFCFF)
+            chromeBackground = dark ? Color(hex: 0x141D3A).opacity(0.92) : Color(hex: 0xFAFCFF).opacity(0.95)
+        case .paper:
+            listSectionBackground = dark ? Color(hex: 0x20251F) : Color(hex: 0xFFF4E4)
+            listRowBackground = dark ? Color(hex: 0x252B24) : Color(hex: 0xFFF9EE)
+            chromeBackground = dark ? Color(hex: 0x252B24).opacity(0.92) : Color(hex: 0xFFF9EE).opacity(0.96)
+        case .slate:
+            listSectionBackground = dark ? Color(hex: 0x102730) : Color(hex: 0xEAF3F7)
+            listRowBackground = dark ? Color(hex: 0x18343F) : Color(hex: 0xF6FBFD)
+            chromeBackground = dark ? Color(hex: 0x193743).opacity(0.92) : Color(hex: 0xF7FBFD).opacity(0.95)
+        case .porcelain:
+            listSectionBackground = dark ? Color(hex: 0x242223) : Color(hex: 0xF8F3EA)
+            listRowBackground = dark ? Color(hex: 0x2B282A) : Color(hex: 0xFFFDF8)
+            chromeBackground = dark ? Color(hex: 0x2B282A).opacity(0.92) : Color(hex: 0xFFFDF8).opacity(0.96)
+        case .sunset:
+            listSectionBackground = dark ? Color(hex: 0x241409) : Color(hex: 0xFFE9D1)
+            listRowBackground = dark ? Color(hex: 0x302010) : Color(hex: 0xFFF5EA)
+            chromeBackground = dark ? Color(hex: 0x302010).opacity(0.92) : Color(hex: 0xFFF7EF).opacity(0.96)
+        case .obsidian:
+            listSectionBackground = dark ? Color(hex: 0x0D1112) : Color(hex: 0xE9EEEE)
+            listRowBackground = dark ? Color(hex: 0x141C1F) : Color(hex: 0xFBFCFC)
+            chromeBackground = dark ? Color(hex: 0x172124).opacity(0.92) : Color(hex: 0xFFFFFF).opacity(0.95)
+        }
 
         switch template {
         case .aurora where dark:
@@ -372,6 +415,9 @@ struct PinesThemeColors {
             controlFill = Color.white.opacity(0.065)
             controlBorder = Color.white.opacity(0.12)
             toolBubble = warning.opacity(0.14)
+            listSectionBackground = Color(hex: 0x101735)
+            listRowBackground = Color(hex: 0x151E3B)
+            chromeBackground = Color(hex: 0x141D3A).opacity(0.92)
         case .paper where dark:
             contentBackground = Color(hex: 0x111412)
             sidebarBackground = Color(hex: 0x171B17)
@@ -380,33 +426,52 @@ struct PinesThemeColors {
             cardBorder = Color.white.opacity(0.11)
             controlFill = Color.white.opacity(0.07)
             controlBorder = Color.white.opacity(0.12)
+            listSectionBackground = Color(hex: 0x20251F)
+            listRowBackground = Color(hex: 0x252B24)
+            chromeBackground = Color(hex: 0x252B24).opacity(0.92)
         case .paper:
             contentBackground = Color(hex: 0xFAF6EC)
             sidebarBackground = Color(hex: 0xEFE6D6)
             sheetBackground = Color(hex: 0xFFF9EE)
             cardBackground = Color(hex: 0xFFF8EC)
             cardBorder = Color.black.opacity(0.085)
+            listSectionBackground = Color(hex: 0xFFF4E4)
+            listRowBackground = Color(hex: 0xFFF9EE)
+            chromeBackground = Color(hex: 0xFFF9EE).opacity(0.96)
         case .slate where !dark:
             sidebarBackground = Color(hex: 0xD8E6EC)
             cardBackground = Color(hex: 0xF6FBFD)
             cardBorder = Color(hex: 0x9BB5C1).opacity(0.34)
+            listSectionBackground = Color(hex: 0xEAF3F7)
+            listRowBackground = Color(hex: 0xF6FBFD)
+            chromeBackground = Color(hex: 0xF7FBFD).opacity(0.95)
         case .porcelain where !dark:
             sidebarBackground = Color(hex: 0xF0ECE3)
             cardBackground = Color(hex: 0xFFFDF8)
             cardBorder = Color(hex: 0xD8CEC2).opacity(0.48)
+            listSectionBackground = Color(hex: 0xF8F3EA)
+            listRowBackground = Color(hex: 0xFFFDF8)
+            chromeBackground = Color(hex: 0xFFFDF8).opacity(0.96)
         case .sunset where dark:
             sidebarBackground = Color(hex: 0x1D1008)
             cardBackground = Color(hex: 0x2A180C)
             cardBorder = Color(hex: 0xFFB15B).opacity(0.16)
             controlFill = Color.white.opacity(0.075)
             controlBorder = Color(hex: 0xFFB15B).opacity(0.18)
+            listSectionBackground = Color(hex: 0x241409)
+            listRowBackground = Color(hex: 0x302010)
+            chromeBackground = Color(hex: 0x302010).opacity(0.92)
         case .sunset:
             sidebarBackground = Color(hex: 0xF4E0C8)
             cardBackground = Color(hex: 0xFFF3E5)
             cardBorder = Color(hex: 0xD66B00).opacity(0.16)
+            listSectionBackground = Color(hex: 0xFFE9D1)
+            listRowBackground = Color(hex: 0xFFF5EA)
+            chromeBackground = Color(hex: 0xFFF7EF).opacity(0.96)
         default:
             break
         }
+        chromeBorder = controlBorder
     }
 }
 

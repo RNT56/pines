@@ -147,8 +147,7 @@ struct ModelsView: View {
                     self.selectedModelID = nil
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(theme.colors.sidebarBackground)
+            .pinesSidebarListChrome()
             .animation(theme.motion.fast, value: appModel.isSearchingModels)
             .animation(theme.motion.fast, value: appModel.models)
         } detail: {

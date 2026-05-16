@@ -1398,6 +1398,48 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return nil
     }
 
+    func selectModel(_ option: ModelPickerOption, for threadID: UUID, services: PinesAppServices) async {
+        setIfChanged(\.defaultProviderID, option.providerID)
+        setIfChanged(\.defaultModelID, option.modelID)
+        await saveSettings(services: services)
+
+        guard let repository = services.conversationRepository else {
+            setChatError("Conversation repository is unavailable.")
+            emitHaptic(.runFailed)
+            return
+        }
+
+        do {
+            try await repository.updateConversationModel(
+                modelID: option.modelID,
+                providerID: option.providerID,
+                conversationID: threadID
+            )
+            if let thread = threads.first(where: { $0.id == threadID }) {
+                upsertThreadPreview(
+                    PinesThreadPreview(
+                        id: thread.id,
+                        title: thread.title,
+                        modelName: option.displayName,
+                        modelID: option.modelID,
+                        providerID: option.providerID,
+                        lastMessage: thread.lastMessage,
+                        messages: thread.messages,
+                        status: thread.status,
+                        updatedLabel: RelativeDateTimeFormatter.shortLabel(for: Date()),
+                        tokenCount: thread.tokenCount
+                    ),
+                    moveToFront: true
+                )
+            }
+            clearChatError()
+            emitHaptic(.primaryAction)
+        } catch {
+            setChatError(error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
     func saveMCPServer(
         existingID: MCPServerID? = nil,
         displayName: String,

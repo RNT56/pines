@@ -105,6 +105,23 @@ actor GRDBPinesStore:
         }
     }
 
+    func updateConversationModel(modelID: ModelID?, providerID: ProviderID?, conversationID: UUID) async throws {
+        let modelRawValue: String? = modelID?.rawValue
+        let providerRawValue: String? = providerID?.rawValue
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE conversations SET default_model_id = ?, default_provider_id = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [
+                    modelRawValue,
+                    providerRawValue,
+                    Date().timeIntervalSinceReferenceDate,
+                    SyncState.local.rawValue,
+                    conversationID.uuidString,
+                ]
+            )
+        }
+    }
+
     func setConversationArchived(_ archived: Bool, conversationID: UUID) async throws {
         try await database.write { db in
             try db.execute(

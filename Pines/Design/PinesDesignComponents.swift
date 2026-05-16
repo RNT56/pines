@@ -602,8 +602,10 @@ private struct PinesSurfaceModifier: ViewModifier {
 
     private var backgroundStyle: AnyShapeStyle {
         switch kind {
-        case .glass, .chrome:
+        case .glass:
             theme.colors.glassSurface
+        case .chrome:
+            AnyShapeStyle(theme.colors.chromeBackground)
         case .elevated, .selected:
             AnyShapeStyle(theme.colors.elevatedSurface)
         case .inset:
@@ -619,7 +621,9 @@ private struct PinesSurfaceModifier: ViewModifier {
         switch kind {
         case .selected:
             theme.colors.accent.opacity(0.72)
-        case .glass, .chrome:
+        case .chrome:
+            theme.colors.chromeBorder
+        case .glass:
             theme.colors.controlBorder
         case .code:
             theme.colors.separator
@@ -1154,7 +1158,7 @@ struct PinesSidebarRow<Accessory: View>: View {
         if isSelected {
             return theme.colors.sidebarSelection
         }
-        return theme.colors.cardBackground.opacity(theme.colorScheme == .dark ? 0.34 : 0.72)
+        return theme.colors.listRowBackground
     }
 
     private var rowBorder: Color {
@@ -1568,6 +1572,34 @@ private struct PinesFieldChromeModifier: ViewModifier {
     }
 }
 
+private struct PinesSidebarListChromeModifier: ViewModifier {
+    @Environment(\.pinesTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(theme.colors.sidebarBackground)
+    }
+}
+
+private struct PinesSidebarListRowModifier: ViewModifier {
+    @Environment(\.pinesTheme) private var theme
+    let insets: EdgeInsets?
+    let background: Color?
+
+    func body(content: Content) -> some View {
+        content
+            .listRowInsets(insets ?? EdgeInsets(
+                top: theme.spacing.xxsmall,
+                leading: theme.spacing.xsmall,
+                bottom: theme.spacing.xxsmall,
+                trailing: theme.spacing.xsmall
+            ))
+            .listRowBackground(background ?? theme.colors.listSectionBackground)
+    }
+}
+
 extension View {
     func pinesPanel(padding: CGFloat? = nil) -> some View {
         modifier(PinesSurfaceModifier(kind: .panel, padding: padding))
@@ -1587,6 +1619,14 @@ extension View {
 
     func pinesButtonStyle(_ kind: PinesButtonKind = .secondary, fillWidth: Bool = false) -> some View {
         buttonStyle(PinesButtonStyle(kind: kind, fillWidth: fillWidth))
+    }
+
+    func pinesSidebarListChrome() -> some View {
+        modifier(PinesSidebarListChromeModifier())
+    }
+
+    func pinesSidebarListRow(insets: EdgeInsets? = nil, background: Color? = nil) -> some View {
+        modifier(PinesSidebarListRowModifier(insets: insets, background: background))
     }
 
     func pinesFittingText(lines: Int = 1, minimumScale: CGFloat = 0.78) -> some View {

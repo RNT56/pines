@@ -33,6 +33,7 @@ struct ChatsView: View {
                         NavigationLink(value: thread.id) {
                             ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
                         }
+                        .pinesSidebarListRow()
                     }
                 }
             }
@@ -40,7 +41,16 @@ struct ChatsView: View {
             .pinesExpressiveScrollHaptics()
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    ChatModelPickerButton(selectedThreadID: $selectedThreadID)
+                    Button {
+                        Task {
+                            if let threadID = await appModel.createChat(services: services) {
+                                selectedThreadID = threadID
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("New chat")
                 }
             }
             .onAppear(perform: selectDefaultThreadIfNeeded)
@@ -56,8 +66,7 @@ struct ChatsView: View {
             .onChange(of: selectedThreadID) { _, _ in
                 haptics.play(.navigationSelected)
             }
-            .scrollContentBackground(.hidden)
-            .background(theme.colors.sidebarBackground)
+            .pinesSidebarListChrome()
         } detail: {
             if let selectedThread {
                 ChatTranscriptView(thread: selectedThread)
@@ -81,7 +90,12 @@ private struct ChatModelPickerButton: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
-    @Binding var selectedThreadID: PinesThreadPreview.ID?
+    let currentProviderID: ProviderID?
+    let currentModelID: ModelID?
+    let fallbackLabel: String?
+    var accessibilityLabel = "Chat model"
+    var fillWidth = false
+    let select: (ModelPickerOption) async -> Void
 
     var body: some View {
         Menu {
@@ -94,7 +108,7 @@ private struct ChatModelPickerButton: View {
                         ForEach(section.models) { option in
                             Button {
                                 Task {
-                                    selectedThreadID = await appModel.selectModel(option, services: services, createNewChat: true)
+                                    await select(option)
                                 }
                             } label: {
                                 Label {
@@ -113,12 +127,15 @@ private struct ChatModelPickerButton: View {
                 Text(currentModelLabel)
                     .lineLimit(1)
                     .minimumScaleFactor(0.76)
+                if fillWidth {
+                    Spacer(minLength: theme.spacing.xsmall)
+                }
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
             }
         }
-        .accessibilityLabel("New chat model")
-        .pinesButtonStyle(.secondary)
+        .accessibilityLabel(accessibilityLabel)
+        .pinesButtonStyle(.secondary, fillWidth: fillWidth)
         .task {
             await appModel.refreshCloudModelCatalog(services: services)
         }
@@ -127,10 +144,19 @@ private struct ChatModelPickerButton: View {
     private var currentModelLabel: String {
         let sections = appModel.modelPickerSections(services: services)
         let options = sections.flatMap(\.models)
+        if let currentProviderID,
+           let currentModelID,
+           let match = options.first(where: { $0.providerID == currentProviderID && $0.modelID == currentModelID }) {
+            return match.displayName
+        }
+        if let currentModelID,
+           let match = options.first(where: { $0.modelID == currentModelID }) {
+            return match.displayName
+        }
         if let match = options.first(where: { $0.providerID == appModel.defaultProviderID && $0.modelID == appModel.defaultModelID }) {
             return match.displayName
         }
-        return options.first?.displayName ?? "Model"
+        return fallbackLabel ?? options.first?.displayName ?? "No text models available"
     }
 }
 
@@ -155,8 +181,6 @@ private struct ChatThreadRow: View {
                 size: 9
             )
         }
-        .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
-        .listRowBackground(theme.colors.sidebarBackground)
     }
 }
 
@@ -193,10 +217,7 @@ private struct ChatTranscriptView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: theme.spacing.large) {
-                    PinesSectionHeader(
-                        thread.title,
-                        subtitle: "\(thread.modelName) - \(thread.tokenCount) tokens - \(thread.status.title)"
-                    )
+                    ChatTranscriptHeader(thread: thread)
 
                     LazyVStack(spacing: theme.spacing.medium) {
                         ForEach(thread.messages) { message in
@@ -242,6 +263,13 @@ private struct ChatTranscriptView: View {
         .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .toolbar {
+            if horizontalSizeClass == .compact {
+                ToolbarItem(placement: .principal) {
+                    ChatModelSelector(thread: thread, fillWidth: false)
+                        .frame(maxWidth: 230)
+                }
+            }
+
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     appModel.stopCurrentRun()
@@ -288,6 +316,46 @@ private struct ChatTranscriptView: View {
 
     private var contentPadding: CGFloat {
         horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large
+    }
+}
+
+private struct ChatTranscriptHeader: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.pinesTheme) private var theme
+    let thread: PinesThreadPreview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            if horizontalSizeClass != .compact {
+                ChatModelSelector(thread: thread, fillWidth: false)
+            }
+
+            Text("\(thread.tokenCount) tokens - \(thread.status.title)")
+                .font(theme.typography.callout)
+                .foregroundStyle(theme.colors.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.84)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ChatModelSelector: View {
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    let thread: PinesThreadPreview
+    var fillWidth: Bool
+
+    var body: some View {
+        ChatModelPickerButton(
+            currentProviderID: thread.providerID,
+            currentModelID: thread.modelID,
+            fallbackLabel: thread.modelName,
+            accessibilityLabel: "Chat model",
+            fillWidth: fillWidth
+        ) { option in
+            await appModel.selectModel(option, for: thread.id, services: services)
+        }
     }
 }
 

@@ -35,6 +35,7 @@ struct VaultView: View {
                         NavigationLink(value: item.id) {
                             VaultItemRow(item: item, isSelected: selectedItemID == item.id)
                         }
+                        .pinesSidebarListRow()
                     }
                 }
             }
@@ -82,8 +83,7 @@ struct VaultView: View {
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(theme.colors.sidebarBackground)
+            .pinesSidebarListChrome()
         } detail: {
             if let selectedItem {
                 VaultDetailView(item: selectedItem)
@@ -118,8 +118,6 @@ private struct VaultItemRow: View {
             isSelected: isSelected,
             isActive: item.sensitivity == .locked
         )
-        .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
-        .listRowBackground(theme.colors.sidebarBackground)
     }
 }
 

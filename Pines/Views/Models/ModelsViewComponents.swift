@@ -23,8 +23,15 @@ struct ModelSidebarList: View {
                     selectedInstallState: $selectedInstallStateFilter,
                     isSearching: isSearching
                 )
-                .listRowInsets(EdgeInsets(top: theme.spacing.small, leading: theme.spacing.medium, bottom: theme.spacing.small, trailing: theme.spacing.medium))
-                .listRowBackground(theme.colors.sidebarBackground)
+                .pinesSidebarListRow(
+                    insets: EdgeInsets(
+                        top: theme.spacing.small,
+                        leading: theme.spacing.medium,
+                        bottom: theme.spacing.small,
+                        trailing: theme.spacing.medium
+                    ),
+                    background: theme.colors.sidebarBackground
+                )
             }
 
             Section {
@@ -232,6 +239,14 @@ private struct ModelListStatusRow: View {
             }
         }
         .padding(.vertical, theme.spacing.xsmall)
+        .pinesSidebarListRow(
+            insets: EdgeInsets(
+                top: theme.spacing.xxsmall,
+                leading: theme.spacing.xsmall,
+                bottom: theme.spacing.xxsmall,
+                trailing: theme.spacing.xsmall
+            )
+        )
     }
 }
 
@@ -269,8 +284,7 @@ private struct ModelRow: View {
                     .padding(.horizontal, theme.spacing.small)
             }
         }
-        .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
-        .listRowBackground(theme.colors.sidebarBackground)
+        .pinesSidebarListRow()
     }
 }
 

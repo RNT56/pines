@@ -30,7 +30,7 @@ The selected mode is applied through `preferredColorScheme`, while the resolved 
 `PinesTheme` controls:
 
 - semantic colors
-- content, sidebar, sheet, card, list-row, and disabled-state roles
+- content, sidebar, sheet, card, themed grouped-list, chrome, list-row, and disabled-state roles
 - typography
 - spacing
 - radii
@@ -78,6 +78,20 @@ Use shared modifiers:
 content
     .pinesPanel()
     .pinesAppBackground()
+```
+
+Sidebar lists should use the shared list chrome so SwiftUI grouped-list containers do not fall back to system light/dark surfaces:
+
+```swift
+List {
+    Section("Recent") {
+        NavigationLink(value: item.id) {
+            PinesSidebarRow(...)
+        }
+        .pinesSidebarListRow()
+    }
+}
+.pinesSidebarListChrome()
 ```
 
 ## Rules

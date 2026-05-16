@@ -32,6 +32,7 @@ struct SettingsView: View {
                         NavigationLink(value: section.id) {
                             SettingsSectionRow(section: section, isSelected: selectedSectionID == section.id)
                         }
+                        .pinesSidebarListRow()
                     }
                 }
             }
@@ -50,8 +51,7 @@ struct SettingsView: View {
             .onChange(of: selectedSectionID) { _, _ in
                 haptics.play(.navigationSelected)
             }
-            .scrollContentBackground(.hidden)
-            .background(theme.colors.sidebarBackground)
+            .pinesSidebarListChrome()
         } detail: {
             if let selectedSection {
                 SettingsDetailView(
@@ -90,7 +90,5 @@ private struct SettingsSectionRow: View {
             tint: theme.colors.accent,
             isSelected: isSelected
         )
-        .listRowInsets(EdgeInsets(top: theme.spacing.xxsmall, leading: theme.spacing.xsmall, bottom: theme.spacing.xxsmall, trailing: theme.spacing.xsmall))
-        .listRowBackground(theme.colors.sidebarBackground)
     }
 }
