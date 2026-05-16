@@ -887,6 +887,16 @@ struct PinesProgressBar: View {
     var tint: Color?
     var animates = true
 
+    init(value: Double, tint: Color? = nil, animates: Bool = true) {
+        self.value = value
+        self.tint = tint
+        self.animates = animates
+    }
+
+    init(value: Double, tint: Color?) {
+        self.init(value: value, tint: tint, animates: true)
+    }
+
     private var clampedValue: Double {
         min(1, max(0, value))
     }
