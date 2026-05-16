@@ -509,6 +509,11 @@ private struct PinesScrollHapticSnapshot: Equatable {
     var maxOffset: CGFloat?
 }
 
+private enum PinesScrollHapticAxis {
+    case horizontal
+    case vertical
+}
+
 private final class PinesScrollHapticCoordinator {
     private var gate = PinesScrollHapticGate()
 
@@ -524,6 +529,7 @@ private final class PinesScrollHapticCoordinator {
 private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var coordinator = PinesScrollHapticCoordinator()
+    let axis: PinesScrollHapticAxis
 
     func body(content: Content) -> some View {
         #if targetEnvironment(simulator)
@@ -532,10 +538,10 @@ private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
         if haptics.mode == .expressive {
             content
                 .onScrollGeometryChange(for: PinesScrollHapticSnapshot.self) { geometry in
-                    let minOffset = quantizedScrollOffset(-geometry.contentInsets.top)
-                    let rawMaxOffset = geometry.contentSize.height - geometry.containerSize.height + geometry.contentInsets.bottom
+                    let minOffset = quantizedScrollOffset(minOffset(for: geometry))
+                    let rawMaxOffset = maxOffset(for: geometry)
                     let maxOffset = max(minOffset, quantizedScrollOffset(rawMaxOffset))
-                    let offset = quantizedScrollOffset(geometry.contentOffset.y)
+                    let offset = quantizedScrollOffset(offset(for: geometry))
                     return PinesScrollHapticSnapshot(
                         offset: offset,
                         minOffset: minOffset,
@@ -559,10 +565,41 @@ private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
         let step: CGFloat = 24
         return (value / step).rounded() * step
     }
+
+    private func offset(for geometry: ScrollGeometry) -> CGFloat {
+        switch axis {
+        case .horizontal:
+            geometry.contentOffset.x
+        case .vertical:
+            geometry.contentOffset.y
+        }
+    }
+
+    private func minOffset(for geometry: ScrollGeometry) -> CGFloat {
+        switch axis {
+        case .horizontal:
+            -geometry.contentInsets.leading
+        case .vertical:
+            -geometry.contentInsets.top
+        }
+    }
+
+    private func maxOffset(for geometry: ScrollGeometry) -> CGFloat {
+        switch axis {
+        case .horizontal:
+            geometry.contentSize.width - geometry.containerSize.width + geometry.contentInsets.trailing
+        case .vertical:
+            geometry.contentSize.height - geometry.containerSize.height + geometry.contentInsets.bottom
+        }
+    }
 }
 
 extension View {
     func pinesExpressiveScrollHaptics() -> some View {
-        modifier(PinesExpressiveScrollHapticsModifier())
+        modifier(PinesExpressiveScrollHapticsModifier(axis: .vertical))
+    }
+
+    func pinesExpressiveHorizontalScrollHaptics() -> some View {
+        modifier(PinesExpressiveScrollHapticsModifier(axis: .horizontal))
     }
 }

@@ -244,6 +244,7 @@ private struct MCPSamplingApprovalSheet: View {
                     TextEditor(text: $promptDraft)
                         .frame(minHeight: 220)
                         .font(theme.typography.body)
+                        .pinesExpressiveScrollHaptics()
                 }
 
                 if let preferences = request.modelPreferences {

@@ -182,6 +182,7 @@ private struct ModelFilterControls: View {
             }
         }
         .scrollIndicators(.hidden)
+        .pinesExpressiveHorizontalScrollHaptics()
         .font(theme.typography.caption.weight(.medium))
     }
 }

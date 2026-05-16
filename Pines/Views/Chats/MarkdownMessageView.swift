@@ -307,6 +307,7 @@ private struct MarkdownTableView: View {
             .background(theme.colors.surface, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
         }
         .scrollIndicators(.visible)
+        .pinesExpressiveHorizontalScrollHaptics()
         .overlay(alignment: .leading) {
             LinearGradient(colors: [theme.colors.appBackground.opacity(0.95), .clear], startPoint: .leading, endPoint: .trailing)
                 .frame(width: 18)
@@ -463,6 +464,7 @@ private struct MarkdownCodeBlockView: View {
                             .frame(minWidth: 1, alignment: .leading)
                     }
                     .scrollIndicators(.visible)
+                    .pinesExpressiveHorizontalScrollHaptics()
                     .overlay(alignment: .leading) {
                         LinearGradient(colors: [theme.colors.codeBackground, .clear], startPoint: .leading, endPoint: .trailing)
                             .frame(width: 18)
