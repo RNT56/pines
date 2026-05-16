@@ -659,7 +659,7 @@ struct ModelLifecycleService: Sendable {
             return false
         }
 
-        for case let fileURL as URL in enumerator where fileURL.pathExtension == "safetensors" {
+        for case let fileURL as URL in enumerator where fileURL.pathExtension.lowercased() == "safetensors" {
             return true
         }
         return false
@@ -679,7 +679,7 @@ struct ModelLifecycleService: Sendable {
                 guard hasProcessorConfig else { continue }
             }
             let hasSafetensors = paths.contains { candidate in
-                candidate.hasSuffix(".safetensors") && isPath(candidate, inOrBelow: root)
+                candidate.lowercased().hasSuffix(".safetensors") && isPath(candidate, inOrBelow: root)
             }
             if hasSafetensors {
                 return root
