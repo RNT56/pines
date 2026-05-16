@@ -224,7 +224,9 @@ final class PinesHaptics: ObservableObject {
     #if canImport(CoreHaptics)
     private var hapticEngine: CHHapticEngine?
     private var hapticEngineRunning = false
+    private var hapticEngineStartInFlight = false
     private var lastHapticEngineStartAttempt = Date.distantPast
+    private var coreHapticsDisabledUntil = Date.distantPast
     #endif
 
     init() {
@@ -399,9 +401,13 @@ final class PinesHaptics: ObservableObject {
         #if canImport(CoreHaptics)
         guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
         if hapticEngineRunning { return }
+        if hapticEngineStartInFlight { return }
         let now = Date()
+        guard now >= coreHapticsDisabledUntil else { return }
         guard now.timeIntervalSince(lastHapticEngineStartAttempt) > 0.4 else { return }
         lastHapticEngineStartAttempt = now
+        hapticEngineStartInFlight = true
+        defer { hapticEngineStartInFlight = false }
 
         do {
             let engine: CHHapticEngine
@@ -428,9 +434,16 @@ final class PinesHaptics: ObservableObject {
         } catch {
             hapticEngineRunning = false
             hapticEngine = nil
+            disableCoreHapticsTemporarily()
         }
         #endif
     }
+
+    #if canImport(CoreHaptics)
+    private func disableCoreHapticsTemporarily() {
+        coreHapticsDisabledUntil = Date().addingTimeInterval(20)
+    }
+    #endif
 
     private func playCorePulse(intensity: Float, sharpness: Float, fallback: ImpactStyle = .soft, fallbackIntensity: CGFloat? = nil) {
         playCoreSequence(
@@ -467,6 +480,9 @@ final class PinesHaptics: ObservableObject {
             let player = try hapticEngine.makePlayer(with: pattern)
             try player.start(atTime: CHHapticTimeImmediate)
         } catch {
+            hapticEngineRunning = false
+            self.hapticEngine = nil
+            disableCoreHapticsTemporarily()
             impact(fallback, intensity: fallbackIntensity)
         }
         #else
@@ -500,9 +516,10 @@ private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onScrollGeometryChange(for: PinesScrollHapticSnapshot.self) { geometry in
-                let minOffset = -geometry.contentInsets.top
-                let maxOffset = max(minOffset, geometry.contentSize.height - geometry.containerSize.height + geometry.contentInsets.bottom)
-                let offset = (geometry.contentOffset.y / 8).rounded() * 8
+                let minOffset = quantizedScrollOffset(-geometry.contentInsets.top)
+                let rawMaxOffset = geometry.contentSize.height - geometry.containerSize.height + geometry.contentInsets.bottom
+                let maxOffset = max(minOffset, quantizedScrollOffset(rawMaxOffset))
+                let offset = quantizedScrollOffset(geometry.contentOffset.y)
                 return PinesScrollHapticSnapshot(
                     offset: offset,
                     minOffset: minOffset,
@@ -518,6 +535,11 @@ private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
                     haptics.play(event)
                 }
             }
+    }
+
+    private func quantizedScrollOffset(_ value: CGFloat) -> CGFloat {
+        let step: CGFloat = 24
+        return (value / step).rounded() * step
     }
 }
 

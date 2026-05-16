@@ -13,6 +13,7 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
     private var requestConversations: [UUID: UUID] = [:]
     private var completedRequests = Set<UUID>()
     private var completedRequestOrder: [UUID] = []
+    private var suppressApplicationContextUpdates = false
     private static let completedRequestLimit = 64
 
     init(services: PinesAppServices, session: WCSession = .default) {
@@ -39,6 +40,7 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
         error: Error?
     ) {
         Task { @MainActor in
+            self.suppressApplicationContextUpdates = false
             self.publishPhoneStatus()
         }
     }
@@ -48,11 +50,19 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
 
     nonisolated func sessionDidDeactivate(_ session: WCSession) {
         Task { @MainActor in
+            self.suppressApplicationContextUpdates = false
             session.activate()
             self.publishPhoneStatus()
         }
     }
     #endif
+
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        Task { @MainActor in
+            self.suppressApplicationContextUpdates = false
+            self.publishPhoneStatus()
+        }
+    }
 
     nonisolated func session(
         _ session: WCSession,
@@ -359,8 +369,24 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
     private func publishPhoneStatus() {
         guard WCSession.isSupported(), session.activationState == .activated else { return }
         guard session.isPaired, session.isWatchAppInstalled else { return }
+        guard !suppressApplicationContextUpdates else { return }
+        #if targetEnvironment(simulator)
+        guard session.isReachable else { return }
+        #endif
         guard let message = try? WatchChatCodec.message(kind: .phoneStatus, payload: phoneStatus()) else { return }
-        try? session.updateApplicationContext(message)
+        do {
+            try session.updateApplicationContext(message)
+        } catch {
+            if shouldSuppressApplicationContextUpdates(for: error) {
+                suppressApplicationContextUpdates = true
+            }
+        }
+    }
+
+    private func shouldSuppressApplicationContextUpdates(for error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == WCError.errorDomain else { return false }
+        return WCError.Code(rawValue: nsError.code) == .watchAppNotInstalled
     }
 }
 #endif
