@@ -657,7 +657,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
         var events = [InferenceStreamEvent]()
         if format == .openAIResponses {
-            return extractOpenAIResponsesEvents(json, pendingFinish: &pendingFinish)
+            return extractOpenAIResponsesEvents(json, state: &state, pendingFinish: &pendingFinish)
         }
 
         switch providerKind {
@@ -767,19 +767,45 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
     private static func extractOpenAIResponsesEvents(
         _ json: [String: Any],
+        state: inout CloudToolCallStreamState,
         pendingFinish: inout InferenceFinish?
     ) -> [InferenceStreamEvent] {
         let type = json["type"] as? String
         switch type {
         case "response.output_text.delta":
             if let delta = json["delta"] as? String, !delta.isEmpty {
+                state.openAIResponsesTextEmitted = true
                 return [.token(TokenDelta(kind: .token, text: delta, tokenCount: 1))]
+            }
+        case "response.output_text.done":
+            if !state.openAIResponsesTextEmitted,
+               let text = json["text"] as? String,
+               !text.isEmpty {
+                state.openAIResponsesTextEmitted = true
+                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
+            }
+        case "response.content_part.done":
+            if !state.openAIResponsesTextEmitted,
+               let part = json["part"] as? [String: Any],
+               let text = part["text"] as? String,
+               !text.isEmpty {
+                state.openAIResponsesTextEmitted = true
+                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
             }
         case "response.refusal.delta":
             if let delta = json["delta"] as? String, !delta.isEmpty {
+                state.openAIResponsesTextEmitted = true
                 return [.token(TokenDelta(kind: .token, text: delta, tokenCount: 1))]
             }
         case "response.completed":
+            if !state.openAIResponsesTextEmitted,
+               let response = json["response"] as? [String: Any],
+               let text = openAIResponsesOutputText(from: response),
+               !text.isEmpty {
+                state.openAIResponsesTextEmitted = true
+                pendingFinish = InferenceFinish(reason: .stop)
+                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
+            }
             pendingFinish = InferenceFinish(reason: .stop)
         case "response.incomplete":
             let response = json["response"] as? [String: Any]
@@ -802,6 +828,20 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             break
         }
         return []
+    }
+
+    private static func openAIResponsesOutputText(from response: [String: Any]) -> String? {
+        guard let output = response["output"] as? [[String: Any]] else { return nil }
+        let parts = output.flatMap { item -> [String] in
+            guard let content = item["content"] as? [[String: Any]] else { return [] }
+            return content.compactMap { part in
+                let type = part["type"] as? String
+                guard type == nil || type == "output_text" || type == "text" else { return nil }
+                return part["text"] as? String
+            }
+        }
+        let text = parts.joined()
+        return text.isEmpty ? nil : text
     }
 
     private static func openAIFinish(from finishReason: String) -> InferenceFinish {
@@ -834,6 +874,7 @@ private struct CloudToolCallStreamState {
     var openAIToolIDs: [Int: String] = [:]
     var openAIToolNames: [Int: String] = [:]
     var openAIArguments: [Int: String] = [:]
+    var openAIResponsesTextEmitted = false
 
     var anthropicToolIndex: Int?
     var anthropicToolID: String?
