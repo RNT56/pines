@@ -127,64 +127,74 @@ private struct ChatModelPickerButton: View {
     let select: (ModelPickerOption) async -> Void
 
     var body: some View {
-        Menu {
-            let sections = appModel.modelPickerSections(services: services)
+        let sections = appModel.modelPickerSections(services: services)
+
+        Group {
             if sections.isEmpty {
-                Text("No models installed")
+                pickerLabel(showsDisclosure: false)
+                    .accessibilityValue("No models installed")
             } else {
-                ForEach(sections) { section in
-                    Section(section.title) {
-                        ForEach(section.models) { option in
-                            Button {
-                                Task {
-                                    await select(option)
-                                }
-                            } label: {
-                                Label {
-                                    Text(option.compactDisplayName)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                } icon: {
-                                    Image(systemName: option.systemImage)
+                Menu {
+                    ForEach(sections) { section in
+                        Section(section.title) {
+                            ForEach(section.models) { option in
+                                Button {
+                                    Task {
+                                        await select(option)
+                                    }
+                                } label: {
+                                    Label {
+                                        Text(option.compactDisplayName)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    } icon: {
+                                        Image(systemName: option.systemImage)
+                                    }
                                 }
                             }
                         }
                     }
+                } label: {
+                    pickerLabel(showsDisclosure: true)
                 }
             }
-        } label: {
-            HStack(spacing: theme.spacing.xsmall) {
-                Text(currentModelLabel)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .minimumScaleFactor(0.76)
-                if fillWidth {
-                    Spacer(minLength: theme.spacing.xsmall)
-                }
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .font(theme.typography.callout.weight(.semibold))
-            .foregroundStyle(theme.colors.accent)
-            .padding(.horizontal, theme.spacing.medium)
-            .frame(maxWidth: fillWidth ? .infinity : maxWidth, minHeight: 44)
-            .background(theme.colors.glassSurface, in: Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
-            }
-            .overlay {
-                Capsule()
-                    .strokeBorder(theme.colors.surfaceHighlight.opacity(0.68), lineWidth: theme.stroke.hairline)
-                    .blendMode(.plusLighter)
-            }
-            .shadow(color: theme.shadow.panelColor.opacity(0.22), radius: theme.shadow.panelRadius * 0.24, x: 0, y: theme.shadow.panelY * 0.18)
-            .contentShape(Capsule())
         }
         .accessibilityLabel(accessibilityLabel)
         .task {
             await appModel.refreshCloudModelCatalog(services: services)
         }
+    }
+
+    private func pickerLabel(showsDisclosure: Bool) -> some View {
+        HStack(spacing: theme.spacing.xsmall) {
+            Text(currentModelLabel)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .minimumScaleFactor(0.76)
+            if fillWidth {
+                Spacer(minLength: theme.spacing.xsmall)
+            }
+            if showsDisclosure {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+        }
+        .font(theme.typography.callout.weight(.semibold))
+        .foregroundStyle(showsDisclosure ? theme.colors.accent : theme.colors.secondaryText)
+        .padding(.horizontal, theme.spacing.medium)
+        .frame(maxWidth: fillWidth ? .infinity : maxWidth, minHeight: 44)
+        .background(theme.colors.glassSurface, in: Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+        }
+        .overlay {
+            Capsule()
+                .strokeBorder(theme.colors.surfaceHighlight.opacity(0.68), lineWidth: theme.stroke.hairline)
+                .blendMode(.plusLighter)
+        }
+        .shadow(color: theme.shadow.panelColor.opacity(0.22), radius: theme.shadow.panelRadius * 0.24, x: 0, y: theme.shadow.panelY * 0.18)
+        .contentShape(Capsule())
     }
 
     private var currentModelLabel: String {
