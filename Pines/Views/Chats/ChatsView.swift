@@ -34,6 +34,34 @@ struct ChatsView: View {
                             ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
                         }
                         .pinesSidebarListRow()
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button {
+                                Task {
+                                    await appModel.setThreadPinned(thread, pinned: !thread.isPinned, services: services)
+                                }
+                            } label: {
+                                Label(thread.isPinned ? "Unpin" : "Pin", systemImage: thread.isPinned ? "pin.slash" : "pin")
+                            }
+                            .tint(theme.colors.accent)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                Task {
+                                    await appModel.deleteThread(thread, services: services)
+                                }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+
+                            Button {
+                                Task {
+                                    await appModel.setThreadArchived(thread, archived: thread.status != .archived, services: services)
+                                }
+                            } label: {
+                                Label(thread.status == .archived ? "Restore" : "Archive", systemImage: thread.status == .archived ? "tray.and.arrow.up" : "archivebox")
+                            }
+                            .tint(theme.colors.warning)
+                        }
                     }
                 }
             }
@@ -95,13 +123,14 @@ private struct ChatModelPickerButton: View {
     let fallbackLabel: String?
     var accessibilityLabel = "Chat model"
     var fillWidth = false
+    var maxWidth: CGFloat?
     let select: (ModelPickerOption) async -> Void
 
     var body: some View {
         Menu {
             let sections = appModel.modelPickerSections(services: services)
             if sections.isEmpty {
-                Text("No model installed")
+                Text("No models installed")
             } else {
                 ForEach(sections) { section in
                     Section(section.title) {
@@ -112,7 +141,9 @@ private struct ChatModelPickerButton: View {
                                 }
                             } label: {
                                 Label {
-                                    Text(option.displayName)
+                                    Text(option.compactDisplayName)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
                                 } icon: {
                                     Image(systemName: option.systemImage)
                                 }
@@ -125,6 +156,7 @@ private struct ChatModelPickerButton: View {
             HStack(spacing: theme.spacing.xsmall) {
                 Text(currentModelLabel)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                     .minimumScaleFactor(0.76)
                 if fillWidth {
                     Spacer(minLength: theme.spacing.xsmall)
@@ -135,7 +167,7 @@ private struct ChatModelPickerButton: View {
             .font(theme.typography.callout.weight(.semibold))
             .foregroundStyle(theme.colors.accent)
             .padding(.horizontal, theme.spacing.medium)
-            .frame(maxWidth: fillWidth ? .infinity : nil, minHeight: 44)
+            .frame(maxWidth: fillWidth ? .infinity : maxWidth, minHeight: 44)
             .background(theme.colors.glassSurface, in: Capsule())
             .overlay {
                 Capsule()
@@ -158,7 +190,7 @@ private struct ChatModelPickerButton: View {
     private var currentModelLabel: String {
         let sections = appModel.modelPickerSections(services: services)
         let options = sections.flatMap(\.models)
-        guard !options.isEmpty else { return "No model installed" }
+        guard !options.isEmpty else { return "None" }
 
         if let currentProviderID,
            let currentModelID,
@@ -191,16 +223,32 @@ private struct ChatThreadRow: View {
             isSelected: isSelected,
             isActive: thread.status == .streaming
         ) {
-            PinesStatusIndicator(
-                color: thread.status.tint(in: theme),
-                isActive: thread.status == .streaming,
-                size: 9
-            )
+            HStack(spacing: theme.spacing.xsmall) {
+                if thread.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.colors.accent)
+                        .accessibilityLabel("Pinned")
+                }
+
+                PinesStatusIndicator(
+                    color: thread.status.tint(in: theme),
+                    isActive: thread.status == .streaming,
+                    size: 9
+                )
+            }
         }
     }
 }
 
 private extension ModelPickerOption {
+    var compactDisplayName: String {
+        guard displayName.count > 34 else { return displayName }
+        let prefix = String(displayName.prefix(18)).trimmingCharacters(in: .whitespacesAndNewlines)
+        let suffix = String(displayName.suffix(12)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(prefix)...\(suffix)"
+    }
+
     var systemImage: String {
         if isLocal {
             return "cpu"
@@ -281,8 +329,7 @@ private struct ChatTranscriptView: View {
         .toolbar {
             if horizontalSizeClass == .compact {
                 ToolbarItem(placement: .principal) {
-                    ChatModelSelector(thread: thread, fillWidth: false)
-                        .frame(maxWidth: 230)
+                    ChatModelSelector(thread: thread, fillWidth: false, maxWidth: 156)
                 }
             }
 
@@ -343,7 +390,7 @@ private struct ChatTranscriptHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
             if horizontalSizeClass != .compact {
-                ChatModelSelector(thread: thread, fillWidth: false)
+                ChatModelSelector(thread: thread, fillWidth: false, maxWidth: 280)
             }
 
             Text("\(thread.tokenCount) tokens - \(thread.status.title)")
@@ -361,6 +408,7 @@ private struct ChatModelSelector: View {
     @EnvironmentObject private var appModel: PinesAppModel
     let thread: PinesThreadPreview
     var fillWidth: Bool
+    var maxWidth: CGFloat?
 
     var body: some View {
         ChatModelPickerButton(
@@ -368,7 +416,8 @@ private struct ChatModelSelector: View {
             currentModelID: thread.modelID,
             fallbackLabel: thread.modelName,
             accessibilityLabel: "Chat model",
-            fillWidth: fillWidth
+            fillWidth: fillWidth,
+            maxWidth: maxWidth
         ) { option in
             await appModel.selectModel(option, for: thread.id, services: services)
         }

@@ -136,6 +136,20 @@ actor GRDBPinesStore:
         }
     }
 
+    func setConversationPinned(_ pinned: Bool, conversationID: UUID) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE conversations SET pinned = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [
+                    pinned ? 1 : 0,
+                    Date().timeIntervalSinceReferenceDate,
+                    SyncState.local.rawValue,
+                    conversationID.uuidString,
+                ]
+            )
+        }
+    }
+
     func deleteConversation(id: UUID) async throws {
         try await database.write { db in
             try db.execute(

@@ -386,6 +386,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 lastMessage: preview.lastMessage,
                 messages: existing.messages,
                 status: preview.status,
+                isPinned: preview.isPinned,
                 updatedLabel: preview.updatedLabel,
                 tokenCount: preview.tokenCount
             )
@@ -485,6 +486,54 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     func retryLastUserMessage(in thread: PinesThreadPreview, services: PinesAppServices) {
         guard let lastUser = thread.messages.last(where: { $0.role == .user }) else { return }
         startSending(lastUser.content, in: thread.id, services: services)
+    }
+
+    func setThreadArchived(_ thread: PinesThreadPreview, archived: Bool, services: PinesAppServices) async {
+        do {
+            guard let repository = services.conversationRepository else {
+                setChatError("Conversation repository is unavailable.")
+                return
+            }
+            try await repository.setConversationArchived(archived, conversationID: thread.id)
+            emitHaptic(archived ? .destructiveAction : .primaryAction)
+            await refreshAll(services: services)
+        } catch {
+            setChatError(error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    func setThreadPinned(_ thread: PinesThreadPreview, pinned: Bool, services: PinesAppServices) async {
+        do {
+            guard let repository = services.conversationRepository else {
+                setChatError("Conversation repository is unavailable.")
+                return
+            }
+            try await repository.setConversationPinned(pinned, conversationID: thread.id)
+            emitHaptic(.primaryAction)
+            await refreshAll(services: services)
+        } catch {
+            setChatError(error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    func deleteThread(_ thread: PinesThreadPreview, services: PinesAppServices) async {
+        do {
+            guard let repository = services.conversationRepository else {
+                setChatError("Conversation repository is unavailable.")
+                return
+            }
+            try await repository.deleteConversation(id: thread.id)
+            if let activeRunID, thread.messages.contains(where: { $0.id == activeRunID }) {
+                stopCurrentRun()
+            }
+            emitHaptic(.destructiveAction)
+            await refreshAll(services: services)
+        } catch {
+            setChatError(error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
     }
 
     private func sendMessage(_ draft: String, in threadID: UUID?, services: PinesAppServices, runToken: UUID) async {
@@ -1425,6 +1474,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         lastMessage: thread.lastMessage,
                         messages: thread.messages,
                         status: thread.status,
+                        isPinned: thread.isPinned,
                         updatedLabel: RelativeDateTimeFormatter.shortLabel(for: Date()),
                         tokenCount: thread.tokenCount
                     ),
@@ -2465,6 +2515,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
             messages: messages,
             status: record.archived ? .archived : (status ?? .local),
+            isPinned: record.pinned,
             updatedLabel: RelativeDateTimeFormatter.shortLabel(for: updatedAt ?? record.updatedAt),
             tokenCount: threadTokenCount(messages)
         )
@@ -2498,6 +2549,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
             messages: [],
             status: status,
+            isPinned: record.pinned,
             updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt),
             tokenCount: record.tokenCount
         )
@@ -2520,6 +2572,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
             messages: messages,
             status: resolvedStatus,
+            isPinned: existing.isPinned,
             updatedLabel: RelativeDateTimeFormatter.shortLabel(for: updatedAt),
             tokenCount: resolvedStatus == .streaming ? existing.tokenCount : threadTokenCount(messages)
         )

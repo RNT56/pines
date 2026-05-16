@@ -74,6 +74,7 @@ struct PinesThreadPreview: Identifiable, Hashable {
     let lastMessage: String
     let messages: [ChatMessage]
     let status: PinesThreadStatus
+    let isPinned: Bool
     let updatedLabel: String
     let tokenCount: Int
 
