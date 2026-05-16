@@ -1790,7 +1790,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         let previews = self.models.map { preview in
                             let key = preview.install.repository.lowercased()
                             guard changedRepositories.contains(key) else { return preview }
-                            Self.modelPreview(
+                            return Self.modelPreview(
                                 from: preview.install,
                                 runtime: services.mlxRuntime,
                                 download: downloadByRepository[key]
