@@ -79,13 +79,13 @@ struct SettingsDetailView: View {
                 .frame(maxWidth: PinesSettingsDetailLayout.contentMaxWidth, alignment: .topLeading)
                 .frame(maxWidth: .infinity)
             }
+            .pinesExpressiveScrollHaptics()
         }
         .navigationTitle(section.title)
         .task(id: section.destination) {
             guard section.destination == .tools else { return }
             await appModel.startMCPServersIfNeeded(services: services)
         }
-        .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .pinesAppBackground()
     }

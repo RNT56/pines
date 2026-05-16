@@ -137,24 +137,26 @@ struct PinesScrollHapticGate {
     private var wasAtTop = false
     private var wasAtBottom = false
 
-    mutating func event(offset: CGFloat, minOffset: CGFloat = 0, maxOffset: CGFloat? = nil, now: Date = Date()) -> PinesHapticEvent? {
+    mutating func event(
+        offset: CGFloat,
+        minOffset: CGFloat = 0,
+        maxOffset: CGFloat? = nil,
+        isAtTop: Bool? = nil,
+        isAtBottom: Bool? = nil,
+        now: Date = Date()
+    ) -> PinesHapticEvent? {
         defer { lastOffset = offset }
         let boundaryTolerance: CGFloat = 6
+        let atTop = isAtTop ?? (offset <= minOffset + boundaryTolerance)
+        let atBottom = isAtBottom ?? maxOffset.map { offset >= $0 - boundaryTolerance && $0 > minOffset + boundaryTolerance } ?? false
 
         guard let previousOffset = lastOffset else {
             lastEmittedOffset = offset
-            wasAtTop = offset <= minOffset + boundaryTolerance
-            if let maxOffset {
-                wasAtBottom = offset >= maxOffset - boundaryTolerance
-            }
+            wasAtTop = atTop
+            wasAtBottom = atBottom
             return nil
         }
 
-        let delta = offset - previousOffset
-        guard abs(delta) > 1.5 else { return nil }
-
-        let atTop = offset <= minOffset + boundaryTolerance
-        let atBottom = maxOffset.map { offset >= $0 - boundaryTolerance && $0 > minOffset + boundaryTolerance } ?? false
         defer {
             if !atTop { wasAtTop = false }
             if !atBottom { wasAtBottom = false }
@@ -171,6 +173,9 @@ struct PinesScrollHapticGate {
             lastBoundaryAt = now
             return .scrollBoundaryBottom
         }
+
+        let delta = offset - previousOffset
+        guard abs(delta) > 1.5 else { return nil }
 
         let direction: PinesScrollDirection = delta > 0 ? .down : .up
         let emittedOffset = lastEmittedOffset ?? previousOffset
@@ -507,6 +512,8 @@ private struct PinesScrollHapticSnapshot: Equatable {
     var offset: CGFloat
     var minOffset: CGFloat
     var maxOffset: CGFloat?
+    var isAtTop: Bool
+    var isAtBottom: Bool
 }
 
 private enum PinesScrollHapticAxis {
@@ -522,7 +529,13 @@ private final class PinesScrollHapticCoordinator {
     }
 
     func event(for snapshot: PinesScrollHapticSnapshot) -> PinesHapticEvent? {
-        gate.event(offset: snapshot.offset, minOffset: snapshot.minOffset, maxOffset: snapshot.maxOffset)
+        gate.event(
+            offset: snapshot.offset,
+            minOffset: snapshot.minOffset,
+            maxOffset: snapshot.maxOffset,
+            isAtTop: snapshot.isAtTop,
+            isAtBottom: snapshot.isAtBottom
+        )
     }
 }
 
@@ -538,14 +551,19 @@ private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
         if haptics.mode == .expressive {
             content
                 .onScrollGeometryChange(for: PinesScrollHapticSnapshot.self) { geometry in
-                    let minOffset = quantizedScrollOffset(minOffset(for: geometry))
+                    let quantizedMinOffset = quantizedScrollOffset(minOffset(for: geometry))
                     let rawMaxOffset = maxOffset(for: geometry)
-                    let maxOffset = max(minOffset, quantizedScrollOffset(rawMaxOffset))
-                    let offset = quantizedScrollOffset(offset(for: geometry))
+                    let maxOffset = max(quantizedMinOffset, quantizedScrollOffset(rawMaxOffset))
+                    let quantizedOffset = quantizedScrollOffset(offset(for: geometry))
+                    let rawMinOffset = minOffset(for: geometry)
+                    let rawOffset = offset(for: geometry)
+                    let hasScrollableContent = rawMaxOffset > rawMinOffset + 6
                     return PinesScrollHapticSnapshot(
-                        offset: offset,
-                        minOffset: minOffset,
-                        maxOffset: maxOffset > minOffset ? maxOffset : nil
+                        offset: quantizedOffset,
+                        minOffset: quantizedMinOffset,
+                        maxOffset: maxOffset > quantizedMinOffset ? maxOffset : nil,
+                        isAtTop: rawOffset <= rawMinOffset + 6,
+                        isAtBottom: hasScrollableContent && rawOffset >= rawMaxOffset - 6
                     )
                 } action: { _, snapshot in
                     if let event = coordinator.event(for: snapshot) {

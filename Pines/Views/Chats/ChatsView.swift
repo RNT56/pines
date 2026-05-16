@@ -333,6 +333,7 @@ private struct ChatTranscriptView: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
+            .pinesExpressiveScrollHaptics()
             .onChange(of: thread.messages.count) { _, _ in
                 withAnimation(theme.motion.standard) {
                     proxy.scrollTo("chat-bottom", anchor: .bottom)
@@ -352,7 +353,6 @@ private struct ChatTranscriptView: View {
                 force: !thread.messages.isEmpty
             )
         }
-        .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .toolbar {
             if horizontalSizeClass == .compact {
