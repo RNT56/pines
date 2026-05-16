@@ -1,6 +1,15 @@
 import SwiftUI
 import PinesWatchSupport
 
+enum WatchPinesPalette {
+    static let reachable = Color(red: 0.40, green: 0.82, blue: 0.62)
+    static let pending = Color(red: 0.92, green: 0.70, blue: 0.36)
+    static let userAccent = Color(red: 0.50, green: 0.67, blue: 1.00)
+    static let assistantAccent = Color(red: 0.48, green: 0.86, blue: 0.74)
+    static let toolAccent = Color(red: 0.92, green: 0.70, blue: 0.36)
+    static let systemAccent = Color(red: 0.95, green: 0.56, blue: 0.52)
+}
+
 struct WatchRootView: View {
     @EnvironmentObject private var model: WatchChatViewModel
     @State private var renameConversation: WatchConversationSummary?
@@ -12,7 +21,7 @@ struct WatchRootView: View {
                 Section {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(model.isReachable ? Color.green : Color.orange)
+                            .fill(model.isReachable ? WatchPinesPalette.reachable : WatchPinesPalette.pending)
                             .frame(width: 7, height: 7)
                         Text(model.pendingRequestCount > 0 ? "\(model.statusText) • \(model.pendingRequestCount) queued" : model.statusText)
                             .font(.caption)

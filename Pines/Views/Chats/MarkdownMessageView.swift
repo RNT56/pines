@@ -659,10 +659,16 @@ private actor SyntaxHighlightingService {
         switch themeKey {
         case PinesThemeTemplate.aurora.rawValue:
             highlightTheme = .tokyoNight
+        case PinesThemeTemplate.slate.rawValue:
+            highlightTheme = .tokyoNight
+        case PinesThemeTemplate.obsidian.rawValue:
+            highlightTheme = .tokyoNight
         case PinesThemeTemplate.graphite.rawValue:
             highlightTheme = .grayscale
         case PinesThemeTemplate.paper.rawValue:
             highlightTheme = .papercolor
+        case PinesThemeTemplate.porcelain.rawValue:
+            highlightTheme = .github
         default:
             highlightTheme = .github
         }

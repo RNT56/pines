@@ -148,7 +148,7 @@ struct ModelsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(theme.colors.secondaryBackground)
+            .background(theme.colors.sidebarBackground)
             .animation(theme.motion.fast, value: appModel.isSearchingModels)
             .animation(theme.motion.fast, value: appModel.models)
         } detail: {

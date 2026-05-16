@@ -11,7 +11,7 @@ struct WatchTranscriptView: View {
             if !model.statusText.isEmpty {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(model.isReachable ? Color.green : Color.orange)
+                        .fill(model.isReachable ? WatchPinesPalette.reachable : WatchPinesPalette.pending)
                         .frame(width: 6, height: 6)
                     Text(statusLine)
                         .font(.caption2)
@@ -108,12 +108,12 @@ private struct WatchMessageBubble: View {
 
             Text(message.content.isEmpty ? "..." : message.content)
                 .font(.body)
-                .foregroundStyle(message.role == .user ? Color.primary : Color.green)
+                .foregroundStyle(message.role.foregroundStyle)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
-        .background(message.role == .user ? Color.blue.opacity(0.18) : Color.green.opacity(0.16))
+        .background(message.role.bubbleFill)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
@@ -129,6 +129,32 @@ private extension WatchChatRole {
             "Pines"
         case .tool:
             "Tool"
+        }
+    }
+
+    var foregroundStyle: Color {
+        switch self {
+        case .system:
+            WatchPinesPalette.systemAccent
+        case .user:
+            Color.primary
+        case .assistant:
+            WatchPinesPalette.assistantAccent
+        case .tool:
+            WatchPinesPalette.toolAccent
+        }
+    }
+
+    var bubbleFill: Color {
+        switch self {
+        case .system:
+            WatchPinesPalette.systemAccent.opacity(0.16)
+        case .user:
+            WatchPinesPalette.userAccent.opacity(0.18)
+        case .assistant:
+            WatchPinesPalette.assistantAccent.opacity(0.16)
+        case .tool:
+            WatchPinesPalette.toolAccent.opacity(0.16)
         }
     }
 }

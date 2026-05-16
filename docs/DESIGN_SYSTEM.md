@@ -10,6 +10,9 @@ The current templates are:
 - `Graphite`: dense professional workspace with neutral contrast.
 - `Aurora`: cooler research surface with brighter blue/violet accents.
 - `Paper`: warmer reading and vault-focused layout.
+- `Slate`: technical blue-gray workspace with quiet precision.
+- `Porcelain`: crisp minimal surface with refined airy contrast.
+- `Obsidian`: dark-first pro console with restrained luminous accents.
 
 ## Interface Modes
 
@@ -26,6 +29,7 @@ The selected mode is applied through `preferredColorScheme`, while the resolved 
 `PinesTheme` controls:
 
 - semantic colors
+- content, sidebar, sheet, card, list-row, and disabled-state roles
 - typography
 - spacing
 - radii
@@ -33,6 +37,7 @@ The selected mode is applied through `preferredColorScheme`, while the resolved 
 - shadows
 - materials
 - motion curves
+- semantic soft fills for success, warning, danger, and info states
 - panel styling
 - empty states
 - metric pills

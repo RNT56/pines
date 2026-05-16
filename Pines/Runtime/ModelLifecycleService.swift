@@ -117,7 +117,7 @@ struct ModelLifecycleService: Sendable {
             cancelled.status = .cancelled
             cancelled.errorMessage = "Download was interrupted."
             cancelled.updatedAt = Date()
-            try await downloadRepository.upsertDownload(cancelled)
+            try await upsertDownloadProgress(cancelled)
         }
 
         let installs = try await installRepository.listInstalledAndCuratedModels()
@@ -225,7 +225,7 @@ struct ModelLifecycleService: Sendable {
             status: .queued,
             totalBytes: totalBytes
         )
-        try await downloadRepository.upsertDownload(progress)
+        try await upsertDownloadProgress(progress)
 
         let stagingURL = try Self.modelsDirectory()
             .appending(path: "staging", directoryHint: .isDirectory)
@@ -260,7 +260,7 @@ struct ModelLifecycleService: Sendable {
                 progress.currentFile = file.path
                 progress.bytesReceived = received
                 progress.updatedAt = Date()
-                try await downloadRepository.upsertDownload(progress)
+                try await upsertDownloadProgress(progress)
 
                 let destination = stagingURL.appending(path: file.path)
                 try FileManager.default.createDirectory(
@@ -296,7 +296,7 @@ struct ModelLifecycleService: Sendable {
                     guard now.timeIntervalSince(lastProgressWrite) > 0.4 else { return }
                     lastProgressWrite = now
                     progress.updatedAt = now
-                    try await downloadRepository.upsertDownload(progress)
+                    try await upsertDownloadProgress(progress)
                 }
 
                 if let oid = file.oid, oid.count == 64 {
@@ -304,7 +304,7 @@ struct ModelLifecycleService: Sendable {
                     progress.status = .verifying
                     progress.checksum = oid
                     progress.updatedAt = Date()
-                    try await downloadRepository.upsertDownload(progress)
+                    try await upsertDownloadProgress(progress)
                     let digest = try Self.sha256Hex(url: destination)
                     guard digest.caseInsensitiveCompare(oid) == .orderedSame else {
                         throw URLError(.cannotDecodeContentData)
@@ -316,7 +316,7 @@ struct ModelLifecycleService: Sendable {
             progress.bytesReceived = received
             progress.localURL = finalURL
             progress.updatedAt = Date()
-            try await downloadRepository.upsertDownload(progress)
+            try await upsertDownloadProgress(progress)
 
             try Task.checkCancellation()
             if FileManager.default.fileExists(atPath: finalURL.path) {
@@ -337,7 +337,7 @@ struct ModelLifecycleService: Sendable {
             progress.status = .installed
             progress.bytesReceived = progress.totalBytes ?? received
             progress.updatedAt = Date()
-            try await downloadRepository.upsertDownload(progress)
+            try await upsertDownloadProgress(progress)
             try await auditRepository?.append(
                 AuditEvent(category: .modelDownload, summary: "Installed \(repository)", modelID: ModelID(rawValue: repository))
             )
@@ -351,7 +351,7 @@ struct ModelLifecycleService: Sendable {
             progress.status = .failed
             progress.errorMessage = error.localizedDescription
             progress.updatedAt = Date()
-            try await downloadRepository.upsertDownload(progress)
+            try await upsertDownloadProgress(progress)
             try await installRepository.updateInstallState(.failed, for: repository)
             throw error
         }
@@ -383,6 +383,7 @@ struct ModelLifecycleService: Sendable {
         for download in downloads where download.repository.caseInsensitiveCompare(repository) == .orderedSame {
             try await downloadRepository.deleteDownload(id: download.id)
         }
+        await ModelDownloadLiveActivityController.end(repository: repository)
         try await auditRepository?.append(
             AuditEvent(category: .modelDownload, summary: "Deleted \(repository)", modelID: ModelID(rawValue: repository))
         )
@@ -407,6 +408,11 @@ struct ModelLifecycleService: Sendable {
         }
     }
 
+    private func upsertDownloadProgress(_ progress: ModelDownloadProgress) async throws {
+        try await downloadRepository.upsertDownload(progress)
+        await ModelDownloadLiveActivityController.update(progress: progress)
+    }
+
     @discardableResult
     private func markActiveDownloadsCancelled(for repository: String) async throws -> Bool {
         let downloads = try await downloadRepository.listDownloads()
@@ -417,7 +423,7 @@ struct ModelLifecycleService: Sendable {
             cancelled.status = .cancelled
             cancelled.errorMessage = nil
             cancelled.updatedAt = Date()
-            try await downloadRepository.upsertDownload(cancelled)
+            try await upsertDownloadProgress(cancelled)
         }
         return didCancel
     }
@@ -429,7 +435,7 @@ struct ModelLifecycleService: Sendable {
             cancelled.status = .cancelled
             cancelled.errorMessage = "Download was interrupted."
             cancelled.updatedAt = Date()
-            try await downloadRepository.upsertDownload(cancelled)
+            try await upsertDownloadProgress(cancelled)
         }
     }
 
@@ -445,7 +451,7 @@ struct ModelLifecycleService: Sendable {
         cancelled.status = .cancelled
         cancelled.errorMessage = cleanupError?.localizedDescription
         cancelled.updatedAt = Date()
-        try await downloadRepository.upsertDownload(cancelled)
+        try await upsertDownloadProgress(cancelled)
         try await installRepository.deleteInstall(repository: repository)
         try await auditRepository?.append(
             AuditEvent(category: .modelDownload, summary: "Cancelled \(repository)", modelID: ModelID(rawValue: repository))
@@ -479,55 +485,22 @@ struct ModelLifecycleService: Sendable {
             throw URLError(.badURL)
         }
 
-        let partial = destination.appendingPathExtension("part")
-        let offset = (try? partial.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
         var request = URLRequest(url: url)
         if let accessToken = accessToken?.trimmingCharacters(in: .whitespacesAndNewlines), !accessToken.isEmpty {
             request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
-        if offset > 0 {
-            request.addValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
-        }
 
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, [200, 206].contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-        if offset > 0, http.statusCode == 200 {
-            try? FileManager.default.removeItem(at: partial)
-        }
-        let resumedBytes = http.statusCode == 206 ? offset : 0
-        let expectedFileSize = Self.expectedFileSize(from: response, http: http, offset: offset, declaredSize: file.size)
-        try await progress(resumedBytes, expectedFileSize)
-
-        if !FileManager.default.fileExists(atPath: partial.path) {
-            FileManager.default.createFile(atPath: partial.path, contents: nil)
-        }
-        let handle = try FileHandle(forWritingTo: partial)
-        try handle.seekToEnd()
-        defer { try? handle.close() }
-
-        var buffer = Data()
-        buffer.reserveCapacity(64 * 1024)
-        for try await byte in bytes {
-            try Task.checkCancellation()
-            buffer.append(byte)
-            if buffer.count >= 64 * 1024 {
-                try handle.write(contentsOf: buffer)
-                try await progress(Int64(buffer.count), expectedFileSize)
-                buffer.removeAll(keepingCapacity: true)
+        let events = BackgroundModelFileDownloadCenter.shared.downloadEvents(
+            request: request,
+            destination: destination,
+            declaredSize: file.size
+        )
+        for try await event in events {
+            switch event {
+            case let .progress(bytesWritten, expectedFileSize):
+                try await progress(bytesWritten, expectedFileSize)
             }
         }
-        if !buffer.isEmpty {
-            try Task.checkCancellation()
-            try handle.write(contentsOf: buffer)
-            try await progress(Int64(buffer.count), expectedFileSize)
-        }
-
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
-        }
-        try FileManager.default.moveItem(at: partial, to: destination)
     }
 
     private static func remoteFileSize(
@@ -551,10 +524,10 @@ struct ModelLifecycleService: Sendable {
         }
 
         let (_, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+        guard (200 ..< 300).contains(response.statusCode) else {
             throw URLError(.badServerResponse)
         }
-        return Self.expectedFileSize(from: response, http: http, offset: 0, declaredSize: file.size)
+        return Self.expectedFileSize(from: response, http: response, offset: 0, declaredSize: file.size)
     }
 
     private static func removeStagingDirectory(for repository: String) throws {
@@ -838,6 +811,158 @@ private extension URL {
         let path = standardizedFileURL.path
         let directoryPath = directory.standardizedFileURL.path
         return path == directoryPath || path.hasPrefix(directoryPath + "/")
+    }
+}
+
+enum BackgroundModelFileDownloadEvent: Sendable {
+    case progress(bytesWritten: Int64, expectedFileSize: Int64?)
+}
+
+final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = BackgroundModelFileDownloadCenter()
+    static let sessionIdentifier = "com.schtack.pines.model-downloads"
+
+    private struct DownloadState: Sendable {
+        var token: UUID
+        var destination: URL
+        var declaredSize: Int64?
+        var continuation: AsyncThrowingStream<BackgroundModelFileDownloadEvent, Error>.Continuation
+    }
+
+    private let lock = NSLock()
+    private var states: [Int: DownloadState] = [:]
+    private var tasksByToken: [UUID: URLSessionDownloadTask] = [:]
+    private var backgroundCompletionHandlers: [String: () -> Void] = [:]
+
+    private lazy var session: URLSession = {
+        let configuration = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
+        configuration.sessionSendsLaunchEvents = true
+        configuration.waitsForConnectivity = true
+        configuration.isDiscretionary = false
+        return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    }()
+
+    func downloadEvents(
+        request: URLRequest,
+        destination: URL,
+        declaredSize: Int64?
+    ) -> AsyncThrowingStream<BackgroundModelFileDownloadEvent, Error> {
+        let token = UUID()
+        return AsyncThrowingStream { continuation in
+            let task = session.downloadTask(with: request)
+            let state = DownloadState(
+                token: token,
+                destination: destination,
+                declaredSize: declaredSize,
+                continuation: continuation
+            )
+            continuation.onTermination = { @Sendable _ in
+                Self.shared.cancelDownload(token: token)
+            }
+            lock.withLock {
+                states[task.taskIdentifier] = state
+                tasksByToken[token] = task
+            }
+            task.resume()
+        }
+    }
+
+    func setBackgroundCompletionHandler(_ completionHandler: @escaping () -> Void, for identifier: String) {
+        lock.withLock {
+            backgroundCompletionHandlers[identifier] = completionHandler
+        }
+        _ = session
+    }
+
+    private func cancelDownload(token: UUID) {
+        let task = lock.withLock {
+            tasksByToken[token]
+        }
+        task?.cancel()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard let state = state(for: downloadTask.taskIdentifier) else { return }
+        let expected = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : state.declaredSize
+        state.continuation.yield(.progress(bytesWritten: bytesWritten, expectedFileSize: expected))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        guard let state = state(for: downloadTask.taskIdentifier) else { return }
+        do {
+            guard let http = downloadTask.response as? HTTPURLResponse,
+                  (200 ..< 300).contains(http.statusCode)
+            else {
+                throw URLError(.badServerResponse)
+            }
+            if FileManager.default.fileExists(atPath: state.destination.path) {
+                try FileManager.default.removeItem(at: state.destination)
+            }
+            try FileManager.default.moveItem(at: location, to: state.destination)
+            complete(taskIdentifier: downloadTask.taskIdentifier, result: .success(()))
+        } catch {
+            complete(taskIdentifier: downloadTask.taskIdentifier, result: .failure(error))
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        guard let error else { return }
+        if (error as? URLError)?.code == .cancelled {
+            complete(taskIdentifier: task.taskIdentifier, result: .failure(CancellationError()))
+        } else {
+            complete(taskIdentifier: task.taskIdentifier, result: .failure(error))
+        }
+    }
+
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        let completionHandler = lock.withLock {
+            backgroundCompletionHandlers.removeValue(forKey: session.configuration.identifier ?? "")
+        }
+        completionHandler?()
+    }
+
+    private func state(for taskIdentifier: Int) -> DownloadState? {
+        lock.withLock {
+            states[taskIdentifier]
+        }
+    }
+
+    private func complete(taskIdentifier: Int, result: Result<Void, Error>) {
+        let state = lock.withLock {
+            guard let state = states.removeValue(forKey: taskIdentifier) else { return nil as DownloadState? }
+            tasksByToken.removeValue(forKey: state.token)
+            return state
+        }
+        guard let state else { return }
+
+        switch result {
+        case .success:
+            state.continuation.finish()
+        case let .failure(error):
+            state.continuation.finish(throwing: error)
+        }
+    }
+}
+
+private extension NSLock {
+    func withLock<T>(_ operation: () throws -> T) rethrows -> T {
+        lock()
+        defer { unlock() }
+        return try operation()
     }
 }
 

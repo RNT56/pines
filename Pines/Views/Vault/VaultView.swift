@@ -83,7 +83,7 @@ struct VaultView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(theme.colors.secondaryBackground)
+            .background(theme.colors.sidebarBackground)
         } detail: {
             if let selectedItem {
                 VaultDetailView(item: selectedItem)

@@ -64,7 +64,7 @@ struct ChatsView: View {
                 haptics.play(.navigationSelected)
             }
             .scrollContentBackground(.hidden)
-            .background(theme.colors.secondaryBackground)
+            .background(theme.colors.sidebarBackground)
         } detail: {
             if let selectedThread {
                 ChatTranscriptView(thread: selectedThread)

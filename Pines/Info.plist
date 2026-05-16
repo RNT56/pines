@@ -35,6 +35,8 @@
 	<string>pines uses selected images for local vision prompts and vault imports.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>pines can attach captured images to local vision prompts when you choose to use the camera.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
