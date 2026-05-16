@@ -32,9 +32,9 @@ enum PinesHapticMode: String, CaseIterable, Identifiable {
         case .off:
             "No in-app haptic feedback."
         case .standard:
-            "Sparse feedback for actions, navigation, and chat state."
+            "Minimal, subtle feedback for direct actions and navigation."
         case .expressive:
-            "Adds gentle, throttled texture while scrolling and assistant messages stream."
+            "Richer feedback for actions, streaming, scroll texture, and boundaries."
         }
     }
 }
@@ -139,12 +139,13 @@ struct PinesScrollHapticGate {
 
     mutating func event(offset: CGFloat, minOffset: CGFloat = 0, maxOffset: CGFloat? = nil, now: Date = Date()) -> PinesHapticEvent? {
         defer { lastOffset = offset }
+        let boundaryTolerance: CGFloat = 6
 
         guard let previousOffset = lastOffset else {
             lastEmittedOffset = offset
-            wasAtTop = offset <= minOffset + 1
+            wasAtTop = offset <= minOffset + boundaryTolerance
             if let maxOffset {
-                wasAtBottom = offset >= maxOffset - 1
+                wasAtBottom = offset >= maxOffset - boundaryTolerance
             }
             return nil
         }
@@ -152,8 +153,8 @@ struct PinesScrollHapticGate {
         let delta = offset - previousOffset
         guard abs(delta) > 1.5 else { return nil }
 
-        let atTop = offset <= minOffset + 1
-        let atBottom = maxOffset.map { offset >= $0 - 1 && $0 > minOffset + 1 } ?? false
+        let atTop = offset <= minOffset + boundaryTolerance
+        let atBottom = maxOffset.map { offset >= $0 - boundaryTolerance && $0 > minOffset + boundaryTolerance } ?? false
         defer {
             if !atTop { wasAtTop = false }
             if !atBottom { wasAtBottom = false }
@@ -234,64 +235,101 @@ final class PinesHaptics: ObservableObject {
         guard mode != .off else { return }
         guard event.allowsLowPowerPlayback || !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
 
+        switch mode {
+        case .off:
+            break
+        case .standard:
+            playStandard(event)
+        case .expressive:
+            playExpressive(event)
+        }
+
+        prepare()
+    }
+
+    private func playStandard(_ event: PinesHapticEvent) {
+        switch event {
+        case .appReady, .firstToken, .streamPulse, .streamMilestone, .scrollUp, .scrollDown, .scrollBoundaryTop, .scrollBoundaryBottom:
+            break
+        case .tabChanged, .navigationSelected:
+            selectionChanged()
+        case .primaryAction:
+            impact(.light, intensity: 0.30)
+        case .destructiveAction:
+            impact(.medium, intensity: 0.46)
+        case .sendCommitted:
+            impact(.light, intensity: 0.36)
+        case .runAccepted:
+            impact(.soft, intensity: 0.28)
+        case .toolApprovalNeeded:
+            impact(.medium, intensity: 0.48)
+        case .runCompleted:
+            impact(.soft, intensity: 0.34)
+        case .runCancelled:
+            impact(.light, intensity: 0.34)
+        case .runFailed:
+            impact(.medium, intensity: 0.52)
+        }
+    }
+
+    private func playExpressive(_ event: PinesHapticEvent) {
         switch event {
         case .appReady:
             success()
         case .tabChanged, .navigationSelected:
             selectionChanged()
         case .primaryAction:
-            impact(.light, intensity: 0.55)
+            impact(.light, intensity: 0.58)
         case .destructiveAction:
-            impact(.heavy, intensity: 0.75)
+            impact(.heavy, intensity: 0.82)
         case .sendCommitted:
-            impact(.medium, intensity: 0.65)
+            impact(.medium, intensity: 0.70)
         case .runAccepted:
-            impact(.soft, intensity: 0.45)
+            playCorePulse(intensity: 0.34, sharpness: 0.24, fallback: .soft, fallbackIntensity: 0.48)
         case .firstToken:
-            impact(.soft, intensity: 0.35)
+            playCorePulse(intensity: 0.28, sharpness: 0.20, fallback: .soft, fallbackIntensity: 0.38)
         case .streamPulse:
-            if mode == .expressive {
-                playCorePulse(intensity: 0.16, sharpness: 0.18)
-            } else {
-                impact(.soft, intensity: 0.22)
-            }
+            playCorePulse(intensity: 0.20, sharpness: 0.18, fallback: .soft, fallbackIntensity: 0.28)
         case .streamMilestone:
-            if mode == .expressive {
-                playCorePulse(intensity: 0.26, sharpness: 0.28)
-            } else {
-                impact(.light, intensity: 0.34)
-            }
+            playCoreSequence(
+                [
+                    (intensity: 0.30, sharpness: 0.28, relativeTime: 0),
+                    (intensity: 0.18, sharpness: 0.18, relativeTime: 0.055),
+                ],
+                fallback: .light,
+                fallbackIntensity: 0.46
+            )
         case .scrollUp:
-            if mode == .expressive {
-                playCorePulse(intensity: 0.10, sharpness: 0.16)
-            }
+            playCorePulse(intensity: 0.12, sharpness: 0.18, fallback: .soft, fallbackIntensity: 0.18)
         case .scrollDown:
-            if mode == .expressive {
-                playCorePulse(intensity: 0.12, sharpness: 0.22)
-            }
+            playCorePulse(intensity: 0.14, sharpness: 0.24, fallback: .soft, fallbackIntensity: 0.20)
         case .scrollBoundaryTop:
-            if mode == .expressive {
-                playCorePulse(intensity: 0.20, sharpness: 0.34)
-            } else {
-                impact(.light, intensity: 0.34)
-            }
+            playCoreSequence(
+                [
+                    (intensity: 0.40, sharpness: 0.42, relativeTime: 0),
+                    (intensity: 0.18, sharpness: 0.22, relativeTime: 0.045),
+                ],
+                fallback: .light,
+                fallbackIntensity: 0.58
+            )
         case .scrollBoundaryBottom:
-            if mode == .expressive {
-                playCorePulse(intensity: 0.22, sharpness: 0.38)
-            } else {
-                impact(.light, intensity: 0.38)
-            }
+            playCoreSequence(
+                [
+                    (intensity: 0.50, sharpness: 0.54, relativeTime: 0),
+                    (intensity: 0.24, sharpness: 0.26, relativeTime: 0.05),
+                ],
+                fallback: .medium,
+                fallbackIntensity: 0.66
+            )
         case .toolApprovalNeeded:
             warning()
         case .runCompleted:
             success()
         case .runCancelled:
-            impact(.medium, intensity: 0.55)
+            impact(.medium, intensity: 0.58)
         case .runFailed:
             error()
         }
-
-        prepare()
     }
 
     func prepare() {
@@ -380,31 +418,45 @@ final class PinesHaptics: ObservableObject {
         #endif
     }
 
-    private func playCorePulse(intensity: Float, sharpness: Float) {
+    private func playCorePulse(intensity: Float, sharpness: Float, fallback: ImpactStyle = .soft, fallbackIntensity: CGFloat? = nil) {
+        playCoreSequence(
+            [(intensity: intensity, sharpness: sharpness, relativeTime: 0)],
+            fallback: fallback,
+            fallbackIntensity: fallbackIntensity ?? CGFloat(intensity)
+        )
+    }
+
+    private func playCoreSequence(
+        _ events: [(intensity: Float, sharpness: Float, relativeTime: TimeInterval)],
+        fallback: ImpactStyle,
+        fallbackIntensity: CGFloat
+    ) {
         #if canImport(CoreHaptics)
         prepareCoreHaptics()
         guard let hapticEngine else {
-            impact(.soft, intensity: CGFloat(intensity))
+            impact(fallback, intensity: fallbackIntensity)
             return
         }
 
         do {
-            let event = CHHapticEvent(
-                eventType: .hapticTransient,
-                parameters: [
-                    CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity),
-                    CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness),
-                ],
-                relativeTime: 0
-            )
-            let pattern = try CHHapticPattern(events: [event], parameters: [])
+            let hapticEvents = events.map { event in
+                CHHapticEvent(
+                    eventType: .hapticTransient,
+                    parameters: [
+                        CHHapticEventParameter(parameterID: .hapticIntensity, value: event.intensity),
+                        CHHapticEventParameter(parameterID: .hapticSharpness, value: event.sharpness),
+                    ],
+                    relativeTime: event.relativeTime
+                )
+            }
+            let pattern = try CHHapticPattern(events: hapticEvents, parameters: [])
             let player = try hapticEngine.makePlayer(with: pattern)
             try player.start(atTime: CHHapticTimeImmediate)
         } catch {
-            impact(.soft, intensity: CGFloat(intensity))
+            impact(fallback, intensity: fallbackIntensity)
         }
         #else
-        impact(.soft, intensity: CGFloat(intensity))
+        impact(fallback, intensity: fallbackIntensity)
         #endif
     }
 }
@@ -430,7 +482,7 @@ private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
                     maxOffset: maxOffset > minOffset ? maxOffset : nil
                 )
             } action: { _, snapshot in
-                guard haptics.mode != .off else {
+                guard haptics.mode == .expressive else {
                     gate.reset()
                     return
                 }
