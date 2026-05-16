@@ -388,7 +388,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             appendThreadMessage(userMessage, conversationID: conversationID, status: .local, moveToFront: true)
 
             let localInstall = preferredInstalledTextModel(for: conversationID)
-            let availableTools = await services.toolRegistry.listSpecs()
+            // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
+            let availableTools: [AnyToolSpec] = []
             let cloudCandidate = cloudProviders
                 .first { $0.enabledForAgents }
                 .map { configuration in
@@ -402,7 +403,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 local: (services.mlxRuntime.localProviderID, services.mlxRuntime.capabilities),
                 cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
                 requiresVision: false,
-                requiresTools: !availableTools.isEmpty
+                requiresTools: false
             )
             let selectedProvider: any InferenceProvider
             let selectedProviderID: ProviderID
@@ -521,17 +522,19 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     try await flushAssistantUpdate(content: accumulated, messageStatus: .streaming, threadStatus: .streaming)
                 case let .finish(finish):
                     didReceiveTerminalEvent = true
-                    let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
-                    if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        let message = finish.message ?? "The selected model finished without producing output."
-                        failureMessage = message
-                        try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true)
-                        setChatError(message)
-                        emitHaptic(.runFailed)
-                    } else {
-                        try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true)
-                        clearChatError()
-                        emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
+                    if failureMessage == nil {
+                        let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
+                        if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            let message = finish.message ?? "The selected model finished without producing output."
+                            failureMessage = message
+                            try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true)
+                            setChatError(message)
+                            emitHaptic(.runFailed)
+                        } else {
+                            try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true)
+                            clearChatError()
+                            emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
+                        }
                     }
                 case let .failure(failure):
                     didReceiveTerminalEvent = true
@@ -763,6 +766,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 setIfChanged(\.serviceError, "Model lifecycle service is unavailable.")
                 return
             }
+            markModelDownloadQueued(repository: repository, services: services)
             try await lifecycle.install(repository: repository)
             if defaultModelID == nil {
                 let installs = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
@@ -838,6 +842,27 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private func markModelDownloadQueued(repository: String, services: PinesAppServices) {
+        let key = repository.lowercased()
+        let previews = models.map { preview in
+            guard preview.install.repository.lowercased() == key else { return preview }
+            var install = preview.install
+            guard install.state != .installed && install.state != .unsupported else { return preview }
+            install.state = .downloading
+            let queuedProgress = preview.downloadProgress ?? ModelDownloadProgress(
+                repository: repository,
+                status: .queued,
+                totalBytes: install.estimatedBytes
+            )
+            return Self.modelPreview(
+                from: install,
+                runtime: services.mlxRuntime,
+                download: queuedProgress
+            )
+        }
+        setIfChanged(\.models, Self.downloadingFirst(previews))
+    }
+
     func selectDefaultModel(_ model: PinesModelPreview, services: PinesAppServices) async {
         guard model.install.state == .installed else {
             setIfChanged(\.serviceError, "Download the model before selecting it as the default.")
@@ -883,7 +908,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         download: downloadByRepository[install.repository.lowercased()]
                     )
                 }
-                setIfChanged(\.models, previews)
+                setIfChanged(\.models, Self.downloadingFirst(previews))
             }
             setIfChanged(\.isSearchingModels, false)
             setIfChanged(\.serviceError, nil)
@@ -1293,7 +1318,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     await MainActor.run {
                         guard let self else { return }
                         if self.isShowingModelDiscoveryResults {
-                            self.setIfChanged(\.models, self.models.map { preview in
+                            let previews = self.models.map { preview in
                                 let key = preview.install.repository.lowercased()
                                 if let install = installByRepository[key] {
                                     return Self.modelPreview(
@@ -1313,15 +1338,17 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                                     runtime: services.mlxRuntime,
                                     download: downloadByRepository[key]
                                 )
-                            })
+                            }
+                            self.setIfChanged(\.models, Self.downloadingFirst(previews))
                         } else {
-                            self.setIfChanged(\.models, installs.map { install in
+                            let previews = installs.map { install in
                                 Self.modelPreview(
                                     from: install,
                                     runtime: services.mlxRuntime,
                                     download: downloadByRepository[install.repository.lowercased()]
                                 )
-                            })
+                            }
+                            self.setIfChanged(\.models, Self.downloadingFirst(previews))
                         }
                     }
                 }
@@ -1335,13 +1362,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         guard let self else { return }
                         self.setIfChanged(\.modelDownloads, downloads)
                         let downloadByRepository = Self.latestDownloadByRepository(downloads)
-                        self.setIfChanged(\.models, self.models.map { preview in
+                        let previews = self.models.map { preview in
                             Self.modelPreview(
                                 from: preview.install,
                                 runtime: services.mlxRuntime,
                                 download: downloadByRepository[preview.install.repository.lowercased()]
                             )
-                        })
+                        }
+                        self.setIfChanged(\.models, Self.downloadingFirst(previews))
                     }
                 }
             })
@@ -1960,7 +1988,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     download: downloadByRepository[install.repository.lowercased()]
                 )
             }
-        setIfChanged(\.models, previews)
+        setIfChanged(\.models, Self.downloadingFirst(previews))
     }
 
     private static func threadPreview(
@@ -2066,6 +2094,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         let readiness: Double
         if download?.status == .cancelled {
             readiness = install.state == .installed ? 1 : 0
+        } else if download?.status == .installed || install.state == .installed {
+            readiness = 1
         } else if let download {
             if let total = download.totalBytes, total > 0 {
                 readiness = min(0.98, max(0, Double(download.bytesReceived) / Double(total)))
@@ -2109,6 +2139,25 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         Dictionary(grouping: downloads, by: { $0.repository.lowercased() }).mapValues { values in
             values.sorted { $0.updatedAt > $1.updatedAt }.first!
         }
+    }
+
+    private static func downloadingFirst(_ previews: [PinesModelPreview]) -> [PinesModelPreview] {
+        previews.enumerated()
+            .sorted { lhs, rhs in
+                let lhsActive = lhs.element.isDownloadActive
+                let rhsActive = rhs.element.isDownloadActive
+                if lhsActive != rhsActive {
+                    return lhsActive
+                }
+                if lhsActive,
+                   let lhsUpdated = lhs.element.downloadProgress?.updatedAt,
+                   let rhsUpdated = rhs.element.downloadProgress?.updatedAt,
+                   lhsUpdated != rhsUpdated {
+                    return lhsUpdated > rhsUpdated
+                }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 
     private static func vaultPreview(from record: VaultDocumentRecord) -> PinesVaultItemPreview {
@@ -2313,6 +2362,23 @@ struct PinesModelPreview: Identifiable, Hashable {
     let readiness: Double
     let downloadProgress: ModelDownloadProgress?
     let compatibilityWarnings: [String]
+}
+
+private extension PinesModelPreview {
+    var isDownloadActive: Bool {
+        downloadProgress?.isActive == true || install.state == .downloading || status == .indexing
+    }
+}
+
+private extension ModelDownloadProgress {
+    var isActive: Bool {
+        switch status {
+        case .queued, .downloading, .verifying, .installing:
+            true
+        case .installed, .failed, .cancelled:
+            false
+        }
+    }
 }
 
 enum PinesModelStatus: String, Hashable {

@@ -22,8 +22,10 @@ public struct ModelPreflightClassifier: Sendable {
         let processorClass = processor?["processor_class"] as? String
         let size = input.files.compactMap(\.size).reduce(Int64(0), +)
         let hasSafetensors = input.files.contains { $0.path.hasSuffix(".safetensors") }
-        let hasTokenizer = input.files.contains { file in
-            file.path == "tokenizer.json" || file.path == "tokenizer.model" || file.path == "tokenizer_config.json"
+        let hasTokenizerJSON = input.files.contains { Self.filename($0.path) == "tokenizer.json" }
+        let hasProcessorConfig = input.processorConfigJSON != nil || input.files.contains { file in
+            let filename = Self.filename(file.path)
+            return filename == "processor_config.json" || filename == "preprocessor_config.json"
         }
         let lowerRepository = input.repository.lowercased()
         let hasEmbeddingSignal = lowerRepository.contains("embedding")
@@ -52,8 +54,11 @@ public struct ModelPreflightClassifier: Sendable {
         if !hasSafetensors {
             reasons.append("No safetensors weights were found.")
         }
-        if !hasTokenizer && modalities.contains(.text) {
-            reasons.append("Tokenizer files were not found.")
+        if !hasTokenizerJSON && !modalities.isEmpty {
+            reasons.append("tokenizer.json was not found.")
+        }
+        if modalities.contains(.vision) && !hasProcessorConfig {
+            reasons.append("Vision processor configuration was not found.")
         }
         if modelType == nil {
             reasons.append("config.json does not expose model_type.")
@@ -65,7 +70,10 @@ public struct ModelPreflightClassifier: Sendable {
             || input.tags.contains { $0.localizedCaseInsensitiveContains("bitnet") }
 
         let verification: ModelVerificationState
-        if modalities.isEmpty || !hasSafetensors {
+        if modalities.isEmpty
+            || !hasSafetensors
+            || (!hasTokenizerJSON && !modalities.isEmpty)
+            || (modalities.contains(.vision) && !hasProcessorConfig) {
             verification = .unsupported
         } else if hasExperimentalOneBitSignal || modelType == "bitnet" {
             verification = .experimental
@@ -90,6 +98,10 @@ public struct ModelPreflightClassifier: Sendable {
 
     private static func decodeJSONObject(_ data: Data) -> [String: Any]? {
         (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private static func filename(_ path: String) -> String {
+        path.split(separator: "/").last.map { String($0).lowercased() } ?? path.lowercased()
     }
 
     public static let defaultSupportedLLMTypes: Set<String> = [

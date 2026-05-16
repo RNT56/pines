@@ -179,7 +179,8 @@ struct WatchChatOrchestrator {
                         messages.insert(vaultContext.message, at: 0)
                     }
 
-                    let availableTools = await services.toolRegistry.listSpecs()
+                    // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
+                    let availableTools: [AnyToolSpec] = []
                     let request = ChatRequest(
                         modelID: providerSelection.modelID,
                         messages: messages,
@@ -206,6 +207,8 @@ struct WatchChatOrchestrator {
 
                     let startedAt = Date()
                     let stream = runner.run(session: session, request: request, provider: providerSelection.provider)
+                    var didReceiveTerminalEvent = false
+                    var didFail = false
                     for try await event in stream {
                         try Task.checkCancellation()
                         switch event {
@@ -229,24 +232,52 @@ struct WatchChatOrchestrator {
                                 )
                             )
                         case let .finish(finish):
-                            let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
-                            try await repository.updateMessage(
-                                id: pendingAssistant.id,
-                                content: accumulated,
-                                status: status,
-                                tokenCount: tokenCount
-                            )
-                            continuation.yield(
-                                WatchChatRunUpdate(
-                                    runID: runID,
-                                    conversationID: conversationID,
-                                    assistantMessageID: pendingAssistant.id,
-                                    status: finish.reason == .cancelled ? .cancelled : .completed,
-                                    text: accumulated,
-                                    tokenCount: tokenCount
-                                )
-                            )
+                            didReceiveTerminalEvent = true
+                            if !didFail {
+                                let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
+                                let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if status == .complete && finalText.isEmpty {
+                                    let message = finish.message ?? "The selected model finished without producing output."
+                                    didFail = true
+                                    try await repository.updateMessage(
+                                        id: pendingAssistant.id,
+                                        content: message,
+                                        status: .failed,
+                                        tokenCount: tokenCount
+                                    )
+                                    continuation.yield(
+                                        WatchChatRunUpdate(
+                                            runID: runID,
+                                            conversationID: conversationID,
+                                            assistantMessageID: pendingAssistant.id,
+                                            status: .failed,
+                                            text: accumulated,
+                                            tokenCount: tokenCount,
+                                            errorMessage: message
+                                        )
+                                    )
+                                } else {
+                                    try await repository.updateMessage(
+                                        id: pendingAssistant.id,
+                                        content: accumulated,
+                                        status: status,
+                                        tokenCount: tokenCount
+                                    )
+                                    continuation.yield(
+                                        WatchChatRunUpdate(
+                                            runID: runID,
+                                            conversationID: conversationID,
+                                            assistantMessageID: pendingAssistant.id,
+                                            status: finish.reason == .cancelled ? .cancelled : .completed,
+                                            text: accumulated,
+                                            tokenCount: tokenCount
+                                        )
+                                    )
+                                }
+                            }
                         case let .failure(failure):
+                            didReceiveTerminalEvent = true
+                            didFail = true
                             try await repository.updateMessage(
                                 id: pendingAssistant.id,
                                 content: failure.message,
@@ -268,6 +299,47 @@ struct WatchChatOrchestrator {
                             services.runtimeMetrics.recordGenerationMetrics(metrics, modelID: providerSelection.modelID)
                         case .toolCall:
                             break
+                        }
+                    }
+
+                    if !didReceiveTerminalEvent {
+                        let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if finalText.isEmpty {
+                            let message = "The inference stream ended before the model produced output."
+                            try await repository.updateMessage(
+                                id: pendingAssistant.id,
+                                content: message,
+                                status: .failed,
+                                tokenCount: tokenCount
+                            )
+                            continuation.yield(
+                                WatchChatRunUpdate(
+                                    runID: runID,
+                                    conversationID: conversationID,
+                                    assistantMessageID: pendingAssistant.id,
+                                    status: .failed,
+                                    text: accumulated,
+                                    tokenCount: tokenCount,
+                                    errorMessage: message
+                                )
+                            )
+                        } else {
+                            try await repository.updateMessage(
+                                id: pendingAssistant.id,
+                                content: accumulated,
+                                status: .complete,
+                                tokenCount: tokenCount
+                            )
+                            continuation.yield(
+                                WatchChatRunUpdate(
+                                    runID: runID,
+                                    conversationID: conversationID,
+                                    assistantMessageID: pendingAssistant.id,
+                                    status: .completed,
+                                    text: accumulated,
+                                    tokenCount: tokenCount
+                                )
+                            )
                         }
                     }
 
@@ -362,13 +434,12 @@ struct WatchChatOrchestrator {
                     BYOKCloudInferenceProvider(configuration: configuration, secretStore: services.secretStore)
                 )
             }
-        let availableTools = await services.toolRegistry.listSpecs()
         let route = services.executionRouter.routeChat(
             mode: settings?.executionMode ?? .preferLocal,
             local: (services.mlxRuntime.localProviderID, services.mlxRuntime.capabilities),
             cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
             requiresVision: false,
-            requiresTools: !availableTools.isEmpty
+            requiresTools: false
         )
 
         switch route.destination {

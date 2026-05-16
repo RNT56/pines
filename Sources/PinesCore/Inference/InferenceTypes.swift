@@ -402,6 +402,8 @@ public extension InferenceProvider {
                                     metadata: ["reason": finish.reason.rawValue]
                                 )
                             )
+                            continuation.finish()
+                            return
                         case let .metrics(metrics):
                             continuation.yield(
                                 TokenDelta(
@@ -426,6 +428,8 @@ public extension InferenceProvider {
                                     ]
                                 )
                             )
+                            continuation.finish()
+                            return
                         }
                     }
                     continuation.finish()

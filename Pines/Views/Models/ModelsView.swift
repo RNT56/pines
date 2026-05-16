@@ -238,6 +238,10 @@ private struct ModelSidebarList: View {
 }
 
 private struct ModelRows: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
     let models: [PinesModelPreview]
     let defaultModelID: ModelID?
     let selectedModelID: PinesModelPreview.ID?
@@ -250,6 +254,40 @@ private struct ModelRows: View {
                 isSelected: selectedModelID == model.id
             )
             .tag(model.id)
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if model.canStartDownload {
+                    Button {
+                        haptics.play(.primaryAction)
+                        Task {
+                            await appModel.installModel(repository: model.install.repository, services: services)
+                        }
+                    } label: {
+                        Label("Download", systemImage: "arrow.down.circle")
+                    }
+                    .tint(theme.colors.accent)
+                }
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if model.hasActiveDownload {
+                    Button(role: .destructive) {
+                        haptics.play(.destructiveAction)
+                        Task {
+                            await appModel.cancelModelDownload(repository: model.install.repository, services: services)
+                        }
+                    } label: {
+                        Label("Cancel", systemImage: "stop.circle")
+                    }
+                } else if model.canDeleteModel {
+                    Button(role: .destructive) {
+                        haptics.play(.destructiveAction)
+                        Task {
+                            await appModel.deleteModel(repository: model.install.repository, services: services)
+                        }
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
         }
     }
 }
@@ -400,12 +438,41 @@ private struct ModelRow: View {
     }
 }
 
+private enum ModelDetailAction: Hashable {
+    case download
+    case cancel
+    case use
+    case delete
+}
+
+private struct ModelActionLabel: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let systemImage: String
+    let isPending: Bool
+
+    var body: some View {
+        HStack(spacing: theme.spacing.xsmall) {
+            if isPending {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: systemImage)
+            }
+
+            Text(title)
+        }
+        .contentTransition(.opacity)
+    }
+}
+
 private struct ModelDetailView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var haptics: PinesHaptics
     let model: PinesModelPreview
+    @State private var pendingAction: ModelDetailAction?
 
     var body: some View {
         ScrollView {
@@ -433,6 +500,16 @@ private struct ModelDetailView: View {
         .task(id: model.install.repository) {
             guard model.install.state == .remote else { return }
             await appModel.preflightModel(repository: model.install.repository, services: services)
+        }
+        .onChange(of: model.hasActiveDownload) { _, isActive in
+            if isActive, pendingAction == .download {
+                pendingAction = nil
+            }
+        }
+        .onChange(of: model.install.state) { _, _ in
+            if pendingAction != .download {
+                pendingAction = nil
+            }
         }
     }
 
@@ -512,42 +589,79 @@ private struct ModelDetailView: View {
 
                 if model.hasActiveDownload {
                     Button(role: .destructive) {
-                        haptics.play(.destructiveAction)
-                        Task { await appModel.cancelModelDownload(repository: model.install.repository, services: services) }
+                        runAction(.cancel) {
+                            await appModel.cancelModelDownload(repository: model.install.repository, services: services)
+                        }
                     } label: {
-                        Label("Cancel download", systemImage: "stop.circle")
+                        ModelActionLabel(
+                            title: pendingAction == .cancel ? "Cancelling" : "Cancel download",
+                            systemImage: "stop.circle",
+                            isPending: pendingAction == .cancel
+                        )
                     }
                     .pinesButtonStyle(.destructive, fillWidth: true)
+                    .disabled(pendingAction != nil)
                 } else {
                     HStack(spacing: theme.spacing.small) {
                         Button {
-                            haptics.play(.primaryAction)
-                            Task { await appModel.installModel(repository: model.install.repository, services: services) }
+                            runAction(.download) {
+                                await appModel.installModel(repository: model.install.repository, services: services)
+                            }
                         } label: {
-                            Label("Download", systemImage: "arrow.down.circle")
+                            ModelActionLabel(
+                                title: pendingAction == .download ? "Starting" : "Download",
+                                systemImage: "arrow.down.circle",
+                                isPending: pendingAction == .download
+                            )
                         }
                         .pinesButtonStyle(.primary, fillWidth: true)
-                        .disabled(model.install.state == .installed || model.status == .unsupported)
+                        .disabled(model.install.state == .installed || model.status == .unsupported || pendingAction != nil)
 
                         Button {
-                            haptics.play(.primaryAction)
-                            Task { await appModel.selectDefaultModel(model, services: services) }
+                            runAction(.use) {
+                                await appModel.selectDefaultModel(model, services: services)
+                            }
                         } label: {
-                            Label(isDefaultModel ? "Default" : "Use", systemImage: isDefaultModel ? "checkmark.seal.fill" : "checkmark.circle")
+                            ModelActionLabel(
+                                title: pendingAction == .use ? "Selecting" : (isDefaultModel ? "Default" : "Use"),
+                                systemImage: isDefaultModel ? "checkmark.seal.fill" : "checkmark.circle",
+                                isPending: pendingAction == .use
+                            )
                         }
                         .pinesButtonStyle(.secondary, fillWidth: true)
-                        .disabled(model.install.state != .installed || isDefaultModel)
+                        .disabled(model.install.state != .installed || isDefaultModel || pendingAction != nil)
                     }
                 }
 
                 Button(role: .destructive) {
-                    haptics.play(.destructiveAction)
-                    Task { await appModel.deleteModel(repository: model.install.repository, services: services) }
+                    runAction(.delete) {
+                        await appModel.deleteModel(repository: model.install.repository, services: services)
+                    }
                 } label: {
-                    Label(model.hasActiveDownload ? "Remove download" : "Delete model", systemImage: "trash")
+                    ModelActionLabel(
+                        title: pendingAction == .delete ? "Deleting" : (model.hasActiveDownload ? "Remove download" : "Delete model"),
+                        systemImage: "trash",
+                        isPending: pendingAction == .delete
+                    )
                 }
                 .pinesButtonStyle(.destructive, fillWidth: true)
-                .disabled(!model.canDeleteModel)
+                .disabled(!model.canDeleteModel || pendingAction != nil)
+            }
+            .animation(theme.motion.fast, value: pendingAction)
+        }
+    }
+
+    private func runAction(_ action: ModelDetailAction, operation: @escaping () async -> Void) {
+        guard pendingAction == nil else { return }
+        pendingAction = action
+        haptics.play(action == .delete || action == .cancel ? .destructiveAction : .primaryAction)
+
+        Task {
+            await operation()
+            await MainActor.run {
+                if pendingAction == action {
+                    pendingAction = nil
+                }
             }
         }
     }
@@ -849,6 +963,10 @@ private extension PinesModelPreview {
 
     var canDeleteModel: Bool {
         hasActiveDownload || install.state != .remote || downloadProgress != nil
+    }
+
+    var canStartDownload: Bool {
+        install.state != .installed && !hasActiveDownload && status != .unsupported
     }
 }
 

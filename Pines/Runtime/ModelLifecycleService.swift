@@ -128,6 +128,31 @@ struct ModelLifecycleService: Sendable {
             interruptedRepositories[key] = install.repository
         }
 
+        for install in installs where install.state == .installed {
+            guard let localURL = install.localURL,
+                  let resolvedURL = Self.resolvedModelDirectory(from: localURL, modalities: install.modalities)
+            else {
+                var failed = install
+                failed.state = .failed
+                failed.localURL = nil
+                try await installRepository.upsertInstall(failed)
+                try await auditRepository?.append(
+                    AuditEvent(
+                        category: .modelDownload,
+                        summary: "Marked incomplete install failed: \(install.repository)",
+                        modelID: install.modelID
+                    )
+                )
+                continue
+            }
+
+            if resolvedURL != localURL {
+                var repaired = install
+                repaired.localURL = resolvedURL
+                try await installRepository.upsertInstall(repaired)
+            }
+        }
+
         for repository in interruptedRepositories.values {
             try? Self.removeStagingDirectory(for: repository)
             try await installRepository.deleteInstall(repository: repository)
@@ -144,7 +169,16 @@ struct ModelLifecycleService: Sendable {
             .first(where: { $0.repository.caseInsensitiveCompare(repository) == .orderedSame }) {
             switch existing.state {
             case .installed:
-                return
+                if let localURL = existing.localURL,
+                   let resolvedURL = Self.resolvedModelDirectory(from: localURL, modalities: existing.modalities) {
+                    if resolvedURL != localURL {
+                        var repaired = existing
+                        repaired.localURL = resolvedURL
+                        try await installRepository.upsertInstall(repaired)
+                    }
+                    return
+                }
+                try? Self.removeInstalledDirectory(for: repository, localURL: existing.localURL)
             case .downloading, .remote, .failed, .unsupported:
                 break
             }
@@ -161,6 +195,7 @@ struct ModelLifecycleService: Sendable {
         try Self.validateAvailableDiskSpace(for: result.estimatedBytes)
 
         let files = input.files.filter(Self.shouldDownload)
+        try Self.validateDownloadManifest(files, repository: repository, modalities: result.modalities)
         var resolvedFileSizes = Dictionary(
             uniqueKeysWithValues: files.compactMap { file -> (String, Int64)? in
                 guard let size = file.size, size > 0 else { return nil }
@@ -177,8 +212,11 @@ struct ModelLifecycleService: Sendable {
                 resolvedFileSizes[file.path] = size
             }
         }
-        let totalBytes = Self.totalDownloadBytes(for: files, fileSizes: resolvedFileSizes)
-            ?? (result.estimatedBytes > 0 ? result.estimatedBytes : nil)
+        let totalBytes = Self.totalDownloadBytes(
+            for: files,
+            fileSizes: resolvedFileSizes,
+            fallback: result.estimatedBytes > 0 ? result.estimatedBytes : nil
+        )
         let downloadID = UUID()
         var progress = ModelDownloadProgress(
             id: downloadID,
@@ -246,7 +284,11 @@ struct ModelLifecycleService: Sendable {
                     progress.bytesReceived = received
                     if let expectedFileSize {
                         resolvedFileSizes[file.path] = expectedFileSize
-                        if let inferredTotal = Self.totalDownloadBytes(for: files, fileSizes: resolvedFileSizes) {
+                        if let inferredTotal = Self.totalDownloadBytes(
+                            for: files,
+                            fileSizes: resolvedFileSizes,
+                            fallback: progress.totalBytes
+                        ) {
                             progress.totalBytes = inferredTotal
                         }
                     }
@@ -281,13 +323,19 @@ struct ModelLifecycleService: Sendable {
                 try FileManager.default.removeItem(at: finalURL)
             }
             try FileManager.default.moveItem(at: stagingURL, to: finalURL)
+            let resolvedURL = try Self.validateModelDirectory(
+                finalURL,
+                repository: repository,
+                modalities: result.modalities
+            )
 
             var installed = install
-            installed.localURL = finalURL
+            installed.localURL = resolvedURL
             installed.state = .installed
             try await installRepository.upsertInstall(installed)
 
             progress.status = .installed
+            progress.bytesReceived = progress.totalBytes ?? received
             progress.updatedAt = Date()
             try await downloadRepository.upsertDownload(progress)
             try await auditRepository?.append(
@@ -320,6 +368,10 @@ struct ModelLifecycleService: Sendable {
         if FileManager.default.fileExists(atPath: directory.path) {
             try FileManager.default.removeItem(at: directory)
         }
+        let legacyDirectory = try Self.modelsDirectory().appending(path: Self.legacySafeDirectoryName(repository), directoryHint: .isDirectory)
+        if legacyDirectory != directory, FileManager.default.fileExists(atPath: legacyDirectory.path) {
+            try FileManager.default.removeItem(at: legacyDirectory)
+        }
         let stagingDirectory = try Self.modelsDirectory()
             .appending(path: "staging", directoryHint: .isDirectory)
             .appending(path: Self.safeDirectoryName(repository), directoryHint: .isDirectory)
@@ -337,12 +389,15 @@ struct ModelLifecycleService: Sendable {
     }
 
     private static func shouldDownload(_ file: ModelFileInfo) -> Bool {
-        let path = file.path.lowercased()
-        return path.hasSuffix(".safetensors")
-            || path.hasSuffix(".json")
-            || path.hasSuffix(".model")
-            || path.hasSuffix(".txt")
-            || path.hasSuffix(".tiktoken")
+        let components = file.path.split(separator: "/")
+        guard !components.contains(where: { $0.hasPrefix(".") }) else { return false }
+        let filename = components.last.map { String($0).lowercased() } ?? file.path.lowercased()
+        let pathExtension = filename.split(separator: ".").last.map(String.init) ?? ""
+
+        // Keep this in sync with mlx-swift-lm's model snapshot patterns:
+        // ["*.safetensors", "*.json", "*.jinja"]. The extra tokenizer extensions
+        // are retained for imported or legacy local repositories.
+        return ["safetensors", "json", "jinja", "model", "txt", "tiktoken"].contains(pathExtension)
     }
 
     private func hasActiveDownload(for repository: String) async throws -> Bool {
@@ -495,11 +550,11 @@ struct ModelLifecycleService: Sendable {
             request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
 
-        let (_, http) = try await URLSession.shared.data(for: request)
-        guard (200 ..< 300).contains(http.statusCode) else {
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
-        return Self.expectedFileSize(from: http, http: http, offset: 0, declaredSize: file.size)
+        return Self.expectedFileSize(from: response, http: http, offset: 0, declaredSize: file.size)
     }
 
     private static func removeStagingDirectory(for repository: String) throws {
@@ -511,14 +566,164 @@ struct ModelLifecycleService: Sendable {
         }
     }
 
-    private static func totalDownloadBytes(for files: [ModelFileInfo], fileSizes: [String: Int64]) -> Int64? {
+    private static func removeInstalledDirectory(for repository: String, localURL: URL?) throws {
+        let modelsDirectory = try modelsDirectory()
+        let currentDirectory = modelsDirectory.appending(path: safeDirectoryName(repository), directoryHint: .isDirectory)
+        let legacyDirectory = modelsDirectory.appending(path: legacySafeDirectoryName(repository), directoryHint: .isDirectory)
+        let candidates = [localURL, currentDirectory, legacyDirectory]
+            .compactMap(\.self)
+            .uniquedByPath()
+
+        for candidate in candidates where candidate.isDescendant(of: modelsDirectory) {
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                try FileManager.default.removeItem(at: candidate)
+            }
+        }
+    }
+
+    private static func validateDownloadManifest(
+        _ files: [ModelFileInfo],
+        repository: String,
+        modalities: Set<ModelModality>
+    ) throws {
+        guard downloadableModelRoot(in: files, modalities: modalities) != nil else {
+            var required = ["config.json", "tokenizer.json", "*.safetensors"]
+            if modalities.contains(.vision) {
+                required.append("processor_config.json or preprocessor_config.json")
+            }
+            throw InferenceError.unsupportedCapability(
+                "The Hugging Face repository \(repository) does not expose the files Pines needs for local MLX loading: \(required.joined(separator: ", "))."
+            )
+        }
+    }
+
+    private static func validateModelDirectory(
+        _ directory: URL,
+        repository: String,
+        modalities: Set<ModelModality>
+    ) throws -> URL {
+        guard let resolved = resolvedModelDirectory(from: directory, modalities: modalities) else {
+            throw InferenceError.invalidRequest(
+                "The downloaded model \(repository) is incomplete. Delete it and download it again."
+            )
+        }
+        return resolved
+    }
+
+    static func resolvedModelDirectory(from directory: URL, modalities: Set<ModelModality> = []) -> URL? {
+        if hasRequiredModelFiles(in: directory, modalities: modalities) {
+            return directory
+        }
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return nil
+        }
+
+        for case let fileURL as URL in enumerator where fileURL.lastPathComponent == "config.json" {
+            let candidate = fileURL.deletingLastPathComponent()
+            if hasRequiredModelFiles(in: candidate, modalities: modalities) {
+                return candidate
+            }
+        }
+
+        return nil
+    }
+
+    private static func hasRequiredModelFiles(in directory: URL, modalities: Set<ModelModality>) -> Bool {
+        let fileManager = FileManager.default
+        let configURL = directory.appending(path: "config.json")
+        guard fileManager.fileExists(atPath: configURL.path) else {
+            return false
+        }
+
+        guard fileManager.fileExists(atPath: directory.appending(path: "tokenizer.json").path) else {
+            return false
+        }
+
+        if modalities.contains(.vision) {
+            let processorFiles = ["preprocessor_config.json", "processor_config.json"]
+            guard processorFiles.contains(where: { fileManager.fileExists(atPath: directory.appending(path: $0).path) }) else {
+                return false
+            }
+        }
+
+        guard let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return false
+        }
+
+        for case let fileURL as URL in enumerator where fileURL.pathExtension == "safetensors" {
+            return true
+        }
+        return false
+    }
+
+    private static func downloadableModelRoot(
+        in files: [ModelFileInfo],
+        modalities: Set<ModelModality>
+    ) -> String? {
+        let paths = Set(files.map(\.path))
+        for configPath in paths where filename(configPath) == "config.json" {
+            let root = directoryPath(configPath)
+            guard paths.contains(path("tokenizer.json", in: root)) else { continue }
+            if modalities.contains(.vision) {
+                let hasProcessorConfig = paths.contains(path("preprocessor_config.json", in: root))
+                    || paths.contains(path("processor_config.json", in: root))
+                guard hasProcessorConfig else { continue }
+            }
+            let hasSafetensors = paths.contains { candidate in
+                candidate.hasSuffix(".safetensors") && isPath(candidate, inOrBelow: root)
+            }
+            if hasSafetensors {
+                return root
+            }
+        }
+        return nil
+    }
+
+    private static func filename(_ path: String) -> String {
+        path.split(separator: "/").last.map { String($0).lowercased() } ?? path.lowercased()
+    }
+
+    private static func directoryPath(_ path: String) -> String {
+        let components = path.split(separator: "/").map(String.init)
+        guard components.count > 1 else { return "" }
+        return components.dropLast().joined(separator: "/")
+    }
+
+    private static func path(_ filename: String, in directory: String) -> String {
+        directory.isEmpty ? filename : "\(directory)/\(filename)"
+    }
+
+    private static func isPath(_ path: String, inOrBelow directory: String) -> Bool {
+        directory.isEmpty || path == directory || path.hasPrefix(directory + "/")
+    }
+
+    private static func totalDownloadBytes(
+        for files: [ModelFileInfo],
+        fileSizes: [String: Int64],
+        fallback: Int64?
+    ) -> Int64? {
         guard !files.isEmpty else { return nil }
         var total: Int64 = 0
+        var hasUnknownSize = false
         for file in files {
             guard let size = fileSizes[file.path], size > 0 else {
-                return nil
+                hasUnknownSize = true
+                continue
             }
             total += size
+        }
+        guard total > 0 else { return fallback }
+        if hasUnknownSize, let fallback, fallback > total {
+            return fallback
         }
         return total
     }
@@ -589,6 +794,10 @@ struct ModelLifecycleService: Sendable {
         repository.replacingOccurrences(of: "/", with: "__")
     }
 
+    private static func legacySafeDirectoryName(_ repository: String) -> String {
+        repository.replacingOccurrences(of: "/", with: "_")
+    }
+
     private static func encodedPath(_ path: String) -> String {
         path.split(separator: "/")
             .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
@@ -608,6 +817,27 @@ struct ModelLifecycleService: Sendable {
             hasher.update(data: data)
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private extension Array where Element == URL {
+    func uniquedByPath() -> [URL] {
+        var seen = Set<String>()
+        var result: [URL] = []
+        for url in self {
+            let path = url.standardizedFileURL.path
+            guard seen.insert(path).inserted else { continue }
+            result.append(url)
+        }
+        return result
+    }
+}
+
+private extension URL {
+    func isDescendant(of directory: URL) -> Bool {
+        let path = standardizedFileURL.path
+        let directoryPath = directory.standardizedFileURL.path
+        return path == directoryPath || path.hasPrefix(directoryPath + "/")
     }
 }
 

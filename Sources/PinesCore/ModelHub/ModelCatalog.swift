@@ -208,6 +208,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
             URLQueryItem(name: "filter", value: "mlx"),
             URLQueryItem(name: "full", value: "true"),
             URLQueryItem(name: "config", value: "true"),
+            URLQueryItem(name: "blobs", value: "true"),
             URLQueryItem(name: "limit", value: String(max(1, min(filters.limit, 100)))),
             URLQueryItem(name: "sort", value: filters.sort.rawValue),
             URLQueryItem(name: "direction", value: filters.descending ? "-1" : "1"),
@@ -237,7 +238,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
                 task: dto.pipelineTag.flatMap(HubTask.init(rawValue:)),
                 lastModified: dto.lastModified,
                 files: dto.siblings?.map {
-                    ModelFileInfo(path: $0.rfilename, size: $0.size ?? $0.lfs?.size, oid: $0.blobID ?? $0.lfs?.oid)
+                    ModelFileInfo(path: $0.rfilename, size: $0.size ?? $0.lfs?.size, oid: $0.lfs?.oid ?? $0.blobID)
                 } ?? [],
                 modelType: dto.config?.modelType,
                 license: dto.cardData?.license ?? dto.tags?.licenseTagValue
@@ -250,7 +251,9 @@ public struct HuggingFaceModelCatalogService: Sendable {
             .split(separator: "/")
             .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
             .joined(separator: "/")
-        let infoURL = baseURL.appending(path: "/api/models/\(encodedRepository)")
+        var components = URLComponents(url: baseURL.appending(path: "/api/models/\(encodedRepository)"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "blobs", value: "true")]
+        let infoURL = components.url!
         let (infoData, infoResponse) = try await client.data(for: authorizedRequest(url: infoURL, accessToken: accessToken))
         guard (200 ..< 300).contains(infoResponse.statusCode) else {
             throw URLError(.badServerResponse)
@@ -260,14 +263,17 @@ public struct HuggingFaceModelCatalogService: Sendable {
         async let config = optionalFile(repository: encodedRepository, revision: revision, path: "config.json", accessToken: accessToken)
         async let generation = optionalFile(repository: encodedRepository, revision: revision, path: "generation_config.json", accessToken: accessToken)
         async let processor = optionalFile(repository: encodedRepository, revision: revision, path: "processor_config.json", accessToken: accessToken)
+        async let preprocessor = optionalFile(repository: encodedRepository, revision: revision, path: "preprocessor_config.json", accessToken: accessToken)
+        let processorConfigJSON = try await preprocessor
+        let fallbackProcessorConfigJSON = try await processor
 
         return try await ModelPreflightInput(
             repository: repository,
             configJSON: config,
             generationConfigJSON: generation,
-            processorConfigJSON: processor,
+            processorConfigJSON: processorConfigJSON ?? fallbackProcessorConfigJSON,
             files: info.siblings?.map {
-                ModelFileInfo(path: $0.rfilename, size: $0.size ?? $0.lfs?.size, oid: $0.blobID ?? $0.lfs?.oid)
+                ModelFileInfo(path: $0.rfilename, size: $0.size ?? $0.lfs?.size, oid: $0.lfs?.oid ?? $0.blobID)
             } ?? [],
             tags: info.tags ?? [],
             license: info.cardData?.license
@@ -368,6 +374,19 @@ private struct HubSiblingDTO: Decodable {
 private struct HubLFSDTO: Decodable {
     var oid: String?
     var size: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case oid
+        case sha256
+        case size
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        oid = try container.decodeIfPresent(String.self, forKey: .oid)
+            ?? container.decodeIfPresent(String.self, forKey: .sha256)
+        size = try container.decodeIfPresent(Int64.self, forKey: .size)
+    }
 }
 
 private struct HubCardDataDTO: Decodable {

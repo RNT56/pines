@@ -21,6 +21,7 @@ struct PinesCoreTestRunner {
         try testMarkdownMessageParser()
         try await testToolRegistry()
         try await testInferenceStreamAdapter()
+        try await testInferenceStreamAdapterTreatsFailureAsTerminal()
         try await testAgentPolicyGate()
         try testVaultChunking()
         try testVectorIndex()
@@ -88,6 +89,18 @@ struct PinesCoreTestRunner {
         )
         try expectEqual(unsupported.verification, .unsupported)
 
+        let missingTokenizerJSON = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen3-4B-4bit",
+                configJSON: #"{"model_type":"qwen3"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 1_200_000_000),
+                    .init(path: "tokenizer_config.json", size: 3_000),
+                ]
+            )
+        )
+        try expectEqual(missingTokenizerJSON.verification, .unsupported)
+
         let embedding = ModelPreflightClassifier().classify(
             ModelPreflightInput(
                 repository: "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
@@ -105,14 +118,28 @@ struct PinesCoreTestRunner {
             ModelPreflightInput(
                 repository: "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
                 configJSON: #"{"model_type":"qwen2_5_vl"}"#.data(using: .utf8)!,
+                processorConfigJSON: #"{"processor_class":"Qwen2VLProcessor"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "model.safetensors", size: 3_000_000_000),
+                    .init(path: "tokenizer.json", size: 300_000),
+                    .init(path: "preprocessor_config.json", size: 5_000),
+                ]
+            )
+        )
+        try expect(vlm.modalities.contains(.text), "VLM preflight should remain text-capable")
+        try expect(vlm.modalities.contains(.vision), "VLM preflight should be vision-capable")
+
+        let missingVLMProcessor = ModelPreflightClassifier().classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+                configJSON: #"{"model_type":"qwen2_5_vl"}"#.data(using: .utf8)!,
                 files: [
                     .init(path: "model.safetensors", size: 3_000_000_000),
                     .init(path: "tokenizer.json", size: 300_000),
                 ]
             )
         )
-        try expect(vlm.modalities.contains(.text), "VLM preflight should remain text-capable")
-        try expect(vlm.modalities.contains(.vision), "VLM preflight should be vision-capable")
+        try expectEqual(missingVLMProcessor.verification, .unsupported)
     }
 
     private static func testModelCatalogSearch() async throws {
@@ -129,7 +156,7 @@ struct PinesCoreTestRunner {
                 "tags": ["mlx", "safetensors", "qwen3", "feature-extraction", "license:apache-2.0"],
                 "config": { "model_type": "qwen3" },
                 "siblings": [
-                  { "rfilename": "model.safetensors", "size": 600000000, "lfs": { "oid": "abc", "size": 600000000 } },
+                  { "rfilename": "model.safetensors", "size": 600000000, "lfs": { "sha256": "abc", "size": 600000000 } },
                   { "rfilename": "tokenizer.json", "size": 300000 }
                 ]
               }
@@ -144,12 +171,14 @@ struct PinesCoreTestRunner {
         try expectEqual(queryItems["filter"], "mlx")
         try expectEqual(queryItems["full"], "true")
         try expectEqual(queryItems["config"], "true")
+        try expectEqual(queryItems["blobs"], "true")
         try expectEqual(queryItems["search"], "qwen")
         try expectEqual(queryItems["pipeline_tag"], "feature-extraction")
         try expectEqual(models.count, 1)
         try expectEqual(models[0].libraryName, "mlx")
         try expectEqual(models[0].modelType, "qwen3")
         try expectEqual(models[0].files.count, 2)
+        try expectEqual(models[0].files[0].oid, "abc")
         try expectEqual(models[0].license, "apache-2.0")
 
         let classified = ModelPreflightClassifier().classify(models[0].preflightInput)
@@ -511,6 +540,20 @@ struct PinesCoreTestRunner {
         try expectEqual(received, [.token, .metrics, .finish])
     }
 
+    private static func testInferenceStreamAdapterTreatsFailureAsTerminal() async throws {
+        let provider = FakeFailureThenFinishProvider()
+        let stream = try await provider.stream(
+            ChatRequest(modelID: "fake", messages: [ChatMessage(role: .user, content: "hello")])
+        )
+        var received = [TokenDelta]()
+        for try await delta in stream {
+            received.append(delta)
+        }
+        try expectEqual(received.map(\.kind), [.finish])
+        try expectEqual(received.first?.metadata["reason"], InferenceFinishReason.error.rawValue)
+        try expectEqual(received.first?.text, "boom")
+    }
+
     private static func testAgentPolicyGate() async throws {
         let spec = AnyToolSpec(try CalculatorTool.spec())
         let invocation = ToolInvocation(
@@ -620,6 +663,23 @@ private struct FakeInferenceProvider: InferenceProvider {
         AsyncThrowingStream { continuation in
             continuation.yield(.token(TokenDelta(text: "hello", tokenCount: 1)))
             continuation.yield(.metrics(InferenceMetrics(promptTokens: 1, completionTokens: 1)))
+            continuation.yield(.finish(InferenceFinish(reason: .stop)))
+            continuation.finish()
+        }
+    }
+
+    func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
+        EmbeddingResult(modelID: request.modelID, vectors: [[1, 0]])
+    }
+}
+
+private struct FakeFailureThenFinishProvider: InferenceProvider {
+    var id: ProviderID { "fake-failure" }
+    var capabilities: ProviderCapabilities { .init(local: true) }
+
+    func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(.failure(InferenceStreamFailure(code: "test_failure", message: "boom")))
             continuation.yield(.finish(InferenceFinish(reason: .stop)))
             continuation.finish()
         }

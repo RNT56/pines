@@ -69,7 +69,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                             )
                         )
                     )
-                    continuation.finish(throwing: error)
+                    continuation.finish()
                 }
             }
 

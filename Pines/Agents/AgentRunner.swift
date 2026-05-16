@@ -57,6 +57,10 @@ struct AgentRunner {
                                 continuation.yield(event)
                             case let .finish(finish):
                                 pendingFinish = finish
+                            case .failure:
+                                continuation.yield(event)
+                                continuation.finish()
+                                return
                             default:
                                 continuation.yield(event)
                             }
@@ -121,6 +125,12 @@ struct AgentRunner {
                     }
 
                     throw AgentError.stepLimitExceeded
+                } catch is CancellationError {
+                    continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
+                    continuation.finish()
+                } catch InferenceError.cancelled {
+                    continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
+                    continuation.finish()
                 } catch {
                     continuation.yield(
                         .failure(
@@ -131,7 +141,7 @@ struct AgentRunner {
                             )
                         )
                     )
-                    continuation.finish(throwing: error)
+                    continuation.finish()
                 }
             }
 

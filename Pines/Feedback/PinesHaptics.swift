@@ -52,6 +52,8 @@ enum PinesHapticEvent: Hashable {
     case streamMilestone
     case scrollUp
     case scrollDown
+    case scrollBoundaryTop
+    case scrollBoundaryBottom
     case toolApprovalNeeded
     case runCompleted
     case runCancelled
@@ -68,6 +70,8 @@ enum PinesHapticEvent: Hashable {
              .destructiveAction,
              .sendCommitted,
              .runAccepted,
+             .scrollBoundaryTop,
+             .scrollBoundaryBottom,
              .toolApprovalNeeded,
              .runCompleted,
              .runCancelled,
@@ -129,17 +133,43 @@ struct PinesScrollHapticGate {
     private var lastEmittedOffset: CGFloat?
     private var lastEmittedDirection: PinesScrollDirection?
     private var lastEmittedAt = Date.distantPast
+    private var lastBoundaryAt = Date.distantPast
+    private var wasAtTop = false
+    private var wasAtBottom = false
 
-    mutating func event(offset: CGFloat, now: Date = Date()) -> PinesHapticEvent? {
+    mutating func event(offset: CGFloat, minOffset: CGFloat = 0, maxOffset: CGFloat? = nil, now: Date = Date()) -> PinesHapticEvent? {
         defer { lastOffset = offset }
 
         guard let previousOffset = lastOffset else {
             lastEmittedOffset = offset
+            wasAtTop = offset <= minOffset + 1
+            if let maxOffset {
+                wasAtBottom = offset >= maxOffset - 1
+            }
             return nil
         }
 
         let delta = offset - previousOffset
         guard abs(delta) > 1.5 else { return nil }
+
+        let atTop = offset <= minOffset + 1
+        let atBottom = maxOffset.map { offset >= $0 - 1 && $0 > minOffset + 1 } ?? false
+        defer {
+            if !atTop { wasAtTop = false }
+            if !atBottom { wasAtBottom = false }
+        }
+
+        if atTop, !wasAtTop, now.timeIntervalSince(lastBoundaryAt) >= 0.35 {
+            wasAtTop = true
+            lastBoundaryAt = now
+            return .scrollBoundaryTop
+        }
+
+        if atBottom, !wasAtBottom, now.timeIntervalSince(lastBoundaryAt) >= 0.35 {
+            wasAtBottom = true
+            lastBoundaryAt = now
+            return .scrollBoundaryBottom
+        }
 
         let direction: PinesScrollDirection = delta > 0 ? .down : .up
         let emittedOffset = lastEmittedOffset ?? previousOffset
@@ -162,6 +192,9 @@ struct PinesScrollHapticGate {
         lastEmittedOffset = nil
         lastEmittedDirection = nil
         lastEmittedAt = .distantPast
+        lastBoundaryAt = .distantPast
+        wasAtTop = false
+        wasAtBottom = false
     }
 }
 
@@ -235,6 +268,18 @@ final class PinesHaptics: ObservableObject {
         case .scrollDown:
             if mode == .expressive {
                 playCorePulse(intensity: 0.12, sharpness: 0.22)
+            }
+        case .scrollBoundaryTop:
+            if mode == .expressive {
+                playCorePulse(intensity: 0.20, sharpness: 0.34)
+            } else {
+                impact(.light, intensity: 0.34)
+            }
+        case .scrollBoundaryBottom:
+            if mode == .expressive {
+                playCorePulse(intensity: 0.22, sharpness: 0.38)
+            } else {
+                impact(.light, intensity: 0.38)
             }
         case .toolApprovalNeeded:
             warning()
@@ -364,21 +409,33 @@ final class PinesHaptics: ObservableObject {
     }
 }
 
+private struct PinesScrollHapticSnapshot: Equatable {
+    var offset: CGFloat
+    var minOffset: CGFloat
+    var maxOffset: CGFloat?
+}
+
 private struct PinesExpressiveScrollHapticsModifier: ViewModifier {
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var gate = PinesScrollHapticGate()
 
     func body(content: Content) -> some View {
         content
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentOffset.y
-            } action: { _, newOffset in
-                guard haptics.mode == .expressive else {
+            .onScrollGeometryChange(for: PinesScrollHapticSnapshot.self) { geometry in
+                let minOffset = -geometry.contentInsets.top
+                let maxOffset = max(minOffset, geometry.contentSize.height - geometry.containerSize.height + geometry.contentInsets.bottom)
+                return PinesScrollHapticSnapshot(
+                    offset: geometry.contentOffset.y,
+                    minOffset: minOffset,
+                    maxOffset: maxOffset > minOffset ? maxOffset : nil
+                )
+            } action: { _, snapshot in
+                guard haptics.mode != .off else {
                     gate.reset()
                     return
                 }
 
-                if let event = gate.event(offset: newOffset) {
+                if let event = gate.event(offset: snapshot.offset, minOffset: snapshot.minOffset, maxOffset: snapshot.maxOffset) {
                     haptics.play(event)
                 }
             }

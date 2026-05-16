@@ -269,7 +269,7 @@ private actor MLXRuntimeState {
         activeProfile = profile
 
         #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
-        let configuration = Self.lmConfiguration(for: install)
+        let configuration = try Self.lmConfiguration(for: install)
         if install.modalities.contains(.vision) {
             visionContainer = try await VLMModelFactory.shared.loadContainer(
                 from: PinesHubDownloader(),
@@ -415,7 +415,7 @@ private actor MLXRuntimeState {
                             )
                         )
                     )
-                    continuation.finish(throwing: error)
+                    continuation.finish()
                 }
             }
 
@@ -448,9 +448,17 @@ private actor MLXRuntimeState {
     }
 
     #if canImport(MLXLMCommon)
-    private static func lmConfiguration(for install: ModelInstall) -> MLXLMCommon.ModelConfiguration {
+    private static func lmConfiguration(for install: ModelInstall) throws -> MLXLMCommon.ModelConfiguration {
         if let localURL = install.localURL {
-            return MLXLMCommon.ModelConfiguration(directory: localURL)
+            guard let resolvedURL = ModelLifecycleService.resolvedModelDirectory(
+                from: localURL,
+                modalities: install.modalities
+            ) else {
+                throw InferenceError.invalidRequest(
+                    "The installed model \(install.repository) is incomplete. Delete it and download it again."
+                )
+            }
+            return MLXLMCommon.ModelConfiguration(directory: resolvedURL)
         }
         return MLXLMCommon.ModelConfiguration(id: install.repository, revision: install.revision ?? "main")
     }
