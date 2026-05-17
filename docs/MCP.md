@@ -1,6 +1,6 @@
 # Pines MCP Support
 
-Pines can connect to remote MCP servers over Streamable HTTP and expose server capabilities to local or BYOK-backed chat flows. The implementation is intentionally user-driven: tools, resources, prompts, and sampling are enabled per server from Settings.
+Pines can connect to remote MCP servers over Streamable HTTP. The implementation is intentionally user-driven: tools, resources, prompts, and sampling are enabled per server from Settings. Selected resources and invoked prompts can enter normal chat context; MCP tools are registered for tool-enabled agent paths and MCP sampling but are not advertised to normal chat by default.
 
 Implementation ownership:
 
@@ -21,7 +21,7 @@ Remote production servers should use HTTPS. Plain HTTP is intended only for expl
 
 ## Tools
 
-Pines supports MCP tools as model-callable functions.
+Pines supports MCP tools as registered, policy-gated functions. Enabled MCP tools are namespaced and added to the shared `ToolRegistry`, but normal chat currently keeps its advertised tool list empty unless a future tool mode opts in.
 
 Server methods used:
 
@@ -29,7 +29,7 @@ Server methods used:
 - `tools/call`
 - `notifications/tools/list_changed`
 
-Tool schemas are preserved as raw JSON Schema and forwarded to local MLX and BYOK providers. Pines namespaces tool names as `mcp.<server>.<tool>` before advertising them to models, so server tool names can be stable without colliding with built-in tools.
+Tool schemas are preserved as raw JSON Schema. Pines namespaces tool names as `mcp.<server>.<tool>` before registering them, so server tool names can be stable without colliding with built-in tools.
 
 Tool calls are treated as network operations and go through approval/policy checks. Tool outputs are capped before being returned to model context.
 
@@ -102,7 +102,7 @@ Pines shows the requesting server, prompt, model preferences, tool count, contex
 
 Model selection uses MCP `modelPreferences` where provided. Pines ranks installed local models first using model hints plus cost, speed, and intelligence priorities. If local execution fails and BYOK sampling is enabled, Pines ranks enabled BYOK providers with the same hints and provider capability checks. Global chat execution mode is not used implicitly for sampling.
 
-Audio sampling content is rejected with a JSON-RPC error. Text and image content are converted to Pines chat messages where the selected provider supports them. Sampling tool definitions are forwarded to the provider; the MCP server remains responsible for executing its own tool loop.
+Audio sampling content is rejected with a JSON-RPC error. Text and image content are converted to Pines chat messages where the selected provider supports them. Sampling tool definitions supplied by the MCP server are forwarded to the selected local or BYOK provider; the MCP server remains responsible for executing its own tool loop.
 
 Per-server controls:
 

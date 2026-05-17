@@ -2,7 +2,7 @@
 
 This file documents third-party software dependencies used by Pines. The Pines repository license does not relicense third-party software. Each dependency remains available under its own license.
 
-This inventory is based on `project.yml`, `Package.swift`, dependency manifests, the committed package lockfile, and the package graph resolved by `xcodebuild -resolvePackageDependencies` on May 16, 2026. The Swift package lockfile covers package/test dependencies; the iOS app MLX fork dependencies are exact revision pins in `project.yml`.
+This inventory was checked against `project.yml`, `Package.swift`, dependency manifests, and the committed package lockfile on May 17, 2026. The iOS app package graph was last resolved by `xcodebuild -resolvePackageDependencies` on May 16, 2026. The Swift package lockfile covers package/test dependencies; the iOS app MLX fork dependencies are exact revision pins in `project.yml`.
 
 ## Direct Swift Package Dependencies
 

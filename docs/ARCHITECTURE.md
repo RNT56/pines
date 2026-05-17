@@ -1,6 +1,6 @@
 # Architecture
 
-`pines` is structured as a modular iOS app with a testable Swift core and a SwiftUI presentation layer. The current repository is a production-oriented foundation: interfaces, boundaries, and verification are in place; the heavy runtime integrations are intentionally isolated behind protocols so they can be implemented without reshaping the app.
+`pines` is structured as a modular iOS app with a testable Swift core and a SwiftUI presentation layer. The current repository is a production-oriented foundation with live GRDB persistence, MLX runtime bridges, BYOK cloud providers, CloudKit sync, MCP Streamable HTTP support, and vault ingestion isolated behind protocols so features can evolve without reshaping the app.
 
 ## Layers
 
@@ -13,7 +13,7 @@
 
 ## Composition Root
 
-`PinesAppServices` owns service construction for the app layer:
+`PinesAppServices` owns service construction for the app layer. The default SwiftUI environment creates a no-store instance for previews and early view construction; `PinesRootView` creates live services only after the boot mark has reached the first frame.
 
 - `SecretStore`
 - `HuggingFaceModelCatalogService`
@@ -23,14 +23,15 @@
 - `ToolPolicyGate`
 - `Redactor`
 - `MLXRuntimeBridge`
-- `DeviceRuntimeMonitor`
 - `PinesRuntimeMetrics`
 - `GRDBPinesStore`
 - `ModelLifecycleService`
 - `VaultIngestionService`
 - `CloudProviderService`
 - `CloudKitSyncService`
-- `AgentRunner`
+- `MCPServerService`
+
+`AgentRunner` is constructed per chat or sampling run with the selected provider, session policy, tool registry, policy gate, and audit repository. Runtime device monitoring lives inside the MLX runtime bridge and adapts local model defaults there.
 
 SwiftUI views receive services via environment values. This keeps views from constructing runtime dependencies directly and makes it possible to swap live, mock, or preview implementations.
 
@@ -49,21 +50,26 @@ Repository protocols separate UI from storage:
 - `ConversationRepository`
 - `ModelInstallRepository`
 - `VaultRepository`
+- `SettingsRepository`
+- `CloudProviderRepository`
+- `MCPServerRepository`
+- `ModelDownloadRepository`
+- `AuditEventRepository`
 
-The production local store is GRDB/SQLite with optional CloudKit private-database sync for user-enabled metadata and source documents. API keys, model binaries, prompt caches, browser state, and transient tool state do not sync. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
+The production local store is GRDB/SQLite with optional CloudKit private-database sync for user-enabled settings, conversations, messages, vault metadata, vault chunks, and source documents. API keys, model binaries, prompt caches, browser state, chat attachment files, and transient tool state do not sync. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
 
 The GRDB implementation is split by repository concern: base SQLite repository operations remain in `GRDBPinesStore.swift`, while CloudKit snapshot/apply/delete merge support lives in `GRDBPinesStore+CloudKit.swift`.
 
 ## Local-First Inference
 
-Normal chat, VLM prompts, embeddings, vault retrieval, and history are local-first. Runtime profiles request TurboQuant for local KV cache by default through the pinned MLX forks, including requested/active backend and attention-path diagnostics so the app can distinguish direct compressed Metal attention from packed-lane fallback. Cloud execution is represented only through explicit agent policy:
+Normal chat, VLM prompts, embeddings, vault retrieval, and history are local-first. Runtime profiles request TurboQuant for local KV cache by default through the pinned MLX forks, including requested/active backend and attention-path diagnostics so the app can distinguish direct compressed Metal attention from packed-lane fallback. Normal chat can route to selected/configured BYOK providers when the user's execution mode and provider selection allow it:
 
 - `localOnly`
 - `preferLocal`
 - `cloudAllowed`
 - `cloudRequired`
 
-The router must never silently fall back to cloud. If local capability is missing, the UI should show a consent/configuration path.
+The router must never silently fall back to cloud. If local capability is missing, the UI should show a consent/configuration path. When local vault or MCP resource context would be included in a cloud request, the app asks for per-turn approval and can continue without that context.
 
 `DeviceRuntimeMonitor` adapts local runtime defaults from physical memory, available process memory, and thermal state. Compact 6 GB devices use lower prefill, embedding batch, and vector scan limits; iOS memory warnings stop the active run and unload transient MLX containers.
 
@@ -112,7 +118,7 @@ Tool definitions are typed, versioned, schema-backed, and include permission met
 - timeout
 - permissions such as network, browser, files, photos, clipboard, or cloud context
 
-`ToolPolicyGate` validates invocations before execution. Calculator is implemented locally with a safe arithmetic parser. `web.search` uses a Brave Search BYOK key from Keychain, and browser automation runs through an isolated non-persistent `WKWebView` runtime with observe and user-approved action tools.
+`ToolPolicyGate` validates invocations before execution. Calculator is implemented locally with a safe arithmetic parser. `web.search` uses a Brave Search BYOK key from Keychain, and browser automation runs through an isolated non-persistent `WKWebView` runtime with observe and user-approved action tools. Normal chat currently keeps its advertised tool list empty unless a tool mode opts in; MCP sampling can forward server-supplied tool definitions to the selected local or BYOK provider while the MCP server owns its tool loop.
 
 ## Source Organization Notes
 
@@ -121,5 +127,7 @@ Large app files are intentionally split by responsibility:
 - App-model presentation DTOs and helpers: `PinesAppModelTypes.swift`.
 - Design tokens and environment: `PinesDesignSystem.swift`; reusable controls and modifiers: `PinesDesignComponents.swift`.
 - MCP transport state and requests: `MCPStreamableHTTPClient.swift`; wire DTOs and JSON helpers: `MCPStreamableHTTPPayloads.swift`.
+- BYOK provider request/stream handling: `BYOKCloudInferenceProvider.swift`; provider stream metadata parsing: `CloudProviderStreamParser.swift`.
+- Startup boot and lazy service creation: `PinesRootView.swift`; live service composition: `PinesAppServices.swift`.
 - Model installer orchestration: `ModelLifecycleService.swift`; background download coordination and install-mode support: `ModelDownloadSupport.swift`.
 - Settings and Models screen shells remain small; their detail/component surfaces live in `SettingsDetailView.swift` and `ModelsViewComponents.swift`.

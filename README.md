@@ -9,7 +9,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-informational" alt="License: PolyForm Noncommercial 1.0.0"></a>
 </p>
 
-`pines` is an iOS 26-only, local-first AI workbench scaffolded for MLX Swift inference and pinned Schtack-maintained MLX forks.
+`pines` is an iOS 26-only, local-first AI workbench for MLX Swift inference, BYOK cloud routing, private vault context, MCP servers, and pinned Schtack-maintained MLX forks.
 
 The repository contains:
 
@@ -17,18 +17,18 @@ The repository contains:
 - `Sources/PinesCore/`: testable core domain, routing, model catalog, tools, vault, persistence schema, and cloud/BYOK abstractions.
 - `Sources/PinesCore/Architecture/`: module ownership and repository contracts for production feature boundaries.
 - `Sources/PinesCoreTestRunner/`: framework-free checks for the non-UI production contracts.
-- `.github/workflows/`: CI and GitHub Release automation.
+- `.github/workflows/`: CI, GitHub Release, and MLX upstream reachability automation.
 - `project.yml`: XcodeGen configuration for the iOS project.
 - `Package.resolved`: committed SwiftPM lockfile for the package/test graph. The iOS app MLX fork pins live in `project.yml` as exact revisions.
 
 ## Architecture
 
-The app is split into production seams:
+The app is split into production layers:
 
-- `PinesAppServices` is the composition root for secrets, model catalog, preflight, execution routing, tool policy, redaction, and MLX bridge services.
+- `PinesAppServices` is the composition root for secrets, model catalog, preflight, execution routing, tool policy, redaction, MLX bridge services, and the GRDB-backed repository set. The default SwiftUI environment uses a no-store preview instance; live services are created after the boot mark is visible.
 - `PinesArchitecture.modules` documents feature ownership for Chats, Models, Vault, Agents, and Settings, including database tables and dependencies.
 - Repository protocols in `PinesCore` isolate persistence from SwiftUI and let GRDB/CloudKit implementations replace seed data without changing views.
-- Agent/cloud routing remains explicit: cloud execution is opt-in through `AgentPolicy` and is never a silent fallback.
+- Normal chat routing remains explicit: local models are preferred by default, selected BYOK providers can be used when configured, and private vault/MCP context requires per-turn approval before it is sent to cloud. Agent and MCP sampling flows keep their own policy gates.
 - App-level implementation files are split by concern: app model DTOs live in `PinesAppModelTypes.swift`, CloudKit persistence merge logic lives in `GRDBPinesStore+CloudKit.swift`, design components live in `PinesDesignComponents.swift`, MCP wire payloads live in `MCPStreamableHTTPPayloads.swift`, model download support lives in `ModelDownloadSupport.swift`, and MLX compatibility models are split by model family.
 - TurboQuant is the requested default local KV-cache strategy. Pine requests the paper-exact Metal backend, reports native Metal codec and compressed-attention availability, falls back to MLX packed attention when needed, and stores compressed vault embeddings locally for approximate search plus FP16 rerank. Runtime defaults adapt to iOS memory/thermal state, including compact 6 GB device guardrails. See `docs/TURBOQUANT.md`.
 
@@ -82,7 +82,7 @@ The repository keeps `PinesCoreTestRunner` as a framework-light smoke runner for
 
 ## CI And Releases
 
-CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, builds the Swift package, runs `swift test`, runs `PinesCoreTestRunner`, regenerates the Xcode project, and builds the iOS app without signing on the `macos-26` runner.
+CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, builds the Swift package, runs `swift test`, runs `PinesCoreTestRunner`, regenerates the Xcode project, checks generated-project drift, resolves Xcode package dependencies, and builds the iOS app without signing on the `macos-26` runner.
 
 GitHub Releases are tag-driven. Push a semantic tag such as `v0.1.0` to run release validation and publish a source/developer-preview release with checksums:
 

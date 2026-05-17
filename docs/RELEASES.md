@@ -13,7 +13,7 @@ Jobs:
 
 The iOS job uses the `macos-26` GitHub-hosted runner so Xcode 26 and iOS 26 SDKs are available.
 
-The release workflow mirrors the same package verification before packaging source artifacts. Keep `ci.yml` and `release.yml` aligned when adding required checks.
+The release workflow regenerates the Xcode project, runs the same package build/test/core runner checks, builds an unsigned iOS archive, and packages source artifacts. Keep `ci.yml` and `release.yml` aligned when adding required checks.
 
 ## Release Tags
 
