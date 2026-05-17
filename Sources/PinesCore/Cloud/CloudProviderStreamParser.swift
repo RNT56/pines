@@ -414,6 +414,12 @@ public struct CloudProviderStreamParser {
         var finish: InferenceFinish?
 
         switch type {
+        case "error":
+            finish = InferenceFinish(
+                reason: .error,
+                message: Self.openAIStreamErrorMessage(from: json),
+                providerMetadata: state.openAIProviderMetadata
+            )
         case "response.output_item.added":
             if let index = json["output_index"] as? Int,
                let item = json["item"] as? [String: Any],
@@ -452,7 +458,7 @@ public struct CloudProviderStreamParser {
             }
         case "response.output_text.done":
             if !state.openAIResponsesTextEmitted,
-               let text = Self.textValue(from: json["text"]),
+               let text = Self.openAIResponsesOutputText(fromTextEvent: json),
                !text.isEmpty {
                 state.openAIResponsesTextEmitted = true
                 events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
@@ -550,7 +556,7 @@ public struct CloudProviderStreamParser {
             let finishReason: InferenceFinishReason = hasToolCalls ? .toolCall : .stop
             finish = InferenceFinish(
                 reason: finishReason,
-                message: finishReason == .stop && events.isEmpty && !state.openAIResponsesTextEmitted
+                message: finishReason == .stop && !state.openAIResponsesTextEmitted
                     ? Self.openAIResponsesEmptyOutputMessage(response: response, eventTypes: state.openAIResponsesEventTypes)
                     : nil,
                 providerMetadata: state.openAIProviderMetadata
@@ -621,9 +627,21 @@ public struct CloudProviderStreamParser {
         if let text = openAIResponsesOutputText(fromContentPart: item), !text.isEmpty {
             return text
         }
-        guard let content = item["content"] as? [[String: Any]] else { return nil }
-        let text = content.compactMap(openAIResponsesOutputText(fromContentPart:)).joined()
-        return text.isEmpty ? nil : text
+        let text: String?
+        if let content = item["content"] as? [[String: Any]] {
+            text = content.compactMap(openAIResponsesOutputText(fromContentPart:)).joined()
+        } else {
+            text = textValue(from: item["content"])
+        }
+        return text?.isEmpty == false ? text : nil
+    }
+
+    private static func openAIResponsesOutputText(fromTextEvent event: [String: Any]) -> String? {
+        let text = textValue(from: event["text"])
+            ?? textValue(from: event["delta"])
+            ?? textValue(from: event["content"])
+            ?? textValue(from: event["output_text"])
+        return text?.isEmpty == false ? text : nil
     }
 
     private static func openAIResponsesOutputText(fromContentPart part: [String: Any]) -> String? {
@@ -631,7 +649,10 @@ public struct CloudProviderStreamParser {
         guard type == nil || type == "output_text" || type == "text" || type == "refusal" else {
             return nil
         }
-        return textValue(from: part["text"]) ?? textValue(from: part["refusal"])
+        let text = textValue(from: part["text"])
+            ?? textValue(from: part["content"])
+            ?? textValue(from: part["refusal"])
+        return text?.isEmpty == false ? text : nil
     }
 
     private static func textValue(from value: Any?) -> String? {
@@ -639,10 +660,16 @@ public struct CloudProviderStreamParser {
             return text
         }
         if let object = value as? [String: Any] {
-            return (object["text"] as? String)
-                ?? (object["value"] as? String)
-                ?? (object["content"] as? String)
-                ?? (object["refusal"] as? String)
+            for key in ["text", "value", "content", "refusal", "output_text"] {
+                if let text = textValue(from: object[key]), !text.isEmpty {
+                    return text
+                }
+            }
+            return nil
+        }
+        if let array = value as? [Any] {
+            let text = array.compactMap(textValue(from:)).joined()
+            return text.isEmpty ? nil : text
         }
         return nil
     }
@@ -688,6 +715,17 @@ public struct CloudProviderStreamParser {
         }
         let suffix = details.isEmpty ? "" : " (\(details.joined(separator: "; ")))."
         return "OpenAI completed the Responses stream without visible output text\(suffix)"
+    }
+
+    private static func openAIStreamErrorMessage(from json: [String: Any]) -> String {
+        let error = (json["error"] as? [String: Any]) ?? json
+        if let message = textValue(from: error["message"]) ?? textValue(from: json["message"]), !message.isEmpty {
+            return message
+        }
+        if let code = textValue(from: error["code"]), !code.isEmpty {
+            return "OpenAI stream failed with error code \(code)."
+        }
+        return "OpenAI stream failed before producing a response."
     }
 
     private static func openAIFinish(from finishReason: String, metadata: [String: String]) -> InferenceFinish {

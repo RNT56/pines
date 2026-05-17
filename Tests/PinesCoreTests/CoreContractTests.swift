@@ -576,6 +576,32 @@ struct CoreContractTests {
     }
 
     @Test
+    func openAIResponsesParserReportsEmptyCompletionsEvenWithUsage() {
+        var parser = CloudProviderStreamParser()
+        let payload = #"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":4,"output_tokens":1}}}"#
+        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+
+        #expect(output.events.contains(.metrics(InferenceMetrics(promptTokens: 4, completionTokens: 1))))
+        #expect(output.finish?.reason == .stop)
+        #expect(output.finish?.message?.contains("without visible output text") == true)
+        #expect(output.finish?.message?.contains("output items: 0") == true)
+    }
+
+    @Test
+    func openAIResponsesParserSurfacesStreamErrors() {
+        var parser = CloudProviderStreamParser()
+        parser.recordRequestMetadata(providerKind: .openAI, serverRequestID: "req_header", clientRequestID: "client_1")
+        let payload = #"{"type":"error","error":{"message":"The requested model is unavailable.","code":"model_not_found"}}"#
+        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+
+        #expect(output.events.isEmpty)
+        #expect(output.finish?.reason == .error)
+        #expect(output.finish?.message == "The requested model is unavailable.")
+        #expect(output.finish?.providerMetadata[CloudProviderMetadataKeys.openAIRequestID] == "req_header")
+        #expect(output.finish?.providerMetadata[CloudProviderMetadataKeys.openAIClientRequestID] == "client_1")
+    }
+
+    @Test
     func openAIResponsesParserAcceptsTextObjectStreamingVariants() {
         var parser = CloudProviderStreamParser()
         let payloads = [
@@ -597,6 +623,61 @@ struct CoreContractTests {
         #expect(events.contains(.metrics(InferenceMetrics(promptTokens: 3, completionTokens: 2))))
         #expect(finish?.reason == .stop)
         #expect(finish?.message == nil)
+    }
+
+    @Test
+    func openAIResponsesSSEDecoderFeedsParserWhenTypeOnlyAppearsInEventField() {
+        var decoder = CloudProviderSSEStreamDecoder()
+        var parser = CloudProviderStreamParser()
+        let lines = [
+            #"event: response.output_text.delta"#,
+            #"data: {"delta":"streamed"}"#,
+            "",
+            #"event: response.completed"#,
+            #"data: {"response":{"id":"resp_5","status":"completed","output":[]}}"#,
+            "",
+        ]
+
+        var events = [InferenceStreamEvent]()
+        var finish: InferenceFinish?
+        for line in lines {
+            guard let sseEvent = decoder.ingest(line), let data = sseEvent.jsonData() else { continue }
+            let output = parser.parse(data: data, format: .openAIResponses, providerKind: .openAI)
+            events.append(contentsOf: output.events)
+            finish = output.finish ?? finish
+        }
+
+        #expect(events.contains(.token(TokenDelta(kind: .token, text: "streamed", tokenCount: 1))))
+        #expect(finish?.reason == .stop)
+        #expect(finish?.message == nil)
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_5")
+    }
+
+    @Test
+    func openAIResponsesSSEDecoderIgnoresDoneSentinelAndFlushesTrailingEvent() throws {
+        var decoder = CloudProviderSSEStreamDecoder()
+        var parser = CloudProviderStreamParser()
+
+        #expect(decoder.ingest("data: [DONE]") == nil)
+        #expect(decoder.ingest("")?.jsonData() == nil)
+        #expect(decoder.ingest("event: response.output_text.delta") == nil)
+        #expect(decoder.ingest(#"data: {"delta":"tail"}"#) == nil)
+
+        let flushedEvent = decoder.finish()
+        let trailing = try #require(flushedEvent)
+        let data = try #require(trailing.jsonData())
+        let output = parser.parse(data: data, format: .openAIResponses, providerKind: .openAI)
+
+        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "tail", tokenCount: 1))))
+    }
+
+    @Test
+    func openAIResponsesParserReadsNestedTextEventVariants() {
+        var parser = CloudProviderStreamParser()
+        let payload = #"{"type":"response.output_text.done","content":[{"type":"output_text","text":{"value":"late text"}}]}"#
+        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+
+        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "late text", tokenCount: 1))))
     }
 
     @Test
@@ -623,6 +704,31 @@ struct CoreContractTests {
         let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
 
         #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "top level", tokenCount: 1))))
+        #expect(output.finish?.reason == .stop)
+        #expect(output.finish?.message == nil)
+    }
+
+    @Test
+    func openAIResponsesParserReadsObjectContentFallbacks() {
+        var parser = CloudProviderStreamParser()
+        let payload = #"""
+        {
+          "type": "response.completed",
+          "response": {
+            "id": "resp_3",
+            "status": "completed",
+            "output": [
+              {
+                "type": "message",
+                "content": { "type": "output_text", "text": { "content": "object content" } }
+              }
+            ]
+          }
+        }
+        """#
+        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+
+        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "object content", tokenCount: 1))))
         #expect(output.finish?.reason == .stop)
         #expect(output.finish?.message == nil)
     }

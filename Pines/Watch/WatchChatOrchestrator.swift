@@ -249,6 +249,33 @@ struct WatchChatOrchestrator {
                             didReceiveTerminalEvent = true
                             finalProviderMetadata = finish.providerMetadata
                             if !didFail {
+                                if finish.reason == .error {
+                                    let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let message = Self.messageWithProviderDiagnostics(
+                                        finish.message ?? "The inference stream failed before the model produced a complete response.",
+                                        metadata: finalProviderMetadata
+                                    )
+                                    didFail = true
+                                    try await repository.updateMessage(
+                                        id: pendingAssistant.id,
+                                        content: finalText.isEmpty ? message : accumulated,
+                                        status: .failed,
+                                        tokenCount: tokenCount,
+                                        providerMetadata: finalProviderMetadata
+                                    )
+                                    continuation.yield(
+                                        WatchChatRunUpdate(
+                                            runID: runID,
+                                            conversationID: conversationID,
+                                            assistantMessageID: pendingAssistant.id,
+                                            status: .failed,
+                                            text: accumulated,
+                                            tokenCount: tokenCount,
+                                            errorMessage: message
+                                        )
+                                    )
+                                    continue
+                                }
                                 let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                                 let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if status == .complete && finalText.isEmpty {

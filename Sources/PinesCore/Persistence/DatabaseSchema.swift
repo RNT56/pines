@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 11
+    public static let currentVersion = 12
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -144,14 +144,12 @@ public enum PinesDatabaseSchema {
             """,
             """
             CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-                INSERT INTO messages_fts(messages_fts, rowid, content, conversation_id, message_id)
-                VALUES ('delete', old.rowid, old.content, old.conversation_id, old.id);
+                DELETE FROM messages_fts WHERE rowid = old.rowid;
             END;
             """,
             """
             CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content ON messages BEGIN
-                INSERT INTO messages_fts(messages_fts, rowid, content, conversation_id, message_id)
-                VALUES ('delete', old.rowid, old.content, old.conversation_id, old.id);
+                DELETE FROM messages_fts WHERE rowid = old.rowid;
                 INSERT INTO messages_fts(rowid, content, conversation_id, message_id)
                 VALUES (new.rowid, new.content, new.conversation_id, new.id);
             END;
@@ -164,14 +162,12 @@ public enum PinesDatabaseSchema {
             """,
             """
             CREATE TRIGGER IF NOT EXISTS vault_chunks_ad AFTER DELETE ON vault_chunks BEGIN
-                INSERT INTO vault_chunks_fts(vault_chunks_fts, rowid, text, document_id, chunk_id)
-                VALUES ('delete', old.rowid, old.text, old.document_id, old.id);
+                DELETE FROM vault_chunks_fts WHERE rowid = old.rowid;
             END;
             """,
             """
             CREATE TRIGGER IF NOT EXISTS vault_chunks_au AFTER UPDATE OF text ON vault_chunks BEGIN
-                INSERT INTO vault_chunks_fts(vault_chunks_fts, rowid, text, document_id, chunk_id)
-                VALUES ('delete', old.rowid, old.text, old.document_id, old.id);
+                DELETE FROM vault_chunks_fts WHERE rowid = old.rowid;
                 INSERT INTO vault_chunks_fts(rowid, text, document_id, chunk_id)
                 VALUES (new.rowid, new.text, new.document_id, new.id);
             END;
@@ -581,6 +577,36 @@ public enum PinesDatabaseSchema {
         DatabaseMigration(version: 11, name: "message-tool-call-payloads", sql: [
             "ALTER TABLE messages ADD COLUMN tool_name TEXT;",
             "ALTER TABLE messages ADD COLUMN tool_calls_json TEXT;",
+        ]),
+        DatabaseMigration(version: 12, name: "fts-delete-triggers", sql: [
+            "DROP TRIGGER IF EXISTS messages_ad;",
+            "DROP TRIGGER IF EXISTS messages_au;",
+            "DROP TRIGGER IF EXISTS vault_chunks_ad;",
+            "DROP TRIGGER IF EXISTS vault_chunks_au;",
+            """
+            CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.rowid;
+            END;
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content ON messages BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.rowid;
+                INSERT INTO messages_fts(rowid, content, conversation_id, message_id)
+                VALUES (new.rowid, new.content, new.conversation_id, new.id);
+            END;
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS vault_chunks_ad AFTER DELETE ON vault_chunks BEGIN
+                DELETE FROM vault_chunks_fts WHERE rowid = old.rowid;
+            END;
+            """,
+            """
+            CREATE TRIGGER IF NOT EXISTS vault_chunks_au AFTER UPDATE OF text ON vault_chunks BEGIN
+                DELETE FROM vault_chunks_fts WHERE rowid = old.rowid;
+                INSERT INTO vault_chunks_fts(rowid, text, document_id, chunk_id)
+                VALUES (new.rowid, new.text, new.document_id, new.id);
+            END;
+            """,
         ]),
     ]
 }

@@ -60,7 +60,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                         )
                     }
 
-                    var dataLines = [String]()
+                    var sseDecoder = CloudProviderSSEStreamDecoder()
                     var streamParser = CloudProviderStreamParser()
                     streamParser.recordRequestMetadata(
                         providerKind: configuration.kind,
@@ -70,16 +70,12 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                     var pendingFinish: InferenceFinish?
                     for try await rawLine in bytes.lines {
                         guard !Task.isCancelled else { throw InferenceError.cancelled }
-                        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if line.isEmpty {
-                            handleSSEDataLines(dataLines, format: streamingFormat, parser: &streamParser, pendingFinish: &pendingFinish, continuation: continuation)
-                            dataLines.removeAll(keepingCapacity: true)
-                        } else if line.hasPrefix("data:") {
-                            dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
+                        if let event = sseDecoder.ingest(rawLine) {
+                            handleSSEEvent(event, format: streamingFormat, parser: &streamParser, pendingFinish: &pendingFinish, continuation: continuation)
                         }
                     }
-                    if !dataLines.isEmpty {
-                        handleSSEDataLines(dataLines, format: streamingFormat, parser: &streamParser, pendingFinish: &pendingFinish, continuation: continuation)
+                    if let event = sseDecoder.finish() {
+                        handleSSEEvent(event, format: streamingFormat, parser: &streamParser, pendingFinish: &pendingFinish, continuation: continuation)
                     }
                     continuation.yield(.finish(pendingFinish ?? streamParser.fallbackFinish(
                         format: streamingFormat,
@@ -385,10 +381,14 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         request.httpMethod = "POST"
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("text/event-stream", forHTTPHeaderField: "Accept")
         addOpenAIClientRequestID(to: &request)
 
         let payload = try Self.openAIResponsesPayload(from: chatRequest.messages)
         let usesReasoningControls = Self.isOpenAIReasoningModelID(chatRequest.modelID)
+        var textConfiguration: [String: Any] = [
+            "format": ["type": "text"],
+        ]
         var body: [String: Any] = [
             "model": chatRequest.modelID.rawValue,
             "stream": true,
@@ -396,6 +396,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             "input": payload.input,
             "max_output_tokens": openAICompletionTokenLimit(for: chatRequest, usesReasoningParameters: usesReasoningControls),
             "truncation": "auto",
+            "text": textConfiguration,
         ]
         if usesReasoningControls {
             body["reasoning"] = [
@@ -404,7 +405,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                     requested: chatRequest.sampling.openAIReasoningEffort
                 ).rawValue,
             ]
-            body["text"] = ["verbosity": chatRequest.sampling.openAITextVerbosity.rawValue]
+            textConfiguration["verbosity"] = chatRequest.sampling.openAITextVerbosity.rawValue
+            body["text"] = textConfiguration
             if chatRequest.sampling.openAIResponseStorage == .statelessEncrypted {
                 body["include"] = ["reasoning.encrypted_content"]
             }
@@ -746,15 +748,14 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         modelID.rawValue.lowercased().contains("deep-research")
     }
 
-    private func handleSSEDataLines(
-        _ dataLines: [String],
+    private func handleSSEEvent(
+        _ event: CloudProviderSSEEvent,
         format: CloudProviderStreamFormat,
         parser: inout CloudProviderStreamParser,
         pendingFinish: inout InferenceFinish?,
         continuation: AsyncThrowingStream<InferenceStreamEvent, Error>.Continuation
     ) {
-        let payload = dataLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard payload != "[DONE]", let data = payload.data(using: .utf8) else { return }
+        guard let data = event.jsonData() else { return }
 
         let output = parser.parse(data: data, format: format, providerKind: configuration.kind)
         if let finish = output.finish {

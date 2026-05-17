@@ -11,6 +11,7 @@ struct PinesCoreTestRunner {
         try testModelPreflight()
         try await testModelCatalogSearch()
         try testPersistenceSchema()
+        try testPersistenceFTSTriggers()
         try testProductionTypes()
         try testDeviceProfiles()
         try testArchitectureModules()
@@ -416,13 +417,69 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("ALTER TABLE messages ADD COLUMN sync_state"), "missing message sync state")
         try expect(sql.contains("ALTER TABLE messages ADD COLUMN tool_name"), "missing message tool name column")
         try expect(sql.contains("ALTER TABLE messages ADD COLUMN tool_calls_json"), "missing assistant tool calls column")
+        try expect(sql.contains("DELETE FROM messages_fts WHERE rowid = old.rowid"), "message FTS trigger must use normal FTS deletes")
+        try expect(sql.contains("DELETE FROM vault_chunks_fts WHERE rowid = old.rowid"), "vault FTS trigger must use normal FTS deletes")
+        try expect(!sql.contains("INSERT INTO messages_fts(messages_fts"), "message FTS trigger must not use external-content delete rows")
+        try expect(!sql.contains("INSERT INTO vault_chunks_fts(vault_chunks_fts"), "vault FTS trigger must not use external-content delete rows")
         try expect(sql.contains("PRIMARY KEY(chunk_id, embedding_model_id)"), "missing stable embedding merge key")
         try expect(sql.contains("PRIMARY KEY(chunk_id, profile_id)"), "missing profile-scoped embedding merge key")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 11)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 12)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")
         try expect(!config.syncsEmbeddings, "embeddings must not sync by default")
+    }
+
+    private static func testPersistenceFTSTriggers() throws {
+        let schemaSQL = PinesDatabaseSchema.migrations.flatMap(\.sql).joined(separator: "\n")
+        let script = """
+        PRAGMA foreign_keys = ON;
+        \(schemaSQL)
+        INSERT INTO conversations (id, title, created_at, updated_at)
+        VALUES ('conversation-1', 'Conversation', 1, 1);
+        INSERT INTO messages (id, conversation_id, role, content, created_at, status)
+        VALUES ('message-1', 'conversation-1', 'assistant', 'original message', 1, 'streaming');
+        UPDATE messages SET content = 'updated message' WHERE id = 'message-1';
+        SELECT 'message_fts=' || COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'updated';
+        DELETE FROM messages WHERE id = 'message-1';
+        SELECT 'message_fts_after_delete=' || COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'updated';
+
+        INSERT INTO vault_documents (id, title, source_type, created_at, updated_at)
+        VALUES ('document-1', 'Document', 'text', 1, 1);
+        INSERT INTO vault_chunks (id, document_id, ordinal, text, token_estimate, created_at)
+        VALUES ('chunk-1', 'document-1', 0, 'original chunk', 1, 1);
+        UPDATE vault_chunks SET text = 'updated chunk' WHERE id = 'chunk-1';
+        SELECT 'vault_fts=' || COUNT(*) FROM vault_chunks_fts WHERE vault_chunks_fts MATCH 'updated';
+        DELETE FROM vault_chunks WHERE id = 'chunk-1';
+        SELECT 'vault_fts_after_delete=' || COUNT(*) FROM vault_chunks_fts WHERE vault_chunks_fts MATCH 'updated';
+        """
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["sqlite3", ":memory:"]
+
+        let input = Pipe()
+        let output = Pipe()
+        let error = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = error
+
+        try process.run()
+        input.fileHandleForWriting.write(Data(script.utf8))
+        input.fileHandleForWriting.closeFile()
+        process.waitUntilExit()
+
+        let stdout = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let stderr = String(decoding: error.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        if process.terminationStatus != 0 {
+            throw TestFailure("SQLite FTS trigger exercise failed: \(stderr)")
+        }
+
+        try expect(stdout.contains("message_fts=1"), "message FTS update trigger did not index the replacement content")
+        try expect(stdout.contains("message_fts_after_delete=0"), "message FTS delete trigger did not remove deleted content")
+        try expect(stdout.contains("vault_fts=1"), "vault FTS update trigger did not index the replacement content")
+        try expect(stdout.contains("vault_fts_after_delete=0"), "vault FTS delete trigger did not remove deleted content")
     }
 
     private static func testProductionTypes() throws {

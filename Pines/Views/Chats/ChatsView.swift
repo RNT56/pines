@@ -1217,33 +1217,49 @@ struct ChatQuickSettingsButton: View {
     var body: some View {
         Menu {
             if !availability.openAIReasoningEfforts.isEmpty {
-                Picker("Reasoning", selection: reasoningSelection) {
+                Section("OpenAI Reasoning Effort") {
                     ForEach(availability.openAIReasoningEfforts, id: \.self) { effort in
-                        Text(effort.shortTitle).tag(effort)
+                        Button {
+                            reasoningSelection.wrappedValue = effort
+                        } label: {
+                            quickSettingLabel(effort.shortTitle, isSelected: reasoningSelection.wrappedValue == effort)
+                        }
                     }
                 }
             }
 
             if availability.supportsOpenAITextVerbosity {
-                Picker("Verbosity", selection: verbositySelection) {
+                Section("OpenAI Text Verbosity") {
                     ForEach(OpenAITextVerbosity.quickSettingOptions, id: \.self) { verbosity in
-                        Text(verbosity.shortTitle).tag(verbosity)
+                        Button {
+                            verbositySelection.wrappedValue = verbosity
+                        } label: {
+                            quickSettingLabel(verbosity.shortTitle, isSelected: verbositySelection.wrappedValue == verbosity)
+                        }
                     }
                 }
             }
 
             if !availability.anthropicEfforts.isEmpty {
-                Picker("Effort", selection: anthropicEffortSelection) {
+                Section("Anthropic Thinking Effort") {
                     ForEach(availability.anthropicEfforts, id: \.self) { effort in
-                        Text(effort.shortTitle).tag(effort)
+                        Button {
+                            anthropicEffortSelection.wrappedValue = effort
+                        } label: {
+                            quickSettingLabel(effort.shortTitle, isSelected: anthropicEffortSelection.wrappedValue == effort)
+                        }
                     }
                 }
             }
 
             if !availability.geminiThinkingLevels.isEmpty {
-                Picker("Thinking", selection: geminiThinkingSelection) {
+                Section("Gemini Thinking Level") {
                     ForEach(availability.geminiThinkingLevels, id: \.self) { level in
-                        Text(level.shortTitle).tag(level)
+                        Button {
+                            geminiThinkingSelection.wrappedValue = level
+                        } label: {
+                            quickSettingLabel(level.shortTitle, isSelected: geminiThinkingSelection.wrappedValue == level)
+                        }
                     }
                 }
             }
@@ -1298,6 +1314,15 @@ struct ChatQuickSettingsButton: View {
         .accessibilityLabel("Model quick settings")
         .accessibilityValue(accessibilityValue)
         .simultaneousGesture(TapGesture().onEnded { haptics.play(.navigationSelected) })
+    }
+
+    @ViewBuilder
+    private func quickSettingLabel(_ title: String, isSelected: Bool) -> some View {
+        if isSelected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
     }
 
     private var reasoningSelection: Binding<OpenAIReasoningEffort> {
@@ -1372,16 +1397,16 @@ struct ChatQuickSettingsButton: View {
     private var accessibilityValue: String {
         var parts = [String]()
         if !availability.openAIReasoningEfforts.isEmpty {
-            parts.append("Reasoning \(reasoningSelection.wrappedValue.shortTitle)")
+            parts.append("OpenAI reasoning effort \(reasoningSelection.wrappedValue.shortTitle)")
         }
         if availability.supportsOpenAITextVerbosity {
-            parts.append("Verbosity \(appModel.openAITextVerbosity.shortTitle)")
+            parts.append("OpenAI text verbosity \(appModel.openAITextVerbosity.shortTitle)")
         }
         if !availability.anthropicEfforts.isEmpty {
-            parts.append("Effort \(anthropicEffortSelection.wrappedValue.shortTitle)")
+            parts.append("Anthropic thinking effort \(anthropicEffortSelection.wrappedValue.shortTitle)")
         }
         if !availability.geminiThinkingLevels.isEmpty {
-            parts.append("Thinking \(geminiThinkingSelection.wrappedValue.shortTitle)")
+            parts.append("Gemini thinking level \(geminiThinkingSelection.wrappedValue.shortTitle)")
         }
         return parts.joined(separator: ", ")
     }

@@ -360,8 +360,6 @@ final class PinesAppModel: ObservableObject {
             }
 
             try await refreshModelPreviews(services: services, enrichRuntime: false)
-            await refreshVaultEmbeddingState(services: services)
-            await normalizeDefaultModelIfNeeded(services: services)
             setIfChanged(\.serviceError, nil)
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
@@ -1243,6 +1241,16 @@ final class PinesAppModel: ObservableObject {
                     didReceiveTerminalEvent = true
                     finalProviderMetadata = finish.providerMetadata
                     if failureMessage == nil {
+                        if finish.reason == .error {
+                            let baseMessage = finish.message ?? "The inference stream failed before the model produced a complete response."
+                            let message = messageWithProviderDiagnostics(baseMessage, metadata: finalProviderMetadata)
+                            let content = accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? message : accumulated
+                            failureMessage = message
+                            try await flushAssistantUpdate(content: content, messageStatus: .failed, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata, toolCalls: completedToolCalls)
+                            setChatError(message)
+                            emitHaptic(.runFailed)
+                            continue
+                        }
                         let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                         if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             let baseMessage = finish.message ?? emptyCloudOutputMessage(

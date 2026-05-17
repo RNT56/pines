@@ -450,6 +450,9 @@ extension PinesAppModel {
                     stopReason: "toolUse"
                 )
             case let .finish(finish):
+                if finish.reason == .error {
+                    throw InferenceError.invalidRequest(finish.message ?? "The inference stream failed before producing a response.")
+                }
                 stopReason = finish.reason == .length ? "maxTokens" : "endTurn"
             case let .failure(failure):
                 throw InferenceError.invalidRequest(failure.message)
