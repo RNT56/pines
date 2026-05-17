@@ -1,8 +1,11 @@
 import Foundation
+import OSLog
 import PinesWatchSupport
 
 #if canImport(WatchConnectivity)
 @preconcurrency import WatchConnectivity
+
+private let phoneWatchSessionLogger = Logger(subsystem: "com.schtack.pines", category: "watch-session")
 
 @MainActor
 final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
@@ -73,21 +76,33 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
-        let envelopeData = try? WatchChatCodec.envelopeData(from: message)
+        let envelopeData: Data?
+        do {
+            envelopeData = try WatchChatCodec.envelopeData(from: message)
+        } catch {
+            phoneWatchSessionLogger.warning("watch_message_decode_failed error=\(error.localizedDescription, privacy: .public)")
+            envelopeData = nil
+        }
         nonisolated(unsafe) let replyHandler = replyHandler
         Task { @MainActor in
             let reply: [String: Any]
             if let envelopeData {
                 reply = await self.handleEnvelopeData(envelopeData)
             } else {
-                reply = (try? self.errorReply("Invalid watch message.", requestID: UUID())) ?? [:]
+                reply = self.errorReplyOrEmpty("Invalid watch message.", requestID: UUID())
             }
             replyHandler(reply)
         }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-        let envelopeData = try? WatchChatCodec.envelopeData(from: userInfo)
+        let envelopeData: Data?
+        do {
+            envelopeData = try WatchChatCodec.envelopeData(from: userInfo)
+        } catch {
+            phoneWatchSessionLogger.warning("watch_user_info_decode_failed error=\(error.localizedDescription, privacy: .public)")
+            envelopeData = nil
+        }
         Task { @MainActor in
             if let envelopeData {
                 _ = await self.handleEnvelopeData(envelopeData)
@@ -96,8 +111,10 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
     }
 
     private func handleEnvelopeData(_ data: Data) async -> [String: Any] {
+        var replyRequestID = UUID()
         do {
             let envelope = try WatchChatCodec.envelope(from: data)
+            replyRequestID = envelope.requestID
             let orchestrator = WatchChatOrchestrator(services: services)
 
             switch envelope.kind {
@@ -167,8 +184,13 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
                 if let conversationID = request.conversationID {
                     selectedConversationID = conversationID
                 } else {
-                    let snapshot = try? await orchestrator.snapshot()
-                    selectedConversationID = snapshot?.selectedConversationID
+                    do {
+                        let snapshot = try await orchestrator.snapshot()
+                        selectedConversationID = snapshot.selectedConversationID
+                    } catch {
+                        phoneWatchSessionLogger.warning("watch_send_snapshot_selection_failed request=\(envelope.requestID.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                        selectedConversationID = nil
+                    }
                 }
                 requestRuns[envelope.requestID] = runID
                 if let selectedConversationID {
@@ -199,7 +221,8 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
                 return try errorReply("Unsupported watch-to-phone message: \(envelope.kind.rawValue)", requestID: envelope.requestID)
             }
         } catch {
-            return (try? errorReply(error.localizedDescription, requestID: UUID())) ?? [:]
+            phoneWatchSessionLogger.warning("watch_envelope_handle_failed request=\(replyRequestID.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            return errorReplyOrEmpty(error.localizedDescription, requestID: replyRequestID)
         }
     }
 
@@ -243,12 +266,16 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
                     payload: WatchChatErrorPayload(message: error.localizedDescription)
                 )
 
-                if let selectedConversationID,
-                   let snapshot = try? await orchestrator.snapshot(
-                       selectedConversationID: selectedConversationID,
-                       activeRunID: nil
-                   ) {
-                    self.deliver(kind: .snapshot, requestID: requestID, sequence: sequence + 2, payload: snapshot)
+                if let selectedConversationID {
+                    do {
+                        let snapshot = try await orchestrator.snapshot(
+                            selectedConversationID: selectedConversationID,
+                            activeRunID: nil
+                        )
+                        self.deliver(kind: .snapshot, requestID: requestID, sequence: sequence + 2, payload: snapshot)
+                    } catch {
+                        phoneWatchSessionLogger.warning("watch_error_snapshot_failed request=\(requestID.uuidString, privacy: .public) conversation=\(selectedConversationID.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                    }
                 }
             }
 
@@ -305,6 +332,15 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
         )
     }
 
+    private func errorReplyOrEmpty(_ message: String, requestID: UUID) -> [String: Any] {
+        do {
+            return try errorReply(message, requestID: requestID)
+        } catch {
+            phoneWatchSessionLogger.error("watch_error_reply_encode_failed request=\(requestID.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            return [:]
+        }
+    }
+
     private func deliver<Payload: Encodable>(
         kind: WatchChatMessageKind,
         requestID: UUID,
@@ -317,15 +353,25 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
               session.isWatchAppInstalled
         else { return }
 
-        guard let message = try? WatchChatCodec.message(
-            kind: kind,
-            requestID: requestID,
-            sequence: sequence,
-            payload: payload
-        ) else {
+        let message: [String: Any]
+        do {
+            message = try WatchChatCodec.message(
+                kind: kind,
+                requestID: requestID,
+                sequence: sequence,
+                payload: payload
+            )
+        } catch {
+            phoneWatchSessionLogger.error("watch_delivery_encode_failed kind=\(kind.rawValue, privacy: .public) request=\(requestID.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
             return
         }
-        let envelopeData = try? WatchChatCodec.envelopeData(from: message)
+        let envelopeData: Data?
+        do {
+            envelopeData = try WatchChatCodec.envelopeData(from: message)
+        } catch {
+            phoneWatchSessionLogger.warning("watch_delivery_fallback_encode_failed kind=\(kind.rawValue, privacy: .public) request=\(requestID.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            envelopeData = nil
+        }
 
         if session.isReachable {
             session.sendMessage(message, replyHandler: nil) { [weak self] _ in
@@ -377,7 +423,13 @@ final class PhoneWatchSessionService: NSObject, WCSessionDelegate {
         #if targetEnvironment(simulator)
         guard session.isReachable else { return }
         #endif
-        guard let message = try? WatchChatCodec.message(kind: .phoneStatus, payload: phoneStatus()) else { return }
+        let message: [String: Any]
+        do {
+            message = try WatchChatCodec.message(kind: .phoneStatus, payload: phoneStatus())
+        } catch {
+            phoneWatchSessionLogger.error("watch_phone_status_encode_failed error=\(error.localizedDescription, privacy: .public)")
+            return
+        }
         do {
             try session.updateApplicationContext(message)
         } catch {

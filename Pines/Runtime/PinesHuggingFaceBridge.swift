@@ -17,6 +17,8 @@ enum PinesHuggingFaceBridgeError: LocalizedError {
     }
 }
 
+// SAFETY: MLXLMCommon requires a Sendable downloader, but the upstream HubClient
+// does not declare Sendable. This wrapper is immutable and delegates each call.
 struct PinesHubDownloader: MLXLMCommon.Downloader, @unchecked Sendable {
     private let upstream: HuggingFace.HubClient
 
@@ -52,6 +54,8 @@ struct PinesTokenizerLoader: MLXLMCommon.TokenizerLoader {
     }
 }
 
+// SAFETY: Tokenizers.Tokenizer does not declare Sendable. The bridge is immutable
+// and exposes synchronous tokenizer calls required by MLXLMCommon.
 struct PinesTokenizerBridge: MLXLMCommon.Tokenizer, @unchecked Sendable {
     private let upstream: any Tokenizers.Tokenizer
 

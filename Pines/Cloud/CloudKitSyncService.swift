@@ -1,6 +1,9 @@
 import CloudKit
 import Foundation
+import OSLog
 import PinesCore
+
+private let cloudKitSyncLogger = Logger(subsystem: "com.schtack.pines", category: "CloudKitSync")
 
 protocol CloudKitSyncRepository: Sendable {
     func cloudKitLocalSnapshot(includeVault: Bool, includeEmbeddings: Bool, includeClean: Bool) async throws -> CloudKitLocalSnapshot
@@ -350,21 +353,29 @@ struct CloudKitSyncService {
     }
 
     private static func encodeProviderMetadata(_ metadata: [String: String]) -> String? {
-        guard !metadata.isEmpty,
-              let data = try? JSONEncoder().encode(metadata)
-        else {
+        guard !metadata.isEmpty else {
             return nil
         }
-        return String(decoding: data, as: UTF8.self)
+        do {
+            let data = try JSONEncoder().encode(metadata)
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            cloudKitSyncLogger.error("Failed to encode CloudKit provider metadata: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     private static func encodeToolCalls(_ toolCalls: [ToolCallDelta]) -> String? {
-        guard !toolCalls.isEmpty,
-              let data = try? JSONEncoder().encode(toolCalls)
-        else {
+        guard !toolCalls.isEmpty else {
             return nil
         }
-        return String(decoding: data, as: UTF8.self)
+        do {
+            let data = try JSONEncoder().encode(toolCalls)
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            cloudKitSyncLogger.error("Failed to encode CloudKit tool calls: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     fileprivate static func stableRecordSuffix(_ value: String) -> String {
@@ -382,10 +393,14 @@ private extension CloudKitRemoteSnapshot {
         switch record.recordType {
         case "AppSettings":
             guard let valueJSON = record["valueJSON"] as? String,
-                  let updatedAt = record["updatedAt"] as? Date,
-                  let value = try? JSONDecoder().decode(AppSettingsSnapshot.self, from: Data(valueJSON.utf8))
+                  let updatedAt = record["updatedAt"] as? Date
             else { return }
-            settings = CloudKitSettingsSnapshot(value: value, updatedAt: updatedAt)
+            do {
+                let value = try JSONDecoder().decode(AppSettingsSnapshot.self, from: Data(valueJSON.utf8))
+                settings = CloudKitSettingsSnapshot(value: value, updatedAt: updatedAt)
+            } catch {
+                cloudKitSyncLogger.error("Failed to decode CloudKit app settings record \(record.recordID.recordName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
 
         case "Conversation":
             guard let id = UUID(uuidString: record.recordID.recordName),
@@ -521,31 +536,39 @@ private extension CloudKitRemoteSnapshot {
     }
 
     private static func encodeProviderMetadata(_ metadata: [String: String]) -> String? {
-        guard !metadata.isEmpty,
-              let data = try? JSONEncoder().encode(metadata)
-        else {
+        guard !metadata.isEmpty else {
             return nil
         }
-        return String(decoding: data, as: UTF8.self)
+        do {
+            let data = try JSONEncoder().encode(metadata)
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            cloudKitSyncLogger.error("Failed to encode CloudKit provider metadata: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     private static func decodeProviderMetadata(_ rawValue: String?) -> [String: String] {
-        guard let rawValue,
-              let data = rawValue.data(using: .utf8),
-              let metadata = try? JSONDecoder().decode([String: String].self, from: data)
-        else {
+        guard let rawValue, let data = rawValue.data(using: .utf8) else {
             return [:]
         }
-        return metadata
+        do {
+            return try JSONDecoder().decode([String: String].self, from: data)
+        } catch {
+            cloudKitSyncLogger.error("Failed to decode CloudKit provider metadata: \(error.localizedDescription, privacy: .public)")
+            return [:]
+        }
     }
 
     private static func decodeToolCalls(_ rawValue: String?) -> [ToolCallDelta] {
-        guard let rawValue,
-              let data = rawValue.data(using: .utf8),
-              let toolCalls = try? JSONDecoder().decode([ToolCallDelta].self, from: data)
-        else {
+        guard let rawValue, let data = rawValue.data(using: .utf8) else {
             return []
         }
-        return toolCalls
+        do {
+            return try JSONDecoder().decode([ToolCallDelta].self, from: data)
+        } catch {
+            cloudKitSyncLogger.error("Failed to decode CloudKit tool calls: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
     }
 }

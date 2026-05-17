@@ -76,9 +76,6 @@ jobs:
           fi
           xcodegen --version
 
-      - name: Generate Xcode project
-        run: xcodegen generate
-
       - name: Ensure iOS platform is installed
         run: |
           sudo xcodebuild -runFirstLaunch || true
@@ -91,13 +88,16 @@ jobs:
         run: bash scripts/ci/check-public-hygiene.sh
 
       - name: Build Swift package
-        run: swift build
+        run: swift build --disable-automatic-resolution
 
       - name: Run Swift package tests
-        run: swift test
+        run: swift test --disable-automatic-resolution
 
       - name: Run core verification
-        run: swift run PinesCoreTestRunner
+        run: swift run --disable-automatic-resolution PinesCoreTestRunner
+
+      - name: Validate Xcode project
+        run: bash scripts/ci/run-xcode-validation.sh
 
       - name: Build unsigned iOS archive
         run: |
@@ -122,6 +122,9 @@ jobs:
         with:
           name: pines-${{ steps.release-tag.outputs.tag }}-validation
           path: |
+            build/xcodebuild.log
+            build/xcodebuild-tests.log
+            build/xcodebuild-test-run.log
             build/archive.log
             dist/pines-${{ steps.release-tag.outputs.tag }}-source.tar.gz
             dist/pines-${{ steps.release-tag.outputs.tag }}-source.tar.gz.sha256

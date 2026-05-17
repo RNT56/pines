@@ -24,3 +24,5 @@ Current manifest entries:
 `Info.plist` also contains photo-library and camera usage descriptions for selected or captured image prompts/imports. Current chat and vault imports use user-selected files; final submission should keep these strings only if the direct photo/camera entry points remain in scope.
 
 Final App Store submission must re-run this review after Xcode resolves the complete package graph for GRDB, the pinned MLX forks, Swift Hugging Face, Swift Transformers, PDFKit, Vision, WebKit, and CloudKit.
+
+CI runs `scripts/ci/check-privacy-manifest.sh` to lint the committed manifest shape, tracking flag, and required-reason API declarations. This is a repository guardrail only; it does not replace App Store Connect's final privacy review for a signed production build.

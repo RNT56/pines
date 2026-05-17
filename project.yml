@@ -9,10 +9,10 @@ packages:
     path: .
   MLXSwift:
     url: https://github.com/RNT56/mlx-swift
-    revision: 2577c8856ddfb05cad0da4eda7b502cbb5d99a3f
+    revision: 221ef73921c1d2bb92fc545168120e57545bac22
   MLXSwiftLM:
     url: https://github.com/RNT56/mlx-swift-lm
-    revision: 8861b2d9746128f3461b71deee5bf94ec3817a78
+    revision: ef066d0999150a8970025101e6f0d55cb44afca0
   SwiftTransformers:
     url: https://github.com/huggingface/swift-transformers
     from: 1.3.0
@@ -150,8 +150,8 @@ schemes:
   Pines:
     build:
       targets:
-        Pines: [run, profile, analyze, archive]
-        PinesWatch: [run, profile, analyze, archive]
+        Pines: [test, run, profile, analyze, archive]
+        PinesWatch: [test, run, profile, analyze, archive]
         PinesTests: [test]
     run:
       config: Debug

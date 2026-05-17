@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import PinesCore
 
 struct MCPServerService: Sendable {
@@ -7,16 +8,27 @@ struct MCPServerService: Sendable {
     let secretStore: any SecretStore
     let auditRepository: (any AuditEventRepository)?
 
+    private static let logger = Logger(subsystem: "com.schtack.pines", category: "mcp-server")
     private static let watchTasks = MCPServerWatchTaskRegistry()
 
     typealias SamplingHandler = @Sendable (_ request: MCPSamplingRequest, _ server: MCPServerConfiguration) async throws -> MCPSamplingResult
 
     func start(samplingHandler: SamplingHandler? = nil) async {
-        let servers = (try? await repository.listMCPServers()) ?? []
+        let servers: [MCPServerConfiguration]
+        do {
+            servers = try await repository.listMCPServers()
+        } catch {
+            Self.logger.error("mcp_start_failed_to_list_servers error=\(error.localizedDescription, privacy: .public)")
+            return
+        }
         await Self.watchTasks.stopServers(excluding: Set(servers.filter(\.enabled).map(\.id)))
         for server in servers where server.enabled {
             await Self.watchTasks.start(serverID: server.id) {
-                try? await refresh(server)
+                do {
+                    try await refresh(server)
+                } catch {
+                    Self.logger.error("mcp_start_refresh_failed server=\(server.id.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                }
                 await watchEvents(for: server, samplingHandler: samplingHandler)
             }
         }
@@ -238,7 +250,11 @@ struct MCPServerService: Sendable {
             var degraded = server
             degraded.status = .degraded
             degraded.lastError = error.localizedDescription
-            try? await repository.upsertMCPServer(degraded)
+            do {
+                try await repository.upsertMCPServer(degraded)
+            } catch {
+                Self.logger.error("mcp_degraded_state_persist_failed server=\(server.id.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 

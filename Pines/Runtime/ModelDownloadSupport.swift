@@ -86,6 +86,9 @@ enum BackgroundModelFileDownloadEvent: Sendable {
     case progress(bytesWritten: Int64, expectedFileSize: Int64?)
 }
 
+// SAFETY: URLSession background delegates require NSObject identity. Shared
+// mutable dictionaries are only accessed under `lock`; delegate callbacks hand
+// data back through Sendable AsyncThrowingStream continuations.
 final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate, @unchecked Sendable {
     static let shared = BackgroundModelFileDownloadCenter()
     static let sessionIdentifier = "com.schtack.pines.model-downloads"

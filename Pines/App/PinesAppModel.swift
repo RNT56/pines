@@ -8,7 +8,7 @@ private enum ChatStreamPerformance {
 }
 
 @MainActor
-final class PinesAppModel: ObservableObject, @unchecked Sendable {
+final class PinesAppModel: ObservableObject {
     @Published var threads: [PinesThreadPreview]
     @Published var models: [PinesModelPreview]
     @Published var vaultItems: [PinesVaultItemPreview]
@@ -69,12 +69,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private var currentRunTask: Task<Void, Never>?
     private var currentRunToken: UUID?
     private var vaultReindexToken: UUID?
-    private var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
-    private var cloudContextContinuation: CheckedContinuation<CloudContextApprovalDecision, Never>?
-    private var cloudVaultEmbeddingContinuation: CheckedContinuation<Bool, Never>?
-    private var samplingContinuation: CheckedContinuation<Bool, Never>?
-    private var samplingResultContinuation: CheckedContinuation<Bool, Never>?
-    private var mcpSamplingRequestCountByServer: [MCPServerID: Int] = [:]
+    var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
+    var cloudContextContinuation: CheckedContinuation<CloudContextApprovalDecision, Never>?
+    var cloudVaultEmbeddingContinuation: CheckedContinuation<Bool, Never>?
+    var samplingContinuation: CheckedContinuation<Bool, Never>?
+    var samplingResultContinuation: CheckedContinuation<Bool, Never>?
+    var mcpSamplingRequestCountByServer: [MCPServerID: Int] = [:]
     private var isShowingModelDiscoveryResults = false
 
     private func setIfChanged<Value: Equatable>(
@@ -92,6 +92,32 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private func setChatError(_ message: String) {
         setIfChanged(\.chatError, message)
         setIfChanged(\.serviceError, message)
+    }
+
+    func recordRecoverableIssue(_ component: String, error: any Error, services: PinesAppServices) {
+        services.runtimeMetrics.recordRecoverableIssue(component, message: services.redactor.redact(error.localizedDescription))
+    }
+
+    func recordRecoverableIssue(_ component: String, message: String, services: PinesAppServices) {
+        services.runtimeMetrics.recordRecoverableIssue(component, message: services.redactor.redact(message))
+    }
+
+    func appendAuditEvent(_ event: AuditEvent, services: PinesAppServices, component: String) async {
+        guard let auditRepository = services.auditRepository else { return }
+        do {
+            try await auditRepository.append(event)
+        } catch {
+            recordRecoverableIssue("audit.\(component)", error: error, services: services)
+        }
+    }
+
+    private func refreshModelPreviewsIfNeeded(services: PinesAppServices, component: String) async {
+        guard !isShowingModelDiscoveryResults else { return }
+        do {
+            try await refreshModelPreviews(services: services)
+        } catch {
+            recordRecoverableIssue(component, error: error, services: services)
+        }
     }
 
     private func clearChatError() {
@@ -307,7 +333,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
         observeRepositories(services: services)
         bootstrapBackgroundTask = Task(priority: .utility) { [weak self] in
-            try? await Task.sleep(nanoseconds: 750_000_000)
+            do {
+                try await Task.sleep(nanoseconds: 750_000_000)
+            } catch {
+                return
+            }
             await self?.finishBackgroundBootstrap(services: services)
         }
         services.runtimeMetrics.recordStartupPhase("bootstrap_visible", elapsedSeconds: Date().timeIntervalSince(startedAt))
@@ -336,7 +366,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private func finishBackgroundBootstrap(services: PinesAppServices) async {
         let startedAt = Date()
         await services.bootstrap()
-        try? await services.modelLifecycleService?.reconcileInterruptedDownloads()
+        if let modelLifecycleService = services.modelLifecycleService {
+            do {
+                try await modelLifecycleService.reconcileInterruptedDownloads()
+            } catch {
+                recordRecoverableIssue("startup.model_download_reconcile", error: error, services: services)
+            }
+        }
         await refreshPostBootstrapState(services: services)
         didBootstrap = true
         isBootstrapping = false
@@ -811,7 +847,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 return
             }
             runConversationID = conversationID
-            let settings = try? await services.settingsRepository?.loadSettings()
+            let settings: AppSettingsSnapshot?
+            do {
+                settings = try await services.settingsRepository?.loadSettings()
+            } catch {
+                settings = nil
+                recordRecoverableIssue("chat.settings_load", error: error, services: services)
+            }
 
             let userMessage = ChatMessage(role: .user, content: userContent, attachments: attachments)
             try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: nil, providerID: nil)
@@ -1081,15 +1123,19 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             await refreshThread(conversationID: conversationID, repository: repository, status: .local)
         } catch InferenceError.cancelled {
             if let runRepository, let assistantMessageID {
-                try? await runRepository.updateMessage(
-                    id: assistantMessageID,
-                    content: accumulated,
-                    status: .cancelled,
-                    tokenCount: tokenCount,
-                    providerMetadata: nil,
-                    toolName: nil,
-                    toolCalls: completedToolCalls
-                )
+                do {
+                    try await runRepository.updateMessage(
+                        id: assistantMessageID,
+                        content: accumulated,
+                        status: .cancelled,
+                        tokenCount: tokenCount,
+                        providerMetadata: nil,
+                        toolName: nil,
+                        toolCalls: completedToolCalls
+                    )
+                } catch {
+                    recordRecoverableIssue("chat.persist_cancelled_message", error: error, services: services)
+                }
             }
             if let runConversationID, let assistantMessageID {
                 updateThreadMessage(
@@ -1110,15 +1156,19 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         } catch {
             let message = failureMessage ?? error.localizedDescription
             if let runRepository, let assistantMessageID {
-                try? await runRepository.updateMessage(
-                    id: assistantMessageID,
-                    content: accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? message : accumulated,
-                    status: .failed,
-                    tokenCount: tokenCount,
-                    providerMetadata: nil,
-                    toolName: nil,
-                    toolCalls: completedToolCalls
-                )
+                do {
+                    try await runRepository.updateMessage(
+                        id: assistantMessageID,
+                        content: accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? message : accumulated,
+                        status: .failed,
+                        tokenCount: tokenCount,
+                        providerMetadata: nil,
+                        toolName: nil,
+                        toolCalls: completedToolCalls
+                    )
+                } catch {
+                    recordRecoverableIssue("chat.persist_failed_message", error: error, services: services)
+                }
             }
             if let runConversationID, let assistantMessageID {
                 updateThreadMessage(
@@ -1156,7 +1206,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         var sections = [String]()
         var attachments = [ChatAttachment]()
         for resource in selected {
-            guard let contents = try? await services.mcpServerService?.readResource(resource) else {
+            let contents: [MCPResourceContent]
+            do {
+                guard let resourceContents = try await services.mcpServerService?.readResource(resource) else {
+                    continue
+                }
+                contents = resourceContents
+            } catch {
+                recordRecoverableIssue("mcp.resource_context.\(resource.id)", error: error, services: services)
                 continue
             }
             for content in contents {
@@ -1252,11 +1309,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             throw InferenceError.cancelled
         }
         if decision == .sendWithoutContext {
-            try? await services.auditRepository?.append(
+            await appendAuditEvent(
                 AuditEvent(
                     category: .security,
                     summary: "Sent cloud chat without selected local vault or MCP context."
-                )
+                ),
+                services: services,
+                component: "cloud_context_without_local_context"
             )
         }
         return decision
@@ -1413,7 +1472,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func chatSampling(
+    func chatSampling(
         for providerID: ProviderID,
         settings: AppSettingsSnapshot?,
         services: PinesAppServices,
@@ -1436,7 +1495,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         )
     }
 
-    private func localRuntimeProfile(
+    func localRuntimeProfile(
         for install: ModelInstall,
         settings: AppSettingsSnapshot?,
         services: PinesAppServices
@@ -1480,14 +1539,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             await refreshVaultEmbeddingState(services: services)
         } catch InferenceError.cancelled {
             setIfChanged(\.serviceError, nil)
-            if !isShowingModelDiscoveryResults {
-                try? await refreshModelPreviews(services: services)
-            }
+            await refreshModelPreviewsIfNeeded(services: services, component: "models.refresh_after_install_cancel")
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
-            if !isShowingModelDiscoveryResults {
-                try? await refreshModelPreviews(services: services)
-            }
+            await refreshModelPreviewsIfNeeded(services: services, component: "models.refresh_after_install_error")
         }
     }
 
@@ -1509,14 +1564,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             await refreshVaultEmbeddingState(services: services)
         } catch InferenceError.cancelled {
             setIfChanged(\.serviceError, nil)
-            if !isShowingModelDiscoveryResults {
-                try? await refreshModelPreviews(services: services)
-            }
+            await refreshModelPreviewsIfNeeded(services: services, component: "models.refresh_after_delete_cancel")
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
-            if !isShowingModelDiscoveryResults {
-                try? await refreshModelPreviews(services: services)
-            }
+            await refreshModelPreviewsIfNeeded(services: services, component: "models.refresh_after_delete_error")
         }
     }
 
@@ -1532,14 +1583,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             }
         } catch InferenceError.cancelled {
             setIfChanged(\.serviceError, nil)
-            if !isShowingModelDiscoveryResults {
-                try? await refreshModelPreviews(services: services)
-            }
+            await refreshModelPreviewsIfNeeded(services: services, component: "models.refresh_after_cancel_download_cancel")
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
-            if !isShowingModelDiscoveryResults {
-                try? await refreshModelPreviews(services: services)
-            }
+            await refreshModelPreviewsIfNeeded(services: services, component: "models.refresh_after_cancel_download_error")
         }
     }
 
@@ -1756,7 +1803,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 let profile = try await services.vaultEmbeddingService?.activeUsableProfile()
                 var queryEmbedding: [Float]?
                 if let profile {
-                    queryEmbedding = try? await services.vaultEmbeddingService?.embedQuery(trimmed, profile: profile)
+                    do {
+                        queryEmbedding = try await services.vaultEmbeddingService?.embedQuery(trimmed, profile: profile)
+                    } catch {
+                        recordRecoverableIssue("vault.search_query_embedding", error: error, services: services)
+                    }
                 }
                 let results = try await services.vaultRepository?.search(
                     query: trimmed,
@@ -1900,11 +1951,21 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             emitHaptic(.runCompleted)
         } catch is CancellationError {
             if let repository = services.vaultRepository {
-                let jobs = (try? await repository.listEmbeddingJobs(limit: 20)) ?? vaultEmbeddingJobs
+                let jobs: [VaultEmbeddingJob]
+                do {
+                    jobs = try await repository.listEmbeddingJobs(limit: 20)
+                } catch {
+                    jobs = vaultEmbeddingJobs
+                    recordRecoverableIssue("vault.reindex_cancel_list_jobs", error: error, services: services)
+                }
                 for var job in jobs where job.status == .running {
                     job.status = .cancelled
                     job.updatedAt = Date()
-                    try? await repository.upsertEmbeddingJob(job)
+                    do {
+                        try await repository.upsertEmbeddingJob(job)
+                    } catch {
+                        recordRecoverableIssue("vault.reindex_cancel_update_job", error: error, services: services)
+                    }
                 }
                 await refreshVaultEmbeddingState(services: services)
             }
@@ -2633,607 +2694,24 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
-    func requestToolApproval(_ request: ToolApprovalRequest) async -> ToolApprovalStatus {
-        pendingToolApproval = request
-        emitHaptic(.toolApprovalNeeded)
-        return await withCheckedContinuation { continuation in
-            approvalContinuation = continuation
-        }
-    }
-
-    func resolvePendingToolApproval(_ status: ToolApprovalStatus) {
-        pendingToolApproval = nil
-        emitHaptic(status == .approved ? .primaryAction : .runCancelled)
-        approvalContinuation?.resume(returning: status)
-        approvalContinuation = nil
-    }
-
-    func requestCloudContextApproval(_ request: CloudContextApprovalRequest) async -> CloudContextApprovalDecision {
-        cloudContextContinuation?.resume(returning: .cancel)
-        pendingCloudContextApproval = request
-        emitHaptic(.toolApprovalNeeded)
-        return await withCheckedContinuation { continuation in
-            cloudContextContinuation = continuation
-        }
-    }
-
-    func resolvePendingCloudContextApproval(_ decision: CloudContextApprovalDecision) {
-        pendingCloudContextApproval = nil
-        emitHaptic(decision == .sendWithContext ? .primaryAction : .runCancelled)
-        cloudContextContinuation?.resume(returning: decision)
-        cloudContextContinuation = nil
-    }
-
-    func requestCloudVaultEmbeddingApproval(_ request: CloudVaultEmbeddingApprovalRequest) async -> Bool {
-        cloudVaultEmbeddingContinuation?.resume(returning: false)
-        pendingCloudVaultEmbeddingApproval = request
-        emitHaptic(.toolApprovalNeeded)
-        return await withCheckedContinuation { continuation in
-            cloudVaultEmbeddingContinuation = continuation
-        }
-    }
-
-    func resolvePendingCloudVaultEmbeddingApproval(_ approved: Bool) {
-        pendingCloudVaultEmbeddingApproval = nil
-        emitHaptic(approved ? .primaryAction : .runCancelled)
-        cloudVaultEmbeddingContinuation?.resume(returning: approved)
-        cloudVaultEmbeddingContinuation = nil
-    }
-
-    func resolvePendingMCPSampling(_ approved: Bool) {
-        pendingMCPSamplingRequest = nil
-        samplingContinuation?.resume(returning: approved)
-        samplingContinuation = nil
-    }
-
-    func resolvePendingMCPSamplingResultReview(_ approved: Bool) {
-        pendingMCPSamplingResultReview = nil
-        samplingResultContinuation?.resume(returning: approved)
-        samplingResultContinuation = nil
-    }
-
-    private func requestMCPSamplingApproval(_ request: MCPSamplingRequest) async -> Bool {
-        pendingMCPSamplingRequest = request
-        mcpSamplingPromptDraft = Self.chatText(from: request.messages)
-        emitHaptic(.toolApprovalNeeded)
-        return await withCheckedContinuation { continuation in
-            samplingContinuation = continuation
-        }
-    }
-
-    private func requestMCPSamplingResultApproval(_ result: MCPSamplingResult, serverID: MCPServerID) async -> Bool {
-        pendingMCPSamplingResultReview = MCPSamplingResultReview(
-            serverID: serverID,
-            result: result,
-            summary: Self.samplingResultSummary(result)
-        )
-        emitHaptic(.toolApprovalNeeded)
-        return await withCheckedContinuation { continuation in
-            samplingResultContinuation = continuation
-        }
-    }
-
-    private func emitHaptic(_ event: PinesHapticEvent) {
-        hapticSignal = PinesHapticSignal(event: event)
-    }
-
-    private func handleMCPSampling(
-        _ request: MCPSamplingRequest,
-        server: MCPServerConfiguration,
-        services: PinesAppServices
-    ) async throws -> MCPSamplingResult {
-        guard server.samplingEnabled else {
-            throw InferenceError.unsupportedCapability("Sampling is disabled for this MCP server.")
-        }
-        let usedRequests = mcpSamplingRequestCountByServer[server.id, default: 0]
-        guard usedRequests < server.maxSamplingRequestsPerSession else {
-            throw InferenceError.invalidRequest("MCP sampling request limit reached for \(server.displayName).")
-        }
-        await auditMCPSampling(
-            server: server,
-            summary: "MCP sampling requested by \(server.displayName)",
-            request: request,
-            services: services
-        )
-        let approved = await requestMCPSamplingApproval(request)
-        await auditMCPSampling(
-            server: server,
-            summary: approved ? "Approved MCP sampling for \(server.displayName)" : "Denied MCP sampling for \(server.displayName)",
-            request: request,
-            services: services
-        )
-        guard approved else {
-            throw AgentError.permissionDenied("MCP sampling request was denied.")
-        }
-        mcpSamplingRequestCountByServer[server.id, default: 0] += 1
-        let editedPrompt = mcpSamplingPromptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let messages = try Self.chatMessages(
-            from: request.messages,
-            systemPrompt: request.systemPrompt,
-            editedPrompt: editedPrompt.isEmpty ? nil : editedPrompt
-        )
-        let tools = try request.tools.map {
-            try AnyToolSpec(
-                name: $0.name,
-                version: "mcp-sampling",
-                description: $0.description ?? "MCP sampling tool \($0.name).",
-                inputJSONSchema: $0.inputSchema
-            )
-        }
-        let requiredInputs = ProviderInputRequirements(messages: messages)
-        let settings = try? await services.settingsRepository?.loadSettings()
-
-        if let localModelID = rankedLocalModelID(for: request, requiredInputs: requiredInputs),
-           let localInstall = installedModel(for: localModelID) {
-            try await services.mlxRuntime.load(
-                localInstall,
-                profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
-            )
-            let sampling = chatSampling(
-                for: services.mlxRuntime.localProviderID,
-                settings: settings,
-                services: services,
-                requestedMaxTokens: request.maxTokens,
-                temperature: Float(request.temperature ?? 0.6)
-            )
-            let localChatRequest = ChatRequest(
-                modelID: localModelID,
-                messages: messages,
-                sampling: sampling,
-                allowsTools: !tools.isEmpty,
-                availableTools: tools
-            )
-
-            if let result = try? await runMCPSampling(localChatRequest, provider: services.mlxRuntime, modelID: localModelID) {
-                let returnApproved = await requestMCPSamplingResultApproval(result, serverID: server.id)
-                await auditMCPSampling(
-                    server: server,
-                    summary: returnApproved ? "Returned MCP sampling result to \(server.displayName)" : "Blocked MCP sampling result for \(server.displayName)",
-                    request: request,
-                    result: result,
-                    services: services
-                )
-                guard returnApproved else {
-                    throw AgentError.permissionDenied("MCP sampling result was not approved for return.")
-                }
-                return result
-            }
-        }
-
-        guard server.byokSamplingEnabled,
-              let cloudProvider = rankedCloudProvider(for: request, requiredInputs: requiredInputs, requiresTools: !tools.isEmpty)
-        else {
-            throw InferenceError.providerUnavailable(services.mlxRuntime.localProviderID)
-        }
-        guard let cloudModelID = cloudProvider.defaultModelID else {
-            throw InferenceError.invalidRequest("The selected cloud provider does not define a default model.")
-        }
-        let sampling = chatSampling(
-            for: cloudProvider.id,
-            settings: settings,
-            services: services,
-            requestedMaxTokens: request.maxTokens,
-            temperature: Float(request.temperature ?? 0.6)
-        )
-        let cloudChatRequest = ChatRequest(
-            modelID: cloudModelID,
-            messages: messages,
-            sampling: sampling,
-            allowsTools: !tools.isEmpty,
-            availableTools: tools
-        )
-        let provider = BYOKCloudInferenceProvider(configuration: cloudProvider, secretStore: services.secretStore)
-        let result = try await runMCPSampling(
-            cloudChatRequest,
-            provider: provider,
-            modelID: cloudModelID
-        )
-        let returnApproved = await requestMCPSamplingResultApproval(result, serverID: server.id)
-        await auditMCPSampling(
-            server: server,
-            summary: returnApproved ? "Returned MCP sampling result to \(server.displayName)" : "Blocked MCP sampling result for \(server.displayName)",
-            request: request,
-            result: result,
-            services: services
-        )
-        guard returnApproved else {
-            throw AgentError.permissionDenied("MCP sampling result was not approved for return.")
-        }
-        return result
-    }
-
-    private func rankedLocalModelID(for request: MCPSamplingRequest, requiredInputs: ProviderInputRequirements) -> ModelID? {
-        guard !requiredInputs.requiresPDFs && !requiredInputs.requiresTextDocuments else { return nil }
-        let preference = MCPModelPreferenceProfile(json: request.modelPreferences)
-        let candidates = models
-            .map(\.install)
-            .filter { install in
-                install.state == .installed
-                    && install.modalities.contains(.text)
-                    && (!requiredInputs.requiresImages || install.modalities.contains(.vision))
-            }
-        guard !candidates.isEmpty else { return nil }
-        return candidates.max { left, right in
-            samplingModelScore(install: left, preference: preference) < samplingModelScore(install: right, preference: preference)
-        }?.modelID
-    }
-
-    private func installedModel(for modelID: ModelID) -> ModelInstall? {
-        models
-            .map(\.install)
-            .first { install in
-                install.modelID == modelID && install.state == .installed
-            }
-    }
-
-    private func providerDisplayName(for providerID: ProviderID, services: PinesAppServices) -> String {
-        if providerID == services.mlxRuntime.localProviderID {
-            return "Local"
-        }
-        return cloudProviders.first(where: { $0.id == providerID })?.displayName ?? providerID.rawValue
-    }
-
-    private func emptyCloudOutputMessage(
-        providerID: ProviderID,
-        modelID: ModelID,
-        services: PinesAppServices
-    ) -> String {
-        guard providerID != services.mlxRuntime.localProviderID else {
-            return "The selected model finished without producing output."
-        }
-        let providerName = providerDisplayName(for: providerID, services: services)
-        return "\(providerName) returned a successful stream for \(modelID.rawValue), but Pines did not receive visible text. Check the provider event diagnostics above and retry with a text-capable chat model."
-    }
-
-    private func messageWithProviderDiagnostics(_ message: String, metadata: [String: String]) -> String {
-        let diagnosticKeys = [
-            CloudProviderMetadataKeys.openAIRequestID,
-            CloudProviderMetadataKeys.openAIResponseID,
-            CloudProviderMetadataKeys.openAIChatCompletionID,
-            CloudProviderMetadataKeys.openAIModel,
-            CloudProviderMetadataKeys.openAISystemFingerprint,
-            CloudProviderMetadataKeys.anthropicRequestID,
-            CloudProviderMetadataKeys.anthropicMessageID,
-            CloudProviderMetadataKeys.geminiRequestID,
-            CloudProviderMetadataKeys.geminiResponseID,
-            CloudProviderMetadataKeys.geminiInteractionID,
-            CloudProviderMetadataKeys.geminiModelVersion,
-            LocalProviderMetadataKeys.turboQuantActiveBackend,
-            LocalProviderMetadataKeys.turboQuantAttentionPath,
-            LocalProviderMetadataKeys.turboQuantKernelProfile,
-            LocalProviderMetadataKeys.turboQuantSelfTestStatus,
-            LocalProviderMetadataKeys.turboQuantFallbackReason,
-            LocalProviderMetadataKeys.turboQuantLastUnsupportedShape,
-        ]
-        let diagnostics = diagnosticKeys.compactMap { key -> String? in
-            guard let value = metadata[key], !value.isEmpty else { return nil }
-            return "\(key)=\(value)"
-        }
-        guard !diagnostics.isEmpty else { return message }
-        return "\(message)\n\nProvider diagnostics: \(diagnostics.joined(separator: ", "))"
-    }
-
-    private func providerKind(for providerID: ProviderID, services: PinesAppServices) -> CloudProviderKind? {
-        if providerID == services.mlxRuntime.localProviderID {
-            return nil
-        }
-        return cloudProviders.first(where: { $0.id == providerID })?.kind
-    }
-
-    private func displayName(for modelID: ModelID, providerID: ProviderID) -> String {
-        if let install = installedModel(for: modelID), install.modelID == modelID {
-            return Self.localModelDisplayName(install)
-        }
-        if let model = cloudModelCatalog[providerID]?.first(where: { $0.id == modelID }) {
-            return model.displayName
-        }
-        return Self.friendlyModelName(modelID.rawValue)
-    }
-
-    private func localModelScore(_ install: ModelInstall) -> Double {
-        let parameterScale = min(Double(install.parameterCount ?? 0) / 10_000_000_000, 10)
-        let byteScale = min(Double(install.estimatedBytes ?? 0) / 10_000_000_000, 10)
-        return parameterScale * 10 + byteScale
-    }
-
-    private func rankedCloudProvider(for request: MCPSamplingRequest, requiredInputs: ProviderInputRequirements, requiresTools: Bool) -> CloudProviderConfiguration? {
-        let preference = MCPModelPreferenceProfile(json: request.modelPreferences)
-        let candidates = cloudProviders.filter { provider in
-            provider.enabledForAgents
-                && provider.capabilities.textGeneration
-                && requiredInputs.isSatisfied(by: provider.capabilities)
-                && (!requiresTools || provider.capabilities.toolCalling)
-        }
-        guard !candidates.isEmpty else { return nil }
-        return candidates.max { left, right in
-            samplingCloudScore(provider: left, preference: preference) < samplingCloudScore(provider: right, preference: preference)
-        }
-    }
-
-    private func samplingModelScore(install: ModelInstall, preference: MCPModelPreferenceProfile) -> Double {
-        let searchable = [
-            install.modelID.rawValue,
-            install.displayName,
-            install.repository,
-            install.modelType ?? "",
-            install.processorClass ?? "",
-        ].joined(separator: " ").lowercased()
-        var score = 10.0
-        for hint in preference.hints {
-            let normalizedHint = hint.lowercased()
-            if searchable == normalizedHint {
-                score += 120
-            } else if searchable.contains(normalizedHint) {
-                score += 60
-            }
-        }
-        if install.modelID == defaultModelID {
-            score += 12
-        }
-        let parameterScale = min(Double(install.parameterCount ?? 0) / 10_000_000_000, 1)
-        let byteScale = min(Double(install.estimatedBytes ?? 0) / 10_000_000_000, 1)
-        score += preference.intelligencePriority * parameterScale * 24
-        score += preference.speedPriority * (1 - max(parameterScale, byteScale)) * 18
-        score += preference.costPriority * (1 - byteScale) * 12
-        return score
-    }
-
-    private func samplingCloudScore(provider: CloudProviderConfiguration, preference: MCPModelPreferenceProfile) -> Double {
-        let searchable = [
-            provider.displayName,
-            provider.kind.rawValue,
-            provider.baseURL.host(percentEncoded: false) ?? "",
-            provider.defaultModelID?.rawValue ?? "",
-        ].joined(separator: " ").lowercased()
-        var score = 5.0
-        for hint in preference.hints {
-            let normalizedHint = hint.lowercased()
-            if searchable == normalizedHint {
-                score += 120
-            } else if searchable.contains(normalizedHint) {
-                score += 60
-            }
-        }
-        score += preference.intelligencePriority * 8
-        score += preference.speedPriority * (provider.kind == .openAICompatible ? 6 : 4)
-        score -= preference.costPriority * 4
-        return score
-    }
-
-    private func auditMCPSampling(
-        server: MCPServerConfiguration,
-        summary: String,
-        request: MCPSamplingRequest,
-        result: MCPSamplingResult? = nil,
-        services: PinesAppServices
-    ) async {
-        let payload = [
-            "server=\(server.id.rawValue)",
-            "messages=\(request.messages.count)",
-            "tools=\(request.tools.count)",
-            "maxTokens=\(request.maxTokens ?? 512)",
-            "includeContext=\(request.includeContext ?? "unspecified")",
-            result.map { "result=\(Self.samplingResultKind($0))" },
-        ].compactMap { $0 }.joined(separator: ", ")
-        try? await services.auditRepository?.append(
-            AuditEvent(
-                category: .consent,
-                summary: summary,
-                redactedPayload: payload,
-                networkDomains: server.endpointURL.host(percentEncoded: false).map { [$0] } ?? []
-            )
-        )
-    }
-
-    private static func samplingResultKind(_ result: MCPSamplingResult) -> String {
-        switch result.content {
-        case .text:
-            return "text"
-        case .toolUse:
-            return "tool_use"
-        case .toolResult:
-            return "tool_result"
-        case .resource:
-            return "resource"
-        case .image:
-            return "image"
-        case .audio:
-            return "audio"
-        case .unknown:
-            return "unknown"
-        }
-    }
-
-    private func runMCPSampling(
-        _ request: ChatRequest,
-        provider: any InferenceProvider,
-        modelID: ModelID
-    ) async throws -> MCPSamplingResult {
-        let stream = try await provider.streamEvents(request)
-        var text = ""
-        var stopReason = "endTurn"
-        for try await event in stream {
-            switch event {
-            case let .token(delta):
-                text += delta.text
-            case let .toolCall(toolCall):
-                let input = (try? JSONDecoder().decode(JSONValue.self, from: Data(toolCall.argumentsFragment.utf8))) ?? .object([:])
-                return MCPSamplingResult(
-                    content: .toolUse(id: toolCall.id, name: toolCall.name, input: input),
-                    model: modelID.rawValue,
-                    stopReason: "toolUse"
-                )
-            case let .finish(finish):
-                stopReason = finish.reason == .length ? "maxTokens" : "endTurn"
-            case let .failure(failure):
-                throw InferenceError.invalidRequest(failure.message)
-            case .metrics:
-                break
-            }
-        }
-        return MCPSamplingResult(content: .text(text), model: modelID.rawValue, stopReason: stopReason)
-    }
-
-    private static func chatMessages(from messages: [MCPPromptMessage], systemPrompt: String?, editedPrompt: String? = nil) throws -> [ChatMessage] {
-        var chatMessages = [ChatMessage]()
-        if let systemPrompt, !systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            chatMessages.append(ChatMessage(role: .system, content: systemPrompt))
-        }
-        if let editedPrompt, !editedPrompt.isEmpty {
-            chatMessages.append(ChatMessage(role: .user, content: editedPrompt))
-            return chatMessages
-        }
-        for message in messages {
-            let role: ChatRole = message.role == .assistant ? .assistant : .user
-            let converted = try textAndAttachments(from: message.content)
-            chatMessages.append(ChatMessage(role: role, content: converted.text, attachments: converted.attachments))
-        }
-        return chatMessages
-    }
-
-    private static func samplingResultSummary(_ result: MCPSamplingResult) -> String {
-        switch result.content {
-        case let .text(text):
-            return text
-        case let .toolUse(id, name, _):
-            return "Tool use \(id): \(name)"
-        case let .toolResult(toolUseID, content):
-            let text = (try? textAndAttachments(from: content).text) ?? ""
-            return "Tool result \(toolUseID)\n\(text)"
-        case let .resource(resource):
-            return resource.text ?? "[Resource: \(resource.uri)]"
-        case let .image(_, mimeType):
-            return "[Image: \(mimeType)]"
-        case let .audio(_, mimeType):
-            return "[Audio: \(mimeType)]"
-        case .unknown:
-            return "[Unsupported sampling result content]"
-        }
-    }
-
-    private static func chatText(from messages: [MCPPromptMessage]) -> String {
-        messages.map { message in
-            (try? textAndAttachments(from: message.content).text) ?? ""
-        }.joined(separator: "\n\n")
-    }
-
-    private static func textAndAttachments(from contents: [MCPMessageContent]) throws -> (text: String, attachments: [ChatAttachment]) {
-        var parts = [String]()
-        var attachments = [ChatAttachment]()
-        for content in contents {
-            switch content {
-            case let .text(text):
-                parts.append(text)
-            case let .resource(resource):
-                if let text = resource.text {
-                    parts.append(text)
-                } else if let blob = resource.blob {
-                    let attachment = try mcpAttachment(
-                        fromBase64: blob,
-                        mimeType: resource.mimeType,
-                        fileNameHint: resource.uri
-                    )
-                    attachments.append(attachment)
-                    parts.append("[Embedded resource attachment: \(attachment.fileName), \(attachment.contentType)]")
-                }
-            case let .image(data, mimeType):
-                let attachment = try mcpAttachment(fromBase64: data, mimeType: mimeType, fileNameHint: "sampling-image")
-                guard attachment.kind == .image else {
-                    throw InferenceError.unsupportedCapability("MCP image content used unsupported MIME type \(mimeType).")
-                }
-                attachments.append(attachment)
-                parts.append("[Image: \(attachment.contentType)]")
-            case .audio:
-                throw InferenceError.unsupportedCapability("Audio sampling content is not supported yet.")
-            case let .toolUse(id, name, _):
-                parts.append("[Tool use \(id): \(name)]")
-            case let .toolResult(toolUseID, content):
-                let nested = try textAndAttachments(from: content)
-                parts.append("[Tool result \(toolUseID)]\n\(nested.text)")
-            case .unknown:
-                break
-            }
-        }
-        return (parts.joined(separator: "\n\n"), attachments)
-    }
-
-    private static let maxMCPAttachmentBytes = 10 * 1024 * 1024
-
-    private static func mcpAttachment(fromBase64 data: String, mimeType: String?, fileNameHint: String) throws -> ChatAttachment {
-        guard let decoded = Data(base64Encoded: data) else {
-            throw InferenceError.invalidRequest("MCP resource content was not valid base64.")
-        }
-        guard decoded.count <= maxMCPAttachmentBytes else {
-            throw InferenceError.invalidRequest("MCP resource exceeds the \(ByteCountFormatter.string(fromByteCount: Int64(maxMCPAttachmentBytes), countStyle: .file)) attachment limit.")
-        }
-        let normalizedMimeType = (mimeType ?? "application/octet-stream").lowercased()
-        guard let policy = mcpAttachmentPolicy(for: normalizedMimeType) else {
-            throw InferenceError.unsupportedCapability("MCP resource MIME type \(normalizedMimeType) is not allowed as an attachment.")
-        }
-        let safeName = sanitizedMCPFileName(from: fileNameHint, fallbackExtension: policy.fileExtension)
-        let url = FileManager.default.temporaryDirectory.appending(path: "mcp-\(UUID().uuidString)-\(safeName)")
-        try decoded.write(to: url)
-        return ChatAttachment(
-            kind: policy.kind,
-            fileName: url.lastPathComponent,
-            contentType: normalizedMimeType,
-            localURL: url,
-            byteCount: decoded.count
-        )
-    }
-
-    private static func mcpAttachmentPolicy(for mimeType: String) -> (kind: AttachmentKind, fileExtension: String)? {
-        switch mimeType {
-        case "image/png":
-            return (.image, "png")
-        case "image/jpeg", "image/jpg":
-            return (.image, "jpg")
-        case "image/webp":
-            return (.image, "webp")
-        case "image/gif":
-            return (.image, "gif")
-        case "application/pdf":
-            return (.document, "pdf")
-        case "text/plain":
-            return (.document, "txt")
-        case "text/markdown", "text/x-markdown":
-            return (.document, "md")
-        case "application/json":
-            return (.document, "json")
-        case "text/csv":
-            return (.document, "csv")
-        default:
-            return nil
-        }
-    }
-
-    private static func sanitizedMCPFileName(from hint: String, fallbackExtension: String) -> String {
-        let candidate = hint
-            .split(separator: "/")
-            .last
-            .map(String.init)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? "resource"
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
-        let sanitizedScalars = candidate.unicodeScalars.map { allowed.contains($0) ? String($0) : "-" }
-        var name = sanitizedScalars.joined().trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
-        if name.isEmpty {
-            name = "resource"
-        }
-        if !name.lowercased().hasSuffix(".\(fallbackExtension)") {
-            name += ".\(fallbackExtension)"
-        }
-        return String(name.prefix(96))
-    }
-
     private func refreshCredentialStatuses(services: PinesAppServices) async {
-        setIfChanged(\.huggingFaceCredentialStatus, (try? await services.huggingFaceCredentialService.readToken())?.isEmpty == false
-            ? "Configured"
-            : "Not configured")
-        setIfChanged(\.braveSearchCredentialStatus, (try? await services.secretStore.read(
-            service: BraveSearchTool.keychainService,
-            account: BraveSearchTool.keychainAccount
-        ))?.isEmpty == false ? "Configured" : "Not configured")
+        do {
+            setIfChanged(\.huggingFaceCredentialStatus, (try await services.huggingFaceCredentialService.readToken())?.isEmpty == false
+                ? "Configured"
+                : "Not configured")
+        } catch {
+            setIfChanged(\.huggingFaceCredentialStatus, "Unavailable")
+            recordRecoverableIssue("credentials.huggingface_status", error: error, services: services)
+        }
+        do {
+            setIfChanged(\.braveSearchCredentialStatus, (try await services.secretStore.read(
+                service: BraveSearchTool.keychainService,
+                account: BraveSearchTool.keychainAccount
+            ))?.isEmpty == false ? "Configured" : "Not configured")
+        } catch {
+            setIfChanged(\.braveSearchCredentialStatus, "Unavailable")
+            recordRecoverableIssue("credentials.brave_search_status", error: error, services: services)
+        }
     }
 
     private func refreshModelPreviews(services: PinesAppServices, enrichRuntime: Bool? = nil) async throws {
@@ -3260,273 +2738,4 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         setIfChanged(\.models, Self.downloadingFirst(previews))
     }
 
-    private static func threadPreview(
-        from record: ConversationRecord,
-        messages: [ChatMessage],
-        status: PinesThreadStatus? = nil,
-        updatedAt: Date? = nil
-    ) -> PinesThreadPreview {
-        let lastMessage = previewText(for: messages.last)
-        return PinesThreadPreview(
-            id: record.id,
-            title: record.title,
-            modelName: record.defaultModelID.map { friendlyModelName($0.rawValue) } ?? "No model selected",
-            modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
-            providerID: record.defaultProviderID,
-            lastMessage: lastMessage ?? "No messages yet.",
-            messages: messages,
-            status: record.archived ? .archived : (status ?? .local),
-            isPinned: record.pinned,
-            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: updatedAt ?? record.updatedAt),
-            tokenCount: threadTokenCount(messages)
-        )
-    }
-
-    private static func localModelDisplayName(_ install: ModelInstall) -> String {
-        friendlyModelName(install.displayName.isEmpty ? install.repository : install.displayName)
-    }
-
-    private static func friendlyModelName(_ rawValue: String) -> String {
-        var name = rawValue
-            .replacingOccurrences(of: "mlx-community/", with: "", options: [.caseInsensitive])
-            .replacingOccurrences(of: "mlx-community", with: "", options: [.caseInsensitive])
-        if name.contains("/") {
-            name = name.split(separator: "/").last.map(String.init) ?? name
-        }
-        return name
-            .replacingOccurrences(of: "_", with: " ")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-/ ").union(.whitespacesAndNewlines))
-    }
-
-    private static func threadPreview(from record: ConversationPreviewRecord) -> PinesThreadPreview {
-        let lastMessage = record.lastMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let status: PinesThreadStatus = record.archived ? .archived : .local
-        return PinesThreadPreview(
-            id: record.id,
-            title: record.title,
-            modelName: record.defaultModelID.map { friendlyModelName($0.rawValue) } ?? "No model selected",
-            modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
-            providerID: record.defaultProviderID,
-            lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
-            messages: [],
-            status: status,
-            isPinned: record.pinned,
-            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt),
-            tokenCount: record.tokenCount
-        )
-    }
-
-    private static func threadPreview(
-        from existing: PinesThreadPreview,
-        messages: [ChatMessage],
-        status: PinesThreadStatus? = nil,
-        updatedAt: Date = Date()
-    ) -> PinesThreadPreview {
-        let lastMessage = previewText(for: messages.last)
-        let resolvedStatus = existing.status == .archived ? PinesThreadStatus.archived : (status ?? existing.status)
-        return PinesThreadPreview(
-            id: existing.id,
-            title: existing.title,
-            modelName: existing.modelName,
-            modelID: existing.modelID,
-            providerID: existing.providerID,
-            lastMessage: lastMessage ?? "No messages yet.",
-            messages: messages,
-            status: resolvedStatus,
-            isPinned: existing.isPinned,
-            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: updatedAt),
-            tokenCount: resolvedStatus == .streaming ? existing.tokenCount : threadTokenCount(messages)
-        )
-    }
-
-    private static func threadTokenCount(_ messages: [ChatMessage]) -> Int {
-        messages.reduce(0) { $0 + max(1, $1.content.split(separator: " ").count) }
-    }
-
-    private static func previewText(for message: ChatMessage?) -> String? {
-        guard let message else { return nil }
-        let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty {
-            return text
-        }
-        guard !message.attachments.isEmpty else { return nil }
-        return message.attachments.count == 1
-            ? "1 attachment"
-            : "\(message.attachments.count) attachments"
-    }
-
-    private static func install(from summary: RemoteModelSummary, preflight: ModelPreflightResult) -> ModelInstall {
-        return ModelInstall(
-            modelID: ModelID(rawValue: summary.repository),
-            displayName: summary.repository.components(separatedBy: "/").last ?? summary.repository,
-            repository: summary.repository,
-            modalities: preflight.modalities.isEmpty ? Self.modalities(from: summary) : preflight.modalities,
-            verification: preflight.verification,
-            state: preflight.verification == .unsupported ? .unsupported : .remote,
-            estimatedBytes: preflight.estimatedBytes > 0 ? preflight.estimatedBytes : nil,
-            license: preflight.license,
-            modelType: preflight.modelType,
-            processorClass: preflight.processorClass
-        )
-    }
-
-    private static func modalities(from summary: RemoteModelSummary) -> Set<ModelModality> {
-        if summary.tags.contains(where: { $0 == "feature-extraction" || $0 == "sentence-similarity" || $0 == "sentence-transformers" }) {
-            return [.embeddings]
-        }
-        switch summary.task {
-        case .imageTextToText:
-            return [.text, .vision]
-        case .featureExtraction, .sentenceSimilarity:
-            return [.embeddings]
-        case .textGeneration, .none:
-            return [.text]
-        }
-    }
-
-    private static func modelPreview(
-        from install: ModelInstall,
-        runtime: MLXRuntimeBridge,
-        download: ModelDownloadProgress? = nil,
-        enrichRuntime: Bool = true
-    ) -> PinesModelPreview {
-        let status: PinesModelStatus
-        switch download?.status {
-        case .queued, .downloading, .verifying, .installing:
-            status = .indexing
-        case .failed:
-            status = .failed
-        case .cancelled, .installed, .none:
-            switch install.state {
-            case .installed:
-                status = .ready
-            case .downloading:
-                status = .indexing
-            case .failed:
-                status = .failed
-            case .unsupported:
-                status = .unsupported
-            case .remote:
-                status = .available
-            }
-        }
-
-        let readiness: Double
-        if download?.status == .cancelled {
-            readiness = install.state == .installed ? 1 : 0
-        } else if download?.status == .installed || install.state == .installed {
-            readiness = 1
-        } else if let download {
-            if let total = download.totalBytes, total > 0 {
-                readiness = min(0.98, max(0, Double(download.bytesReceived) / Double(total)))
-            } else {
-                readiness = status == .ready ? 1 : 0.1
-            }
-        } else {
-            readiness = install.state == .installed ? 1 : (install.state == .downloading ? 0.5 : 0)
-        }
-
-        let compatibilityWarnings: [String]
-        switch install.verification {
-        case .unsupported:
-            compatibilityWarnings = ["This repository is not compatible with the current MLX runtime profile."]
-        case .experimental:
-            compatibilityWarnings = ["This repository looks compatible but needs device verification before production use."]
-        case .installable:
-            compatibilityWarnings = install.state == .remote ? ["Compatibility is based on Hugging Face metadata until preflight completes."] : []
-        case .verified:
-            compatibilityWarnings = []
-        }
-
-        let runtimeProfile = enrichRuntime
-            ? runtime.defaultRuntimeProfile(for: install)
-            : RuntimeProfile(
-                name: "Pending",
-                quantization: QuantizationProfile(
-                    algorithm: .none,
-                    kvCacheStrategy: .none,
-                    preset: nil,
-                    requestedBackend: nil,
-                    activeBackend: nil,
-                    activeAttentionPath: nil,
-                    activeFallbackReason: "Runtime diagnostics load after startup."
-                ),
-                promptCacheIdentifier: install.repository
-            )
-        let contextWindow = enrichRuntime
-            ? (runtime.capabilities.maxContextTokens.map { "\($0 / 1000)K" } ?? "Unknown")
-            : "Pending"
-
-        return PinesModelPreview(
-            id: install.id,
-            install: install,
-            runtimeProfile: runtimeProfile,
-            name: install.displayName,
-            family: install.modelType ?? install.modalities.map(\.rawValue).sorted().joined(separator: ", "),
-            footprint: install.estimatedBytes.map(Self.byteLabel) ?? download?.totalBytes.map(Self.byteLabel) ?? "Remote",
-            contextWindow: contextWindow,
-            runtime: install.modalities.contains(.embeddings) ? "MLX Embedders" : (install.modalities.contains(.vision) ? "MLX VLM" : "MLX"),
-            status: status,
-            capabilities: install.modalities.map(\.rawValue).sorted(),
-            readiness: readiness,
-            downloadProgress: download,
-            compatibilityWarnings: compatibilityWarnings
-        )
-    }
-
-    private static func latestDownloadByRepository(_ downloads: [ModelDownloadProgress]) -> [String: ModelDownloadProgress] {
-        Dictionary(grouping: downloads, by: { $0.repository.lowercased() }).mapValues { values in
-            values.sorted { $0.updatedAt > $1.updatedAt }.first!
-        }
-    }
-
-    private static func downloadingFirst(_ previews: [PinesModelPreview]) -> [PinesModelPreview] {
-        previews.enumerated()
-            .sorted { lhs, rhs in
-                let lhsActive = lhs.element.isDownloadActive
-                let rhsActive = rhs.element.isDownloadActive
-                if lhsActive != rhsActive {
-                    return lhsActive
-                }
-                if lhsActive,
-                   let lhsUpdated = lhs.element.downloadProgress?.updatedAt,
-                   let rhsUpdated = rhs.element.downloadProgress?.updatedAt,
-                   lhsUpdated != rhsUpdated {
-                    return lhsUpdated > rhsUpdated
-                }
-                return lhs.offset < rhs.offset
-            }
-            .map(\.element)
-    }
-
-    private static func vaultPreview(from record: VaultDocumentRecord) -> PinesVaultItemPreview {
-        let kind: PinesVaultKind
-        switch record.sourceType.lowercased() {
-        case "image", "photo":
-            kind = .image
-        case "key":
-            kind = .key
-        case "note":
-            kind = .note
-        default:
-            kind = .document
-        }
-
-        return PinesVaultItemPreview(
-            id: record.id,
-            title: record.title,
-            kind: kind,
-            detail: "\(record.chunkCount) indexed chunks",
-            chunks: [],
-            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt),
-            sensitivity: .local,
-            linkedThreads: 0,
-            activeProfileEmbeddedChunks: 0,
-            activeProfileTotalChunks: record.chunkCount
-        )
-    }
-
-    private static func byteLabel(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
-    }
 }

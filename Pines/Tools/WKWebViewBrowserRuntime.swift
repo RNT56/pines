@@ -1,7 +1,10 @@
 import Foundation
+import OSLog
 import PinesCore
 import UIKit
 import WebKit
+
+private let browserRuntimeLogger = Logger(subsystem: "com.schtack.pines", category: "BrowserRuntime")
 
 @MainActor
 final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
@@ -153,7 +156,11 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
         await withCheckedContinuation { continuation in
             navigationContinuation = continuation
             Task {
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                do {
+                    try await Task.sleep(nanoseconds: 8_000_000_000)
+                } catch {
+                    return
+                }
                 if let navigationContinuation {
                     navigationContinuation.resume()
                     self.navigationContinuation = nil
@@ -214,7 +221,12 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
     }
 
     private static func jsString(_ string: String) -> String {
-        let data = try? JSONSerialization.data(withJSONObject: string)
-        return data.map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
+        do {
+            let data = try JSONEncoder().encode(string)
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            browserRuntimeLogger.error("Failed to encode browser JavaScript string: \(error.localizedDescription, privacy: .public)")
+            return "\"\""
+        }
     }
 }

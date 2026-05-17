@@ -122,7 +122,11 @@ struct ModelsView: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .task(id: searchFingerprint) {
-                try? await Task.sleep(nanoseconds: 350_000_000)
+                do {
+                    try await Task.sleep(nanoseconds: 350_000_000)
+                } catch {
+                    return
+                }
                 guard !Task.isCancelled else { return }
                 await appModel.searchModels(
                     query: searchText,

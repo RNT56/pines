@@ -127,13 +127,17 @@ extension JSONValue {
     var stableString: String {
         switch self {
         case let .string(value):
-            value
+            return value
         case let .number(value):
-            String(value)
+            return String(value)
         case let .bool(value):
-            String(value)
+            return String(value)
         default:
-            String(decoding: (try? JSONEncoder().encode(self)) ?? Data(), as: UTF8.self)
+            do {
+                return String(decoding: try JSONEncoder().encode(self), as: UTF8.self)
+            } catch {
+                return ""
+            }
         }
     }
 

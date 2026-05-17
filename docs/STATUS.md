@@ -41,6 +41,10 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Chat stop and retry controls.
 - Layered `.icon` source for the app icon.
 - Swift Testing core contract tests, iOS app surface tests, and framework-free verification runner.
+- Shared Xcode validation script used by CI and release validation for project generation, drift checking, unsigned iOS build, simulator build-for-testing, and simulator smoke tests.
+- CI privacy-manifest lint for the committed local-first manifest.
+- OAuth startup guardrails avoid crashing when authentication is attempted without an active foreground window.
+- Service bootstrap logs/audits recoverable built-in tool registration and store initialization failures instead of silently discarding them.
 - App architecture cleanup that splits large files into app model types, GRDB CloudKit sync, design components, MCP payloads, model download support, Settings detail, Models components, and MLX model-family files.
 
 ## Not Complete
@@ -59,6 +63,7 @@ swift build --disable-automatic-resolution
 swift test --disable-automatic-resolution
 swift run --disable-automatic-resolution PinesCoreTestRunner
 xcodegen generate
+bash scripts/ci/run-xcode-validation.sh
 ```
 
 Full iOS verification requires full Xcode:

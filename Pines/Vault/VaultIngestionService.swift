@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import PinesCore
 
 #if canImport(PDFKit)
@@ -17,6 +18,7 @@ struct VaultIngestionService {
     let auditRepository: (any AuditEventRepository)?
     let chunker = VaultChunker()
     private let deviceMonitor = DeviceRuntimeMonitor()
+    private static let logger = Logger(subsystem: "com.schtack.pines", category: "vault-ingestion")
 
     func importFile(url sourceURL: URL) async throws -> VaultDocumentRecord {
         let storedURL = try Self.copyIntoVault(sourceURL)
@@ -88,14 +90,22 @@ struct VaultIngestionService {
             } catch is CancellationError {
                 job.status = .cancelled
                 job.updatedAt = Date()
-                try? await vaultRepository.upsertEmbeddingJob(job)
+                do {
+                    try await vaultRepository.upsertEmbeddingJob(job)
+                } catch {
+                    Self.logger.error("vault_ingestion_cancel_job_persist_failed document=\(document.id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                }
                 throw CancellationError()
             } catch {
                 try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
                 job.status = .failed
                 job.lastError = error.localizedDescription
                 job.updatedAt = Date()
-                try? await vaultRepository.upsertEmbeddingJob(job)
+                do {
+                    try await vaultRepository.upsertEmbeddingJob(job)
+                } catch {
+                    Self.logger.error("vault_ingestion_failed_job_persist_failed document=\(document.id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                }
             }
         } else if let embeddingModelID = try await settingsRepository?.loadSettings().embeddingModelID, !chunks.isEmpty {
             do {

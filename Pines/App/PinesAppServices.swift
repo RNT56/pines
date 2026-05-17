@@ -11,7 +11,7 @@ typealias PinesLiveStore = any ConversationRepository
     & ModelDownloadRepository
     & AuditEventRepository
 
-final class PinesAppServices: @unchecked Sendable {
+final class PinesAppServices: Sendable {
     let secretStore: any SecretStore
     let modelCatalog: HuggingFaceModelCatalogService
     let preflightClassifier: ModelPreflightClassifier
@@ -30,7 +30,8 @@ final class PinesAppServices: @unchecked Sendable {
     let mcpServerRepository: (any MCPServerRepository)?
     let modelDownloadRepository: (any ModelDownloadRepository)?
     let auditRepository: (any AuditEventRepository)?
-    private var didBootstrapTools = false
+    private let defaultStoreStartupError: String?
+    private let bootstrapState = PinesAppServiceBootstrapState()
 
     init(
         secretStore: any SecretStore = KeychainSecretStore(),
@@ -45,7 +46,19 @@ final class PinesAppServices: @unchecked Sendable {
         liveStore: PinesLiveStore? = nil,
         loadsDefaultStore: Bool = true
     ) {
-        let liveStore = liveStore ?? (loadsDefaultStore ? PinesAppServices.makeDefaultStore(runtimeMetrics: runtimeMetrics) : nil)
+        let resolvedStore: PinesLiveStore?
+        let storeStartupError: String?
+        if let liveStore {
+            resolvedStore = liveStore
+            storeStartupError = nil
+        } else if loadsDefaultStore {
+            let defaultStore = PinesAppServices.makeDefaultStore(runtimeMetrics: runtimeMetrics)
+            resolvedStore = defaultStore.store
+            storeStartupError = defaultStore.error
+        } else {
+            resolvedStore = nil
+            storeStartupError = nil
+        }
         self.secretStore = secretStore
         self.modelCatalog = modelCatalog
         self.preflightClassifier = preflightClassifier
@@ -55,15 +68,16 @@ final class PinesAppServices: @unchecked Sendable {
         self.redactor = redactor
         self.mlxRuntime = mlxRuntime
         self.runtimeMetrics = runtimeMetrics
-        self.liveStore = liveStore
-        conversationRepository = liveStore
-        modelInstallRepository = liveStore
-        vaultRepository = liveStore
-        settingsRepository = liveStore
-        cloudProviderRepository = liveStore
-        mcpServerRepository = liveStore
-        modelDownloadRepository = liveStore
-        auditRepository = liveStore
+        self.liveStore = resolvedStore
+        defaultStoreStartupError = storeStartupError
+        conversationRepository = resolvedStore
+        modelInstallRepository = resolvedStore
+        vaultRepository = resolvedStore
+        settingsRepository = resolvedStore
+        cloudProviderRepository = resolvedStore
+        mcpServerRepository = resolvedStore
+        modelDownloadRepository = resolvedStore
+        auditRepository = resolvedStore
     }
 
     func prepareForFirstFrame() async {
@@ -72,22 +86,39 @@ final class PinesAppServices: @unchecked Sendable {
 
     func bootstrap() async {
         await prepareForFirstFrame()
-        guard !didBootstrapTools else { return }
-        didBootstrapTools = true
+        guard await bootstrapState.markToolBootstrapStarted() else { return }
 
-        try? await toolRegistry.register(CalculatorTool.spec())
-        try? await toolRegistry.register(BraveSearchTool.spec(secretStore: secretStore))
+        await registerBuiltInTool(CalculatorTool.name) {
+            try CalculatorTool.spec()
+        }
+        await registerBuiltInTool("web.search") {
+            try BraveSearchTool.spec(secretStore: secretStore)
+        }
         #if canImport(WebKit) && canImport(UIKit)
         let browserRuntime = await MainActor.run { WKWebViewBrowserRuntime() }
-        if let observe: ToolSpec<BrowserObserveInput, BrowserObserveOutput> = try? await MainActor.run(body: { try browserRuntime.observeSpec() }) {
-            try? await toolRegistry.register(observe)
+        do {
+            let observe: ToolSpec<BrowserObserveInput, BrowserObserveOutput> = try await MainActor.run {
+                try browserRuntime.observeSpec()
+            }
+            await registerBuiltInTool(observe, name: "browser.observe")
+        } catch {
+            await recordBootstrapFailure(component: "browser.observe", error: error)
         }
-        if let action: ToolSpec<BrowserActionInput, BrowserActionOutput> = try? await MainActor.run(body: { try browserRuntime.actionSpec() }) {
-            try? await toolRegistry.register(action)
+        do {
+            let action: ToolSpec<BrowserActionInput, BrowserActionOutput> = try await MainActor.run {
+                try browserRuntime.actionSpec()
+            }
+            await registerBuiltInTool(action, name: "browser.action")
+        } catch {
+            await recordBootstrapFailure(component: "browser.action", error: error)
         }
         #else
-        try? await toolRegistry.register(BuiltInToolSpecs.browserObserveSpec())
-        try? await toolRegistry.register(BuiltInToolSpecs.browserActionSpec())
+        await registerBuiltInTool("browser.observe") {
+            try BuiltInToolSpecs.browserObserveSpec()
+        }
+        await registerBuiltInTool("browser.action") {
+            try BuiltInToolSpecs.browserActionSpec()
+        }
         #endif
     }
 
@@ -101,7 +132,9 @@ final class PinesAppServices: @unchecked Sendable {
             ServiceHealth(
                 name: "SQLite Store",
                 readiness: liveStore == nil ? .unavailable : .ready,
-                summary: liveStore == nil ? "GRDB store is unavailable in this build." : "GRDB migrations and repositories are available."
+                summary: liveStore == nil
+                    ? (defaultStoreStartupError ?? "GRDB store is unavailable in this build.")
+                    : "GRDB migrations and repositories are available."
             ),
             ServiceHealth(
                 name: "MLX Runtime",
@@ -222,15 +255,68 @@ final class PinesAppServices: @unchecked Sendable {
         )
     }
 
-    private static func makeDefaultStore(runtimeMetrics: PinesRuntimeMetrics) -> PinesLiveStore? {
+    private static func makeDefaultStore(runtimeMetrics: PinesRuntimeMetrics) -> (store: PinesLiveStore?, error: String?) {
         #if canImport(GRDB)
         let startedAt = Date()
-        let store = try? GRDBPinesStore(runtimeMetrics: runtimeMetrics)
-        runtimeMetrics.recordStartupPhase("store_init", elapsedSeconds: Date().timeIntervalSince(startedAt))
-        return store
+        do {
+            let store = try GRDBPinesStore(runtimeMetrics: runtimeMetrics)
+            runtimeMetrics.recordStartupPhase("store_init", elapsedSeconds: Date().timeIntervalSince(startedAt))
+            return (store, nil)
+        } catch {
+            runtimeMetrics.recordStartupFailure("store_init", error: error)
+            return (nil, "GRDB store failed to initialize: \(error.localizedDescription)")
+        }
         #else
-        return nil
+        return (nil, "GRDB store is unavailable in this build.")
         #endif
+    }
+
+    private func registerBuiltInTool<Input: ToolInput, Output: ToolOutput>(
+        _ name: String,
+        makeSpec: () throws -> ToolSpec<Input, Output>
+    ) async {
+        do {
+            try await toolRegistry.register(makeSpec())
+        } catch {
+            await recordBootstrapFailure(component: name, error: error)
+        }
+    }
+
+    private func registerBuiltInTool<Input: ToolInput, Output: ToolOutput>(
+        _ spec: ToolSpec<Input, Output>,
+        name: String
+    ) async {
+        do {
+            try await toolRegistry.register(spec)
+        } catch {
+            await recordBootstrapFailure(component: name, error: error)
+        }
+    }
+
+    private func recordBootstrapFailure(component: String, error: any Error) async {
+        runtimeMetrics.recordStartupFailure("tool_bootstrap:\(component)", error: error)
+        do {
+            try await auditRepository?.append(
+                AuditEvent(
+                    category: .tool,
+                    summary: "Tool bootstrap failed for \(component).",
+                    redactedPayload: redactor.redact(error.localizedDescription),
+                    toolName: component
+                )
+            )
+        } catch {
+            runtimeMetrics.recordStartupFailure("tool_bootstrap_audit:\(component)", error: error)
+        }
+    }
+}
+
+private actor PinesAppServiceBootstrapState {
+    private var didBootstrapTools = false
+
+    func markToolBootstrapStarted() -> Bool {
+        guard !didBootstrapTools else { return false }
+        didBootstrapTools = true
+        return true
     }
 }
 

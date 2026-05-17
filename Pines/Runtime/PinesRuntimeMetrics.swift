@@ -6,13 +6,18 @@ import PinesCore
 import MetricKit
 #endif
 
+// SAFETY: MetricKit requires an NSObject subscriber. Mutable state is limited to
+// `isStarted` and is protected by `lock`; Logger is thread-safe.
 final class PinesRuntimeMetrics: NSObject, @unchecked Sendable {
     static let shared = PinesRuntimeMetrics()
 
     private let logger = Logger(subsystem: "com.schtack.pines", category: "runtime")
+    private let lock = NSLock()
     private var isStarted = false
 
     func start() {
+        lock.lock()
+        defer { lock.unlock() }
         guard !isStarted else { return }
         isStarted = true
         #if canImport(MetricKit)
@@ -47,6 +52,18 @@ final class PinesRuntimeMetrics: NSObject, @unchecked Sendable {
     func recordStartupPhase(_ phase: String, elapsedSeconds: TimeInterval) {
         logger.info(
             "startup_phase phase=\(phase, privacy: .public) elapsed=\(elapsedSeconds, privacy: .public)"
+        )
+    }
+
+    func recordStartupFailure(_ phase: String, error: any Error) {
+        logger.error(
+            "startup_failure phase=\(phase, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+        )
+    }
+
+    func recordRecoverableIssue(_ component: String, message: String) {
+        logger.warning(
+            "recoverable_issue component=\(component, privacy: .public) message=\(message, privacy: .public)"
         )
     }
 }

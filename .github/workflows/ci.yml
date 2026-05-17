@@ -80,9 +80,6 @@ jobs:
           fi
           xcodegen --version
 
-      - name: Generate Xcode project
-        run: xcodegen generate
-
       - name: Ensure iOS platform is installed
         run: |
           sudo xcodebuild -runFirstLaunch || true
@@ -91,62 +88,8 @@ jobs:
           fi
           xcodebuild -showsdks
 
-      - name: Check generated project drift
-        run: git diff --exit-code -- Pines.xcodeproj project.yml
-
-      - name: Resolve package dependencies
-        run: |
-          xcodebuild \
-            -resolvePackageDependencies \
-            -project Pines.xcodeproj \
-            -scheme Pines \
-            -skipMacroValidation \
-            -skipPackagePluginValidation
-
-      - name: Build iOS app without signing
-        run: |
-          set -o pipefail
-          mkdir -p build
-          xcodebuild \
-            -project Pines.xcodeproj \
-            -scheme Pines \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build/DerivedData \
-            -skipMacroValidation \
-            -skipPackagePluginValidation \
-            CODE_SIGNING_ALLOWED=NO \
-            build | tee build/xcodebuild.log
-
-      - name: Build iOS runtime smoke tests
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project Pines.xcodeproj \
-            -scheme Pines \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/DerivedData \
-            -skipMacroValidation \
-            -skipPackagePluginValidation \
-            CODE_SIGNING_ALLOWED=NO \
-            build-for-testing | tee build/xcodebuild-tests.log
-
-      - name: Run iOS runtime smoke tests
-        run: |
-          set -o pipefail
-          simulator_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
-          if [ -z "$simulator_id" ]; then
-            echo "::warning::No available iPhone simulator was found; smoke tests were build-verified only."
-            exit 0
-          fi
-          xcodebuild \
-            -project Pines.xcodeproj \
-            -scheme Pines \
-            -destination "id=$simulator_id" \
-            -derivedDataPath build/DerivedData \
-            -skipMacroValidation \
-            -skipPackagePluginValidation \
-            CODE_SIGNING_ALLOWED=NO \
-            test-without-building | tee build/xcodebuild-test-run.log
+      - name: Validate Xcode project
+        run: bash scripts/ci/run-xcode-validation.sh
 
       - name: Upload Xcode build log
         if: always()

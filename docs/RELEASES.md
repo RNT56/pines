@@ -9,11 +9,11 @@ CI runs on pull requests, pushes to `main`, and manual dispatch.
 Jobs:
 
 - `swift-core`: public-repo hygiene, Swift package build, `swift test`, and `PinesCoreTestRunner`. SwiftPM commands run with automatic resolution disabled so CI honors the committed `Package.resolved` graph.
-- `xcode-project`: XcodeGen project generation, generated-project drift check, package resolution, and unsigned generic iOS build.
+- `xcode-project`: XcodeGen project generation, generated-project drift check, package resolution, unsigned generic iOS build, simulator build-for-testing, and simulator runtime smoke tests when an iPhone simulator is available.
 
 The iOS job uses the `macos-26` GitHub-hosted runner so Xcode 26 and iOS 26 SDKs are available. Keep local XcodeGen at `2.45.4` or newer before regenerating `Pines.xcodeproj`.
 
-The release workflow regenerates the Xcode project, runs the same package build/test/core runner checks, builds an unsigned iOS archive, and packages source artifacts. Keep `ci.yml` and `release.yml` aligned when adding required checks.
+The release workflow uses the same Xcode validation script as CI, runs SwiftPM with automatic package resolution disabled, builds an unsigned iOS archive, and packages source artifacts. Keep `scripts/ci/run-xcode-validation.sh`, `ci.yml`, and `release.yml` aligned when adding required checks.
 
 ## Release Tags
 
@@ -49,6 +49,8 @@ Until signing and App Store Connect automation are configured, releases publish 
 - validation logs as workflow artifacts
 
 Do not publish an unsigned `.ipa`.
+
+Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed.
 
 ## Future TestFlight Pipeline
 

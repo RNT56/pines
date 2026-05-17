@@ -426,7 +426,11 @@ private struct MarkdownCodeBlockView: View {
                         didCopy = true
                     }
                     Task {
-                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                        do {
+                            try await Task.sleep(nanoseconds: 1_200_000_000)
+                        } catch {
+                            return
+                        }
                         guard !Task.isCancelled else { return }
                         await MainActor.run {
                             withAnimation(reduceMotion ? nil : theme.motion.fast) {
@@ -525,7 +529,7 @@ private struct MarkdownIconButtonStyle: ButtonStyle {
 private actor MarkdownRenderCache {
     static let shared = MarkdownRenderCache()
 
-    private final class Box: NSObject, @unchecked Sendable {
+    private final class Box: NSObject {
         let parsedMessage: ParsedMarkdownMessage
 
         init(_ parsedMessage: ParsedMarkdownMessage) {

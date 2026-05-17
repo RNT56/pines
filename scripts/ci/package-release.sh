@@ -18,7 +18,7 @@ done
 cat > "$bundle/RELEASE_NOTES.md" <<NOTES
 # pines ${tag}
 
-This is a source/developer-preview release for the local-first iOS app foundation.
+This is a source/developer-preview release for the local-first iOS app foundation. It is not a signed App Store or TestFlight build.
 
 License: PolyForm Noncommercial License 1.0.0. Commercial use requires a separate written license from Schtack.
 Third-party dependency notices are documented in THIRD_PARTY_NOTICES.md.
@@ -27,11 +27,13 @@ Build locally with:
 
 \`\`\`sh
 xcodegen generate
-swift build
-swift run PinesCoreTestRunner
+swift build --disable-automatic-resolution
+swift test --disable-automatic-resolution
+swift run --disable-automatic-resolution PinesCoreTestRunner
+bash scripts/ci/run-xcode-validation.sh
 \`\`\`
 
-Full iOS validation requires full Xcode 26 selected via \`xcode-select\`.
+Full iOS validation requires full Xcode 26 selected via \`xcode-select\`. Real-device TurboQuant acceptance and App Store privacy review remain separate release gates before a production distribution.
 NOTES
 
 (

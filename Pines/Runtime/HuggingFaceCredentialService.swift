@@ -1,5 +1,8 @@
 import Foundation
+import OSLog
 import PinesCore
+
+private let huggingFaceCredentialLogger = Logger(subsystem: "com.schtack.pines", category: "HuggingFaceCredential")
 
 struct HuggingFaceCredentialService {
     static let keychainService = "com.schtack.pines.huggingface"
@@ -52,8 +55,14 @@ struct HuggingFaceCredentialService {
 
         let message: String
         if (200..<300).contains(http.statusCode) {
-            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            let name = payload?["name"] as? String
+            let name: String?
+            do {
+                let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                name = payload?["name"] as? String
+            } catch {
+                huggingFaceCredentialLogger.warning("Validated Hugging Face token but failed to parse whoami payload: \(error.localizedDescription, privacy: .public)")
+                name = nil
+            }
             message = name.map { "Validated Hugging Face token for \($0)." } ?? "Validated Hugging Face token."
         } else if http.statusCode == 401 || http.statusCode == 403 {
             message = "Hugging Face rejected the token."

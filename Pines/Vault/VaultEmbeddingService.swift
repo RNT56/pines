@@ -244,34 +244,51 @@ struct VaultRetrievalService {
         var profile: VaultEmbeddingProfile?
         var queryEmbedding: [Float]?
 
-        if let embeddingService,
-           let activeProfile = try? await embeddingService.activeUsableProfile() {
-            profile = activeProfile
-            queryEmbedding = try? await embeddingService.embedQuery(query, profile: activeProfile)
+        if let embeddingService {
+            do {
+                if let activeProfile = try await embeddingService.activeUsableProfile() {
+                    profile = activeProfile
+                    do {
+                        queryEmbedding = try await embeddingService.embedQuery(query, profile: activeProfile)
+                    } catch {
+                        runtimeMetrics.recordRecoverableIssue("vault_retrieval_query_embedding", message: error.localizedDescription)
+                    }
+                }
+            } catch {
+                runtimeMetrics.recordRecoverableIssue("vault_retrieval_active_profile", message: error.localizedDescription)
+            }
         }
 
-        guard let results = try? await vaultRepository.search(
-            query: query,
-            embedding: queryEmbedding,
-            embeddingModelID: profile?.modelID,
-            profileID: queryEmbedding == nil ? nil : profile?.id,
-            limit: limit
-        ) else {
+        let results: [VaultSearchResult]
+        do {
+            results = try await vaultRepository.search(
+                query: query,
+                embedding: queryEmbedding,
+                embeddingModelID: profile?.modelID,
+                profileID: queryEmbedding == nil ? nil : profile?.id,
+                limit: limit
+            )
+        } catch {
+            runtimeMetrics.recordRecoverableIssue("vault_retrieval_search", message: error.localizedDescription)
             return nil
         }
 
         let elapsed = Date().timeIntervalSince(startedAt)
         runtimeMetrics.recordVaultRetrieval(resultCount: results.count, elapsedSeconds: elapsed)
-        try? await vaultRepository.recordRetrievalEvent(
-            VaultRetrievalEvent(
-                profileID: queryEmbedding == nil ? nil : profile?.id,
-                providerID: profile?.providerID,
-                queryHash: StableVaultRetrievalHash.hexDigest(for: query),
-                usedVectorSearch: queryEmbedding != nil,
-                resultCount: results.count,
-                elapsedSeconds: elapsed
+        do {
+            try await vaultRepository.recordRetrievalEvent(
+                VaultRetrievalEvent(
+                    profileID: queryEmbedding == nil ? nil : profile?.id,
+                    providerID: profile?.providerID,
+                    queryHash: StableVaultRetrievalHash.hexDigest(for: query),
+                    usedVectorSearch: queryEmbedding != nil,
+                    resultCount: results.count,
+                    elapsedSeconds: elapsed
+                )
             )
-        )
+        } catch {
+            runtimeMetrics.recordRecoverableIssue("vault_retrieval_event", message: error.localizedDescription)
+        }
         guard !results.isEmpty else { return nil }
 
         let context = results.enumerated().map { index, result in

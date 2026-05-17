@@ -7,7 +7,7 @@
       buildImplicitDependencies = "YES">
       <BuildActionEntries>
          <BuildActionEntry
-            buildForTesting = "NO"
+            buildForTesting = "YES"
             buildForRunning = "YES"
             buildForProfiling = "YES"
             buildForArchiving = "YES"
@@ -35,7 +35,7 @@
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
-            buildForTesting = "NO"
+            buildForTesting = "YES"
             buildForRunning = "YES"
             buildForProfiling = "YES"
             buildForArchiving = "YES"
@@ -59,9 +59,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "9C0C5645F73C831E8B61CB9F"
-            BuildableName = "PinesTests.xctest"
-            BlueprintName = "PinesTests"
+            BlueprintIdentifier = "5ABD42396BC25E46F453A6A1"
+            BuildableName = "pines.app"
+            BlueprintName = "Pines"
             ReferencedContainer = "container:Pines.xcodeproj">
          </BuildableReference>
       </MacroExpansion>

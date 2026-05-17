@@ -1,6 +1,9 @@
 import CryptoKit
 import Foundation
+import OSLog
 import PinesCore
+
+private let modelLifecycleLogger = Logger(subsystem: "com.schtack.pines", category: "ModelLifecycle")
 
 private struct ModelDownloadProgressWriteGate {
     private static let minimumInterval: TimeInterval = 1.25
@@ -155,7 +158,11 @@ struct ModelLifecycleService: Sendable {
         }
 
         for repository in interruptedRepositories.values {
-            try? Self.removeStagingDirectory(for: repository)
+            do {
+                try Self.removeStagingDirectory(for: repository)
+            } catch {
+                modelLifecycleLogger.warning("Failed to remove interrupted staging directory for \(repository, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
             try await installRepository.deleteInstall(repository: repository)
             try await auditRepository?.append(
                 AuditEvent(category: .modelDownload, summary: "Interrupted \(repository)", modelID: ModelID(rawValue: repository))
@@ -173,7 +180,7 @@ struct ModelLifecycleService: Sendable {
                 if let localURL = existing.localURL,
                    let resolvedURL = Self.resolvedModelDirectory(from: localURL, modalities: existing.modalities) {
                     if mode == .full, !existing.modalities.contains(.vision) {
-                        try? Self.removeInstalledDirectory(for: repository, localURL: existing.localURL)
+                        try Self.removeInstalledDirectory(for: repository, localURL: existing.localURL)
                     } else {
                         if resolvedURL != localURL {
                             var repaired = existing
@@ -183,7 +190,7 @@ struct ModelLifecycleService: Sendable {
                         return
                     }
                 }
-                try? Self.removeInstalledDirectory(for: repository, localURL: existing.localURL)
+                try Self.removeInstalledDirectory(for: repository, localURL: existing.localURL)
             case .downloading, .remote, .failed, .unsupported:
                 break
             }
@@ -209,13 +216,17 @@ struct ModelLifecycleService: Sendable {
             }
         )
         for file in files where resolvedFileSizes[file.path] == nil {
-            if let size = try? await Self.remoteFileSize(
-                repository: repository,
-                revision: revision,
-                file: file,
-                accessToken: accessToken
-            ) {
-                resolvedFileSizes[file.path] = size
+            do {
+                if let size = try await Self.remoteFileSize(
+                    repository: repository,
+                    revision: revision,
+                    file: file,
+                    accessToken: accessToken
+                ) {
+                    resolvedFileSizes[file.path] = size
+                }
+            } catch {
+                modelLifecycleLogger.warning("Failed to resolve remote file size for \(repository, privacy: .public)/\(file.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
         let totalBytes = Self.totalDownloadBytes(
@@ -274,7 +285,7 @@ struct ModelLifecycleService: Sendable {
                     withIntermediateDirectories: true
                 )
                 if try Self.isUsableDownloadedFile(file, at: destination) {
-                    received += Self.byteCount(for: destination)
+                    received += try Self.byteCount(for: destination)
                     continue
                 }
 
@@ -729,8 +740,8 @@ struct ModelLifecycleService: Sendable {
         return total
     }
 
-    private static func byteCount(for url: URL) -> Int64 {
-        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+    private static func byteCount(for url: URL) throws -> Int64 {
+        Int64(try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
     }
 
     private static func expectedFileSize(
@@ -758,9 +769,9 @@ struct ModelLifecycleService: Sendable {
             return try sha256Hex(url: destination).caseInsensitiveCompare(oid) == .orderedSame
         }
         if let size = file.size {
-            return byteCount(for: destination) == size
+            return try byteCount(for: destination) == size
         }
-        return byteCount(for: destination) > 0
+        return try byteCount(for: destination) > 0
     }
 
     private static func validateAvailableDiskSpace(for estimatedBytes: Int64) throws {
@@ -807,7 +818,13 @@ struct ModelLifecycleService: Sendable {
 
     private static func sha256Hex(url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
+        defer {
+            do {
+                try handle.close()
+            } catch {
+                modelLifecycleLogger.warning("Failed to close model file handle for \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
 
         var hasher = SHA256()
         while true {

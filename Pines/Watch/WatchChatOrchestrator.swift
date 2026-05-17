@@ -1,10 +1,12 @@
 import Foundation
+import OSLog
 import PinesCore
 import PinesWatchSupport
 
 struct WatchChatOrchestrator {
     let services: PinesAppServices
     let approvalHandler: @Sendable (ToolApprovalRequest) async -> ToolApprovalStatus
+    private static let logger = Logger(subsystem: "com.schtack.pines", category: "watch-chat")
 
     init(
         services: PinesAppServices,
@@ -188,7 +190,13 @@ struct WatchChatOrchestrator {
 
                     // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
                     let availableTools: [AnyToolSpec] = []
-                    let settings = try? await services.settingsRepository?.loadSettings()
+                    let settings: AppSettingsSnapshot?
+                    do {
+                        settings = try await services.settingsRepository?.loadSettings()
+                    } catch {
+                        settings = nil
+                        Self.logger.error("watch_chat_settings_load_failed error=\(error.localizedDescription, privacy: .public)")
+                    }
                     let request = ChatRequest(
                         modelID: providerSelection.modelID,
                         messages: messages,
@@ -390,12 +398,16 @@ struct WatchChatOrchestrator {
                 } catch {
                     if let repository = services.conversationRepository,
                        let assistantMessage {
-                        try? await repository.updateMessage(
-                            id: assistantMessage.id,
-                            content: error.localizedDescription,
-                            status: .failed,
-                            tokenCount: tokenCount
-                        )
+                        do {
+                            try await repository.updateMessage(
+                                id: assistantMessage.id,
+                                content: error.localizedDescription,
+                                status: .failed,
+                                tokenCount: tokenCount
+                            )
+                        } catch {
+                            Self.logger.error("watch_chat_failed_message_persist_failed message=\(assistantMessage.id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                        }
                     }
                     if let conversationID {
                         continuation.yield(
@@ -423,16 +435,26 @@ struct WatchChatOrchestrator {
     private func defaultModelID() async throws -> ModelID? {
         let installs = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
         let installedTextModels = installs.filter { $0.state == .installed && $0.modalities.contains(.text) }
-        if let settings = try? await services.settingsRepository?.loadSettings(),
-           let modelID = settings.defaultModelID,
-           installedTextModels.contains(where: { $0.modelID == modelID }) {
-            return modelID
+        do {
+            if let settings = try await services.settingsRepository?.loadSettings(),
+               let modelID = settings.defaultModelID,
+               installedTextModels.contains(where: { $0.modelID == modelID }) {
+                return modelID
+            }
+        } catch {
+            Self.logger.error("watch_default_model_settings_load_failed error=\(error.localizedDescription, privacy: .public)")
         }
         return installedTextModels.first?.modelID
     }
 
     private func selectProvider(conversationID: UUID) async throws -> ProviderSelection {
-        let settings = try? await services.settingsRepository?.loadSettings()
+        let settings: AppSettingsSnapshot?
+        do {
+            settings = try await services.settingsRepository?.loadSettings()
+        } catch {
+            settings = nil
+            Self.logger.error("watch_select_provider_settings_load_failed error=\(error.localizedDescription, privacy: .public)")
+        }
         let conversations = try await services.conversationRepository?.listConversations() ?? []
         let configuredModelID = settings?.defaultModelID
             ?? conversations.first { $0.id == conversationID }?.defaultModelID
@@ -579,12 +601,16 @@ struct WatchChatOrchestrator {
             return
         }
 
-        try? await repository.updateMessage(
-            id: assistantMessage.id,
-            content: accumulated,
-            status: .cancelled,
-            tokenCount: tokenCount
-        )
+        do {
+            try await repository.updateMessage(
+                id: assistantMessage.id,
+                content: accumulated,
+                status: .cancelled,
+                tokenCount: tokenCount
+            )
+        } catch {
+            Self.logger.error("watch_chat_cancel_message_persist_failed message=\(assistantMessage.id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+        }
 
         _ = selectedModelID
         _ = selectedProviderID

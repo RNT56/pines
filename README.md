@@ -88,7 +88,7 @@ The repository keeps `PinesCoreTestRunner` as a framework-light smoke runner for
 
 ## CI And Releases
 
-CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, builds the Swift package with automatic package resolution disabled, runs `swift test`, runs `PinesCoreTestRunner`, regenerates the Xcode project, checks generated-project drift, resolves Xcode package dependencies, and builds the iOS app without signing on the `macos-26` runner.
+CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, including privacy-manifest linting, builds the Swift package with automatic package resolution disabled, runs `swift test`, runs `PinesCoreTestRunner`, regenerates the Xcode project, checks generated-project drift, resolves Xcode package dependencies, builds the iOS app without signing, builds simulator smoke tests, and runs those tests when an iPhone simulator is available on the `macos-26` runner.
 
 GitHub Releases are tag-driven. Push a semantic tag such as `v0.1.0` to run release validation and publish a source/developer-preview release with checksums:
 

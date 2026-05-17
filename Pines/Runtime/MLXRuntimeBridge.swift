@@ -23,7 +23,7 @@ import MLXLMCommon
 import Tokenizers
 #endif
 
-struct MLXRuntimeBridge {
+struct MLXRuntimeBridge: Sendable {
     private let state = MLXRuntimeState()
     private let deviceMonitor = DeviceRuntimeMonitor()
 

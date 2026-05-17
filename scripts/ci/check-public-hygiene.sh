@@ -13,6 +13,7 @@ grep -q "PolyForm-Noncommercial-1.0.0" README.md
 grep -q "PolyForm-Noncommercial-1.0.0" CONTRIBUTING.md
 bash scripts/ci/check-third-party-notices.sh
 bash scripts/ci/check-mlx-package-pins.sh
+bash scripts/ci/check-privacy-manifest.sh
 
 echo "Checking tracked files for common secret patterns..."
 github_oauth="gh""o_"

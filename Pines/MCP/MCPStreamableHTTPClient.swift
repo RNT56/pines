@@ -1,5 +1,8 @@
 import Foundation
+import OSLog
 import PinesCore
+
+private let mcpTransportLogger = Logger(subsystem: "com.schtack.pines", category: "mcp-transport")
 
 enum MCPTransportError: Error, LocalizedError {
     case insecureHTTPNotAllowed(URL)
@@ -243,7 +246,11 @@ final class MCPStreamableHTTPClient: Sendable {
         var request = URLRequest(url: server.endpointURL)
         request.httpMethod = "DELETE"
         await applyBaseHeaders(to: &request)
-        _ = try? await urlSession.data(for: request)
+        do {
+            _ = try await urlSession.data(for: request)
+        } catch {
+            mcpTransportLogger.warning("mcp_session_terminate_failed server=\(server.id.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+        }
         await state.setSessionID(nil)
     }
 
@@ -501,8 +508,13 @@ final class MCPStreamableHTTPClient: Sendable {
             }.map { String(describing: $0.value) }
         guard let header else { return nil }
         let pattern = #"resource_metadata\s*=\s*"([^"]+)""#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-              let match = regex.firstMatch(in: header, range: NSRange(header.startIndex..., in: header)),
+        let regex: NSRegularExpression
+        do {
+            regex = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        } catch {
+            return nil
+        }
+        guard let match = regex.firstMatch(in: header, range: NSRange(header.startIndex..., in: header)),
               let range = Range(match.range(at: 1), in: header)
         else {
             return nil
@@ -543,9 +555,20 @@ final class MCPStreamableHTTPClient: Sendable {
 
     private static func event(fromSSEDataLines dataLines: [String], serverID: MCPServerID) throws -> MCPServerEvent? {
         guard !dataLines.isEmpty,
-              let data = dataLines.joined(separator: "\n").data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              object["jsonrpc"] as? String == "2.0",
+              let data = dataLines.joined(separator: "\n").data(using: .utf8)
+        else {
+            return nil
+        }
+        let object: [String: Any]
+        do {
+            guard let parsedObject = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            object = parsedObject
+        } catch {
+            return nil
+        }
+        guard object["jsonrpc"] as? String == "2.0",
               let method = object["method"] as? String
         else {
             return nil

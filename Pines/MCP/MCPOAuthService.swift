@@ -1,15 +1,27 @@
 import AuthenticationServices
 import CryptoKit
 import Foundation
+import OSLog
 import PinesCore
 import Security
 import UIKit
 
+private let mcpOAuthLogger = Logger(subsystem: "com.schtack.pines", category: "mcp-oauth")
+
 @MainActor
 final class MCPOAuthPresentationContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
     var activeSession: ASWebAuthenticationSession?
+    private let presentationAnchor: ASPresentationAnchor
+
+    init(presentationAnchor: ASPresentationAnchor) {
+        self.presentationAnchor = presentationAnchor
+    }
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        presentationAnchor
+    }
+
+    static func presentationAnchorIfAvailable() -> ASPresentationAnchor? {
         let scenes = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
         if let keyWindow = scenes.flatMap(\.windows).first(where: \.isKeyWindow) {
@@ -18,7 +30,7 @@ final class MCPOAuthPresentationContextProvider: NSObject, ASWebAuthenticationPr
         if let scene = scenes.first {
             return ASPresentationAnchor(windowScene: scene)
         }
-        preconditionFailure("OAuth presentation requires an active UIWindowScene.")
+        return nil
     }
 }
 
@@ -28,7 +40,6 @@ struct MCPOAuthService {
 
     let secretStore: any SecretStore
     let auditRepository: (any AuditEventRepository)?
-    private let presentationContextProvider = MCPOAuthPresentationContextProvider()
 
     func discover(server: MCPServerConfiguration) async throws -> MCPDiscoveredOAuthConfiguration {
         let discovery = MCPOAuthDiscoveryService(urlSession: .shared)
@@ -105,7 +116,12 @@ struct MCPOAuthService {
     }
 
     private func authenticate(url: URL) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
+        guard let presentationAnchor = MCPOAuthPresentationContextProvider.presentationAnchorIfAvailable() else {
+            throw InferenceError.invalidRequest("OAuth authentication requires Pines to have an active foreground window. Bring the app to the foreground and try again.")
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let presentationContextProvider = MCPOAuthPresentationContextProvider(presentationAnchor: presentationAnchor)
             let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "pines") { callbackURL, error in
                 Task { @MainActor in
                     presentationContextProvider.activeSession = nil
@@ -231,11 +247,14 @@ struct MCPOAuthDiscoveryService {
                 "clientInfo": ["name": "Pines", "version": "0.1.0"],
             ],
         ])
-        if let (_, response) = try? await urlSession.data(for: request),
-           let metadata = MCPStreamableHTTPClient.resourceMetadataURL(from: response),
-           let metadataURL = URL(string: metadata)
-        {
-            return metadataURL
+        do {
+            let (_, response) = try await urlSession.data(for: request)
+            if let metadata = MCPStreamableHTTPClient.resourceMetadataURL(from: response),
+               let metadataURL = URL(string: metadata) {
+                return metadataURL
+            }
+        } catch {
+            mcpOAuthLogger.warning("oauth_resource_metadata_probe_failed server=\(server.id.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
         }
 
         guard var components = URLComponents(url: server.endpointURL, resolvingAgainstBaseURL: false) else {
@@ -259,14 +278,28 @@ struct MCPOAuthDiscoveryService {
 
     private func fetchAuthorizationServerMetadata(issuer: URL) async throws -> AuthorizationServerMetadata {
         let candidates = authorizationMetadataCandidates(for: issuer)
+        var lastError: Error?
         for candidate in candidates {
-            if let (data, response) = try? await urlSession.data(from: candidate),
-               let http = response as? HTTPURLResponse,
-               (200..<300).contains(http.statusCode),
-               let metadata = try? JSONDecoder().decode(AuthorizationServerMetadata.self, from: data)
-            {
-                return metadata
+            do {
+                let (data, response) = try await urlSession.data(from: candidate)
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode)
+                else {
+                    continue
+                }
+                do {
+                    return try JSONDecoder().decode(AuthorizationServerMetadata.self, from: data)
+                } catch {
+                    lastError = error
+                    mcpOAuthLogger.warning("oauth_authorization_metadata_decode_failed url=\(candidate.absoluteString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                }
+            } catch {
+                lastError = error
+                mcpOAuthLogger.warning("oauth_authorization_metadata_fetch_failed url=\(candidate.absoluteString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
             }
+        }
+        if let lastError {
+            throw InferenceError.invalidRequest("Could not fetch OAuth authorization server metadata: \(lastError.localizedDescription)")
         }
         throw InferenceError.invalidRequest("Could not fetch OAuth authorization server metadata.")
     }
