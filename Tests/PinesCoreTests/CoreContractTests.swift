@@ -251,7 +251,7 @@ struct CoreContractTests {
         let request = ChatRequest(
             modelID: "gpt-5.5",
             messages: [ChatMessage(role: .user, content: "Hello")],
-            sampling: ChatSampling(maxTokens: 256, temperature: 0.6, topP: 1)
+            sampling: ChatSampling(maxTokens: 256, temperature: 0.6, topP: 1, openAIReasoningEffort: .high, openAITextVerbosity: .medium)
         )
 
         let urlRequest = try OpenAICompatibleRequestBuilder().chatRequest(
@@ -265,9 +265,18 @@ struct CoreContractTests {
         #expect(urlRequest.url?.absoluteString == "https://api.openai.com/v1/chat/completions")
         #expect(json["max_completion_tokens"] as? Int == 16_384)
         #expect(json["max_tokens"] == nil)
-        #expect(json["reasoning_effort"] as? String == "low")
+        #expect(json["reasoning_effort"] as? String == "high")
+        #expect(json["verbosity"] as? String == "medium")
         #expect(json["temperature"] == nil)
         #expect(json["top_p"] == nil)
+    }
+
+    @Test
+    func openAIReasoningEffortNormalizesModelSpecificValues() {
+        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.5", requested: .xhigh) == .xhigh)
+        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.5-pro", requested: .low) == .high)
+        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5", requested: .none) == .low)
+        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.1", requested: .none) == .none)
     }
 
     @Test
@@ -512,6 +521,84 @@ struct CoreContractTests {
     }
 
     @Test
+    func openAIResponsesParserAcceptsTextObjectStreamingVariants() {
+        var parser = CloudProviderStreamParser()
+        let payloads = [
+            #"{"type":"response.output_text.delta","delta":{"text":"hel"}}"#,
+            #"{"type":"response.output_text.delta","delta":"lo"}"#,
+            #"{"type":"response.completed","response":{"id":"resp_2","status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":2}}}"#,
+        ]
+
+        var events = [InferenceStreamEvent]()
+        var finish: InferenceFinish?
+        for payload in payloads {
+            let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+            events.append(contentsOf: output.events)
+            finish = output.finish ?? finish
+        }
+
+        #expect(events.contains(.token(TokenDelta(kind: .token, text: "hel", tokenCount: 1))))
+        #expect(events.contains(.token(TokenDelta(kind: .token, text: "lo", tokenCount: 1))))
+        #expect(events.contains(.metrics(InferenceMetrics(promptTokens: 3, completionTokens: 2))))
+        #expect(finish?.reason == .stop)
+        #expect(finish?.message == nil)
+    }
+
+    @Test
+    func openAIResponsesParserReadsFinalOutputTextFallbacks() {
+        var parser = CloudProviderStreamParser()
+        let payload = #"""
+        {
+          "type": "response.completed",
+          "response": {
+            "id": "resp_3",
+            "status": "completed",
+            "output_text": "top level",
+            "output": [
+              {
+                "type": "message",
+                "content": [
+                  { "type": "output_text", "text": { "value": "nested" } }
+                ]
+              }
+            ]
+          }
+        }
+        """#
+        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+
+        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "top level", tokenCount: 1))))
+        #expect(output.finish?.reason == .stop)
+        #expect(output.finish?.message == nil)
+    }
+
+    @Test
+    func openAIResponsesParserReadsFunctionCallDoneItemAndStoresOutputItems() {
+        var parser = CloudProviderStreamParser()
+        let payloads = [
+            #"{"type":"response.function_call_arguments.done","output_index":0,"item":{"id":"fc_1","call_id":"call_1","type":"function_call","name":"lookup","arguments":"{\"query\":\"pines\"}"}}"#,
+            #"{"type":"response.completed","response":{"id":"resp_4","status":"completed","output":[{"id":"fc_1","call_id":"call_1","type":"function_call","name":"lookup","arguments":"{\"query\":\"pines\"}","status":"completed"}]}}"#,
+        ]
+
+        var events = [InferenceStreamEvent]()
+        var finish: InferenceFinish?
+        for payload in payloads {
+            let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+            events.append(contentsOf: output.events)
+            finish = output.finish ?? finish
+        }
+
+        let toolCall = events.compactMap { event -> ToolCallDelta? in
+            if case let .toolCall(toolCall) = event { return toolCall }
+            return nil
+        }.first
+        #expect(toolCall?.id == "call_1")
+        #expect(toolCall?.name == "lookup")
+        #expect(toolCall?.argumentsFragment == #"{"query":"pines"}"#)
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIOutputItemsJSON]?.contains(#""function_call""#) == true)
+    }
+
+    @Test
     func appSettingsDecodesGenerationDefaultsAndClampsLimits() throws {
         let legacyJSON = #"{"executionMode":"cloudAllowed","themeTemplate":"graphite","interfaceMode":"dark"}"#
         let decoded = try JSONDecoder().decode(AppSettingsSnapshot.self, from: Data(legacyJSON.utf8))
@@ -528,6 +615,13 @@ struct CoreContractTests {
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
         #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
         #expect(clamped.localMaxContextTokens == AppSettingsSnapshot.minLocalContextTokens)
+
+        let legacySampling = try JSONDecoder().decode(ChatSampling.self, from: Data(#"{"maxTokens":256,"temperature":0.2}"#.utf8))
+        #expect(legacySampling.maxTokens == 256)
+        #expect(legacySampling.temperature == 0.2)
+        #expect(legacySampling.openAIReasoningEffort == .low)
+        #expect(legacySampling.openAITextVerbosity == .low)
+        #expect(legacySampling.openAIResponseStorage == .stateful)
     }
 
     @Test

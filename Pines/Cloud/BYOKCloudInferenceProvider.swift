@@ -344,7 +344,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             body["temperature"] = chatRequest.sampling.temperature
             body["top_p"] = chatRequest.sampling.topP
         } else {
-            body["reasoning_effort"] = "low"
+            body["reasoning_effort"] = CloudProviderModelEligibility.openAIReasoningEffort(
+                for: chatRequest.modelID,
+                requested: chatRequest.sampling.openAIReasoningEffort
+            ).rawValue
+            body["verbosity"] = chatRequest.sampling.openAITextVerbosity.rawValue
         }
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
             body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.openAIFunctionToolObject()) }
@@ -365,16 +369,31 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         addOpenAIClientRequestID(to: &request)
 
         let payload = try Self.openAIResponsesPayload(from: chatRequest.messages)
+        let usesReasoningControls = Self.isOpenAIReasoningModelID(chatRequest.modelID)
         var body: [String: Any] = [
             "model": chatRequest.modelID.rawValue,
             "stream": true,
-            "store": true,
+            "store": chatRequest.sampling.openAIResponseStorage == .stateful,
             "input": payload.input,
-            "max_output_tokens": openAICompletionTokenLimit(for: chatRequest, usesReasoningParameters: true),
-            "reasoning": ["effort": "low"],
-            "text": ["verbosity": "low"],
+            "max_output_tokens": openAICompletionTokenLimit(for: chatRequest, usesReasoningParameters: usesReasoningControls),
+            "truncation": "auto",
         ]
-        if let previousResponseID = payload.previousResponseID {
+        if usesReasoningControls {
+            body["reasoning"] = [
+                "effort": CloudProviderModelEligibility.openAIReasoningEffort(
+                    for: chatRequest.modelID,
+                    requested: chatRequest.sampling.openAIReasoningEffort
+                ).rawValue,
+            ]
+            body["text"] = ["verbosity": chatRequest.sampling.openAITextVerbosity.rawValue]
+            if chatRequest.sampling.openAIResponseStorage == .statelessEncrypted {
+                body["include"] = ["reasoning.encrypted_content"]
+            }
+        } else {
+            body["temperature"] = chatRequest.sampling.temperature
+            body["top_p"] = chatRequest.sampling.topP
+        }
+        if chatRequest.sampling.openAIResponseStorage == .stateful, let previousResponseID = payload.previousResponseID {
             body["previous_response_id"] = previousResponseID
         }
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
@@ -472,7 +491,16 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     private func usesOpenAIResponsesAPI(chatRequest: ChatRequest) -> Bool {
-        usesOfficialOpenAIAPI
+        guard usesOfficialOpenAIAPI else { return false }
+        if Self.isOpenAIReasoningModelID(chatRequest.modelID) {
+            return true
+        }
+        return chatRequest.messages.contains { message in
+            !message.attachments.isEmpty
+                || !message.toolCalls.isEmpty
+                || message.role == .tool
+                || message.providerMetadata[Self.openAIResponseIDMetadataKey]?.isEmpty == false
+        }
     }
 
     private func shouldEnableAnthropicPromptCaching(for chatRequest: ChatRequest) -> Bool {
@@ -761,6 +789,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 ])
                 return
             }
+            if message.role == .assistant,
+               let outputItems = openAIStoredOutputItems(from: message) {
+                input.append(contentsOf: outputItems)
+                return
+            }
             if message.role == .assistant, !message.toolCalls.isEmpty {
                 for toolCall in message.toolCalls {
                     input.append([
@@ -787,6 +820,17 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             instructions: instructions,
             previousResponseID: previousResponse?.element.providerMetadata[openAIResponseIDMetadataKey]
         )
+    }
+
+    private static func openAIStoredOutputItems(from message: ChatMessage) -> [[String: Any]]? {
+        guard let raw = message.providerMetadata[CloudProviderMetadataKeys.openAIOutputItemsJSON],
+              let data = raw.data(using: .utf8),
+              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              !items.isEmpty
+        else {
+            return nil
+        }
+        return items
     }
 
     private static func openAIResponsesMessageContent(from message: ChatMessage) throws -> [[String: Any]] {

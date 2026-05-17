@@ -673,6 +673,33 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private static func providerReadyMessages(
+        _ messages: [ChatMessage],
+        requiredAttachmentMessageIDs: Set<UUID>
+    ) throws -> [ChatMessage] {
+        try messages.map { message in
+            guard !message.attachments.isEmpty else { return message }
+            var next = message
+            if requiredAttachmentMessageIDs.contains(message.id) {
+                for attachment in message.attachments {
+                    try validateAttachmentFileIsAvailable(attachment)
+                }
+            } else {
+                next.attachments = []
+            }
+            return next
+        }
+    }
+
+    private static func validateAttachmentFileIsAvailable(_ attachment: ChatAttachment) throws {
+        guard let localURL = attachment.localURL, localURL.isFileURL else {
+            throw InferenceError.invalidRequest("Attachment \(attachment.fileName) is missing its local file. Remove it and add it again.")
+        }
+        guard FileManager.default.fileExists(atPath: localURL.path) else {
+            throw InferenceError.invalidRequest("Attachment \(attachment.fileName) is no longer available. Remove it and add it again.")
+        }
+    }
+
     func setThreadArchived(_ thread: PinesThreadPreview, archived: Bool, services: PinesAppServices) async {
         do {
             guard let repository = services.conversationRepository else {
@@ -761,7 +788,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
             // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
             let availableTools: [AnyToolSpec] = []
-            let messages = try await repository.messages(in: conversationID)
+            let messages = try Self.providerReadyMessages(
+                try await repository.messages(in: conversationID),
+                requiredAttachmentMessageIDs: [userMessage.id]
+            )
             let vaultContext = userContent.isEmpty ? nil : await vaultContextMessage(for: userContent, services: services)
             let mcpContext = await mcpResourceContextMessages(services: services)
             let routeRequiredInputs = ProviderInputRequirements(messages: messages + mcpContext)

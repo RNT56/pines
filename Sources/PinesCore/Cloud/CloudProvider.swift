@@ -290,6 +290,21 @@ public enum CloudProviderModelEligibility: Sendable {
         guard id.hasPrefix("o") else { return false }
         return id.dropFirst().first?.isNumber == true
     }
+
+    public static func openAIReasoningEffort(for modelID: ModelID, requested: OpenAIReasoningEffort) -> OpenAIReasoningEffort {
+        let id = modelID.rawValue.lowercased()
+        let modelName = id
+            .split(separator: "/")
+            .last
+            .map(String.init) ?? id
+        if modelName.contains("-pro") {
+            return .high
+        }
+        if requested == .none, !(modelName.hasPrefix("gpt-5.1") || modelName.hasPrefix("gpt-5.5")) {
+            return .low
+        }
+        return requested
+    }
 }
 
 public struct OpenAICompatibleRequestBuilder: Sendable {
@@ -324,7 +339,11 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
             body["temperature"] = request.sampling.temperature
             body["top_p"] = request.sampling.topP
         } else {
-            body["reasoning_effort"] = "low"
+            body["reasoning_effort"] = CloudProviderModelEligibility.openAIReasoningEffort(
+                for: request.modelID,
+                requested: request.sampling.openAIReasoningEffort
+            ).rawValue
+            body["verbosity"] = request.sampling.openAITextVerbosity.rawValue
         }
         let advertisedTools = !toolsJSON.isEmpty
             ? toolsJSON

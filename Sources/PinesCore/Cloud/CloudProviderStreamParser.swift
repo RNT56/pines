@@ -4,6 +4,7 @@ public enum CloudProviderMetadataKeys {
     public static let openAIResponseID = "openai.response_id"
     public static let openAIRequestID = "openai.request_id"
     public static let openAIClientRequestID = "openai.client_request_id"
+    public static let openAIOutputItemsJSON = "openai.output_items_json"
     public static let anthropicMessageID = "anthropic.message_id"
     public static let anthropicRequestID = "anthropic.request_id"
     public static let anthropicThinkingContentJSON = "anthropic.thinking_content_json"
@@ -434,13 +435,13 @@ public struct CloudProviderStreamParser {
                 }
             }
         case "response.output_text.delta":
-            if let delta = json["delta"] as? String, !delta.isEmpty {
+            if let delta = Self.textValue(from: json["delta"]), !delta.isEmpty {
                 state.openAIResponsesTextEmitted = true
                 events.append(.token(TokenDelta(kind: .token, text: delta, tokenCount: 1)))
             }
         case "response.output_text.done":
             if !state.openAIResponsesTextEmitted,
-               let text = json["text"] as? String,
+               let text = Self.textValue(from: json["text"]),
                !text.isEmpty {
                 state.openAIResponsesTextEmitted = true
                 events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
@@ -448,7 +449,7 @@ public struct CloudProviderStreamParser {
         case "response.content_part.done":
             if !state.openAIResponsesTextEmitted,
                let part = json["part"] as? [String: Any],
-               let text = part["text"] as? String,
+               let text = Self.openAIResponsesOutputText(fromContentPart: part),
                !text.isEmpty {
                 state.openAIResponsesTextEmitted = true
                 events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
@@ -462,13 +463,13 @@ public struct CloudProviderStreamParser {
                 events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
             }
         case "response.refusal.delta":
-            if let delta = json["delta"] as? String, !delta.isEmpty {
+            if let delta = Self.textValue(from: json["delta"]), !delta.isEmpty {
                 state.openAIResponsesTextEmitted = true
                 events.append(.token(TokenDelta(kind: .token, text: delta, tokenCount: 1)))
             }
         case "response.refusal.done":
             if !state.openAIResponsesTextEmitted,
-               let refusal = json["refusal"] as? String,
+               let refusal = Self.textValue(from: json["refusal"]),
                !refusal.isEmpty {
                 state.openAIResponsesTextEmitted = true
                 events.append(.token(TokenDelta(kind: .token, text: refusal, tokenCount: 1)))
@@ -483,13 +484,20 @@ public struct CloudProviderStreamParser {
             }
         case "response.function_call_arguments.done":
             let index = json["output_index"] as? Int ?? 0
+            let item = json["item"] as? [String: Any]
             if let itemID = json["item_id"] as? String {
+                state.openAIToolIDs[index] = state.openAIToolIDs[index] ?? itemID
+            } else if let itemID = (item?["call_id"] as? String) ?? (item?["id"] as? String) {
                 state.openAIToolIDs[index] = state.openAIToolIDs[index] ?? itemID
             }
             if let name = json["name"] as? String {
                 state.openAIToolNames[index] = name
+            } else if let name = item?["name"] as? String {
+                state.openAIToolNames[index] = name
             }
             if let arguments = json["arguments"] as? String {
+                state.openAIArguments[index] = arguments
+            } else if let arguments = item?["arguments"] as? String {
                 state.openAIArguments[index] = arguments
             }
             if let name = state.openAIToolNames[index] {
@@ -589,6 +597,9 @@ public struct CloudProviderStreamParser {
     }
 
     private static func openAIResponsesOutputText(from response: [String: Any]) -> String? {
+        if let outputText = textValue(from: response["output_text"]), !outputText.isEmpty {
+            return outputText
+        }
         guard let output = response["output"] as? [[String: Any]] else { return nil }
         let text = output.compactMap(openAIResponsesOutputText(fromOutputItem:)).joined()
         return text.isEmpty ? nil : text
@@ -608,7 +619,20 @@ public struct CloudProviderStreamParser {
         guard type == nil || type == "output_text" || type == "text" || type == "refusal" else {
             return nil
         }
-        return (part["text"] as? String) ?? (part["refusal"] as? String)
+        return textValue(from: part["text"]) ?? textValue(from: part["refusal"])
+    }
+
+    private static func textValue(from value: Any?) -> String? {
+        if let text = value as? String {
+            return text
+        }
+        if let object = value as? [String: Any] {
+            return (object["text"] as? String)
+                ?? (object["value"] as? String)
+                ?? (object["content"] as? String)
+                ?? (object["refusal"] as? String)
+        }
+        return nil
     }
 
     private static func openAIChatCompletionText(from value: Any?) -> String? {
@@ -831,6 +855,13 @@ public struct CloudProviderStreamState {
         }
         if let requestID = response["_request_id"] as? String, !requestID.isEmpty {
             openAIProviderMetadata[CloudProviderMetadataKeys.openAIRequestID] = requestID
+        }
+        if let output = response["output"] as? [[String: Any]],
+           JSONSerialization.isValidJSONObject(output),
+           let data = try? JSONSerialization.data(withJSONObject: output),
+           let json = String(data: data, encoding: .utf8),
+           !json.isEmpty {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIOutputItemsJSON] = json
         }
     }
 

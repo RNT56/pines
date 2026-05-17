@@ -319,6 +319,26 @@ public extension ChatAttachment {
     }
 }
 
+public enum OpenAIReasoningEffort: String, Hashable, Codable, Sendable {
+    case none
+    case minimal
+    case low
+    case medium
+    case high
+    case xhigh
+}
+
+public enum OpenAITextVerbosity: String, Hashable, Codable, Sendable {
+    case low
+    case medium
+    case high
+}
+
+public enum OpenAIResponseStorage: String, Hashable, Codable, Sendable {
+    case stateful
+    case statelessEncrypted
+}
+
 public struct ChatSampling: Hashable, Codable, Sendable {
     public var maxTokens: Int?
     public var temperature: Float
@@ -326,6 +346,21 @@ public struct ChatSampling: Hashable, Codable, Sendable {
     public var topK: Int
     public var minP: Float
     public var repetitionPenalty: Float?
+    public var openAIReasoningEffort: OpenAIReasoningEffort
+    public var openAITextVerbosity: OpenAITextVerbosity
+    public var openAIResponseStorage: OpenAIResponseStorage
+
+    private enum CodingKeys: String, CodingKey {
+        case maxTokens
+        case temperature
+        case topP
+        case topK
+        case minP
+        case repetitionPenalty
+        case openAIReasoningEffort
+        case openAITextVerbosity
+        case openAIResponseStorage
+    }
 
     public init(
         maxTokens: Int? = 1024,
@@ -333,7 +368,10 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         topP: Float = 1,
         topK: Int = 0,
         minP: Float = 0,
-        repetitionPenalty: Float? = nil
+        repetitionPenalty: Float? = nil,
+        openAIReasoningEffort: OpenAIReasoningEffort = .low,
+        openAITextVerbosity: OpenAITextVerbosity = .low,
+        openAIResponseStorage: OpenAIResponseStorage = .stateful
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
@@ -341,6 +379,24 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         self.topK = topK
         self.minP = minP
         self.repetitionPenalty = repetitionPenalty
+        self.openAIReasoningEffort = openAIReasoningEffort
+        self.openAITextVerbosity = openAITextVerbosity
+        self.openAIResponseStorage = openAIResponseStorage
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        maxTokens = container.contains(.maxTokens)
+            ? try container.decodeIfPresent(Int.self, forKey: .maxTokens)
+            : 1024
+        temperature = try container.decodeIfPresent(Float.self, forKey: .temperature) ?? 0.6
+        topP = try container.decodeIfPresent(Float.self, forKey: .topP) ?? 1
+        topK = try container.decodeIfPresent(Int.self, forKey: .topK) ?? 0
+        minP = try container.decodeIfPresent(Float.self, forKey: .minP) ?? 0
+        repetitionPenalty = try container.decodeIfPresent(Float.self, forKey: .repetitionPenalty)
+        openAIReasoningEffort = try container.decodeIfPresent(OpenAIReasoningEffort.self, forKey: .openAIReasoningEffort) ?? .low
+        openAITextVerbosity = try container.decodeIfPresent(OpenAITextVerbosity.self, forKey: .openAITextVerbosity) ?? .low
+        openAIResponseStorage = try container.decodeIfPresent(OpenAIResponseStorage.self, forKey: .openAIResponseStorage) ?? .stateful
     }
 }
 
