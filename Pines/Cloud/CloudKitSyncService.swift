@@ -82,6 +82,7 @@ struct CloudKitMessageSnapshot: Hashable, Codable, Sendable {
     var modelID: ModelID?
     var providerID: ProviderID?
     var toolCallID: String?
+    var providerMetadata: [String: String] = [:]
 }
 
 struct CloudKitVaultDocumentSnapshot: Hashable, Codable, Sendable {
@@ -295,6 +296,7 @@ struct CloudKitSyncService {
         record["modelID"] = message.modelID?.rawValue as CKRecordValue?
         record["providerID"] = message.providerID?.rawValue as CKRecordValue?
         record["toolCallID"] = message.toolCallID as CKRecordValue?
+        record["providerMetadataJSON"] = Self.encodeProviderMetadata(message.providerMetadata) as CKRecordValue?
         return record
     }
 
@@ -341,6 +343,15 @@ struct CloudKitSyncService {
 
     private static func decodeChangeToken(from data: Data) throws -> CKServerChangeToken? {
         try NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: data)
+    }
+
+    private static func encodeProviderMetadata(_ metadata: [String: String]) -> String? {
+        guard !metadata.isEmpty,
+              let data = try? JSONEncoder().encode(metadata)
+        else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     fileprivate static func stableRecordSuffix(_ value: String) -> String {
@@ -403,7 +414,8 @@ private extension CloudKitRemoteSnapshot {
                     status: (record["status"] as? String).flatMap(MessageStatus.init(rawValue:)) ?? .complete,
                     modelID: (record["modelID"] as? String).map(ModelID.init(rawValue:)),
                     providerID: (record["providerID"] as? String).map(ProviderID.init(rawValue:)),
-                    toolCallID: record["toolCallID"] as? String
+                    toolCallID: record["toolCallID"] as? String,
+                    providerMetadata: Self.decodeProviderMetadata(record["providerMetadataJSON"] as? String)
                 )
             )
 
@@ -491,5 +503,24 @@ private extension CloudKitRemoteSnapshot {
         if let value = record[key] as? Data { return value }
         if let value = record[key] as? NSData { return value as Data }
         return nil
+    }
+
+    private static func encodeProviderMetadata(_ metadata: [String: String]) -> String? {
+        guard !metadata.isEmpty,
+              let data = try? JSONEncoder().encode(metadata)
+        else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func decodeProviderMetadata(_ rawValue: String?) -> [String: String] {
+        guard let rawValue,
+              let data = rawValue.data(using: .utf8),
+              let metadata = try? JSONDecoder().decode([String: String].self, from: data)
+        else {
+            return [:]
+        }
+        return metadata
     }
 }

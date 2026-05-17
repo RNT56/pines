@@ -386,7 +386,7 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("ALTER TABLE messages ADD COLUMN deleted_at"), "missing message tombstone column")
         try expect(sql.contains("ALTER TABLE messages ADD COLUMN sync_state"), "missing message sync state")
         try expect(sql.contains("PRIMARY KEY(chunk_id, embedding_model_id)"), "missing stable embedding merge key")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 8)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 9)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")
@@ -564,6 +564,7 @@ struct PinesCoreTestRunner {
         }
         try expectEqual(tools.count, 1)
         try expectEqual(json["tool_choice"] as? String, "auto")
+        try expectEqual(json["parallel_tool_calls"] as? Bool, false)
 
         let toolCall = ToolCallDelta(id: "call-1", name: CalculatorTool.name, argumentsFragment: #"{"expression":"2+2"}"#, isComplete: true)
         let encoded = try JSONEncoder().encode(

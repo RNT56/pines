@@ -182,8 +182,8 @@ actor GRDBPinesStore:
             try db.execute(
                 sql: """
                 INSERT INTO messages
-                    (id, conversation_id, role, content, created_at, updated_at, status, model_id, provider_id, tool_call_id, sync_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, conversation_id, role, content, created_at, updated_at, status, model_id, provider_id, tool_call_id, provider_metadata_json, sync_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 arguments: [
                     message.id.uuidString,
@@ -196,6 +196,7 @@ actor GRDBPinesStore:
                     modelID?.rawValue,
                     providerID?.rawValue,
                     message.toolCallID,
+                    Self.encodeProviderMetadata(message.providerMetadata),
                     SyncState.local.rawValue,
                 ]
             )
@@ -227,13 +228,26 @@ actor GRDBPinesStore:
         }
     }
 
-    func updateMessage(id: UUID, content: String, status: MessageStatus, tokenCount: Int?) async throws {
+    func updateMessage(
+        id: UUID,
+        content: String,
+        status: MessageStatus,
+        tokenCount: Int?,
+        providerMetadata: [String: String]?
+    ) async throws {
         try await database.write { db in
             let updatedAt = Date().timeIntervalSinceReferenceDate
-            try db.execute(
-                sql: "UPDATE messages SET content = ?, status = ?, token_count = ?, updated_at = ?, sync_state = ? WHERE id = ?",
-                arguments: [content, status.rawValue, tokenCount, updatedAt, SyncState.local.rawValue, id.uuidString]
-            )
+            if let providerMetadata {
+                try db.execute(
+                    sql: "UPDATE messages SET content = ?, status = ?, token_count = ?, provider_metadata_json = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                    arguments: [content, status.rawValue, tokenCount, Self.encodeProviderMetadata(providerMetadata), updatedAt, SyncState.local.rawValue, id.uuidString]
+                )
+            } else {
+                try db.execute(
+                    sql: "UPDATE messages SET content = ?, status = ?, token_count = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                    arguments: [content, status.rawValue, tokenCount, updatedAt, SyncState.local.rawValue, id.uuidString]
+                )
+            }
             try db.execute(
                 sql: "UPDATE conversations SET updated_at = ?, sync_state = ? WHERE id = (SELECT conversation_id FROM messages WHERE id = ?)",
                 arguments: [updatedAt, SyncState.local.rawValue, id.uuidString]
@@ -1148,7 +1162,7 @@ actor GRDBPinesStore:
         try Row.fetchAll(
             db,
             sql: """
-            SELECT id, role, content, created_at, tool_call_id
+            SELECT id, role, content, created_at, tool_call_id, provider_metadata_json
             FROM messages
             WHERE conversation_id = ? AND deleted_at IS NULL
             ORDER BY created_at ASC
@@ -1341,7 +1355,8 @@ actor GRDBPinesStore:
             role: ChatRole(rawValue: row["role"]) ?? .assistant,
             content: row["content"],
             createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
-            toolCallID: row["tool_call_id"] as String?
+            toolCallID: row["tool_call_id"] as String?,
+            providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?)
         )
     }
 
@@ -1688,6 +1703,14 @@ actor GRDBPinesStore:
     private static func decodeJSON<T: Decodable>(_ string: String?) -> T? {
         guard let string, !string.isEmpty else { return nil }
         return try? JSONDecoder().decode(T.self, from: Data(string.utf8))
+    }
+
+    static func encodeProviderMetadata(_ metadata: [String: String]) -> String? {
+        metadata.isEmpty ? nil : encodeJSON(metadata)
+    }
+
+    static func decodeProviderMetadata(_ rawValue: String?) -> [String: String] {
+        decodeJSON(rawValue) ?? [:]
     }
 
     private static func download(from row: Row) -> ModelDownloadProgress {

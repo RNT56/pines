@@ -73,6 +73,7 @@ public struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
     public var toolCallID: String?
     public var toolName: String?
     public var toolCalls: [ToolCallDelta]
+    public var providerMetadata: [String: String]
 
     public init(
         id: UUID = UUID(),
@@ -82,7 +83,8 @@ public struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
         createdAt: Date = Date(),
         toolCallID: String? = nil,
         toolName: String? = nil,
-        toolCalls: [ToolCallDelta] = []
+        toolCalls: [ToolCallDelta] = [],
+        providerMetadata: [String: String] = [:]
     ) {
         self.id = id
         self.role = role
@@ -92,6 +94,7 @@ public struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
         self.toolCallID = toolCallID
         self.toolName = toolName
         self.toolCalls = toolCalls
+        self.providerMetadata = providerMetadata
     }
 
     enum CodingKeys: String, CodingKey {
@@ -103,6 +106,7 @@ public struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
         case toolCallID
         case toolName
         case toolCalls
+        case providerMetadata
     }
 
     public init(from decoder: Decoder) throws {
@@ -115,6 +119,7 @@ public struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
         toolCallID = try container.decodeIfPresent(String.self, forKey: .toolCallID)
         toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
         toolCalls = try container.decodeIfPresent([ToolCallDelta].self, forKey: .toolCalls) ?? []
+        providerMetadata = try container.decodeIfPresent([String: String].self, forKey: .providerMetadata) ?? [:]
     }
 }
 
@@ -279,10 +284,25 @@ public enum InferenceFinishReason: String, Hashable, Codable, Sendable {
 public struct InferenceFinish: Hashable, Codable, Sendable {
     public var reason: InferenceFinishReason
     public var message: String?
+    public var providerMetadata: [String: String]
 
-    public init(reason: InferenceFinishReason, message: String? = nil) {
+    public init(reason: InferenceFinishReason, message: String? = nil, providerMetadata: [String: String] = [:]) {
         self.reason = reason
         self.message = message
+        self.providerMetadata = providerMetadata
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case reason
+        case message
+        case providerMetadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        reason = try container.decode(InferenceFinishReason.self, forKey: .reason)
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+        providerMetadata = try container.decodeIfPresent([String: String].self, forKey: .providerMetadata) ?? [:]
     }
 }
 
@@ -414,11 +434,13 @@ public extension InferenceProvider {
                                 )
                             )
                         case let .finish(finish):
+                            var metadata = finish.providerMetadata
+                            metadata["reason"] = finish.reason.rawValue
                             continuation.yield(
                                 TokenDelta(
                                     kind: .finish,
                                     text: finish.message ?? "",
-                                    metadata: ["reason": finish.reason.rawValue]
+                                    metadata: metadata
                                 )
                             )
                             continuation.finish()

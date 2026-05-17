@@ -110,7 +110,13 @@ public protocol ConversationRepository: Sendable {
     func messages(in conversationID: UUID) async throws -> [ChatMessage]
     func observeMessages(in conversationID: UUID) -> AsyncStream<[ChatMessage]>
     func appendMessage(_ message: ChatMessage, status: MessageStatus, conversationID: UUID, modelID: ModelID?, providerID: ProviderID?) async throws
-    func updateMessage(id: UUID, content: String, status: MessageStatus, tokenCount: Int?) async throws
+    func updateMessage(id: UUID, content: String, status: MessageStatus, tokenCount: Int?, providerMetadata: [String: String]?) async throws
+}
+
+public extension ConversationRepository {
+    func updateMessage(id: UUID, content: String, status: MessageStatus, tokenCount: Int?) async throws {
+        try await updateMessage(id: id, content: content, status: status, tokenCount: tokenCount, providerMetadata: nil)
+    }
 }
 
 public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {

@@ -217,6 +217,7 @@ struct WatchChatOrchestrator {
                     let stream = runner.run(session: session, request: request, provider: providerSelection.provider)
                     var didReceiveTerminalEvent = false
                     var didFail = false
+                    var finalProviderMetadata = [String: String]()
                     for try await event in stream {
                         try Task.checkCancellation()
                         switch event {
@@ -241,17 +242,19 @@ struct WatchChatOrchestrator {
                             )
                         case let .finish(finish):
                             didReceiveTerminalEvent = true
+                            finalProviderMetadata = finish.providerMetadata
                             if !didFail {
                                 let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                                 let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if status == .complete && finalText.isEmpty {
-                                    let message = finish.message ?? "The selected model finished without producing output. If this is an OpenAI GPT-5 cloud chat, rebuild from the latest main so Pines uses the OpenAI Responses API."
+                                    let message = finish.message ?? "The selected model finished without producing output."
                                     didFail = true
                                     try await repository.updateMessage(
                                         id: pendingAssistant.id,
                                         content: message,
                                         status: .failed,
-                                        tokenCount: tokenCount
+                                        tokenCount: tokenCount,
+                                        providerMetadata: finalProviderMetadata
                                     )
                                     continuation.yield(
                                         WatchChatRunUpdate(
@@ -269,7 +272,8 @@ struct WatchChatOrchestrator {
                                         id: pendingAssistant.id,
                                         content: accumulated,
                                         status: status,
-                                        tokenCount: tokenCount
+                                        tokenCount: tokenCount,
+                                        providerMetadata: finalProviderMetadata
                                     )
                                     continuation.yield(
                                         WatchChatRunUpdate(
@@ -336,7 +340,8 @@ struct WatchChatOrchestrator {
                                 id: pendingAssistant.id,
                                 content: accumulated,
                                 status: .complete,
-                                tokenCount: tokenCount
+                                tokenCount: tokenCount,
+                                providerMetadata: finalProviderMetadata
                             )
                             continuation.yield(
                                 WatchChatRunUpdate(
@@ -491,9 +496,14 @@ struct WatchChatOrchestrator {
 
     private func localRuntimeProfile(for install: ModelInstall, settings: AppSettingsSnapshot?) -> RuntimeProfile {
         var profile = services.mlxRuntime.defaultRuntimeProfile(for: install)
-        profile.quantization.maxKVSize = AppSettingsSnapshot.normalizedLocalContextTokens(
+        let requestedContextTokens = AppSettingsSnapshot.normalizedLocalContextTokens(
             settings?.localMaxContextTokens ?? AppSettingsSnapshot.defaultLocalMaxContextTokens
         )
+        if let recommendedContextTokens = profile.quantization.maxKVSize {
+            profile.quantization.maxKVSize = min(requestedContextTokens, recommendedContextTokens)
+        } else {
+            profile.quantization.maxKVSize = requestedContextTokens
+        }
         return profile
     }
 

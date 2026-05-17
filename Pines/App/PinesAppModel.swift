@@ -689,7 +689,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 content: String,
                 messageStatus: MessageStatus,
                 threadStatus: PinesThreadStatus,
-                force: Bool = false
+                force: Bool = false,
+                providerMetadata: [String: String]? = nil
             ) async throws {
                 let now = Date()
                 if force || (content != lastRenderedContent && now.timeIntervalSince(lastRenderedAt) >= ChatStreamPerformance.renderInterval) {
@@ -704,7 +705,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     lastRenderedAt = now
                 }
                 if force || (content != lastPersistedContent && now.timeIntervalSince(lastPersistedAt) >= ChatStreamPerformance.persistenceInterval) {
-                    try await repository.updateMessage(id: assistantMessage.id, content: content, status: messageStatus, tokenCount: tokenCount)
+                    try await repository.updateMessage(
+                        id: assistantMessage.id,
+                        content: content,
+                        status: messageStatus,
+                        tokenCount: tokenCount,
+                        providerMetadata: providerMetadata
+                    )
                     lastPersistedContent = content
                     lastPersistedAt = now
                 }
@@ -758,6 +765,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             let generationStartedAt = Date()
             var streamHaptics = PinesStreamHapticGate()
             var didReceiveTerminalEvent = false
+            var finalProviderMetadata = [String: String]()
 
             for try await event in stream {
                 guard !Task.isCancelled else { throw InferenceError.cancelled }
@@ -772,6 +780,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     try await flushAssistantUpdate(content: accumulated, messageStatus: .streaming, threadStatus: .streaming)
                 case let .finish(finish):
                     didReceiveTerminalEvent = true
+                    finalProviderMetadata = finish.providerMetadata
                     if failureMessage == nil {
                         let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                         if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -781,11 +790,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                                 services: services
                             )
                             failureMessage = message
-                            try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true)
+                            try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata)
                             setChatError(message)
                             emitHaptic(.runFailed)
                         } else {
-                            try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true)
+                            try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata)
                             clearChatError()
                             emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
                         }
@@ -812,7 +821,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     setChatError(message)
                     emitHaptic(.runFailed)
                 } else {
-                    try await flushAssistantUpdate(content: accumulated, messageStatus: .complete, threadStatus: .local, force: true)
+                    try await flushAssistantUpdate(content: accumulated, messageStatus: .complete, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata)
                     clearChatError()
                     emitHaptic(.runCompleted)
                 }
@@ -1160,9 +1169,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         services: PinesAppServices
     ) -> RuntimeProfile {
         var profile = services.mlxRuntime.defaultRuntimeProfile(for: install)
-        profile.quantization.maxKVSize = AppSettingsSnapshot.normalizedLocalContextTokens(
+        let requestedContextTokens = AppSettingsSnapshot.normalizedLocalContextTokens(
             settings?.localMaxContextTokens ?? localMaxContextTokens
         )
+        if let recommendedContextTokens = profile.quantization.maxKVSize {
+            profile.quantization.maxKVSize = min(requestedContextTokens, recommendedContextTokens)
+        } else {
+            profile.quantization.maxKVSize = requestedContextTokens
+        }
         return profile
     }
 
@@ -2297,7 +2311,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             return "The selected model finished without producing output."
         }
         let providerName = providerDisplayName(for: providerID, services: services)
-        return "\(providerName) returned a successful stream for \(modelID.rawValue), but Pines did not receive visible text. If this provider points to api.openai.com, rebuild from the latest main so Pines uses the OpenAI Responses API for GPT-5 models."
+        return "\(providerName) returned a successful stream for \(modelID.rawValue), but Pines did not receive visible text. Check the provider event diagnostics above and retry with a text-capable chat model."
     }
 
     private func providerKind(for providerID: ProviderID, services: PinesAppServices) -> CloudProviderKind? {

@@ -3,6 +3,10 @@ import PinesCore
 
 struct BYOKCloudInferenceProvider: InferenceProvider {
     private static let openAIReasoningDefaultMaxCompletionTokens = 16_384
+    fileprivate static let openAIResponseIDMetadataKey = "openai.response_id"
+    fileprivate static let openAIRequestIDMetadataKey = "openai.request_id"
+    fileprivate static let openAIClientRequestIDMetadataKey = "openai.client_request_id"
+    fileprivate static let openAIMaxInlineImageBytes = 20 * 1024 * 1024
 
     let configuration: CloudProviderConfiguration
     let secretStore: any SecretStore
@@ -14,10 +18,10 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             local: false,
             streaming: true,
             textGeneration: true,
-            vision: true,
+            vision: usesOfficialOpenAIAPI,
             embeddings: false,
             toolCalling: true,
-            jsonMode: true,
+            jsonMode: false,
             maxContextTokens: nil
         )
     }
@@ -29,6 +33,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
         let streamingFormat = self.streamingFormat(for: request)
         let urlRequest = try buildStreamingRequest(apiKey: apiKey, chatRequest: request)
+        let clientRequestID = urlRequest.value(forHTTPHeaderField: "X-Client-Request-Id")
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -44,12 +49,19 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                         }
                         throw CloudProviderError.providerRejectedRequest(
                             statusCode: http.statusCode,
-                            message: Self.providerErrorMessage(from: body) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+                            message: Self.messageWithRequestID(
+                                Self.providerErrorMessage(from: body) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode),
+                                requestID: http.value(forHTTPHeaderField: "x-request-id")
+                            )
                         )
                     }
 
                     var dataLines = [String]()
                     var toolState = CloudToolCallStreamState()
+                    toolState.recordOpenAIRequestMetadata(
+                        serverRequestID: http.value(forHTTPHeaderField: "x-request-id"),
+                        clientRequestID: clientRequestID
+                    )
                     var pendingFinish: InferenceFinish?
                     for try await rawLine in bytes.lines {
                         guard !Task.isCancelled else { throw InferenceError.cancelled }
@@ -110,8 +122,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         var request: URLRequest
         switch configuration.kind {
         case .openAI, .openAICompatible, .openRouter, .custom:
-            request = URLRequest(url: configuration.baseURL.appending(path: "models"))
+            request = URLRequest(url: apiBaseURL.appending(path: "models"))
             request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            addOpenAIClientRequestID(to: &request)
         case .anthropic:
             request = URLRequest(url: configuration.baseURL.appending(path: "v1/messages"))
             request.httpMethod = "POST"
@@ -140,7 +153,10 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if (200..<300).contains(http.statusCode) {
             return ProviderValidationResult(providerID: configuration.id, status: .valid, message: "Provider validated.", availableModels: availableModels)
         }
-        let message = Self.providerErrorMessage(from: data) ?? "Validation failed with HTTP \(http.statusCode)."
+        let message = Self.messageWithRequestID(
+            Self.providerErrorMessage(from: data) ?? "Validation failed with HTTP \(http.statusCode).",
+            requestID: http.value(forHTTPHeaderField: "x-request-id")
+        )
         if http.statusCode == 429 {
             return ProviderValidationResult(providerID: configuration.id, status: .rateLimited, message: message, availableModels: availableModels)
         }
@@ -176,16 +192,17 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     private func openAICompatibleRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
-        let url = configuration.baseURL.appending(path: "chat/completions")
+        let url = apiBaseURL.appending(path: "chat/completions")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        addOpenAIClientRequestID(to: &request)
         let usesOpenAIReasoningParameters = usesOpenAIReasoningChatParameters(modelID: chatRequest.modelID)
         var body: [String: Any] = [
             "model": chatRequest.modelID.rawValue,
             "stream": true,
-            "messages": chatRequest.messages.map(Self.openAIMessageObject),
+            "messages": try chatRequest.messages.map(Self.openAIMessageObject),
         ]
         body[usesOpenAIReasoningParameters ? "max_completion_tokens" : "max_tokens"] = openAICompletionTokenLimit(
             for: chatRequest,
@@ -200,6 +217,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
             body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.openAIFunctionToolObject()) }
             body["tool_choice"] = "auto"
+            body["parallel_tool_calls"] = false
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try applyExtraHeaders(to: &request)
@@ -207,29 +225,32 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     private func openAIResponsesRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
-        let url = configuration.baseURL.appending(path: "responses")
+        let url = apiBaseURL.appending(path: "responses")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        addOpenAIClientRequestID(to: &request)
 
+        let payload = try Self.openAIResponsesPayload(from: chatRequest.messages)
         var body: [String: Any] = [
             "model": chatRequest.modelID.rawValue,
             "stream": true,
-            "input": Self.openAIResponsesInput(from: chatRequest.messages),
+            "store": true,
+            "input": payload.input,
             "max_output_tokens": openAICompletionTokenLimit(for: chatRequest, usesReasoningParameters: true),
             "reasoning": ["effort": "low"],
             "text": ["verbosity": "low"],
         ]
+        if let previousResponseID = payload.previousResponseID {
+            body["previous_response_id"] = previousResponseID
+        }
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
             body["tools"] = chatRequest.availableTools.map(Self.openAIResponsesFunctionToolObject)
             body["tool_choice"] = "auto"
+            body["parallel_tool_calls"] = false
         }
-        let instructions = chatRequest.messages
-            .filter { $0.role == .system }
-            .map(\.content)
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
+        let instructions = payload.instructions
         if !instructions.isEmpty {
             body["instructions"] = instructions
         }
@@ -242,8 +263,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         var request: URLRequest
         switch configuration.kind {
         case .openAI, .openAICompatible, .openRouter, .custom:
-            request = URLRequest(url: configuration.baseURL.appending(path: "models"))
+            request = URLRequest(url: apiBaseURL.appending(path: "models"))
             request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            addOpenAIClientRequestID(to: &request)
         case .anthropic:
             request = URLRequest(url: configuration.baseURL.appending(path: "v1/models"))
             request.addValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -259,7 +281,10 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(
                 statusCode: http.statusCode,
-                message: Self.providerErrorMessage(from: data) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+                message: Self.messageWithRequestID(
+                    Self.providerErrorMessage(from: data) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode),
+                    requestID: http.value(forHTTPHeaderField: "x-request-id")
+                )
             )
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -297,12 +322,14 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     private func usesOpenAIResponsesAPI(chatRequest: ChatRequest) -> Bool {
-        guard usesOfficialOpenAIAPI,
-              usesOpenAIReasoningChatParameters(modelID: chatRequest.modelID)
-        else {
-            return false
+        usesOfficialOpenAIAPI
+    }
+
+    private var apiBaseURL: URL {
+        guard usesOfficialOpenAIAPI else {
+            return configuration.baseURL
         }
-        return true
+        return Self.openAIV1BaseURL(from: configuration.baseURL)
     }
 
     private var usesOfficialOpenAIAPI: Bool {
@@ -313,6 +340,19 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             return false
         }
         return host == "api.openai.com"
+    }
+
+    private static func openAIV1BaseURL(from url: URL) -> URL {
+        let trimmedPath = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if trimmedPath.split(separator: "/").last?.lowercased() == "v1" {
+            return url
+        }
+        return url.appending(path: "v1")
+    }
+
+    private func addOpenAIClientRequestID(to request: inout URLRequest) {
+        guard usesOfficialOpenAIAPI else { return }
+        request.addValue(UUID().uuidString, forHTTPHeaderField: "X-Client-Request-Id")
     }
 
     private func openAICompletionTokenLimit(for chatRequest: ChatRequest, usesReasoningParameters: Bool) -> Int {
@@ -339,7 +379,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         case .openAIResponses:
             return InferenceFinish(
                 reason: .stop,
-                message: Self.openAIResponsesEmptyOutputMessage(response: nil, eventTypes: state.openAIResponsesEventTypes)
+                message: Self.openAIResponsesEmptyOutputMessage(response: nil, eventTypes: state.openAIResponsesEventTypes),
+                providerMetadata: state.openAIProviderMetadata
             )
         case .chatCompletions:
             guard usesOfficialOpenAIAPI,
@@ -349,7 +390,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             }
             return InferenceFinish(
                 reason: .stop,
-                message: "Pines received an empty OpenAI Chat Completions stream for \(chatRequest.modelID.rawValue). Official OpenAI GPT-5 chats should use the Responses API; check that the provider base URL is api.openai.com and retry from the latest build."
+                message: "Pines received an empty OpenAI Chat Completions stream for \(chatRequest.modelID.rawValue). Official OpenAI reasoning models should use the Responses API; check that the provider base URL is https://api.openai.com/v1.",
+                providerMetadata: state.openAIProviderMetadata
             )
         }
     }
@@ -387,7 +429,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return request
     }
 
-    private static func openAIMessageObject(_ message: ChatMessage) -> [String: Any] {
+    private static func openAIMessageObject(_ message: ChatMessage) throws -> [String: Any] {
         if message.role == .tool {
             return [
                 "role": "tool",
@@ -398,7 +440,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
         var object: [String: Any] = [
             "role": message.role.rawValue,
-            "content": message.content,
+            "content": try openAIChatContent(from: message),
         ]
         if !message.toolCalls.isEmpty {
             object["tool_calls"] = message.toolCalls.map { toolCall in
@@ -415,8 +457,40 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return object
     }
 
-    private static func openAIResponsesInput(from messages: [ChatMessage]) -> [[String: Any]] {
-        messages.reduce(into: [[String: Any]]()) { input, message in
+    private static func openAIChatContent(from message: ChatMessage) throws -> Any {
+        let imageAttachments = message.attachments.filter { $0.kind == .image }
+        guard !imageAttachments.isEmpty, message.role == .user else {
+            return message.content
+        }
+
+        var parts = [[String: Any]]()
+        if !message.content.isEmpty {
+            parts.append(["type": "text", "text": message.content])
+        }
+        for attachment in imageAttachments {
+            if let imageURL = try openAIImageURL(from: attachment) {
+                parts.append([
+                    "type": "image_url",
+                    "image_url": ["url": imageURL],
+                ])
+            }
+        }
+        return parts.isEmpty ? message.content : parts
+    }
+
+    private static func openAIResponsesPayload(from messages: [ChatMessage]) throws -> OpenAIResponsesPayload {
+        let instructions = messages
+            .filter { $0.role == .system }
+            .map(\.content)
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+
+        let previousResponse = messages.enumerated().last { _, message in
+            message.providerMetadata[openAIResponseIDMetadataKey]?.isEmpty == false
+        }
+        let replayStartIndex = previousResponse.map { messages.index(after: $0.offset) } ?? messages.startIndex
+        let replayMessages = messages[replayStartIndex...]
+        let input = try replayMessages.reduce(into: [[String: Any]]()) { input, message in
             guard message.role != .system else { return }
             if message.role == .tool {
                 input.append([
@@ -426,21 +500,68 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 ])
                 return
             }
-            if !message.content.isEmpty {
+            if message.role == .assistant, !message.toolCalls.isEmpty {
+                for toolCall in message.toolCalls {
+                    input.append([
+                        "type": "function_call",
+                        "call_id": toolCall.id,
+                        "name": toolCall.name,
+                        "arguments": toolCall.argumentsFragment,
+                    ])
+                }
+                return
+            }
+
+            let content = try openAIResponsesMessageContent(from: message)
+            if !content.isEmpty {
                 input.append([
                     "role": message.role == .assistant ? "assistant" : "user",
-                    "content": message.content,
-                ])
-            }
-            for toolCall in message.toolCalls {
-                input.append([
-                    "type": "function_call",
-                    "call_id": toolCall.id,
-                    "name": toolCall.name,
-                    "arguments": toolCall.argumentsFragment,
+                    "content": content,
                 ])
             }
         }
+
+        return OpenAIResponsesPayload(
+            input: input,
+            instructions: instructions,
+            previousResponseID: previousResponse?.element.providerMetadata[openAIResponseIDMetadataKey]
+        )
+    }
+
+    private static func openAIResponsesMessageContent(from message: ChatMessage) throws -> [[String: Any]] {
+        var content = [[String: Any]]()
+        if !message.content.isEmpty {
+            content.append([
+                "type": message.role == .assistant ? "output_text" : "input_text",
+                "text": message.content,
+            ])
+        }
+        guard message.role == .user else {
+            return content
+        }
+        for attachment in message.attachments where attachment.kind == .image {
+            if let imageURL = try openAIImageURL(from: attachment) {
+                content.append([
+                    "type": "input_image",
+                    "image_url": imageURL,
+                    "detail": "auto",
+                ])
+            }
+        }
+        return content
+    }
+
+    private static func openAIImageURL(from attachment: ChatAttachment) throws -> String? {
+        guard let localURL = attachment.localURL else { return nil }
+        if let scheme = localURL.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            return localURL.absoluteString
+        }
+        let data = try Data(contentsOf: localURL)
+        guard data.count <= openAIMaxInlineImageBytes else {
+            throw InferenceError.invalidRequest("OpenAI image attachment \(attachment.fileName) exceeds the \(ByteCountFormatter.string(fromByteCount: Int64(openAIMaxInlineImageBytes), countStyle: .file)) inline limit.")
+        }
+        let contentType = attachment.contentType.isEmpty ? "image/png" : attachment.contentType
+        return "data:\(contentType);base64,\(data.base64EncodedString())"
     }
 
     private static func openAIResponsesFunctionToolObject(_ spec: AnyToolSpec) -> [String: Any] {
@@ -554,6 +675,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         let fallback = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return fallback?.isEmpty == false ? fallback : nil
+    }
+
+    private static func messageWithRequestID(_ message: String, requestID: String?) -> String {
+        guard let requestID, !requestID.isEmpty else { return message }
+        return "\(message) (OpenAI request ID: \(requestID))"
     }
 
     private func handleSSEDataLines(
@@ -790,7 +916,19 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         case .openAI, .openAICompatible, .openRouter, .custom:
             let choices = json["choices"] as? [[String: Any]]
             let delta = choices?.first?["delta"] as? [String: Any]
-            if let text = delta?["content"] as? String, !text.isEmpty {
+            if let text = openAIChatCompletionText(from: delta?["content"]), !text.isEmpty {
+                state.openAIChatCompletionTextEmitted = true
+                events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
+            }
+            if let text = openAIChatCompletionText(from: delta?["refusal"]), !text.isEmpty {
+                state.openAIChatCompletionTextEmitted = true
+                events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
+            }
+            let message = choices?.first?["message"] as? [String: Any]
+            if !state.openAIChatCompletionTextEmitted,
+               let text = openAIChatCompletionText(from: message?["content"]),
+               !text.isEmpty {
+                state.openAIChatCompletionTextEmitted = true
                 events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
             }
             if let toolCalls = delta?["tool_calls"] as? [[String: Any]] {
@@ -842,6 +980,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if let type {
             state.openAIResponsesEventTypes.insert(type)
         }
+        if let response = json["response"] as? [String: Any] {
+            state.recordOpenAIResponse(response)
+        }
         switch type {
         case "response.output_item.added":
             if let index = json["output_index"] as? Int,
@@ -851,6 +992,27 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 state.openAIToolNames[index] = item["name"] as? String
                 if let arguments = item["arguments"] as? String {
                     state.openAIArguments[index] = arguments
+                }
+            }
+            if !state.openAIResponsesTextEmitted,
+               let item = json["item"] as? [String: Any],
+               let text = openAIResponsesOutputText(fromOutputItem: item),
+               !text.isEmpty {
+                state.openAIResponsesTextEmitted = true
+                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
+            }
+        case "response.output_item.done":
+            if let item = json["item"] as? [String: Any] {
+                if !state.openAIResponsesTextEmitted,
+                   let text = openAIResponsesOutputText(fromOutputItem: item),
+                   !text.isEmpty {
+                    state.openAIResponsesTextEmitted = true
+                    return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
+                }
+                if let toolCall = openAIResponsesFunctionCall(fromOutputItem: item),
+                   state.markOpenAIToolCallCompleted(toolCall) {
+                    pendingFinish = InferenceFinish(reason: .toolCall, providerMetadata: state.openAIProviderMetadata)
+                    return [.toolCall(toolCall)]
                 }
             }
         case "response.output_text.delta":
@@ -869,6 +1031,14 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             if !state.openAIResponsesTextEmitted,
                let part = json["part"] as? [String: Any],
                let text = part["text"] as? String,
+               !text.isEmpty {
+                state.openAIResponsesTextEmitted = true
+                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
+            }
+        case "response.content_part.added":
+            if !state.openAIResponsesTextEmitted,
+               let part = json["part"] as? [String: Any],
+               let text = openAIResponsesOutputText(fromContentPart: part),
                !text.isEmpty {
                 state.openAIResponsesTextEmitted = true
                 return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
@@ -905,38 +1075,50 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 state.openAIArguments[index] = arguments
             }
             if let name = state.openAIToolNames[index] {
-                let event = InferenceStreamEvent.toolCall(
-                    ToolCallDelta(
-                        id: state.openAIToolIDs[index] ?? UUID().uuidString,
-                        name: name,
-                        argumentsFragment: state.openAIArguments[index] ?? "{}",
-                        isComplete: true
-                    )
+                let toolCall = ToolCallDelta(
+                    id: state.openAIToolIDs[index] ?? UUID().uuidString,
+                    name: name,
+                    argumentsFragment: state.openAIArguments[index] ?? "{}",
+                    isComplete: true
                 )
                 state.openAIToolIDs.removeValue(forKey: index)
                 state.openAIToolNames.removeValue(forKey: index)
                 state.openAIArguments.removeValue(forKey: index)
-                return [event]
+                if state.markOpenAIToolCallCompleted(toolCall) {
+                    pendingFinish = InferenceFinish(reason: .toolCall, providerMetadata: state.openAIProviderMetadata)
+                    return [.toolCall(toolCall)]
+                }
             }
-        case "response.completed":
+        case "response.completed", "response.done":
             let response = json["response"] as? [String: Any]
+            var events = [InferenceStreamEvent]()
             if !state.openAIResponsesTextEmitted,
                let response,
                let text = openAIResponsesOutputText(from: response),
                !text.isEmpty {
                 state.openAIResponsesTextEmitted = true
-                pendingFinish = InferenceFinish(reason: .stop)
-                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
+                events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
             }
-            if let response,
-               let toolCall = openAIResponsesFunctionCall(from: response) {
-                pendingFinish = InferenceFinish(reason: .toolCall)
-                return [.toolCall(toolCall)]
+            if let response {
+                for toolCall in openAIResponsesFunctionCalls(from: response) where state.markOpenAIToolCallCompleted(toolCall) {
+                    events.append(.toolCall(toolCall))
+                }
+                if let metrics = openAIResponsesMetrics(from: response) {
+                    events.append(.metrics(metrics))
+                }
             }
+            let finishReason: InferenceFinishReason = events.contains { event in
+                if case .toolCall = event { return true }
+                return false
+            } ? .toolCall : .stop
             pendingFinish = InferenceFinish(
-                reason: .stop,
-                message: openAIResponsesEmptyOutputMessage(response: response, eventTypes: state.openAIResponsesEventTypes)
+                reason: finishReason,
+                message: finishReason == .stop && events.isEmpty && !state.openAIResponsesTextEmitted
+                    ? openAIResponsesEmptyOutputMessage(response: response, eventTypes: state.openAIResponsesEventTypes)
+                    : nil,
+                providerMetadata: state.openAIProviderMetadata
             )
+            return events
         case "response.incomplete":
             let response = json["response"] as? [String: Any]
             let details = response?["incomplete_details"] as? [String: Any]
@@ -945,14 +1127,16 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 reason: reason == "max_output_tokens" ? .length : .error,
                 message: reason == "max_output_tokens"
                     ? "The selected OpenAI model used its max output token budget before producing visible output."
-                    : "The selected OpenAI model returned an incomplete response."
+                    : "The selected OpenAI model returned an incomplete response.",
+                providerMetadata: state.openAIProviderMetadata
             )
         case "response.failed":
             let response = json["response"] as? [String: Any]
             let error = response?["error"] as? [String: Any]
             pendingFinish = InferenceFinish(
                 reason: .error,
-                message: error?["message"] as? String ?? "The selected OpenAI model failed to produce a response."
+                message: error?["message"] as? String ?? "The selected OpenAI model failed to produce a response.",
+                providerMetadata: state.openAIProviderMetadata
             )
         default:
             break
@@ -960,32 +1144,82 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return []
     }
 
-    private static func openAIResponsesFunctionCall(from response: [String: Any]) -> ToolCallDelta? {
-        guard let output = response["output"] as? [[String: Any]] else { return nil }
-        for item in output where item["type"] as? String == "function_call" {
-            guard let name = item["name"] as? String else { continue }
-            return ToolCallDelta(
-                id: (item["call_id"] as? String) ?? (item["id"] as? String) ?? UUID().uuidString,
-                name: name,
-                argumentsFragment: item["arguments"] as? String ?? "{}",
-                isComplete: true
-            )
+    private static func openAIResponsesFunctionCalls(from response: [String: Any]) -> [ToolCallDelta] {
+        guard let output = response["output"] as? [[String: Any]] else { return [] }
+        return output.compactMap(openAIResponsesFunctionCall(fromOutputItem:))
+    }
+
+    private static func openAIResponsesFunctionCall(fromOutputItem item: [String: Any]) -> ToolCallDelta? {
+        guard item["type"] as? String == "function_call",
+              let name = item["name"] as? String
+        else {
+            return nil
         }
-        return nil
+        return ToolCallDelta(
+            id: (item["call_id"] as? String) ?? (item["id"] as? String) ?? UUID().uuidString,
+            name: name,
+            argumentsFragment: item["arguments"] as? String ?? "{}",
+            isComplete: true
+        )
+    }
+
+    private static func openAIResponsesMetrics(from response: [String: Any]) -> InferenceMetrics? {
+        guard let usage = response["usage"] as? [String: Any] else { return nil }
+        let inputTokens = usage["input_tokens"] as? Int
+            ?? usage["prompt_tokens"] as? Int
+            ?? 0
+        let outputTokens = usage["output_tokens"] as? Int
+            ?? usage["completion_tokens"] as? Int
+            ?? 0
+        guard inputTokens > 0 || outputTokens > 0 else { return nil }
+        return InferenceMetrics(promptTokens: inputTokens, completionTokens: outputTokens)
     }
 
     private static func openAIResponsesOutputText(from response: [String: Any]) -> String? {
         guard let output = response["output"] as? [[String: Any]] else { return nil }
-        let parts = output.flatMap { item -> [String] in
-            guard let content = item["content"] as? [[String: Any]] else { return [] }
-            return content.compactMap { part in
-                let type = part["type"] as? String
-                guard type == nil || type == "output_text" || type == "text" else { return nil }
-                return part["text"] as? String
-            }
-        }
+        let parts = output.compactMap(openAIResponsesOutputText(fromOutputItem:))
         let text = parts.joined()
         return text.isEmpty ? nil : text
+    }
+
+    private static func openAIResponsesOutputText(fromOutputItem item: [String: Any]) -> String? {
+        if let text = openAIResponsesOutputText(fromContentPart: item), !text.isEmpty {
+            return text
+        }
+        guard let content = item["content"] as? [[String: Any]] else { return nil }
+        let parts = content.compactMap(openAIResponsesOutputText(fromContentPart:))
+        let text = parts.joined()
+        return text.isEmpty ? nil : text
+    }
+
+    private static func openAIResponsesOutputText(fromContentPart part: [String: Any]) -> String? {
+        let type = part["type"] as? String
+        guard type == nil || type == "output_text" || type == "text" || type == "refusal" else {
+            return nil
+        }
+        if let text = part["text"] as? String {
+            return text
+        }
+        if let refusal = part["refusal"] as? String {
+            return refusal
+        }
+        return nil
+    }
+
+    private static func openAIChatCompletionText(from value: Any?) -> String? {
+        if let text = value as? String {
+            return text
+        }
+        if let parts = value as? [[String: Any]] {
+            let text = parts.compactMap { part -> String? in
+                let type = part["type"] as? String
+                guard type == nil || type == "text" || type == "output_text" else { return nil }
+                return (part["text"] as? String)
+                    ?? ((part["text"] as? [String: Any])?["value"] as? String)
+            }.joined()
+            return text.isEmpty ? nil : text
+        }
+        return nil
     }
 
     private static func openAIResponsesEmptyOutputMessage(
@@ -1038,8 +1272,11 @@ private struct CloudToolCallStreamState {
     var openAIToolIDs: [Int: String] = [:]
     var openAIToolNames: [Int: String] = [:]
     var openAIArguments: [Int: String] = [:]
+    var openAIChatCompletionTextEmitted = false
     var openAIResponsesTextEmitted = false
     var openAIResponsesEventTypes = Set<String>()
+    var openAIProviderMetadata = [String: String]()
+    var completedOpenAIToolCallIDs = Set<String>()
 
     var anthropicToolIndex: Int?
     var anthropicToolID: String?
@@ -1052,12 +1289,40 @@ private struct CloudToolCallStreamState {
         openAIArguments.removeAll(keepingCapacity: true)
     }
 
+    mutating func recordOpenAIRequestMetadata(serverRequestID: String?, clientRequestID: String?) {
+        if let serverRequestID, !serverRequestID.isEmpty {
+            openAIProviderMetadata[BYOKCloudInferenceProvider.openAIRequestIDMetadataKey] = serverRequestID
+        }
+        if let clientRequestID, !clientRequestID.isEmpty {
+            openAIProviderMetadata[BYOKCloudInferenceProvider.openAIClientRequestIDMetadataKey] = clientRequestID
+        }
+    }
+
+    mutating func recordOpenAIResponse(_ response: [String: Any]) {
+        if let responseID = response["id"] as? String, !responseID.isEmpty {
+            openAIProviderMetadata[BYOKCloudInferenceProvider.openAIResponseIDMetadataKey] = responseID
+        }
+        if let requestID = response["_request_id"] as? String, !requestID.isEmpty {
+            openAIProviderMetadata[BYOKCloudInferenceProvider.openAIRequestIDMetadataKey] = requestID
+        }
+    }
+
+    mutating func markOpenAIToolCallCompleted(_ toolCall: ToolCallDelta) -> Bool {
+        completedOpenAIToolCallIDs.insert(toolCall.id).inserted
+    }
+
     mutating func clearAnthropicTool() {
         anthropicToolIndex = nil
         anthropicToolID = nil
         anthropicToolName = nil
         anthropicArguments.removeAll(keepingCapacity: true)
     }
+}
+
+private struct OpenAIResponsesPayload {
+    var input: [[String: Any]]
+    var instructions: String
+    var previousResponseID: String?
 }
 
 private enum CloudStreamingFormat {

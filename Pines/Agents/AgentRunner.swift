@@ -33,7 +33,7 @@ struct AgentRunner {
 
                     while step < session.policy.maxSteps {
                         step += 1
-                        var nextToolCall: ToolCallDelta?
+                        var completedToolCalls = [ToolCallDelta]()
                         var assistantText = ""
                         var pendingFinish: InferenceFinish?
                         let currentRequest = ChatRequest(
@@ -53,7 +53,9 @@ struct AgentRunner {
                                 assistantText += delta.text
                                 continuation.yield(event)
                             case let .toolCall(toolCall) where toolCall.isComplete:
-                                nextToolCall = toolCall
+                                if !completedToolCalls.contains(where: { $0.id == toolCall.id }) {
+                                    completedToolCalls.append(toolCall)
+                                }
                                 continuation.yield(event)
                             case let .finish(finish):
                                 pendingFinish = finish
@@ -66,62 +68,64 @@ struct AgentRunner {
                             }
                         }
 
-                        guard let toolCall = nextToolCall else {
+                        guard !completedToolCalls.isEmpty else {
                             continuation.yield(.finish(pendingFinish ?? InferenceFinish(reason: .stop)))
                             continuation.finish()
                             return
                         }
 
-                        guard toolCalls < session.policy.maxToolCalls else {
+                        guard toolCalls + completedToolCalls.count <= session.policy.maxToolCalls else {
                             throw AgentError.toolLimitExceeded
                         }
-                        toolCalls += 1
+                        toolCalls += completedToolCalls.count
 
-                        guard let spec = await toolRegistry.spec(named: toolCall.name) else {
-                            throw ToolRegistryError.toolNotFound(name: toolCall.name)
-                        }
-                        let invocation = ToolInvocation(
-                            toolName: toolCall.name,
-                            argumentsJSON: toolCall.argumentsFragment,
-                            reason: "Model requested \(toolCall.name).",
-                            expectedOutput: "Tool result for the next reasoning step.",
-                            privacyImpact: spec.permissions.map(\.rawValue).sorted().joined(separator: ", ")
-                        )
-                        try policyGate.validate(invocation: invocation, spec: spec, policy: session.policy)
-
-                        if spec.permissions.contains(.network) || spec.permissions.contains(.browser) || spec.sideEffect != .none {
-                            let approval = await approvalHandler(ToolApprovalRequest(sessionID: session.id, invocation: invocation))
-                            guard approval == .approved else {
-                                throw AgentError.permissionDenied("Tool \(toolCall.name) was not approved.")
-                            }
-                        }
-
-                        let outputJSON = try await toolRegistry.callRaw(toolCall.name, inputJSON: toolCall.argumentsFragment)
                         messages.append(
                             ChatMessage(
                                 role: .assistant,
                                 content: assistantText,
-                                toolCallID: toolCall.id,
+                                toolCalls: completedToolCalls,
+                                providerMetadata: pendingFinish?.providerMetadata ?? [:]
+                            )
+                        )
+
+                        for toolCall in completedToolCalls {
+                            guard let spec = await toolRegistry.spec(named: toolCall.name) else {
+                                throw ToolRegistryError.toolNotFound(name: toolCall.name)
+                            }
+                            let invocation = ToolInvocation(
                                 toolName: toolCall.name,
-                                toolCalls: [toolCall]
+                                argumentsJSON: toolCall.argumentsFragment,
+                                reason: "Model requested \(toolCall.name).",
+                                expectedOutput: "Tool result for the next reasoning step.",
+                                privacyImpact: spec.permissions.map(\.rawValue).sorted().joined(separator: ", ")
                             )
-                        )
-                        try await auditRepository?.append(
-                            AuditEvent(
-                                category: .tool,
-                                summary: "Ran \(toolCall.name)",
-                                toolName: toolCall.name,
-                                networkDomains: Self.networkDomains(from: spec)
+                            try policyGate.validate(invocation: invocation, spec: spec, policy: session.policy)
+
+                            if spec.permissions.contains(.network) || spec.permissions.contains(.browser) || spec.sideEffect != .none {
+                                let approval = await approvalHandler(ToolApprovalRequest(sessionID: session.id, invocation: invocation))
+                                guard approval == .approved else {
+                                    throw AgentError.permissionDenied("Tool \(toolCall.name) was not approved.")
+                                }
+                            }
+
+                            let outputJSON = try await toolRegistry.callRaw(toolCall.name, inputJSON: toolCall.argumentsFragment)
+                            try await auditRepository?.append(
+                                AuditEvent(
+                                    category: .tool,
+                                    summary: "Ran \(toolCall.name)",
+                                    toolName: toolCall.name,
+                                    networkDomains: Self.networkDomains(from: spec)
+                                )
                             )
-                        )
-                        messages.append(
-                            ChatMessage(
-                                role: .tool,
-                                content: outputJSON,
-                                toolCallID: toolCall.id,
-                                toolName: toolCall.name
+                            messages.append(
+                                ChatMessage(
+                                    role: .tool,
+                                    content: outputJSON,
+                                    toolCallID: toolCall.id,
+                                    toolName: toolCall.name
+                                )
                             )
-                        )
+                        }
                     }
 
                     throw AgentError.stepLimitExceeded

@@ -86,11 +86,18 @@ struct MLXRuntimeBridge {
         let isCompact = deviceProfile.memoryTier == .compact
         let isSmallTextModel = (install.parameterCount ?? Int64.max) <= 2_000_000_000
             || install.repository.localizedCaseInsensitiveContains("1B")
-        let maxKVSize = hasVision
+        let recommendedMaxKVSize = hasVision
             ? min(deviceProfile.recommendedContextTokens, 4096)
             : (isSmallTextModel ? deviceProfile.recommendedSmallModelContextTokens : deviceProfile.recommendedContextTokens)
         let backend = turboQuantBackendSnapshot()
         let linked = isLinked
+        let usesTurboQuant = Self.usesTurboQuantByDefault(for: install)
+        let maxKVSize = usesTurboQuant
+            ? recommendedMaxKVSize
+            : min(recommendedMaxKVSize, 8192)
+        let fallbackReason = usesTurboQuant
+            ? backend.fallbackReason
+            : "Using plain MLX KV cache until this community model is device-verified."
         return RuntimeProfile(
             name: hasVision ? "Vision balanced" : "Local balanced",
             quantization: QuantizationProfile(
@@ -99,25 +106,23 @@ struct MLXRuntimeBridge {
                 kvGroupSize: 64,
                 quantizedKVStart: 0,
                 maxKVSize: maxKVSize,
-                algorithm: .turboQuant,
-                kvCacheStrategy: .turboQuant,
-                preset: .turbo3_5,
-                requestedBackend: backend.requested,
-                activeBackend: linked ? backend.active : nil,
-                metalCodecAvailable: linked && backend.metalCodecAvailable,
-                metalAttentionAvailable: linked && backend.metalAttentionAvailable,
-                activeAttentionPath: linked ? backend.activeAttentionPath : .baseline,
-                metalKernelProfile: linked ? backend.kernelProfile : .mlxPackedFallback,
-                metalSelfTestStatus: linked ? backend.selfTestStatus : nil,
-                metalSelfTestFailureReason: backend.selfTestFailureReason,
-                rawFallbackAllocated: backend.rawFallbackAllocated,
+                algorithm: usesTurboQuant ? .turboQuant : .none,
+                kvCacheStrategy: usesTurboQuant ? .turboQuant : .none,
+                preset: usesTurboQuant ? .turbo3_5 : nil,
+                requestedBackend: usesTurboQuant ? backend.requested : nil,
+                activeBackend: usesTurboQuant && linked ? backend.active : nil,
+                metalCodecAvailable: usesTurboQuant && linked && backend.metalCodecAvailable,
+                metalAttentionAvailable: usesTurboQuant && linked && backend.metalAttentionAvailable,
+                activeAttentionPath: usesTurboQuant && linked ? backend.activeAttentionPath : .baseline,
+                metalKernelProfile: usesTurboQuant && linked ? backend.kernelProfile : nil,
+                metalSelfTestStatus: usesTurboQuant && linked ? backend.selfTestStatus : nil,
+                metalSelfTestFailureReason: usesTurboQuant ? backend.selfTestFailureReason : nil,
+                rawFallbackAllocated: usesTurboQuant ? backend.rawFallbackAllocated : false,
                 devicePerformanceClass: deviceProfile.performanceClass,
                 turboQuantOptimizationPolicy: deviceProfile.turboQuantOptimizationPolicy,
                 thermalDownshiftActive: deviceProfile.thermalDownshiftActive,
-                lastUnsupportedAttentionShape: backend.lastUnsupportedAttentionShape,
-                activeFallbackReason: linked
-                    ? backend.fallbackReason
-                    : "MLX runtime packages are not linked in this build.",
+                lastUnsupportedAttentionShape: usesTurboQuant ? backend.lastUnsupportedAttentionShape : nil,
+                activeFallbackReason: linked ? fallbackReason : "MLX runtime packages are not linked in this build.",
                 memoryCounters: deviceMonitor.memoryCounters()
             ),
             prefillStepSize: hasVision || isCompact
@@ -131,6 +136,10 @@ struct MLXRuntimeBridge {
             repetitionContextSize: isCompact ? 16 : 20,
             maxConcurrentSessions: 1
         )
+    }
+
+    private static func usesTurboQuantByDefault(for install: ModelInstall) -> Bool {
+        install.verification == .verified
     }
 
     private func turboQuantBackendSnapshot() -> (
@@ -529,7 +538,7 @@ private actor MLXRuntimeState {
             kvBits: profile.quantization.kvCacheStrategy == .turboQuant ? nil : profile.quantization.kvBits,
             kvGroupSize: profile.quantization.kvGroupSize,
             quantizedKVStart: profile.quantization.quantizedKVStart,
-            kvCacheStrategy: profile.quantization.kvCacheStrategy == .turboQuant ? .turboQuant : .mlxAffine,
+            kvCacheStrategy: mlxKVCacheStrategy(from: profile.quantization.kvCacheStrategy),
             turboQuantPreset: mlxTurboQuantPreset(from: profile.quantization.preset),
             turboQuantBackend: mlxTurboQuantBackend(from: profile.quantization.requestedBackend),
             turboQuantSeed: turboQuantSeed,
@@ -539,6 +548,19 @@ private actor MLXRuntimeState {
             repetitionContextSize: profile.repetitionContextSize,
             prefillStepSize: profile.prefillStepSize
         )
+    }
+
+    private static func mlxKVCacheStrategy(
+        from strategy: PinesCore.KVCacheStrategy
+    ) -> MLXLMCommon.KVCacheStrategy {
+        switch strategy {
+        case .none:
+            .none
+        case .mlxAffine:
+            .mlxAffine
+        case .turboQuant:
+            .turboQuant
+        }
     }
 
     private static func mlxTurboQuantPreset(from preset: PinesCore.TurboQuantPreset?) -> MLX.TurboQuantPreset {

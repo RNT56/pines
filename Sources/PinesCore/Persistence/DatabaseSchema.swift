@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 8
+    public static let currentVersion = 9
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -450,6 +450,9 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_model ON vault_embeddings(embedding_model_id, dimensions);",
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_document ON vault_embeddings(document_id);",
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_scan ON vault_embeddings(dimensions, embedding_model_id, chunk_id);",
+        ]),
+        DatabaseMigration(version: 9, name: "message-provider-metadata", sql: [
+            "ALTER TABLE messages ADD COLUMN provider_metadata_json TEXT;",
         ]),
     ]
 }

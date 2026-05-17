@@ -71,6 +71,7 @@ struct CoreContractTests {
         let body = try #require(urlRequest.httpBody)
         let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
 
+        #expect(urlRequest.url?.absoluteString == "https://api.openai.com/v1/chat/completions")
         #expect(json["max_completion_tokens"] as? Int == 16_384)
         #expect(json["max_tokens"] == nil)
         #expect(json["reasoning_effort"] as? String == "low")

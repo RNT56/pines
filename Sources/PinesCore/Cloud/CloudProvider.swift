@@ -144,7 +144,7 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
         request: ChatRequest,
         toolsJSON: [[String: any Sendable]] = []
     ) throws -> URLRequest {
-        let url = baseURL.appending(path: "/v1/chat/completions")
+        let url = Self.v1BaseURL(from: baseURL).appending(path: "chat/completions")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -178,9 +178,18 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
         if !advertisedTools.isEmpty {
             body["tools"] = advertisedTools.map(Self.jsonSerializable)
             body["tool_choice"] = "auto"
+            body["parallel_tool_calls"] = false
         }
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
         return urlRequest
+    }
+
+    private static func v1BaseURL(from url: URL) -> URL {
+        let trimmedPath = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if trimmedPath.split(separator: "/").last?.lowercased() == "v1" {
+            return url
+        }
+        return url.appending(path: "v1")
     }
 
     private static func jsonSerializable(_ dictionary: [String: any Sendable]) -> [String: Any] {
