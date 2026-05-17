@@ -6,15 +6,15 @@ struct ModelsView: View {
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var haptics: PinesHaptics
-    @State private var selectedModelID: PinesModelPreview.ID?
+    @State private var selectedModelKey: String?
     @State private var searchText = ""
     @State private var selectedTaskFilter: HubTask?
     @State private var selectedVerificationFilter: ModelVerificationState?
     @State private var selectedInstallStateFilter: ModelInstallState?
 
     private var selectedModel: PinesModelPreview? {
-        guard let selectedModelID else { return nil }
-        return displayedModels.first { $0.id == selectedModelID }
+        guard let selectedModelKey else { return nil }
+        return displayedModels.first { $0.selectionKey == selectedModelKey }
     }
 
     private var displayedModels: [PinesModelPreview] {
@@ -50,7 +50,7 @@ struct ModelsView: View {
     var body: some View {
         NavigationSplitView {
             ModelSidebarList(
-                selectedModelID: $selectedModelID,
+                selectedModelKey: $selectedModelKey,
                 selectedTaskFilter: $selectedTaskFilter,
                 selectedVerificationFilter: $selectedVerificationFilter,
                 selectedInstallStateFilter: $selectedInstallStateFilter,
@@ -132,19 +132,19 @@ struct ModelsView: View {
                     services: services
                 )
             }
-            .onChange(of: selectedModelID) { _, _ in
+            .onChange(of: selectedModelKey) { _, _ in
                 haptics.play(.navigationSelected)
             }
             .onChange(of: appModel.models) { _, models in
-                guard let currentSelection = selectedModelID else { return }
-                if !models.contains(where: { $0.id == currentSelection }) || !displayedModels.contains(where: { $0.id == currentSelection }) {
-                    self.selectedModelID = nil
+                guard let currentSelection = selectedModelKey else { return }
+                if !models.contains(where: { $0.selectionKey == currentSelection }) || !displayedModels.contains(where: { $0.selectionKey == currentSelection }) {
+                    self.selectedModelKey = nil
                 }
             }
             .onChange(of: searchFingerprint) { _, _ in
-                guard let currentSelection = selectedModelID else { return }
-                if !displayedModels.contains(where: { $0.id == currentSelection }) {
-                    self.selectedModelID = nil
+                guard let currentSelection = selectedModelKey else { return }
+                if !displayedModels.contains(where: { $0.selectionKey == currentSelection }) {
+                    self.selectedModelKey = nil
                 }
             }
             .pinesSidebarListChrome()
@@ -161,5 +161,11 @@ struct ModelsView: View {
                 )
             }
         }
+    }
+}
+
+extension PinesModelPreview {
+    var selectionKey: String {
+        install.repository.lowercased()
     }
 }

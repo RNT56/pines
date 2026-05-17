@@ -3,7 +3,7 @@ import PinesCore
 
 struct ModelSidebarList: View {
     @Environment(\.pinesTheme) private var theme
-    @Binding var selectedModelID: PinesModelPreview.ID?
+    @Binding var selectedModelKey: String?
     @Binding var selectedTaskFilter: HubTask?
     @Binding var selectedVerificationFilter: ModelVerificationState?
     @Binding var selectedInstallStateFilter: ModelInstallState?
@@ -15,7 +15,7 @@ struct ModelSidebarList: View {
     let isDiscovering: Bool
 
     var body: some View {
-        List(selection: $selectedModelID) {
+        List(selection: $selectedModelKey) {
             Section {
                 ModelFilterControls(
                     selectedTask: $selectedTaskFilter,
@@ -40,7 +40,7 @@ struct ModelSidebarList: View {
                 ModelRows(
                     models: models,
                     defaultModelID: defaultModelID,
-                    selectedModelID: selectedModelID
+                    selectedModelKey: selectedModelKey
                 )
             } header: {
                 ModelResultsHeader(
@@ -87,16 +87,16 @@ private struct ModelRows: View {
     @EnvironmentObject private var haptics: PinesHaptics
     let models: [PinesModelPreview]
     let defaultModelID: ModelID?
-    let selectedModelID: PinesModelPreview.ID?
+    let selectedModelKey: String?
 
     var body: some View {
         ForEach(models) { model in
             ModelRow(
                 model: model,
                 isDefault: defaultModelID == model.install.modelID,
-                isSelected: selectedModelID == model.id
+                isSelected: selectedModelKey == model.selectionKey
             )
-            .tag(model.id)
+            .tag(model.selectionKey)
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                 if model.canStartDownload {
                     Button {

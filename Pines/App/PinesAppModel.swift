@@ -1317,14 +1317,17 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         installState: ModelInstallState? = nil,
         services: PinesAppServices
     ) async {
-        setIfChanged(\.isSearchingModels, true)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasDiscoveryCriteria = !trimmed.isEmpty || task != nil || verification != nil || installState != nil
+
         setIfChanged(\.modelSearchError, nil)
         do {
-            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty, task == nil, verification == nil, installState == nil {
+            if !hasDiscoveryCriteria {
                 isShowingModelDiscoveryResults = false
+                setIfChanged(\.isSearchingModels, false)
                 try await refreshModelPreviews(services: services)
             } else {
+                setIfChanged(\.isSearchingModels, true)
                 isShowingModelDiscoveryResults = true
                 let token = try await services.huggingFaceCredentialService.readToken()
                 let filters = ModelSearchFilters(query: trimmed, task: task, limit: 100)
@@ -1347,8 +1350,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     )
                 }
                 setIfChanged(\.models, Self.downloadingFirst(previews))
+                setIfChanged(\.isSearchingModels, false)
             }
-            setIfChanged(\.isSearchingModels, false)
             setIfChanged(\.serviceError, nil)
         } catch {
             setIfChanged(\.isSearchingModels, false)
