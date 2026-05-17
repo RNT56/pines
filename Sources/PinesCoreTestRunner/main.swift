@@ -431,6 +431,15 @@ struct PinesCoreTestRunner {
     }
 
     private static func testPersistenceFTSTriggers() throws {
+        let probe = try runSQLiteScript("CREATE VIRTUAL TABLE pines_fts5_probe USING fts5(value);")
+        guard probe.status == 0 else {
+            if probe.stderr.contains("no such module: fts5") {
+                print("PinesCoreTestRunner: skipping SQLite FTS runtime exercise because this host sqlite3 lacks FTS5")
+                return
+            }
+            throw TestFailure("SQLite FTS5 probe failed: \(probe.stderr)")
+        }
+
         let schemaSQL = PinesDatabaseSchema.migrations.flatMap(\.sql).joined(separator: "\n")
         let script = """
         PRAGMA foreign_keys = ON;
@@ -454,6 +463,18 @@ struct PinesCoreTestRunner {
         SELECT 'vault_fts_after_delete=' || COUNT(*) FROM vault_chunks_fts WHERE vault_chunks_fts MATCH 'updated';
         """
 
+        let result = try runSQLiteScript(script)
+        if result.status != 0 {
+            throw TestFailure("SQLite FTS trigger exercise failed: \(result.stderr)")
+        }
+
+        try expect(result.stdout.contains("message_fts=1"), "message FTS update trigger did not index the replacement content")
+        try expect(result.stdout.contains("message_fts_after_delete=0"), "message FTS delete trigger did not remove deleted content")
+        try expect(result.stdout.contains("vault_fts=1"), "vault FTS update trigger did not index the replacement content")
+        try expect(result.stdout.contains("vault_fts_after_delete=0"), "vault FTS delete trigger did not remove deleted content")
+    }
+
+    private static func runSQLiteScript(_ script: String) throws -> (status: Int32, stdout: String, stderr: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["sqlite3", ":memory:"]
@@ -472,14 +493,7 @@ struct PinesCoreTestRunner {
 
         let stdout = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         let stderr = String(decoding: error.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        if process.terminationStatus != 0 {
-            throw TestFailure("SQLite FTS trigger exercise failed: \(stderr)")
-        }
-
-        try expect(stdout.contains("message_fts=1"), "message FTS update trigger did not index the replacement content")
-        try expect(stdout.contains("message_fts_after_delete=0"), "message FTS delete trigger did not remove deleted content")
-        try expect(stdout.contains("vault_fts=1"), "vault FTS update trigger did not index the replacement content")
-        try expect(stdout.contains("vault_fts_after_delete=0"), "vault FTS delete trigger did not remove deleted content")
+        return (process.terminationStatus, stdout, stderr)
     }
 
     private static func testProductionTypes() throws {
