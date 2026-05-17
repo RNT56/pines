@@ -58,8 +58,17 @@ public struct CloudProviderSSEStreamDecoder: Sendable {
 
         switch field {
         case "event":
+            if let pending = dispatchBeforeStartingNextEvent() {
+                eventName = String(value)
+                return pending
+            }
             eventName = String(value)
         case "data":
+            if eventName == nil,
+               let pending = dispatchBeforeStartingNextDataLine() {
+                dataLines.append(String(value))
+                return pending
+            }
             dataLines.append(String(value))
         default:
             break
@@ -83,5 +92,24 @@ public struct CloudProviderSSEStreamDecoder: Sendable {
             eventName: eventName,
             payload: dataLines.joined(separator: "\n")
         )
+    }
+
+    private mutating func dispatchBeforeStartingNextEvent() -> CloudProviderSSEEvent? {
+        guard !dataLines.isEmpty else { return nil }
+        return dispatch()
+    }
+
+    private mutating func dispatchBeforeStartingNextDataLine() -> CloudProviderSSEEvent? {
+        guard !dataLines.isEmpty else { return nil }
+        let payload = dataLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard payload == "[DONE]" || payloadIsCompleteJSON(payload) else {
+            return nil
+        }
+        return dispatch()
+    }
+
+    private func payloadIsCompleteJSON(_ payload: String) -> Bool {
+        guard let data = payload.data(using: .utf8) else { return false }
+        return (try? JSONSerialization.jsonObject(with: data)) != nil
     }
 }

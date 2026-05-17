@@ -81,6 +81,7 @@ final class PinesAppModel: ObservableObject {
     var mcpSamplingRequestCountByServer: [MCPServerID: Int] = [:]
     private var liveAgentActivitiesByMessageID: [UUID: [AgentActivityEvent]] = [:]
     private var isShowingModelDiscoveryResults = false
+    private var modelSearchRequestID: UUID?
 
     private func setIfChanged<Value: Equatable>(
         _ keyPath: ReferenceWritableKeyPath<PinesAppModel, Value>,
@@ -1817,20 +1818,33 @@ final class PinesAppModel: ObservableObject {
         installState: ModelInstallState? = nil,
         services: PinesAppServices
     ) async {
+        let requestID = UUID()
+        modelSearchRequestID = requestID
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasDiscoveryCriteria = !trimmed.isEmpty || task != nil || verification != nil || installState != nil
+        let isCurrentSearch = { [weak self] in
+            self?.modelSearchRequestID == requestID
+        }
 
         setIfChanged(\.modelSearchError, nil)
         do {
             if !hasDiscoveryCriteria {
+                let snapshot = try await modelPreviewSnapshot(services: services)
+                guard isCurrentSearch() else { return }
+                guard !Task.isCancelled else {
+                    modelSearchRequestID = nil
+                    setIfChanged(\.isSearchingModels, false)
+                    return
+                }
                 isShowingModelDiscoveryResults = false
                 setIfChanged(\.isSearchingModels, false)
-                try await refreshModelPreviews(services: services)
+                setIfChanged(\.modelDownloads, snapshot.downloads)
+                setIfChanged(\.models, snapshot.previews)
             } else {
                 setIfChanged(\.isSearchingModels, true)
                 isShowingModelDiscoveryResults = true
                 let token = try await services.huggingFaceCredentialService.readToken()
-                let filters = ModelSearchFilters(query: trimmed, task: task, limit: 100)
+                let filters = ModelSearchFilters(query: trimmed, task: task, limit: 50, includeConfig: false)
                 let remoteModels = try await services.modelCatalog.search(filters: filters, accessToken: token)
                 let installed = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
                 let installedByRepository = Dictionary(uniqueKeysWithValues: installed.map { ($0.repository.lowercased(), $0) })
@@ -1849,11 +1863,28 @@ final class PinesAppModel: ObservableObject {
                         download: downloadByRepository[install.repository.lowercased()]
                     )
                 }
+                guard isCurrentSearch() else { return }
+                guard !Task.isCancelled else {
+                    modelSearchRequestID = nil
+                    setIfChanged(\.isSearchingModels, false)
+                    return
+                }
                 setIfChanged(\.models, Self.downloadingFirst(previews))
                 setIfChanged(\.isSearchingModels, false)
             }
+            modelSearchRequestID = nil
             setIfChanged(\.serviceError, nil)
+        } catch is CancellationError {
+            guard modelSearchRequestID == requestID else { return }
+            modelSearchRequestID = nil
+            setIfChanged(\.isSearchingModels, false)
+        } catch let error as URLError where error.code == .cancelled {
+            guard modelSearchRequestID == requestID else { return }
+            modelSearchRequestID = nil
+            setIfChanged(\.isSearchingModels, false)
         } catch {
+            guard modelSearchRequestID == requestID else { return }
+            modelSearchRequestID = nil
             setIfChanged(\.isSearchingModels, false)
             setIfChanged(\.modelSearchError, error.localizedDescription)
             setIfChanged(\.serviceError, error.localizedDescription)
@@ -2904,12 +2935,19 @@ final class PinesAppModel: ObservableObject {
     }
 
     private func refreshModelPreviews(services: PinesAppServices, enrichRuntime: Bool? = nil) async throws {
+        let snapshot = try await modelPreviewSnapshot(services: services, enrichRuntime: enrichRuntime)
+        setIfChanged(\.modelDownloads, snapshot.downloads)
+        setIfChanged(\.models, snapshot.previews)
+    }
+
+    private func modelPreviewSnapshot(
+        services: PinesAppServices,
+        enrichRuntime: Bool? = nil
+    ) async throws -> (downloads: [ModelDownloadProgress], previews: [PinesModelPreview]) {
         let downloads = try await services.modelDownloadRepository?.listDownloads() ?? []
-        setIfChanged(\.modelDownloads, downloads)
 
         guard let modelRepository = services.modelInstallRepository else {
-            setIfChanged(\.models, [])
-            return
+            return (downloads, [])
         }
 
         let downloadByRepository = Self.latestDownloadByRepository(downloads)
@@ -2924,7 +2962,7 @@ final class PinesAppModel: ObservableObject {
                     enrichRuntime: shouldEnrichRuntime
                 )
             }
-        setIfChanged(\.models, Self.downloadingFirst(previews))
+        return (downloads, Self.downloadingFirst(previews))
     }
 
 }

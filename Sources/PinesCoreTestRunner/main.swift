@@ -391,6 +391,39 @@ struct PinesCoreTestRunner {
         let classified = ModelPreflightClassifier().classify(models[0].preflightInput)
         try expectEqual(classified.verification, .installable)
         try expectEqual(classified.modalities, [.embeddings])
+
+        let lightweightClient = RecordingHTTPClient(
+            payload: """
+            [
+              {
+                "modelId": "example/Qwen3-4B-4bit-MLX",
+                "author": "example",
+                "downloads": 21,
+                "likes": 4,
+                "library_name": "mlx",
+                "pipeline_tag": "text-generation",
+                "tags": ["mlx", "safetensors", "qwen3", "text-generation", "license:apache-2.0"],
+                "siblings": [
+                  { "rfilename": "model.safetensors" },
+                  { "rfilename": "tokenizer.json" }
+                ]
+              }
+            ]
+            """
+        )
+        let lightweightService = HuggingFaceModelCatalogService(client: lightweightClient, baseURL: URL(string: "https://hub.test")!)
+        let lightweightModels = try await lightweightService.search(
+            filters: ModelSearchFilters(query: "qwen", task: .textGeneration, limit: 5, includeConfig: false)
+        )
+        let lightweightURL = try await lightweightClient.lastURL()
+        let lightweightQueryItems = Dictionary(uniqueKeysWithValues: URLComponents(url: lightweightURL, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
+
+        try expectEqual(lightweightQueryItems["config"], nil)
+        try expectEqual(lightweightQueryItems["blobs"], nil)
+        try expectEqual(lightweightModels[0].modelType, "qwen3")
+        let lightweightClassified = ModelPreflightClassifier().classify(lightweightModels[0].preflightInput)
+        try expectEqual(lightweightClassified.verification, .installable)
+        try expectEqual(lightweightClassified.modalities, [.text])
     }
 
     private static func testPersistenceSchema() throws {

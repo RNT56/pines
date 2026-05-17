@@ -201,8 +201,9 @@ struct MCPModelPreferenceProfile: Hashable {
     }
 }
 
-struct PinesModelPreview: Identifiable, Hashable {
-    let id: UUID
+struct PinesModelPreview: Identifiable, Hashable, Sendable {
+    var id: String { install.repository.lowercased() }
+
     let install: ModelInstall
     let runtimeProfile: RuntimeProfile
     let name: String
@@ -234,7 +235,7 @@ extension ModelDownloadProgress {
     }
 }
 
-enum PinesModelStatus: String, Hashable {
+enum PinesModelStatus: String, Hashable, Sendable {
     case ready
     case available
     case indexing

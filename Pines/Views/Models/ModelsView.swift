@@ -11,6 +11,7 @@ struct ModelsView: View {
     @State private var selectedTaskFilter: HubTask?
     @State private var selectedVerificationFilter: ModelVerificationState?
     @State private var selectedInstallStateFilter: ModelInstallState?
+    @State private var scheduledSearchTask: Task<Void, Never>?
 
     private var selectedModel: PinesModelPreview? {
         guard let selectedModelKey else { return nil }
@@ -24,20 +25,17 @@ struct ModelsView: View {
         }
     }
 
-    private var searchFingerprint: String {
-        [
-            searchText,
-            selectedTaskFilter?.rawValue ?? "all",
-            selectedVerificationFilter?.rawValue ?? "all",
-            selectedInstallStateFilter?.rawValue ?? "all",
-        ].joined(separator: "|")
+    private var searchCriteria: ModelSearchCriteria {
+        ModelSearchCriteria(
+            query: searchText,
+            task: selectedTaskFilter,
+            verification: selectedVerificationFilter,
+            installState: selectedInstallStateFilter
+        )
     }
 
     private var isDiscovering: Bool {
-        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || selectedTaskFilter != nil
-            || selectedVerificationFilter != nil
-            || selectedInstallStateFilter != nil
+        searchCriteria.hasDiscoveryCriteria
     }
 
     private var modelSectionTitle: String {
@@ -121,20 +119,15 @@ struct ModelsView: View {
             .searchable(text: $searchText, prompt: "Search Hugging Face")
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-            .task(id: searchFingerprint) {
-                do {
-                    try await Task.sleep(nanoseconds: 350_000_000)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                await appModel.searchModels(
-                    query: searchText,
-                    task: selectedTaskFilter,
-                    verification: selectedVerificationFilter,
-                    installState: selectedInstallStateFilter,
-                    services: services
-                )
+            .task {
+                await appModel.searchModels(query: "", services: services)
+            }
+            .onChange(of: searchCriteria) { _, criteria in
+                scheduleModelSearch(criteria)
+            }
+            .onDisappear {
+                scheduledSearchTask?.cancel()
+                scheduledSearchTask = nil
             }
             .onChange(of: selectedModelKey) { _, _ in
                 haptics.play(.navigationSelected)
@@ -145,7 +138,7 @@ struct ModelsView: View {
                     self.selectedModelKey = nil
                 }
             }
-            .onChange(of: searchFingerprint) { _, _ in
+            .onChange(of: searchCriteria) { _, _ in
                 guard let currentSelection = selectedModelKey else { return }
                 if !displayedModels.contains(where: { $0.selectionKey == currentSelection }) {
                     self.selectedModelKey = nil
@@ -153,7 +146,6 @@ struct ModelsView: View {
             }
             .pinesSidebarListChrome()
             .animation(theme.motion.fast, value: appModel.isSearchingModels)
-            .animation(theme.motion.fast, value: appModel.models)
         } detail: {
             if let selectedModel {
                 ModelDetailView(model: selectedModel)
@@ -166,10 +158,52 @@ struct ModelsView: View {
             }
         }
     }
+
+    private func scheduleModelSearch(_ criteria: ModelSearchCriteria) {
+        scheduledSearchTask?.cancel()
+        scheduledSearchTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: 350_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await appModel.searchModels(
+                query: criteria.query,
+                task: criteria.task,
+                verification: criteria.verification,
+                installState: criteria.installState,
+                services: services
+            )
+        }
+    }
 }
 
 extension PinesModelPreview {
     var selectionKey: String {
         install.repository.lowercased()
+    }
+}
+
+private struct ModelSearchCriteria: Hashable {
+    var query: String
+    var task: HubTask?
+    var verification: ModelVerificationState?
+    var installState: ModelInstallState?
+
+    init(
+        query: String,
+        task: HubTask?,
+        verification: ModelVerificationState?,
+        installState: ModelInstallState?
+    ) {
+        self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.task = task
+        self.verification = verification
+        self.installState = installState
+    }
+
+    var hasDiscoveryCriteria: Bool {
+        !query.isEmpty || task != nil || verification != nil || installState != nil
     }
 }

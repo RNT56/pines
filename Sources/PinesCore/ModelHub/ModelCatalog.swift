@@ -78,19 +78,41 @@ public struct ModelSearchFilters: Hashable, Codable, Sendable {
     public var limit: Int
     public var sort: ModelCatalogSort
     public var descending: Bool
+    public var includeConfig: Bool
 
     public init(
         query: String = "",
         task: HubTask? = nil,
         limit: Int = 25,
         sort: ModelCatalogSort = .downloads,
-        descending: Bool = true
+        descending: Bool = true,
+        includeConfig: Bool = true
     ) {
         self.query = query
         self.task = task
         self.limit = limit
         self.sort = sort
         self.descending = descending
+        self.includeConfig = includeConfig
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case query
+        case task
+        case limit
+        case sort
+        case descending
+        case includeConfig
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        query = try container.decodeIfPresent(String.self, forKey: .query) ?? ""
+        task = try container.decodeIfPresent(HubTask.self, forKey: .task)
+        limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? 25
+        sort = try container.decodeIfPresent(ModelCatalogSort.self, forKey: .sort) ?? .downloads
+        descending = try container.decodeIfPresent(Bool.self, forKey: .descending) ?? true
+        includeConfig = try container.decodeIfPresent(Bool.self, forKey: .includeConfig) ?? true
     }
 }
 
@@ -213,12 +235,14 @@ public struct HuggingFaceModelCatalogService: Sendable {
             URLQueryItem(name: "author", value: modelAuthor),
             URLQueryItem(name: "filter", value: "mlx"),
             URLQueryItem(name: "full", value: "true"),
-            URLQueryItem(name: "config", value: "true"),
-            URLQueryItem(name: "blobs", value: "true"),
             URLQueryItem(name: "limit", value: String(max(1, min(filters.limit, 100)))),
             URLQueryItem(name: "sort", value: filters.sort.rawValue),
             URLQueryItem(name: "direction", value: filters.descending ? "-1" : "1"),
         ]
+        if filters.includeConfig {
+            components.queryItems?.append(URLQueryItem(name: "config", value: "true"))
+            components.queryItems?.append(URLQueryItem(name: "blobs", value: "true"))
+        }
 
         let query = filters.query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {
@@ -246,7 +270,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
                 files: dto.siblings?.map {
                     ModelFileInfo(path: $0.rfilename, size: $0.size ?? $0.lfs?.size, oid: $0.lfs?.oid ?? $0.blobID)
                 } ?? [],
-                modelType: dto.config?.modelType,
+                modelType: dto.config?.modelType ?? dto.tags?.modelTypeTagValue,
                 license: dto.cardData?.license ?? dto.tags?.licenseTagValue
             )
         }
@@ -406,5 +430,47 @@ private extension [String] {
             return tag.split(separator: ":", maxSplits: 1).last.map(String.init)
         }
         .first
+    }
+
+    var modelTypeTagValue: String? {
+        let supportedModelTypes = ModelPreflightClassifier.defaultSupportedLLMTypes
+            .union(ModelPreflightClassifier.defaultSupportedVLMTypes)
+            .union(ModelPreflightClassifier.defaultSupportedEmbedderTypes)
+            .sorted { lhs, rhs in
+                if lhs.count != rhs.count {
+                    return lhs.count > rhs.count
+                }
+                return lhs < rhs
+            }
+
+        for tag in self {
+            let normalizedTag = Self.normalizedModelTypeTag(tag)
+            if let modelType = supportedModelTypes.first(where: { Self.normalizedModelTypeTag($0) == normalizedTag }) {
+                return modelType
+            }
+        }
+
+        for tag in self {
+            let compactTag = Self.compactModelTypeTag(tag)
+            if let modelType = supportedModelTypes.first(where: { Self.compactModelTypeTag($0) == compactTag }) {
+                return modelType
+            }
+        }
+
+        return nil
+    }
+
+    private static func normalizedModelTypeTag(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: ".", with: "_")
+    }
+
+    private static func compactModelTypeTag(_ value: String) -> String {
+        value
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
     }
 }

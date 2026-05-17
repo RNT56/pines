@@ -201,7 +201,6 @@ extension PinesAppModel {
             : "Pending"
 
         return PinesModelPreview(
-            id: install.id,
             install: install,
             runtimeProfile: runtimeProfile,
             name: install.displayName,

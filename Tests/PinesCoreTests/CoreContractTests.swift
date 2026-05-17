@@ -654,6 +654,61 @@ struct CoreContractTests {
     }
 
     @Test
+    func openAIResponsesSSEDecoderFeedsParserWhenBlankSeparatorsAreOmitted() {
+        var decoder = CloudProviderSSEStreamDecoder()
+        var parser = CloudProviderStreamParser()
+        let lines = [
+            #"event: response.created"#,
+            #"data: {"response":{"id":"resp_missing_blanks","status":"in_progress","output":[]}}"#,
+            #"event: response.output_text.delta"#,
+            #"data: {"delta":"visible"}"#,
+            #"event: response.completed"#,
+            #"data: {"response":{"id":"resp_missing_blanks","status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":1}}}"#,
+        ]
+
+        var events = [InferenceStreamEvent]()
+        var finish: InferenceFinish?
+        for line in lines {
+            guard let sseEvent = decoder.ingest(line), let data = sseEvent.jsonData() else { continue }
+            let output = parser.parse(data: data, format: .openAIResponses, providerKind: .openAI)
+            events.append(contentsOf: output.events)
+            finish = output.finish ?? finish
+        }
+        if let sseEvent = decoder.finish(), let data = sseEvent.jsonData() {
+            let output = parser.parse(data: data, format: .openAIResponses, providerKind: .openAI)
+            events.append(contentsOf: output.events)
+            finish = output.finish ?? finish
+        }
+
+        #expect(events.contains(.token(TokenDelta(kind: .token, text: "visible", tokenCount: 1))))
+        #expect(events.contains(.metrics(InferenceMetrics(promptTokens: 3, completionTokens: 1))))
+        #expect(finish?.reason == .stop)
+        #expect(finish?.message == nil)
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_missing_blanks")
+    }
+
+    @Test
+    func sseDecoderSeparatesDataOnlyJSONEventsWhenBlankSeparatorsAreOmitted() {
+        var decoder = CloudProviderSSEStreamDecoder()
+        let lines = [
+            #"data: {"one":1}"#,
+            #"data: {"two":2}"#,
+            #"data: [DONE]"#,
+        ]
+
+        let first = decoder.ingest(lines[0])
+        let second = decoder.ingest(lines[1])
+        let third = decoder.ingest(lines[2])
+        let done = decoder.finish()
+
+        #expect(first == nil)
+        #expect(second?.payload == #"{"one":1}"#)
+        #expect(third?.payload == #"{"two":2}"#)
+        #expect(done?.payload == "[DONE]")
+        #expect(done?.jsonData() == nil)
+    }
+
+    @Test
     func openAIResponsesSSEDecoderIgnoresDoneSentinelAndFlushesTrailingEvent() throws {
         var decoder = CloudProviderSSEStreamDecoder()
         var parser = CloudProviderStreamParser()

@@ -18,7 +18,7 @@ public struct ModelPreflightClassifier: Sendable {
     public func classify(_ input: ModelPreflightInput) -> ModelPreflightResult {
         let config = input.configJSON.flatMap(Self.decodeJSONObject)
         let processor = input.processorConfigJSON.flatMap(Self.decodeJSONObject)
-        let modelType = config?["model_type"] as? String
+        let modelType = config?["model_type"] as? String ?? inferredModelType(from: input.tags)
         let processorClass = processor?["processor_class"] as? String
         let size = input.files.compactMap(\.size).reduce(Int64(0), +)
         let hasSafetensors = input.files.contains { $0.path.hasSuffix(".safetensors") }
@@ -121,6 +121,48 @@ public struct ModelPreflightClassifier: Sendable {
 
     private static func filename(_ path: String) -> String {
         path.split(separator: "/").last.map { String($0).lowercased() } ?? path.lowercased()
+    }
+
+    private func inferredModelType(from tags: [String]) -> String? {
+        let supportedModelTypes = supportedLLMTypes
+            .union(supportedVLMTypes)
+            .union(supportedEmbedderTypes)
+            .sorted { lhs, rhs in
+                if lhs.count != rhs.count {
+                    return lhs.count > rhs.count
+                }
+                return lhs < rhs
+            }
+
+        for tag in tags {
+            let normalizedTag = Self.normalizedModelTypeTag(tag)
+            if let modelType = supportedModelTypes.first(where: { Self.normalizedModelTypeTag($0) == normalizedTag }) {
+                return modelType
+            }
+        }
+
+        for tag in tags {
+            let compactTag = Self.compactModelTypeTag(tag)
+            if let modelType = supportedModelTypes.first(where: { Self.compactModelTypeTag($0) == compactTag }) {
+                return modelType
+            }
+        }
+
+        return nil
+    }
+
+    private static func normalizedModelTypeTag(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: ".", with: "_")
+    }
+
+    private static func compactModelTypeTag(_ value: String) -> String {
+        value
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
     }
 
     public static let runtimeCompatibilityGateReason = "Qwen3 1.7B MLX 4-bit variants require the fixed MLX TurboQuant UInt32 seed path and a passing on-device TurboQuant Metal self-test before local loading."
