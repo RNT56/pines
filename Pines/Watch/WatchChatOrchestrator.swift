@@ -452,7 +452,7 @@ struct WatchChatOrchestrator {
             mode: settings?.executionMode ?? .preferLocal,
             local: localCandidate,
             cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
-            requiresVision: false,
+            requiredInputs: .init(),
             requiresTools: false
         )
 
@@ -518,6 +518,7 @@ struct WatchChatOrchestrator {
         }
         var capabilities = services.mlxRuntime.capabilities
         capabilities.vision = capabilities.vision && install.modalities.contains(.vision)
+        capabilities.imageInputs = capabilities.imageInputs && install.modalities.contains(.vision)
         capabilities.embeddings = capabilities.embeddings && install.modalities.contains(.embeddings)
         return (services.mlxRuntime.localProviderID, capabilities)
     }

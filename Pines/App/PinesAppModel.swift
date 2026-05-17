@@ -602,6 +602,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
             // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
             let availableTools: [AnyToolSpec] = []
+            let messages = try await repository.messages(in: conversationID)
+            let vaultContext = await vaultContextMessage(for: trimmed, services: services)
+            let mcpContext = await mcpResourceContextMessages(services: services)
+            let routeRequiredInputs = ProviderInputRequirements(messages: messages + mcpContext)
             let requestedSelection = selection(for: conversationID, services: services)
             let selectedProvider: any InferenceProvider
             let selectedProviderID: ProviderID
@@ -610,6 +614,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 if requestedSelection.providerID == services.mlxRuntime.localProviderID {
                     guard let localInstall = installedModel(for: requestedSelection.modelID) else {
                         failPendingChatStart("Download the selected local text model before starting chat.", runToken: runToken)
+                        return
+                    }
+                    guard let localCandidate = localRoutingCandidate(for: localInstall, services: services),
+                          routeRequiredInputs.isSatisfied(by: localCandidate.capabilities)
+                    else {
+                        failPendingChatStart("The selected local model does not support the attachments selected for this turn.", runToken: runToken)
                         return
                     }
                     try await services.mlxRuntime.load(
@@ -622,6 +632,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 } else {
                     guard let cloudProvider = cloudProviders.first(where: { $0.id == requestedSelection.providerID }) else {
                         failPendingChatStart("The selected cloud provider is no longer configured.", runToken: runToken)
+                        return
+                    }
+                    guard routeRequiredInputs.isSatisfied(by: cloudProvider.capabilities) else {
+                        failPendingChatStart("The selected cloud provider does not support the attachments selected for this turn.", runToken: runToken)
                         return
                     }
                     selectedProvider = BYOKCloudInferenceProvider(configuration: cloudProvider, secretStore: services.secretStore)
@@ -643,7 +657,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     mode: executionMode,
                     local: localCandidate,
                     cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
-                    requiresVision: false,
+                    requiredInputs: routeRequiredInputs,
                     requiresTools: false
                 )
                 switch route.destination {
@@ -717,10 +731,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 }
             }
 
-            let messages = try await repository.messages(in: conversationID)
-            let vaultContext = await vaultContextMessage(for: trimmed, services: services)
-            let mcpContext = await mcpResourceContextMessages(services: services)
-            var requestMessages = messages.filter { $0.id != assistantMessage.id }
+            var requestMessages = messages
             let cloudContextDecision = try await resolveCloudContextDecision(
                 providerID: selectedProviderID,
                 modelID: selectedModelID,
@@ -1002,6 +1013,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
         var capabilities = services.mlxRuntime.capabilities
         capabilities.vision = capabilities.vision && install.modalities.contains(.vision)
+        capabilities.imageInputs = capabilities.imageInputs && install.modalities.contains(.vision)
         capabilities.embeddings = capabilities.embeddings && install.modalities.contains(.embeddings)
         return (services.mlxRuntime.localProviderID, capabilities)
     }
@@ -2188,12 +2200,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 inputJSONSchema: $0.inputSchema
             )
         }
-        let requiresVision = messages.contains { message in
-            message.attachments.contains { $0.kind == .image }
-        }
+        let requiredInputs = ProviderInputRequirements(messages: messages)
         let settings = try? await services.settingsRepository?.loadSettings()
 
-        if let localModelID = rankedLocalModelID(for: request, requiresVision: requiresVision),
+        if let localModelID = rankedLocalModelID(for: request, requiredInputs: requiredInputs),
            let localInstall = installedModel(for: localModelID) {
             try await services.mlxRuntime.load(
                 localInstall,
@@ -2231,7 +2241,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
 
         guard server.byokSamplingEnabled,
-              let cloudProvider = rankedCloudProvider(for: request, requiresVision: requiresVision, requiresTools: !tools.isEmpty)
+              let cloudProvider = rankedCloudProvider(for: request, requiredInputs: requiredInputs, requiresTools: !tools.isEmpty)
         else {
             throw InferenceError.providerUnavailable(services.mlxRuntime.localProviderID)
         }
@@ -2272,14 +2282,15 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return result
     }
 
-    private func rankedLocalModelID(for request: MCPSamplingRequest, requiresVision: Bool) -> ModelID? {
+    private func rankedLocalModelID(for request: MCPSamplingRequest, requiredInputs: ProviderInputRequirements) -> ModelID? {
+        guard !requiredInputs.requiresPDFs && !requiredInputs.requiresTextDocuments else { return nil }
         let preference = MCPModelPreferenceProfile(json: request.modelPreferences)
         let candidates = models
             .map(\.install)
             .filter { install in
                 install.state == .installed
                     && install.modalities.contains(.text)
-                    && (!requiresVision || install.modalities.contains(.vision))
+                    && (!requiredInputs.requiresImages || install.modalities.contains(.vision))
             }
         guard !candidates.isEmpty else { return nil }
         return candidates.max { left, right in
@@ -2337,12 +2348,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return parameterScale * 10 + byteScale
     }
 
-    private func rankedCloudProvider(for request: MCPSamplingRequest, requiresVision: Bool, requiresTools: Bool) -> CloudProviderConfiguration? {
+    private func rankedCloudProvider(for request: MCPSamplingRequest, requiredInputs: ProviderInputRequirements, requiresTools: Bool) -> CloudProviderConfiguration? {
         let preference = MCPModelPreferenceProfile(json: request.modelPreferences)
         let candidates = cloudProviders.filter { provider in
             provider.enabledForAgents
                 && provider.capabilities.textGeneration
-                && (!requiresVision || provider.capabilities.vision)
+                && requiredInputs.isSatisfied(by: provider.capabilities)
                 && (!requiresTools || provider.capabilities.toolCalling)
         }
         guard !candidates.isEmpty else { return nil }

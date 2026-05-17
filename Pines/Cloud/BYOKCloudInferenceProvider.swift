@@ -1,12 +1,21 @@
 import Foundation
+import ImageIO
 import PinesCore
+import UniformTypeIdentifiers
 
 struct BYOKCloudInferenceProvider: InferenceProvider {
     private static let openAIReasoningDefaultMaxCompletionTokens = 16_384
     fileprivate static let openAIResponseIDMetadataKey = "openai.response_id"
     fileprivate static let openAIRequestIDMetadataKey = "openai.request_id"
     fileprivate static let openAIClientRequestIDMetadataKey = "openai.client_request_id"
-    fileprivate static let openAIMaxInlineImageBytes = 20 * 1024 * 1024
+    fileprivate static let anthropicMessageIDMetadataKey = "anthropic.message_id"
+    fileprivate static let anthropicRequestIDMetadataKey = "anthropic.request_id"
+    fileprivate static let geminiResponseIDMetadataKey = "gemini.response_id"
+    fileprivate static let geminiModelVersionMetadataKey = "gemini.model_version"
+    fileprivate static let geminiRequestIDMetadataKey = "gemini.request_id"
+    fileprivate static let geminiModelContentMetadataKey = "gemini.model_content_json"
+    fileprivate static let maxInlineImageBytes = 20 * 1024 * 1024
+    fileprivate static let maxInlineFileBytes = 50 * 1024 * 1024
 
     let configuration: CloudProviderConfiguration
     let secretStore: any SecretStore
@@ -14,16 +23,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     var id: ProviderID { configuration.id }
 
     var capabilities: ProviderCapabilities {
-        ProviderCapabilities(
-            local: false,
-            streaming: true,
-            textGeneration: true,
-            vision: usesOfficialOpenAIAPI,
-            embeddings: false,
-            toolCalling: true,
-            jsonMode: false,
-            maxContextTokens: nil
-        )
+        configuration.capabilities
     }
 
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
@@ -51,15 +51,17 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                             statusCode: http.statusCode,
                             message: Self.messageWithRequestID(
                                 Self.providerErrorMessage(from: body) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode),
-                                requestID: http.value(forHTTPHeaderField: "x-request-id")
+                                requestID: Self.providerRequestID(from: http, body: body, providerKind: configuration.kind),
+                                providerKind: configuration.kind
                             )
                         )
                     }
 
                     var dataLines = [String]()
                     var toolState = CloudToolCallStreamState()
-                    toolState.recordOpenAIRequestMetadata(
-                        serverRequestID: http.value(forHTTPHeaderField: "x-request-id"),
+                    toolState.recordRequestMetadata(
+                        providerKind: configuration.kind,
+                        serverRequestID: Self.providerRequestID(from: http, body: nil, providerKind: configuration.kind),
                         clientRequestID: clientRequestID
                     )
                     var pendingFinish: InferenceFinish?
@@ -132,16 +134,17 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             request.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "model": modelID?.rawValue ?? configuration.defaultModelID?.rawValue ?? "claude-3-5-haiku-latest",
+                "model": modelID?.rawValue ?? configuration.defaultModelID?.rawValue ?? "claude-sonnet-4-6",
                 "max_tokens": 1,
                 "messages": [["role": "user", "content": "ping"]],
             ])
         case .gemini:
-            let model = modelID?.rawValue ?? configuration.defaultModelID?.rawValue ?? "gemini-2.0-flash"
-            var components = URLComponents(url: configuration.baseURL.appending(path: "v1beta/models/\(model):generateContent"), resolvingAgainstBaseURL: false)!
-            components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
+            let model = modelID?.rawValue ?? configuration.defaultModelID?.rawValue ?? "gemini-2.5-flash"
+            let version = Self.geminiAPIVersion(for: ModelID(rawValue: model))
+            let components = URLComponents(url: configuration.baseURL.appending(path: "\(version)/models/\(model):generateContent"), resolvingAgainstBaseURL: false)!
             request = URLRequest(url: components.url!)
             request.httpMethod = "POST"
+            request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: [
                 "contents": [["parts": [["text": "ping"]]]],
@@ -155,7 +158,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
         let message = Self.messageWithRequestID(
             Self.providerErrorMessage(from: data) ?? "Validation failed with HTTP \(http.statusCode).",
-            requestID: http.value(forHTTPHeaderField: "x-request-id")
+            requestID: Self.providerRequestID(from: http, body: data, providerKind: configuration.kind),
+            providerKind: configuration.kind
         )
         if http.statusCode == 429 {
             return ProviderValidationResult(providerID: configuration.id, status: .rateLimited, message: message, availableModels: availableModels)
@@ -179,7 +183,17 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     private func streamingFormat(for chatRequest: ChatRequest) -> CloudStreamingFormat {
-        usesOpenAIResponsesAPI(chatRequest: chatRequest) ? .openAIResponses : .chatCompletions
+        if usesOpenAIResponsesAPI(chatRequest: chatRequest) {
+            return .openAIResponses
+        }
+        switch configuration.kind {
+        case .anthropic:
+            return .anthropicMessages
+        case .gemini:
+            return .geminiGenerateContent
+        case .openAI, .openAICompatible, .openRouter, .custom:
+            return .chatCompletions
+        }
     }
 
     private func readAPIKey() async throws -> String? {
@@ -202,7 +216,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         var body: [String: Any] = [
             "model": chatRequest.modelID.rawValue,
             "stream": true,
-            "messages": try chatRequest.messages.map(Self.openAIMessageObject),
+            "messages": try chatRequest.messages.map { message in
+                try Self.openAIMessageObject(message, providerKind: configuration.kind)
+            },
         ]
         body[usesOpenAIReasoningParameters ? "max_completion_tokens" : "max_tokens"] = openAICompletionTokenLimit(
             for: chatRequest,
@@ -271,9 +287,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             request.addValue(apiKey, forHTTPHeaderField: "x-api-key")
             request.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         case .gemini:
-            var components = URLComponents(url: configuration.baseURL.appending(path: "v1beta/models"), resolvingAgainstBaseURL: false)!
-            components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
+            let components = URLComponents(url: configuration.baseURL.appending(path: "v1beta/models"), resolvingAgainstBaseURL: false)!
             request = URLRequest(url: components.url!)
+            request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         }
 
         try applyExtraHeaders(to: &request)
@@ -283,7 +299,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 statusCode: http.statusCode,
                 message: Self.messageWithRequestID(
                     Self.providerErrorMessage(from: data) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode),
-                    requestID: http.value(forHTTPHeaderField: "x-request-id")
+                    requestID: Self.providerRequestID(from: http, body: data, providerKind: configuration.kind),
+                    providerKind: configuration.kind
                 )
             )
         }
@@ -305,11 +322,18 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             "stream": true,
             "max_tokens": chatRequest.sampling.maxTokens ?? 1024,
             "temperature": chatRequest.sampling.temperature,
-            "messages": chatRequest.messages.filter { $0.role != .system }.map(Self.anthropicMessageObject),
+            "messages": try chatRequest.messages.filter { $0.role != .system }.map(Self.anthropicMessageObject),
             "system": chatRequest.messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n"),
         ]
+        if chatRequest.sampling.topP < 1 {
+            body["top_p"] = chatRequest.sampling.topP
+        }
+        if chatRequest.sampling.topK > 0 {
+            body["top_k"] = chatRequest.sampling.topK
+        }
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
             body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.anthropicToolObject()) }
+            body["tool_choice"] = ["type": "auto"]
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try applyExtraHeaders(to: &request)
@@ -348,6 +372,14 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             return url
         }
         return url.appending(path: "v1")
+    }
+
+    private static func geminiAPIVersion(for modelID: ModelID) -> String {
+        let id = modelID.rawValue.lowercased()
+        if id.contains("preview") || id.contains("gemini-3") {
+            return "v1beta"
+        }
+        return "v1"
     }
 
     private func addOpenAIClientRequestID(to request: inout URLRequest) {
@@ -393,43 +425,67 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 message: "Pines received an empty OpenAI Chat Completions stream for \(chatRequest.modelID.rawValue). Official OpenAI reasoning models should use the Responses API; check that the provider base URL is https://api.openai.com/v1.",
                 providerMetadata: state.openAIProviderMetadata
             )
+        case .anthropicMessages:
+            return InferenceFinish(reason: .stop, providerMetadata: state.anthropicProviderMetadata)
+        case .geminiGenerateContent:
+            return InferenceFinish(reason: state.geminiCompletedToolCallIDs.isEmpty ? .stop : .toolCall, providerMetadata: state.geminiProviderMetadata)
         }
     }
 
     private func geminiRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
+        let version = Self.geminiAPIVersion(for: chatRequest.modelID)
         var components = URLComponents(
-            url: configuration.baseURL.appending(path: "v1beta/models/\(chatRequest.modelID.rawValue):streamGenerateContent"),
+            url: configuration.baseURL.appending(path: "\(version)/models/\(chatRequest.modelID.rawValue):streamGenerateContent"),
             resolvingAgainstBaseURL: false
         )!
         components.queryItems = [
             URLQueryItem(name: "alt", value: "sse"),
-            URLQueryItem(name: "key", value: apiKey),
         ]
 
         var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
+        request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        var body: [String: Any] = [
-            "contents": chatRequest.messages.filter { $0.role != .system }.map(Self.geminiContentObject),
-            "generationConfig": [
-                "maxOutputTokens": chatRequest.sampling.maxTokens ?? AppSettingsSnapshot.defaultCloudMaxCompletionTokens,
-                "temperature": chatRequest.sampling.temperature,
-                "topP": chatRequest.sampling.topP,
-            ],
+        let systemInstruction = chatRequest.messages
+            .filter { $0.role == .system }
+            .map(\.content)
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        var generationConfig: [String: Any] = [
+            "maxOutputTokens": chatRequest.sampling.maxTokens ?? AppSettingsSnapshot.defaultCloudMaxCompletionTokens,
+            "temperature": chatRequest.sampling.temperature,
+            "topP": chatRequest.sampling.topP,
         ]
+        if chatRequest.sampling.topK > 0 {
+            generationConfig["topK"] = chatRequest.sampling.topK
+        }
+        var body: [String: Any] = [
+            "contents": try chatRequest.messages.filter { $0.role != .system }.map(Self.geminiContentObject),
+            "generationConfig": generationConfig,
+        ]
+        if !systemInstruction.isEmpty {
+            body["systemInstruction"] = [
+                "parts": [["text": systemInstruction]],
+            ]
+        }
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
             body["tools"] = [[
                 "functionDeclarations": chatRequest.availableTools.map {
                     Self.jsonSerializable($0.geminiFunctionDeclarationObject())
                 },
             ]]
+            body["toolConfig"] = [
+                "functionCallingConfig": [
+                    "mode": "AUTO",
+                ],
+            ]
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try applyExtraHeaders(to: &request)
         return request
     }
 
-    private static func openAIMessageObject(_ message: ChatMessage) throws -> [String: Any] {
+    private static func openAIMessageObject(_ message: ChatMessage, providerKind: CloudProviderKind) throws -> [String: Any] {
         if message.role == .tool {
             return [
                 "role": "tool",
@@ -440,7 +496,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
         var object: [String: Any] = [
             "role": message.role.rawValue,
-            "content": try openAIChatContent(from: message),
+            "content": try openAIChatContent(from: message, providerKind: providerKind),
         ]
         if !message.toolCalls.isEmpty {
             object["tool_calls"] = message.toolCalls.map { toolCall in
@@ -457,22 +513,39 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return object
     }
 
-    private static func openAIChatContent(from message: ChatMessage) throws -> Any {
-        let imageAttachments = message.attachments.filter { $0.kind == .image }
-        guard !imageAttachments.isEmpty, message.role == .user else {
+    private static func openAIChatContent(from message: ChatMessage, providerKind: CloudProviderKind) throws -> Any {
+        let attachments = try normalizedCloudAttachments(from: message)
+        guard !attachments.isEmpty else {
             return message.content
+        }
+        guard message.role == .user else {
+            throw InferenceError.invalidRequest("Cloud attachments are only supported on user messages.")
         }
 
         var parts = [[String: Any]]()
         if !message.content.isEmpty {
             parts.append(["type": "text", "text": message.content])
         }
-        for attachment in imageAttachments {
-            if let imageURL = try openAIImageURL(from: attachment) {
+        for attachment in attachments {
+            switch attachment.kind {
+            case .image:
                 parts.append([
                     "type": "image_url",
-                    "image_url": ["url": imageURL],
+                    "image_url": ["url": attachment.dataURL],
                 ])
+            case .pdf:
+                guard providerKind == .openRouter else {
+                    throw unsupportedAttachment(attachment, providerName: "this OpenAI-compatible provider")
+                }
+                parts.append([
+                    "type": "file",
+                    "file": [
+                        "filename": attachment.fileName,
+                        "file_data": attachment.dataURL,
+                    ],
+                ])
+            case .textDocument:
+                throw unsupportedAttachment(attachment, providerName: providerKind == .openRouter ? "OpenRouter" : "this OpenAI-compatible provider")
             }
         }
         return parts.isEmpty ? message.content : parts
@@ -539,29 +612,62 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         guard message.role == .user else {
             return content
         }
-        for attachment in message.attachments where attachment.kind == .image {
-            if let imageURL = try openAIImageURL(from: attachment) {
+        for attachment in try normalizedCloudAttachments(from: message) {
+            switch attachment.kind {
+            case .image:
                 content.append([
                     "type": "input_image",
-                    "image_url": imageURL,
+                    "image_url": attachment.dataURL,
                     "detail": "auto",
+                ])
+            case .pdf, .textDocument:
+                content.append([
+                    "type": "input_file",
+                    "filename": attachment.fileName,
+                    "file_data": attachment.dataURL,
                 ])
             }
         }
         return content
     }
 
-    private static func openAIImageURL(from attachment: ChatAttachment) throws -> String? {
-        guard let localURL = attachment.localURL else { return nil }
-        if let scheme = localURL.scheme?.lowercased(), scheme == "http" || scheme == "https" {
-            return localURL.absoluteString
-        }
-        let data = try Data(contentsOf: localURL)
-        guard data.count <= openAIMaxInlineImageBytes else {
-            throw InferenceError.invalidRequest("OpenAI image attachment \(attachment.fileName) exceeds the \(ByteCountFormatter.string(fromByteCount: Int64(openAIMaxInlineImageBytes), countStyle: .file)) inline limit.")
-        }
-        let contentType = attachment.contentType.isEmpty ? "image/png" : attachment.contentType
-        return "data:\(contentType);base64,\(data.base64EncodedString())"
+    private static func anthropicImageBlock(from attachment: CloudAttachmentPayload) -> [String: Any] {
+        [
+            "type": "image",
+            "source": [
+                "type": "base64",
+                "media_type": attachment.contentType,
+                "data": attachment.base64Data,
+            ],
+        ]
+    }
+
+    private static func anthropicDocumentBlock(from attachment: CloudAttachmentPayload) -> [String: Any] {
+        [
+            "type": "document",
+            "source": [
+                "type": "base64",
+                "media_type": attachment.contentType,
+                "data": attachment.base64Data,
+            ],
+        ]
+    }
+
+    private static func anthropicTextDocumentBlock(from attachment: CloudAttachmentPayload) throws -> [String: Any] {
+        [
+            "type": "text",
+            "text": try textDocumentPrompt(from: attachment),
+        ]
+    }
+
+    private static func geminiInlinePart(from attachment: CloudAttachmentPayload) throws -> [String: Any] {
+        let geminiAttachment = try geminiCompatibleAttachment(attachment)
+        return [
+            "inlineData": [
+                "mimeType": geminiAttachment.contentType,
+                "data": geminiAttachment.base64Data,
+            ],
+        ]
     }
 
     private static func openAIResponsesFunctionToolObject(_ spec: AnyToolSpec) -> [String: Any] {
@@ -573,7 +679,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         ]
     }
 
-    private static func anthropicMessageObject(_ message: ChatMessage) -> [String: Any] {
+    private static func anthropicMessageObject(_ message: ChatMessage) throws -> [String: Any] {
         if message.role == .tool {
             return [
                 "role": "user",
@@ -586,6 +692,20 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
 
         var content = [[String: Any]]()
+        if message.role == .user {
+            for attachment in try normalizedCloudAttachments(from: message) {
+                switch attachment.kind {
+                case .image:
+                    content.append(anthropicImageBlock(from: attachment))
+                case .pdf:
+                    content.append(anthropicDocumentBlock(from: attachment))
+                case .textDocument:
+                    content.append(try anthropicTextDocumentBlock(from: attachment))
+                }
+            }
+        } else if !message.attachments.isEmpty {
+            throw InferenceError.invalidRequest("Cloud attachments are only supported on user messages.")
+        }
         if !message.content.isEmpty {
             content.append(["type": "text", "text": message.content])
         }
@@ -603,30 +723,55 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         ]
     }
 
-    private static func geminiContentObject(_ message: ChatMessage) -> [String: Any] {
+    private static func geminiContentObject(_ message: ChatMessage) throws -> [String: Any] {
+        if message.role == .assistant,
+           let rawContent = message.providerMetadata[geminiModelContentMetadataKey],
+           let data = rawContent.data(using: .utf8),
+           let content = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           content["role"] as? String == "model",
+           content["parts"] is [[String: Any]] {
+            return content
+        }
+
         if message.role == .tool {
+            var functionResponse: [String: Any] = [
+                "name": message.toolName ?? "",
+                "response": Self.jsonObject(fromJSONString: message.content) ?? ["result": message.content],
+            ]
+            if let toolCallID = message.toolCallID, !toolCallID.isEmpty {
+                functionResponse["id"] = toolCallID
+            }
             return [
-                "role": "function",
-                "parts": [[
-                    "functionResponse": [
-                        "name": message.toolName ?? "",
-                        "response": Self.jsonObject(fromJSONString: message.content) ?? ["result": message.content],
-                    ],
-                ]],
+                "role": "user",
+                "parts": [["functionResponse": functionResponse]],
             ]
         }
 
         var parts = [[String: Any]]()
+        if message.role == .user {
+            for attachment in try normalizedCloudAttachments(from: message) {
+                switch attachment.kind {
+                case .image, .pdf:
+                    parts.append(try geminiInlinePart(from: attachment))
+                case .textDocument:
+                    parts.append(["text": try textDocumentPrompt(from: attachment)])
+                }
+            }
+        } else if !message.attachments.isEmpty {
+            throw InferenceError.invalidRequest("Cloud attachments are only supported on user messages.")
+        }
         if !message.content.isEmpty {
             parts.append(["text": message.content])
         }
         for toolCall in message.toolCalls {
-            parts.append([
-                "functionCall": [
-                    "name": toolCall.name,
-                    "args": Self.jsonObject(fromJSONString: toolCall.argumentsFragment) ?? [:],
-                ],
-            ])
+            var functionCall: [String: Any] = [
+                "name": toolCall.name,
+                "args": Self.jsonObject(fromJSONString: toolCall.argumentsFragment) ?? [:],
+            ]
+            if !toolCall.id.isEmpty {
+                functionCall["id"] = toolCall.id
+            }
+            parts.append(["functionCall": functionCall])
         }
         return [
             "role": message.role == .assistant ? "model" : "user",
@@ -647,6 +792,114 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         default:
             return value
         }
+    }
+
+    private static func normalizedCloudAttachments(from message: ChatMessage) throws -> [CloudAttachmentPayload] {
+        try message.attachments.map(normalizedCloudAttachment)
+    }
+
+    private static func normalizedCloudAttachment(_ attachment: ChatAttachment) throws -> CloudAttachmentPayload {
+        let contentType = normalizedCloudAttachmentContentType(attachment.normalizedContentType)
+        let kind: CloudAttachmentPayload.Kind
+        switch attachment.cloudInputKind {
+        case .image:
+            kind = .image
+        case .pdf:
+            kind = .pdf
+        case .textDocument:
+            kind = .textDocument
+        case .unsupported:
+            throw InferenceError.unsupportedCapability("Cloud attachment \(attachment.fileName) has unsupported MIME type \(contentType).")
+        }
+
+        guard let localURL = attachment.localURL else {
+            throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) is missing a local file URL.")
+        }
+        guard localURL.isFileURL else {
+            throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) must be a local file.")
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: localURL)
+        } catch {
+            throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) could not be read from disk: \(error.localizedDescription)")
+        }
+        guard !data.isEmpty else {
+            throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) is empty.")
+        }
+
+        let maxBytes = kind == .image ? maxInlineImageBytes : maxInlineFileBytes
+        guard data.count <= maxBytes else {
+            throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) exceeds the \(ByteCountFormatter.string(fromByteCount: Int64(maxBytes), countStyle: .file)) inline limit.")
+        }
+
+        let rawFileName = attachment.fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fileName = rawFileName.isEmpty ? localURL.lastPathComponent : rawFileName
+        return CloudAttachmentPayload(
+            kind: kind,
+            fileName: fileName.isEmpty ? "attachment" : fileName,
+            contentType: contentType,
+            data: data
+        )
+    }
+
+    private static func normalizedCloudAttachmentContentType(_ contentType: String) -> String {
+        switch contentType.lowercased() {
+        case "image/jpg":
+            return "image/jpeg"
+        case "text/x-markdown":
+            return "text/markdown"
+        default:
+            return contentType.lowercased()
+        }
+    }
+
+    private static func unsupportedAttachment(_ attachment: CloudAttachmentPayload, providerName: String) -> InferenceError {
+        .unsupportedCapability("\(providerName) does not support \(attachment.contentType) attachment inputs in Pines yet.")
+    }
+
+    private static func textDocumentPrompt(from attachment: CloudAttachmentPayload) throws -> String {
+        guard let text = String(data: attachment.data, encoding: .utf8) else {
+            throw InferenceError.invalidRequest("Cloud text attachment \(attachment.fileName) is not valid UTF-8.")
+        }
+        return """
+        Attached file \(attachment.fileName) (\(attachment.contentType)):
+
+        \(text)
+        """
+    }
+
+    private static func geminiCompatibleAttachment(_ attachment: CloudAttachmentPayload) throws -> CloudAttachmentPayload {
+        guard attachment.kind == .image,
+              attachment.contentType == "image/gif"
+        else {
+            return attachment
+        }
+        let pngData = try pngDataFromFirstGIFFrame(attachment.data, fileName: attachment.fileName)
+        return CloudAttachmentPayload(
+            kind: .image,
+            fileName: attachment.fileName.replacingFileExtension(with: "png"),
+            contentType: "image/png",
+            data: pngData
+        )
+    }
+
+    private static func pngDataFromFirstGIFFrame(_ data: Data, fileName: String) throws -> Data {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else {
+            throw InferenceError.invalidRequest("Gemini image attachment \(fileName) could not be decoded as a GIF.")
+        }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, UTType.png.identifier as CFString, 1, nil) else {
+            throw InferenceError.invalidRequest("Gemini image attachment \(fileName) could not be converted to PNG.")
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw InferenceError.invalidRequest("Gemini image attachment \(fileName) could not be finalized as PNG.")
+        }
+        return output as Data
     }
 
     private static func jsonObject(fromJSONString string: String) -> Any? {
@@ -677,9 +930,49 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return fallback?.isEmpty == false ? fallback : nil
     }
 
-    private static func messageWithRequestID(_ message: String, requestID: String?) -> String {
+    private static func messageWithRequestID(_ message: String, requestID: String?, providerKind: CloudProviderKind) -> String {
         guard let requestID, !requestID.isEmpty else { return message }
-        return "\(message) (OpenAI request ID: \(requestID))"
+        return "\(message) (\(requestIDLabel(for: providerKind)): \(requestID))"
+    }
+
+    private static func requestIDLabel(for providerKind: CloudProviderKind) -> String {
+        switch providerKind {
+        case .anthropic:
+            return "Anthropic request ID"
+        case .gemini:
+            return "Gemini request ID"
+        case .openAI, .openAICompatible, .openRouter, .custom:
+            return "OpenAI request ID"
+        }
+    }
+
+    private static func providerRequestID(from response: HTTPURLResponse, body: Data?, providerKind: CloudProviderKind) -> String? {
+        switch providerKind {
+        case .anthropic:
+            return response.value(forHTTPHeaderField: "request-id")
+                ?? response.value(forHTTPHeaderField: "x-request-id")
+                ?? requestIDFromErrorBody(body, keys: ["request_id"])
+        case .gemini:
+            return response.value(forHTTPHeaderField: "x-request-id")
+                ?? response.value(forHTTPHeaderField: "x-goog-request-id")
+                ?? response.value(forHTTPHeaderField: "x-cloud-trace-context")
+        case .openAI, .openAICompatible, .openRouter, .custom:
+            return response.value(forHTTPHeaderField: "x-request-id")
+        }
+    }
+
+    private static func requestIDFromErrorBody(_ body: Data?, keys: [String]) -> String? {
+        guard let body,
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        else {
+            return nil
+        }
+        for key in keys {
+            if let value = json[key] as? String, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
     }
 
     private func handleSSEDataLines(
@@ -750,6 +1043,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             }
 
             let displayName = (item["display_name"] as? String)
+                ?? (item["displayName"] as? String)
                 ?? readableModelName(id)
             let createdAt = createdDate(from: item)
             return CloudProviderModel(
@@ -857,14 +1151,28 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         switch providerKind {
         case .anthropic:
             let type = json["type"] as? String
+            if type == "message_start",
+               let message = json["message"] as? [String: Any] {
+                state.recordAnthropicMessage(message)
+                if let usage = message["usage"] as? [String: Any],
+                   let metrics = anthropicMetrics(from: usage) {
+                    events.append(.metrics(metrics))
+                }
+            }
             if type == "content_block_start",
                let index = json["index"] as? Int,
-               let block = json["content_block"] as? [String: Any],
-               block["type"] as? String == "tool_use" {
-                state.anthropicToolIndex = index
-                state.anthropicToolID = block["id"] as? String
-                state.anthropicToolName = block["name"] as? String
-                state.anthropicArguments = jsonString(from: block["input"]) ?? ""
+               let block = json["content_block"] as? [String: Any] {
+                if block["type"] as? String == "tool_use" {
+                    state.anthropicToolIndex = index
+                    state.anthropicToolID = block["id"] as? String
+                    state.anthropicToolName = block["name"] as? String
+                    state.anthropicArguments = jsonString(from: block["input"]) ?? ""
+                }
+                if block["type"] as? String == "text",
+                   let text = block["text"] as? String,
+                   !text.isEmpty {
+                    events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
+                }
             }
             if let delta = json["delta"] as? [String: Any] {
                 if delta["type"] as? String == "text_delta", let text = delta["text"] as? String, !text.isEmpty {
@@ -891,25 +1199,65 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 )
                 state.clearAnthropicTool()
             }
-        case .gemini:
-            let candidates = json["candidates"] as? [[String: Any]]
-            let content = candidates?.first?["content"] as? [String: Any]
-            let parts = content?["parts"] as? [[String: Any]]
-            for part in parts ?? [] {
-                if let text = part["text"] as? String, !text.isEmpty {
-                    events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
+            if type == "message_delta" {
+                if let usage = json["usage"] as? [String: Any],
+                   let metrics = anthropicMetrics(from: usage) {
+                    events.append(.metrics(metrics))
                 }
-                if let call = part["functionCall"] as? [String: Any],
-                   let name = call["name"] as? String {
-                    events.append(
-                        .toolCall(
-                            ToolCallDelta(
-                                id: UUID().uuidString,
+                if let delta = json["delta"] as? [String: Any],
+                   let stopReason = delta["stop_reason"] as? String {
+                    pendingFinish = anthropicFinish(from: stopReason, metadata: state.anthropicProviderMetadata)
+                }
+            }
+            if type == "error" {
+                let error = json["error"] as? [String: Any]
+                pendingFinish = InferenceFinish(
+                    reason: .error,
+                    message: error?["message"] as? String ?? "Anthropic returned a streaming error.",
+                    providerMetadata: state.anthropicProviderMetadata
+                )
+            }
+        case .gemini:
+            state.recordGeminiResponse(json)
+            if let promptFeedback = json["promptFeedback"] as? [String: Any],
+               let finish = geminiPromptFeedbackFinish(from: promptFeedback, metadata: state.geminiProviderMetadata) {
+                pendingFinish = finish
+            }
+            if let usage = json["usageMetadata"] as? [String: Any],
+               let metrics = geminiMetrics(from: usage) {
+                events.append(.metrics(metrics))
+            }
+            let candidates = json["candidates"] as? [[String: Any]]
+            for candidate in candidates ?? [] {
+                if let content = candidate["content"] as? [String: Any] {
+                    state.recordGeminiModelContent(content)
+                    let parts = content["parts"] as? [[String: Any]]
+                    for part in parts ?? [] {
+                        if part["thought"] as? Bool == true {
+                            continue
+                        }
+                        if let text = part["text"] as? String, !text.isEmpty {
+                            events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
+                        }
+                        if let call = part["functionCall"] as? [String: Any],
+                           let name = call["name"] as? String {
+                            let toolCall = ToolCallDelta(
+                                id: (call["id"] as? String) ?? UUID().uuidString,
                                 name: name,
                                 argumentsFragment: jsonString(from: call["args"]) ?? "{}",
                                 isComplete: true
                             )
-                        )
+                            if state.markGeminiToolCallCompleted(toolCall) {
+                                events.append(.toolCall(toolCall))
+                            }
+                        }
+                    }
+                }
+                if let finishReason = candidate["finishReason"] as? String {
+                    pendingFinish = geminiFinish(
+                        from: finishReason,
+                        hasToolCalls: !state.geminiCompletedToolCallIDs.isEmpty,
+                        metadata: state.geminiProviderMetadata
                     )
                 }
             }
@@ -1258,7 +1606,94 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
     }
 
-    private static func jsonString(from value: Any?) -> String? {
+    private static func anthropicFinish(from stopReason: String, metadata: [String: String]) -> InferenceFinish {
+        switch stopReason {
+        case "tool_use":
+            return InferenceFinish(reason: .toolCall, providerMetadata: metadata)
+        case "max_tokens", "model_context_window_exceeded":
+            return InferenceFinish(reason: .length, providerMetadata: metadata)
+        case "stop_sequence", "end_turn":
+            return InferenceFinish(reason: .stop, providerMetadata: metadata)
+        case "refusal":
+            return InferenceFinish(reason: .error, message: "Anthropic stopped the response with a refusal.", providerMetadata: metadata)
+        case "pause_turn":
+            return InferenceFinish(reason: .error, message: "Anthropic paused the turn before completing a response.", providerMetadata: metadata)
+        default:
+            return InferenceFinish(reason: .stop, providerMetadata: metadata)
+        }
+    }
+
+    private static func anthropicMetrics(from usage: [String: Any]) -> InferenceMetrics? {
+        let inputTokens = intValue(usage["input_tokens"])
+            + intValue(usage["cache_creation_input_tokens"])
+            + intValue(usage["cache_read_input_tokens"])
+        let outputTokens = intValue(usage["output_tokens"])
+        guard inputTokens > 0 || outputTokens > 0 else { return nil }
+        return InferenceMetrics(promptTokens: inputTokens, completionTokens: outputTokens)
+    }
+
+    private static func geminiFinish(
+        from finishReason: String,
+        hasToolCalls: Bool,
+        metadata: [String: String]
+    ) -> InferenceFinish {
+        if hasToolCalls {
+            return InferenceFinish(reason: .toolCall, providerMetadata: metadata)
+        }
+        switch finishReason {
+        case "STOP":
+            return InferenceFinish(reason: .stop, providerMetadata: metadata)
+        case "MAX_TOKENS":
+            return InferenceFinish(reason: .length, providerMetadata: metadata)
+        case "SAFETY":
+            return InferenceFinish(reason: .error, message: "Gemini stopped the response because of safety settings.", providerMetadata: metadata)
+        case "RECITATION":
+            return InferenceFinish(reason: .error, message: "Gemini stopped the response because of recitation policy.", providerMetadata: metadata)
+        case "LANGUAGE":
+            return InferenceFinish(reason: .error, message: "Gemini stopped the response because the language is unsupported.", providerMetadata: metadata)
+        case "BLOCKLIST":
+            return InferenceFinish(reason: .error, message: "Gemini stopped the response because the prompt or output matched a blocklist.", providerMetadata: metadata)
+        case "PROHIBITED_CONTENT":
+            return InferenceFinish(reason: .error, message: "Gemini stopped the response because it contained prohibited content.", providerMetadata: metadata)
+        case "SPII":
+            return InferenceFinish(reason: .error, message: "Gemini stopped the response because it contained sensitive personal data.", providerMetadata: metadata)
+        case "MALFORMED_FUNCTION_CALL":
+            return InferenceFinish(reason: .error, message: "Gemini returned a malformed function call.", providerMetadata: metadata)
+        default:
+            return InferenceFinish(reason: .stop, providerMetadata: metadata)
+        }
+    }
+
+    private static func geminiPromptFeedbackFinish(
+        from promptFeedback: [String: Any],
+        metadata: [String: String]
+    ) -> InferenceFinish? {
+        guard let blockReason = promptFeedback["blockReason"] as? String, !blockReason.isEmpty else {
+            return nil
+        }
+        let message = promptFeedback["blockReasonMessage"] as? String
+            ?? "Gemini blocked the prompt with reason: \(blockReason)."
+        return InferenceFinish(reason: .error, message: message, providerMetadata: metadata)
+    }
+
+    private static func geminiMetrics(from usage: [String: Any]) -> InferenceMetrics? {
+        let inputTokens = intValue(usage["promptTokenCount"])
+        let outputTokens = intValue(usage["candidatesTokenCount"])
+        guard inputTokens > 0 || outputTokens > 0 else { return nil }
+        return InferenceMetrics(promptTokens: inputTokens, completionTokens: outputTokens)
+    }
+
+    private static func intValue(_ value: Any?) -> Int {
+        if let value = value as? Int {
+            return value
+        }
+        if let value = value as? NSNumber {
+            return value.intValue
+        }
+        return 0
+    }
+
+    fileprivate static func jsonString(from value: Any?) -> String? {
         guard let value, JSONSerialization.isValidJSONObject(value),
               let data = try? JSONSerialization.data(withJSONObject: value)
         else {
@@ -1282,11 +1717,31 @@ private struct CloudToolCallStreamState {
     var anthropicToolID: String?
     var anthropicToolName: String?
     var anthropicArguments = ""
+    var anthropicProviderMetadata = [String: String]()
+
+    var geminiProviderMetadata = [String: String]()
+    var geminiCompletedToolCallIDs = Set<String>()
+    var geminiModelContent: [String: Any]?
 
     mutating func clearOpenAITools() {
         openAIToolIDs.removeAll(keepingCapacity: true)
         openAIToolNames.removeAll(keepingCapacity: true)
         openAIArguments.removeAll(keepingCapacity: true)
+    }
+
+    mutating func recordRequestMetadata(providerKind: CloudProviderKind, serverRequestID: String?, clientRequestID: String?) {
+        switch providerKind {
+        case .anthropic:
+            if let serverRequestID, !serverRequestID.isEmpty {
+                anthropicProviderMetadata[BYOKCloudInferenceProvider.anthropicRequestIDMetadataKey] = serverRequestID
+            }
+        case .gemini:
+            if let serverRequestID, !serverRequestID.isEmpty {
+                geminiProviderMetadata[BYOKCloudInferenceProvider.geminiRequestIDMetadataKey] = serverRequestID
+            }
+        case .openAI, .openAICompatible, .openRouter, .custom:
+            recordOpenAIRequestMetadata(serverRequestID: serverRequestID, clientRequestID: clientRequestID)
+        }
     }
 
     mutating func recordOpenAIRequestMetadata(serverRequestID: String?, clientRequestID: String?) {
@@ -1317,6 +1772,53 @@ private struct CloudToolCallStreamState {
         anthropicToolName = nil
         anthropicArguments.removeAll(keepingCapacity: true)
     }
+
+    mutating func recordAnthropicMessage(_ message: [String: Any]) {
+        if let messageID = message["id"] as? String, !messageID.isEmpty {
+            anthropicProviderMetadata[BYOKCloudInferenceProvider.anthropicMessageIDMetadataKey] = messageID
+        }
+    }
+
+    mutating func recordGeminiResponse(_ response: [String: Any]) {
+        if let responseID = response["responseId"] as? String, !responseID.isEmpty {
+            geminiProviderMetadata[BYOKCloudInferenceProvider.geminiResponseIDMetadataKey] = responseID
+        }
+        if let modelVersion = response["modelVersion"] as? String, !modelVersion.isEmpty {
+            geminiProviderMetadata[BYOKCloudInferenceProvider.geminiModelVersionMetadataKey] = modelVersion
+        }
+    }
+
+    mutating func recordGeminiModelContent(_ content: [String: Any]) {
+        guard let parts = content["parts"] as? [[String: Any]], !parts.isEmpty else { return }
+        var existingParts = (geminiModelContent?["parts"] as? [[String: Any]]) ?? []
+        for part in parts {
+            if let text = part["text"] as? String,
+               part["thought"] as? Bool != true,
+               !text.isEmpty {
+                existingParts.append(["text": text])
+                continue
+            }
+            if let functionCall = part["functionCall"] as? [String: Any] {
+                existingParts.append(["functionCall": functionCall])
+                continue
+            }
+            if part["thoughtSignature"] != nil || part["thought"] as? Bool == true {
+                existingParts.append(part)
+            }
+        }
+        guard !existingParts.isEmpty else { return }
+        geminiModelContent = [
+            "role": "model",
+            "parts": existingParts,
+        ]
+        if let json = BYOKCloudInferenceProvider.jsonString(from: geminiModelContent) {
+            geminiProviderMetadata[BYOKCloudInferenceProvider.geminiModelContentMetadataKey] = json
+        }
+    }
+
+    mutating func markGeminiToolCallCompleted(_ toolCall: ToolCallDelta) -> Bool {
+        geminiCompletedToolCallIDs.insert(toolCall.id).inserted
+    }
 }
 
 private struct OpenAIResponsesPayload {
@@ -1325,9 +1827,40 @@ private struct OpenAIResponsesPayload {
     var previousResponseID: String?
 }
 
+private struct CloudAttachmentPayload {
+    enum Kind {
+        case image
+        case pdf
+        case textDocument
+    }
+
+    var kind: Kind
+    var fileName: String
+    var contentType: String
+    var data: Data
+
+    var base64Data: String {
+        data.base64EncodedString()
+    }
+
+    var dataURL: String {
+        "data:\(contentType);base64,\(base64Data)"
+    }
+}
+
 private enum CloudStreamingFormat {
     case chatCompletions
     case openAIResponses
+    case anthropicMessages
+    case geminiGenerateContent
+}
+
+private extension String {
+    func replacingFileExtension(with newExtension: String) -> String {
+        let url = URL(fileURLWithPath: self)
+        let base = url.deletingPathExtension().lastPathComponent
+        return base.isEmpty ? "attachment.\(newExtension)" : "\(base).\(newExtension)"
+    }
 }
 
 private extension Sequence {

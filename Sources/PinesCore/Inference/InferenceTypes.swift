@@ -128,6 +128,9 @@ public struct ProviderCapabilities: Hashable, Codable, Sendable {
     public var streaming: Bool
     public var textGeneration: Bool
     public var vision: Bool
+    public var imageInputs: Bool
+    public var pdfInputs: Bool
+    public var textDocumentInputs: Bool
     public var embeddings: Bool
     public var toolCalling: Bool
     public var jsonMode: Bool
@@ -138,6 +141,9 @@ public struct ProviderCapabilities: Hashable, Codable, Sendable {
         streaming: Bool = true,
         textGeneration: Bool = true,
         vision: Bool = false,
+        imageInputs: Bool = false,
+        pdfInputs: Bool = false,
+        textDocumentInputs: Bool = false,
         embeddings: Bool = false,
         toolCalling: Bool = false,
         jsonMode: Bool = false,
@@ -147,10 +153,147 @@ public struct ProviderCapabilities: Hashable, Codable, Sendable {
         self.streaming = streaming
         self.textGeneration = textGeneration
         self.vision = vision
+        self.imageInputs = imageInputs
+        self.pdfInputs = pdfInputs
+        self.textDocumentInputs = textDocumentInputs
         self.embeddings = embeddings
         self.toolCalling = toolCalling
         self.jsonMode = jsonMode
         self.maxContextTokens = maxContextTokens
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case local
+        case streaming
+        case textGeneration
+        case vision
+        case imageInputs
+        case pdfInputs
+        case textDocumentInputs
+        case embeddings
+        case toolCalling
+        case jsonMode
+        case maxContextTokens
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        local = try container.decode(Bool.self, forKey: .local)
+        streaming = try container.decodeIfPresent(Bool.self, forKey: .streaming) ?? true
+        textGeneration = try container.decodeIfPresent(Bool.self, forKey: .textGeneration) ?? true
+        vision = try container.decodeIfPresent(Bool.self, forKey: .vision) ?? false
+        imageInputs = try container.decodeIfPresent(Bool.self, forKey: .imageInputs) ?? false
+        pdfInputs = try container.decodeIfPresent(Bool.self, forKey: .pdfInputs) ?? false
+        textDocumentInputs = try container.decodeIfPresent(Bool.self, forKey: .textDocumentInputs) ?? false
+        embeddings = try container.decodeIfPresent(Bool.self, forKey: .embeddings) ?? false
+        toolCalling = try container.decodeIfPresent(Bool.self, forKey: .toolCalling) ?? false
+        jsonMode = try container.decodeIfPresent(Bool.self, forKey: .jsonMode) ?? false
+        maxContextTokens = try container.decodeIfPresent(Int.self, forKey: .maxContextTokens)
+    }
+}
+
+public struct ProviderInputRequirements: Hashable, Codable, Sendable {
+    public var requiresImages: Bool
+    public var requiresPDFs: Bool
+    public var requiresTextDocuments: Bool
+
+    public init(
+        requiresImages: Bool = false,
+        requiresPDFs: Bool = false,
+        requiresTextDocuments: Bool = false
+    ) {
+        self.requiresImages = requiresImages
+        self.requiresPDFs = requiresPDFs
+        self.requiresTextDocuments = requiresTextDocuments
+    }
+
+    public init(messages: [ChatMessage]) {
+        self.init()
+        for attachment in messages.flatMap(\.attachments) {
+            switch attachment.cloudInputKind {
+            case .image:
+                requiresImages = true
+            case .pdf:
+                requiresPDFs = true
+            case .textDocument:
+                requiresTextDocuments = true
+            case .unsupported:
+                if attachment.kind == .image {
+                    requiresImages = true
+                } else if attachment.kind == .document {
+                    requiresTextDocuments = true
+                }
+            }
+        }
+    }
+
+    public var isEmpty: Bool {
+        !requiresImages && !requiresPDFs && !requiresTextDocuments
+    }
+
+    public func isSatisfied(by capabilities: ProviderCapabilities) -> Bool {
+        if requiresImages && !(capabilities.imageInputs || capabilities.vision) { return false }
+        if requiresPDFs && !capabilities.pdfInputs { return false }
+        if requiresTextDocuments && !capabilities.textDocumentInputs { return false }
+        return true
+    }
+}
+
+public enum CloudAttachmentInputKind: Hashable, Codable, Sendable {
+    case image
+    case pdf
+    case textDocument
+    case unsupported
+}
+
+public extension ChatAttachment {
+    var normalizedContentType: String {
+        let rawValue = contentType
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if !rawValue.isEmpty {
+            return rawValue
+        }
+        switch localURL?.pathExtension.lowercased() {
+        case "jpg", "jpeg":
+            return "image/jpeg"
+        case "png":
+            return "image/png"
+        case "webp":
+            return "image/webp"
+        case "gif":
+            return "image/gif"
+        case "pdf":
+            return "application/pdf"
+        case "md", "markdown":
+            return "text/markdown"
+        case "json":
+            return "application/json"
+        case "csv":
+            return "text/csv"
+        case "txt", "text":
+            return "text/plain"
+        default:
+            return "application/octet-stream"
+        }
+    }
+
+    var cloudInputKind: CloudAttachmentInputKind {
+        switch normalizedContentType {
+        case "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif":
+            return .image
+        case "application/pdf":
+            return .pdf
+        case "text/plain", "text/markdown", "text/x-markdown", "application/json", "text/csv":
+            return .textDocument
+        default:
+            switch kind {
+            case .image:
+                return .image
+            default:
+                return .unsupported
+            }
+        }
     }
 }
 

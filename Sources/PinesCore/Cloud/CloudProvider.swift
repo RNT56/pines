@@ -71,6 +71,58 @@ public struct CloudProviderConfiguration: Identifiable, Hashable, Codable, Senda
     }
 }
 
+public extension CloudProviderConfiguration {
+    var capabilities: ProviderCapabilities {
+        let officialOpenAI = isOfficialOpenAIAPI
+        let imageInputs: Bool
+        let pdfInputs: Bool
+        let textDocumentInputs: Bool
+
+        switch kind {
+        case .openAI:
+            imageInputs = officialOpenAI
+            pdfInputs = officialOpenAI
+            textDocumentInputs = officialOpenAI
+        case .anthropic, .gemini:
+            imageInputs = true
+            pdfInputs = true
+            textDocumentInputs = true
+        case .openRouter:
+            imageInputs = true
+            pdfInputs = true
+            textDocumentInputs = false
+        case .openAICompatible, .custom:
+            imageInputs = true
+            pdfInputs = officialOpenAI
+            textDocumentInputs = officialOpenAI
+        }
+
+        return ProviderCapabilities(
+            local: false,
+            streaming: true,
+            textGeneration: true,
+            vision: imageInputs,
+            imageInputs: imageInputs,
+            pdfInputs: pdfInputs,
+            textDocumentInputs: textDocumentInputs,
+            embeddings: false,
+            toolCalling: true,
+            jsonMode: true,
+            maxContextTokens: nil
+        )
+    }
+
+    var isOfficialOpenAIAPI: Bool {
+        if kind == .openAI {
+            return true
+        }
+        guard let host = baseURL.host(percentEncoded: false)?.lowercased() else {
+            return false
+        }
+        return host == "api.openai.com"
+    }
+}
+
 public protocol SecretStore: Sendable {
     func read(service: String, account: String) async throws -> String?
     func write(_ secret: String, service: String, account: String) async throws
@@ -154,12 +206,7 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
         var body: [String: Any] = [
             "model": request.modelID.rawValue,
             "stream": true,
-            "messages": request.messages.map { message in
-                [
-                    "role": message.role.rawValue,
-                    "content": message.content,
-                ]
-            }
+            "messages": try request.messages.map(Self.messageObject),
         ]
         if let maxTokens = request.sampling.maxTokens {
             body[usesReasoningChatParameters ? "max_completion_tokens" : "max_tokens"] = usesReasoningChatParameters
@@ -194,6 +241,48 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
 
     private static func jsonSerializable(_ dictionary: [String: any Sendable]) -> [String: Any] {
         dictionary.mapValues { jsonSerializable($0) }
+    }
+
+    private static func messageObject(_ message: ChatMessage) throws -> [String: Any] {
+        guard message.role != .tool else {
+            return [
+                "role": "tool",
+                "tool_call_id": message.toolCallID ?? "",
+                "content": message.content,
+            ]
+        }
+        return [
+            "role": message.role.rawValue,
+            "content": try chatContent(from: message),
+        ]
+    }
+
+    private static func chatContent(from message: ChatMessage) throws -> Any {
+        guard !message.attachments.isEmpty else {
+            return message.content
+        }
+        guard message.role == .user else {
+            throw InferenceError.invalidRequest("OpenAI-compatible attachments are only supported on user messages.")
+        }
+        var parts = [[String: Any]]()
+        if !message.content.isEmpty {
+            parts.append(["type": "text", "text": message.content])
+        }
+        for attachment in message.attachments {
+            guard attachment.cloudInputKind == .image else {
+                throw InferenceError.unsupportedCapability("OpenAI-compatible chat completions only support image attachments.")
+            }
+            guard let localURL = attachment.localURL, localURL.isFileURL else {
+                throw InferenceError.invalidRequest("Image attachment \(attachment.fileName) must have a local file URL.")
+            }
+            let data = try Data(contentsOf: localURL)
+            let contentType = attachment.normalizedContentType == "image/jpg" ? "image/jpeg" : attachment.normalizedContentType
+            parts.append([
+                "type": "image_url",
+                "image_url": ["url": "data:\(contentType);base64,\(data.base64EncodedString())"],
+            ])
+        }
+        return parts
     }
 
     private static func jsonSerializable(_ value: Any) -> Any {

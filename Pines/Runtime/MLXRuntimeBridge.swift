@@ -43,6 +43,7 @@ struct MLXRuntimeBridge {
             streaming: true,
             textGeneration: true,
             vision: profile.allowsVisionModels,
+            imageInputs: profile.allowsVisionModels,
             embeddings: true,
             toolCalling: true,
             jsonMode: true,

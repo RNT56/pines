@@ -35,7 +35,7 @@ struct PinesCoreTestRunner {
             mode: .localOnly,
             local: nil,
             cloud: ("openai", ProviderCapabilities(local: false, toolCalling: true)),
-            requiresVision: false,
+            requiredInputs: .init(),
             requiresTools: true
         )
         try expectEqual(
@@ -45,12 +45,38 @@ struct PinesCoreTestRunner {
 
         let preferLocal = router.routeChat(
             mode: .preferLocal,
-            local: ("mlx", ProviderCapabilities(local: true, vision: true, toolCalling: true)),
-            cloud: ("openai", ProviderCapabilities(local: false, vision: true, toolCalling: true)),
-            requiresVision: true,
+            local: ("mlx", ProviderCapabilities(local: true, vision: true, imageInputs: true, toolCalling: true)),
+            cloud: ("openai", ProviderCapabilities(local: false, vision: true, imageInputs: true, toolCalling: true)),
+            requiredInputs: .init(requiresImages: true),
             requiresTools: true
         )
         try expectEqual(preferLocal.destination, .local("mlx"))
+
+        let pdfRequired = ProviderInputRequirements(
+            messages: [
+                ChatMessage(
+                    role: .user,
+                    content: "summarize",
+                    attachments: [ChatAttachment(kind: .document, fileName: "doc.pdf", contentType: "application/pdf")]
+                ),
+            ]
+        )
+        let genericCloud = router.routeChat(
+            mode: .cloudRequired,
+            local: nil,
+            cloud: ("compat", ProviderCapabilities(local: false, imageInputs: true)),
+            requiredInputs: pdfRequired,
+            requiresTools: false
+        )
+        try expectEqual(genericCloud.destination, .denied(reason: .cloudNotAllowed))
+        let openRouter = router.routeChat(
+            mode: .cloudRequired,
+            local: nil,
+            cloud: ("openrouter", ProviderCapabilities(local: false, imageInputs: true, pdfInputs: true)),
+            requiredInputs: pdfRequired,
+            requiresTools: false
+        )
+        try expectEqual(openRouter.destination, .cloud("openrouter"))
     }
 
     private static func testModelPreflight() throws {

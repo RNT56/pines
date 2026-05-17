@@ -30,19 +30,19 @@ public struct ExecutionRouter: Sendable {
         mode: AgentExecutionMode,
         local: (id: ProviderID, capabilities: ProviderCapabilities)?,
         cloud: (id: ProviderID, capabilities: ProviderCapabilities)?,
-        requiresVision: Bool,
+        requiredInputs: ProviderInputRequirements = .init(),
         requiresTools: Bool
     ) -> RouteDecision {
         let localMatches = local.flatMap { provider -> ProviderID? in
             guard provider.capabilities.textGeneration else { return nil }
-            guard !requiresVision || provider.capabilities.vision else { return nil }
+            guard requiredInputs.isSatisfied(by: provider.capabilities) else { return nil }
             guard !requiresTools || provider.capabilities.toolCalling else { return nil }
             return provider.id
         }
 
         let cloudMatches = cloud.flatMap { provider -> ProviderID? in
             guard provider.capabilities.textGeneration else { return nil }
-            guard !requiresVision || provider.capabilities.vision else { return nil }
+            guard requiredInputs.isSatisfied(by: provider.capabilities) else { return nil }
             guard !requiresTools || provider.capabilities.toolCalling else { return nil }
             return provider.id
         }

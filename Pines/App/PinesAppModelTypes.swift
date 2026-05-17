@@ -448,18 +448,3 @@ enum PinesStaticSettings {
     ]
 
 }
-
-extension CloudProviderConfiguration {
-    var capabilities: ProviderCapabilities {
-        ProviderCapabilities(
-            local: false,
-            streaming: true,
-            textGeneration: true,
-            vision: true,
-            embeddings: false,
-            toolCalling: true,
-            jsonMode: true,
-            maxContextTokens: nil
-        )
-    }
-}
