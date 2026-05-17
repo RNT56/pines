@@ -18,7 +18,7 @@ final class MCPOAuthPresentationContextProvider: NSObject, ASWebAuthenticationPr
         if let scene = scenes.first {
             return ASPresentationAnchor(windowScene: scene)
         }
-        return ASPresentationAnchor()
+        preconditionFailure("OAuth presentation requires an active UIWindowScene.")
     }
 }
 

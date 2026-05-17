@@ -260,21 +260,24 @@ actor GRDBPinesStore:
             var arguments: StatementArguments = [content, status.rawValue, tokenCount]
             if let providerMetadata {
                 assignments.append("provider_metadata_json = ?")
-                arguments.append(Self.encodeProviderMetadata(providerMetadata))
+                _ = arguments.append(contentsOf: StatementArguments([Self.encodeProviderMetadata(providerMetadata)]))
             }
             if let toolName {
                 assignments.append("tool_name = ?")
-                arguments.append(toolName)
+                _ = arguments.append(contentsOf: StatementArguments([toolName]))
             }
             if let toolCalls {
                 assignments.append("tool_calls_json = ?")
-                arguments.append(Self.encodeToolCalls(toolCalls))
+                _ = arguments.append(contentsOf: StatementArguments([Self.encodeToolCalls(toolCalls)]))
             }
             assignments.append("updated_at = ?")
             assignments.append("sync_state = ?")
-            arguments.append(updatedAt)
-            arguments.append(SyncState.local.rawValue)
-            arguments.append(id.uuidString)
+            let finalArguments: StatementArguments = [
+                updatedAt,
+                SyncState.local.rawValue,
+                id.uuidString,
+            ]
+            _ = arguments.append(contentsOf: finalArguments)
             try db.execute(
                 sql: "UPDATE messages SET \(assignments.joined(separator: ", ")) WHERE id = ?",
                 arguments: arguments

@@ -341,8 +341,8 @@ final class MCPStreamableHTTPClient: Sendable {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try await applyAuthHeader(to: &request, server: server)
         await applyBaseHeaders(to: &request)
-        let (_, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        let (_, http) = try await urlSession.data(for: request)
+        guard (200..<300).contains(http.statusCode) else {
             throw MCPTransportError.invalidHTTPResponse
         }
     }

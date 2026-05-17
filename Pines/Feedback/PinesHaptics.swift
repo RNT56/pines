@@ -242,8 +242,7 @@ final class PinesHaptics: ObservableObject {
     func play(_ event: PinesHapticEvent) {
         #if targetEnvironment(simulator)
         return
-        #endif
-
+        #else
         guard mode != .off else { return }
         guard event.allowsLowPowerPlayback || !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
 
@@ -257,6 +256,7 @@ final class PinesHaptics: ObservableObject {
         }
 
         prepare()
+        #endif
     }
 
     private func playStandard(_ event: PinesHapticEvent) {
@@ -347,8 +347,7 @@ final class PinesHaptics: ObservableObject {
     func prepare() {
         #if targetEnvironment(simulator)
         return
-        #endif
-
+        #else
         #if canImport(UIKit)
         selection.prepare()
         notification.prepare()
@@ -361,6 +360,7 @@ final class PinesHaptics: ObservableObject {
         if mode == .expressive {
             prepareCoreHaptics()
         }
+        #endif
     }
 
     private func selectionChanged() {
