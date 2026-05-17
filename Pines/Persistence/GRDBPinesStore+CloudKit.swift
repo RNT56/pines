@@ -154,7 +154,8 @@ extension GRDBPinesStore: CloudKitSyncRepository {
             sql: """
             SELECT m.id, m.conversation_id, m.role, m.content, m.created_at,
                    COALESCE(m.updated_at, m.created_at) AS updated_at,
-                   m.deleted_at, m.status, m.model_id, m.provider_id, m.tool_call_id, m.provider_metadata_json
+                   m.deleted_at, m.status, m.model_id, m.provider_id, m.tool_call_id,
+                   m.tool_name, m.tool_calls_json, m.provider_metadata_json
             FROM messages m
             JOIN conversations c ON c.id = m.conversation_id
             WHERE c.deleted_at IS NULL AND (? OR m.sync_state != ?)
@@ -177,6 +178,8 @@ extension GRDBPinesStore: CloudKitSyncRepository {
                 modelID: (row["model_id"] as String?).map(ModelID.init(rawValue:)),
                 providerID: (row["provider_id"] as String?).map(ProviderID.init(rawValue:)),
                 toolCallID: row["tool_call_id"] as String?,
+                toolName: row["tool_name"] as String?,
+                toolCalls: decodeToolCalls(row["tool_calls_json"] as String?),
                 providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?)
             )
         }
@@ -359,8 +362,8 @@ extension GRDBPinesStore: CloudKitSyncRepository {
             try db.execute(
                 sql: """
                 INSERT INTO messages
-                    (id, conversation_id, role, content, created_at, updated_at, deleted_at, status, model_id, provider_id, tool_call_id, provider_metadata_json, sync_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, conversation_id, role, content, created_at, updated_at, deleted_at, status, model_id, provider_id, tool_call_id, tool_name, tool_calls_json, provider_metadata_json, sync_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     conversation_id = excluded.conversation_id,
                     role = excluded.role,
@@ -371,6 +374,8 @@ extension GRDBPinesStore: CloudKitSyncRepository {
                     model_id = excluded.model_id,
                     provider_id = excluded.provider_id,
                     tool_call_id = excluded.tool_call_id,
+                    tool_name = excluded.tool_name,
+                    tool_calls_json = excluded.tool_calls_json,
                     provider_metadata_json = excluded.provider_metadata_json,
                     sync_state = excluded.sync_state
                 """,
@@ -386,6 +391,8 @@ extension GRDBPinesStore: CloudKitSyncRepository {
                     message.modelID?.rawValue,
                     message.providerID?.rawValue,
                     message.toolCallID,
+                    message.toolName,
+                    encodeToolCalls(message.toolCalls),
                     encodeProviderMetadata(message.providerMetadata),
                     SyncState.deleted.rawValue,
                 ]
@@ -403,8 +410,8 @@ extension GRDBPinesStore: CloudKitSyncRepository {
         try db.execute(
             sql: """
             INSERT INTO messages
-                (id, conversation_id, role, content, created_at, updated_at, deleted_at, status, model_id, provider_id, tool_call_id, provider_metadata_json, sync_state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, conversation_id, role, content, created_at, updated_at, deleted_at, status, model_id, provider_id, tool_call_id, tool_name, tool_calls_json, provider_metadata_json, sync_state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 conversation_id = excluded.conversation_id,
                 role = excluded.role,
@@ -415,6 +422,8 @@ extension GRDBPinesStore: CloudKitSyncRepository {
                 model_id = excluded.model_id,
                 provider_id = excluded.provider_id,
                 tool_call_id = excluded.tool_call_id,
+                tool_name = excluded.tool_name,
+                tool_calls_json = excluded.tool_calls_json,
                 provider_metadata_json = excluded.provider_metadata_json,
                 sync_state = excluded.sync_state
             """,
@@ -430,6 +439,8 @@ extension GRDBPinesStore: CloudKitSyncRepository {
                 message.modelID?.rawValue,
                 message.providerID?.rawValue,
                 message.toolCallID,
+                message.toolName,
+                encodeToolCalls(message.toolCalls),
                 encodeProviderMetadata(message.providerMetadata),
                 SyncState.synced.rawValue,
             ]

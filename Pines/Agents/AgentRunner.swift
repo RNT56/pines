@@ -30,8 +30,16 @@ struct AgentRunner {
                     var messages = request.messages
                     var step = 0
                     var toolCalls = 0
+                    let startedAt = Date()
+
+                    func enforceWallTimeLimit() throws {
+                        guard Date().timeIntervalSince(startedAt) <= TimeInterval(session.policy.maxWallTimeSeconds) else {
+                            throw AgentError.wallTimeExceeded
+                        }
+                    }
 
                     while step < session.policy.maxSteps {
+                        try enforceWallTimeLimit()
                         step += 1
                         var completedToolCalls = [ToolCallDelta]()
                         var assistantText = ""
@@ -48,6 +56,7 @@ struct AgentRunner {
                         let stream = try await provider.streamEvents(currentRequest)
 
                         for try await event in stream {
+                            try enforceWallTimeLimit()
                             switch event {
                             case let .token(delta):
                                 assistantText += delta.text
@@ -89,6 +98,7 @@ struct AgentRunner {
                         )
 
                         for toolCall in completedToolCalls {
+                            try enforceWallTimeLimit()
                             guard let spec = await toolRegistry.spec(named: toolCall.name) else {
                                 throw ToolRegistryError.toolNotFound(name: toolCall.name)
                             }
@@ -109,6 +119,7 @@ struct AgentRunner {
                             }
 
                             let outputJSON = try await toolRegistry.callRaw(toolCall.name, inputJSON: toolCall.argumentsFragment)
+                            try enforceWallTimeLimit()
                             try await auditRepository?.append(
                                 AuditEvent(
                                     category: .tool,

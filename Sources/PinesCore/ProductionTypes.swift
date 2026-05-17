@@ -371,6 +371,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let maxLocalContextTokens = 262_144
     public static let defaultOpenAIReasoningEffort: OpenAIReasoningEffort = .low
     public static let defaultOpenAITextVerbosity: OpenAITextVerbosity = .low
+    public static let defaultAnthropicEffort: AnthropicEffort = .medium
+    public static let defaultGeminiThinkingLevel: GeminiThinkingLevel = .medium
 
     public var executionMode: AgentExecutionMode
     public var storeConfiguration: LocalStoreConfiguration
@@ -382,6 +384,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var localMaxContextTokens: Int
     public var openAIReasoningEffort: OpenAIReasoningEffort
     public var openAITextVerbosity: OpenAITextVerbosity
+    public var anthropicEffort: AnthropicEffort
+    public var geminiThinkingLevel: GeminiThinkingLevel
     public var requireToolApproval: Bool
     public var braveSearchEnabled: Bool
     public var onboardingCompleted: Bool
@@ -399,6 +403,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         case localMaxContextTokens
         case openAIReasoningEffort
         case openAITextVerbosity
+        case anthropicEffort
+        case geminiThinkingLevel
         case requireToolApproval
         case braveSearchEnabled
         case onboardingCompleted
@@ -417,6 +423,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         localMaxContextTokens: Int = Self.defaultLocalMaxContextTokens,
         openAIReasoningEffort: OpenAIReasoningEffort = Self.defaultOpenAIReasoningEffort,
         openAITextVerbosity: OpenAITextVerbosity = Self.defaultOpenAITextVerbosity,
+        anthropicEffort: AnthropicEffort = Self.defaultAnthropicEffort,
+        geminiThinkingLevel: GeminiThinkingLevel = Self.defaultGeminiThinkingLevel,
         requireToolApproval: Bool = true,
         braveSearchEnabled: Bool = false,
         onboardingCompleted: Bool = false,
@@ -433,6 +441,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         self.localMaxContextTokens = Self.normalizedLocalContextTokens(localMaxContextTokens)
         self.openAIReasoningEffort = openAIReasoningEffort
         self.openAITextVerbosity = openAITextVerbosity
+        self.anthropicEffort = anthropicEffort
+        self.geminiThinkingLevel = geminiThinkingLevel
         self.requireToolApproval = requireToolApproval
         self.braveSearchEnabled = braveSearchEnabled
         self.onboardingCompleted = onboardingCompleted
@@ -458,6 +468,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         )
         openAIReasoningEffort = try container.decodeIfPresent(OpenAIReasoningEffort.self, forKey: .openAIReasoningEffort) ?? Self.defaultOpenAIReasoningEffort
         openAITextVerbosity = try container.decodeIfPresent(OpenAITextVerbosity.self, forKey: .openAITextVerbosity) ?? Self.defaultOpenAITextVerbosity
+        anthropicEffort = try container.decodeIfPresent(AnthropicEffort.self, forKey: .anthropicEffort) ?? Self.defaultAnthropicEffort
+        geminiThinkingLevel = try container.decodeIfPresent(GeminiThinkingLevel.self, forKey: .geminiThinkingLevel) ?? Self.defaultGeminiThinkingLevel
         requireToolApproval = try container.decodeIfPresent(Bool.self, forKey: .requireToolApproval) ?? true
         braveSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .braveSearchEnabled) ?? false
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false

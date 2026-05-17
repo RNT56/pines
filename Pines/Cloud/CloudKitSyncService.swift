@@ -82,6 +82,8 @@ struct CloudKitMessageSnapshot: Hashable, Codable, Sendable {
     var modelID: ModelID?
     var providerID: ProviderID?
     var toolCallID: String?
+    var toolName: String?
+    var toolCalls: [ToolCallDelta] = []
     var providerMetadata: [String: String] = [:]
 }
 
@@ -296,6 +298,8 @@ struct CloudKitSyncService {
         record["modelID"] = message.modelID?.rawValue as CKRecordValue?
         record["providerID"] = message.providerID?.rawValue as CKRecordValue?
         record["toolCallID"] = message.toolCallID as CKRecordValue?
+        record["toolName"] = message.toolName as CKRecordValue?
+        record["toolCallsJSON"] = Self.encodeToolCalls(message.toolCalls) as CKRecordValue?
         record["providerMetadataJSON"] = Self.encodeProviderMetadata(message.providerMetadata) as CKRecordValue?
         return record
     }
@@ -348,6 +352,15 @@ struct CloudKitSyncService {
     private static func encodeProviderMetadata(_ metadata: [String: String]) -> String? {
         guard !metadata.isEmpty,
               let data = try? JSONEncoder().encode(metadata)
+        else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func encodeToolCalls(_ toolCalls: [ToolCallDelta]) -> String? {
+        guard !toolCalls.isEmpty,
+              let data = try? JSONEncoder().encode(toolCalls)
         else {
             return nil
         }
@@ -415,6 +428,8 @@ private extension CloudKitRemoteSnapshot {
                     modelID: (record["modelID"] as? String).map(ModelID.init(rawValue:)),
                     providerID: (record["providerID"] as? String).map(ProviderID.init(rawValue:)),
                     toolCallID: record["toolCallID"] as? String,
+                    toolName: record["toolName"] as? String,
+                    toolCalls: Self.decodeToolCalls(record["toolCallsJSON"] as? String),
                     providerMetadata: Self.decodeProviderMetadata(record["providerMetadataJSON"] as? String)
                 )
             )
@@ -522,5 +537,15 @@ private extension CloudKitRemoteSnapshot {
             return [:]
         }
         return metadata
+    }
+
+    private static func decodeToolCalls(_ rawValue: String?) -> [ToolCallDelta] {
+        guard let rawValue,
+              let data = rawValue.data(using: .utf8),
+              let toolCalls = try? JSONDecoder().decode([ToolCallDelta].self, from: data)
+        else {
+            return []
+        }
+        return toolCalls
     }
 }

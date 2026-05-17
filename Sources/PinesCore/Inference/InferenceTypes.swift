@@ -334,6 +334,21 @@ public enum OpenAITextVerbosity: String, Hashable, Codable, Sendable {
     case high
 }
 
+public enum AnthropicEffort: String, Hashable, Codable, Sendable {
+    case low
+    case medium
+    case high
+    case xhigh
+    case max
+}
+
+public enum GeminiThinkingLevel: String, Hashable, Codable, Sendable {
+    case minimal
+    case low
+    case medium
+    case high
+}
+
 public enum OpenAIResponseStorage: String, Hashable, Codable, Sendable {
     case stateful
     case statelessEncrypted
@@ -348,6 +363,8 @@ public struct ChatSampling: Hashable, Codable, Sendable {
     public var repetitionPenalty: Float?
     public var openAIReasoningEffort: OpenAIReasoningEffort
     public var openAITextVerbosity: OpenAITextVerbosity
+    public var anthropicEffort: AnthropicEffort
+    public var geminiThinkingLevel: GeminiThinkingLevel
     public var openAIResponseStorage: OpenAIResponseStorage
 
     private enum CodingKeys: String, CodingKey {
@@ -359,6 +376,8 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         case repetitionPenalty
         case openAIReasoningEffort
         case openAITextVerbosity
+        case anthropicEffort
+        case geminiThinkingLevel
         case openAIResponseStorage
     }
 
@@ -371,6 +390,8 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         repetitionPenalty: Float? = nil,
         openAIReasoningEffort: OpenAIReasoningEffort = .low,
         openAITextVerbosity: OpenAITextVerbosity = .low,
+        anthropicEffort: AnthropicEffort = .medium,
+        geminiThinkingLevel: GeminiThinkingLevel = .medium,
         openAIResponseStorage: OpenAIResponseStorage = .stateful
     ) {
         self.maxTokens = maxTokens
@@ -381,6 +402,8 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         self.repetitionPenalty = repetitionPenalty
         self.openAIReasoningEffort = openAIReasoningEffort
         self.openAITextVerbosity = openAITextVerbosity
+        self.anthropicEffort = anthropicEffort
+        self.geminiThinkingLevel = geminiThinkingLevel
         self.openAIResponseStorage = openAIResponseStorage
     }
 
@@ -396,6 +419,8 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         repetitionPenalty = try container.decodeIfPresent(Float.self, forKey: .repetitionPenalty)
         openAIReasoningEffort = try container.decodeIfPresent(OpenAIReasoningEffort.self, forKey: .openAIReasoningEffort) ?? .low
         openAITextVerbosity = try container.decodeIfPresent(OpenAITextVerbosity.self, forKey: .openAITextVerbosity) ?? .low
+        anthropicEffort = try container.decodeIfPresent(AnthropicEffort.self, forKey: .anthropicEffort) ?? .medium
+        geminiThinkingLevel = try container.decodeIfPresent(GeminiThinkingLevel.self, forKey: .geminiThinkingLevel) ?? .medium
         openAIResponseStorage = try container.decodeIfPresent(OpenAIResponseStorage.self, forKey: .openAIResponseStorage) ?? .stateful
     }
 }

@@ -193,8 +193,8 @@ actor GRDBPinesStore:
             try db.execute(
                 sql: """
                 INSERT INTO messages
-                    (id, conversation_id, role, content, created_at, updated_at, status, model_id, provider_id, tool_call_id, provider_metadata_json, sync_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, conversation_id, role, content, created_at, updated_at, status, model_id, provider_id, tool_call_id, tool_name, tool_calls_json, provider_metadata_json, sync_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 arguments: [
                     message.id.uuidString,
@@ -207,6 +207,8 @@ actor GRDBPinesStore:
                     modelID?.rawValue,
                     providerID?.rawValue,
                     message.toolCallID,
+                    message.toolName,
+                    Self.encodeToolCalls(message.toolCalls),
                     Self.encodeProviderMetadata(message.providerMetadata),
                     SyncState.local.rawValue,
                 ]
@@ -244,21 +246,39 @@ actor GRDBPinesStore:
         content: String,
         status: MessageStatus,
         tokenCount: Int?,
-        providerMetadata: [String: String]?
+        providerMetadata: [String: String]?,
+        toolName: String?,
+        toolCalls: [ToolCallDelta]?
     ) async throws {
         try await database.write { db in
             let updatedAt = Date().timeIntervalSinceReferenceDate
+            var assignments = [
+                "content = ?",
+                "status = ?",
+                "token_count = ?",
+            ]
+            var arguments: StatementArguments = [content, status.rawValue, tokenCount]
             if let providerMetadata {
-                try db.execute(
-                    sql: "UPDATE messages SET content = ?, status = ?, token_count = ?, provider_metadata_json = ?, updated_at = ?, sync_state = ? WHERE id = ?",
-                    arguments: [content, status.rawValue, tokenCount, Self.encodeProviderMetadata(providerMetadata), updatedAt, SyncState.local.rawValue, id.uuidString]
-                )
-            } else {
-                try db.execute(
-                    sql: "UPDATE messages SET content = ?, status = ?, token_count = ?, updated_at = ?, sync_state = ? WHERE id = ?",
-                    arguments: [content, status.rawValue, tokenCount, updatedAt, SyncState.local.rawValue, id.uuidString]
-                )
+                assignments.append("provider_metadata_json = ?")
+                arguments.append(Self.encodeProviderMetadata(providerMetadata))
             }
+            if let toolName {
+                assignments.append("tool_name = ?")
+                arguments.append(toolName)
+            }
+            if let toolCalls {
+                assignments.append("tool_calls_json = ?")
+                arguments.append(Self.encodeToolCalls(toolCalls))
+            }
+            assignments.append("updated_at = ?")
+            assignments.append("sync_state = ?")
+            arguments.append(updatedAt)
+            arguments.append(SyncState.local.rawValue)
+            arguments.append(id.uuidString)
+            try db.execute(
+                sql: "UPDATE messages SET \(assignments.joined(separator: ", ")) WHERE id = ?",
+                arguments: arguments
+            )
             try db.execute(
                 sql: "UPDATE conversations SET updated_at = ?, sync_state = ? WHERE id = (SELECT conversation_id FROM messages WHERE id = ?)",
                 arguments: [updatedAt, SyncState.local.rawValue, id.uuidString]
@@ -1467,7 +1487,7 @@ actor GRDBPinesStore:
         var messages = try Row.fetchAll(
             db,
             sql: """
-            SELECT id, role, content, created_at, tool_call_id, provider_metadata_json
+            SELECT id, role, content, created_at, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
             FROM messages
             WHERE conversation_id = ? AND deleted_at IS NULL
             ORDER BY created_at ASC
@@ -1697,6 +1717,8 @@ actor GRDBPinesStore:
             content: row["content"],
             createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
             toolCallID: row["tool_call_id"] as String?,
+            toolName: row["tool_name"] as String?,
+            toolCalls: decodeToolCalls(row["tool_calls_json"] as String?),
             providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?)
         )
     }
@@ -2175,6 +2197,14 @@ actor GRDBPinesStore:
 
     static func decodeProviderMetadata(_ rawValue: String?) -> [String: String] {
         decodeJSON(rawValue) ?? [:]
+    }
+
+    static func encodeToolCalls(_ toolCalls: [ToolCallDelta]) -> String? {
+        toolCalls.isEmpty ? nil : encodeJSON(toolCalls)
+    }
+
+    static func decodeToolCalls(_ rawValue: String?) -> [ToolCallDelta] {
+        decodeJSON(rawValue) ?? []
     }
 
     private static func download(from row: Row) -> ModelDownloadProgress {

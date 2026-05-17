@@ -108,11 +108,16 @@ struct ModelPickerOption: Identifiable, Hashable {
 struct ChatQuickSettingsAvailability: Hashable {
     let providerID: ProviderID
     let modelID: ModelID
-    let reasoningEfforts: [OpenAIReasoningEffort]
-    let supportsVerbosity: Bool
+    let openAIReasoningEfforts: [OpenAIReasoningEffort]
+    let supportsOpenAITextVerbosity: Bool
+    let anthropicEfforts: [AnthropicEffort]
+    let geminiThinkingLevels: [GeminiThinkingLevel]
 
     var isEmpty: Bool {
-        reasoningEfforts.isEmpty && !supportsVerbosity
+        openAIReasoningEfforts.isEmpty
+            && !supportsOpenAITextVerbosity
+            && anthropicEfforts.isEmpty
+            && geminiThinkingLevels.isEmpty
     }
 }
 

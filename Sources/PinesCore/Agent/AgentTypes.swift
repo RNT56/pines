@@ -103,7 +103,27 @@ public struct ToolResultEnvelope: Hashable, Codable, Sendable {
 public enum AgentError: Error, Equatable, Sendable {
     case stepLimitExceeded
     case toolLimitExceeded
+    case wallTimeExceeded
     case missingToolExplanation(String)
     case permissionDenied(String)
     case invalidToolArguments(String)
+}
+
+extension AgentError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .stepLimitExceeded:
+            return "The agent reached its step limit before completing."
+        case .toolLimitExceeded:
+            return "The agent reached its tool-call limit before completing."
+        case .wallTimeExceeded:
+            return "The agent reached its wall-time limit before completing."
+        case let .missingToolExplanation(toolName):
+            return "The model requested \(toolName) without a usable explanation."
+        case let .permissionDenied(message):
+            return message
+        case let .invalidToolArguments(message):
+            return message
+        }
+    }
 }

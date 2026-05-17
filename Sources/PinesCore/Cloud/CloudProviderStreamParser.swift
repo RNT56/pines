@@ -2,8 +2,11 @@ import Foundation
 
 public enum CloudProviderMetadataKeys {
     public static let openAIResponseID = "openai.response_id"
+    public static let openAIChatCompletionID = "openai.chat_completion_id"
     public static let openAIRequestID = "openai.request_id"
     public static let openAIClientRequestID = "openai.client_request_id"
+    public static let openAIModel = "openai.model"
+    public static let openAISystemFingerprint = "openai.system_fingerprint"
     public static let openAIOutputItemsJSON = "openai.output_items_json"
     public static let anthropicMessageID = "anthropic.message_id"
     public static let anthropicRequestID = "anthropic.request_id"
@@ -335,6 +338,13 @@ public struct CloudProviderStreamParser {
     private mutating func extractChatCompletionEvents(_ json: [String: Any]) -> CloudProviderStreamParseOutput {
         var events = [InferenceStreamEvent]()
         var finish: InferenceFinish?
+        state.recordOpenAIChatCompletionChunk(json)
+
+        if let usage = json["usage"] as? [String: Any],
+           let metrics = Self.openAIChatCompletionMetrics(from: usage) {
+            events.append(.metrics(metrics))
+        }
+
         let choices = json["choices"] as? [[String: Any]]
         let delta = choices?.first?["delta"] as? [String: Any]
 
@@ -372,7 +382,7 @@ public struct CloudProviderStreamParser {
         }
 
         if let finishReason = choices?.first?["finish_reason"] as? String {
-            finish = Self.openAIFinish(from: finishReason)
+            finish = Self.openAIFinish(from: finishReason, metadata: state.openAIProviderMetadata)
             if finishReason == "tool_calls" {
                 for index in state.openAIToolNames.keys.sorted() {
                     guard let name = state.openAIToolNames[index] else { continue }
@@ -668,20 +678,28 @@ public struct CloudProviderStreamParser {
         return "OpenAI completed the Responses stream without visible output text\(suffix)"
     }
 
-    private static func openAIFinish(from finishReason: String) -> InferenceFinish {
+    private static func openAIFinish(from finishReason: String, metadata: [String: String]) -> InferenceFinish {
         switch finishReason {
         case "length":
             return InferenceFinish(
                 reason: .length,
-                message: "The selected OpenAI model used its completion token budget before producing visible output. Try again with a larger completion limit."
+                message: "The selected OpenAI model used its completion token budget before producing visible output. Try again with a larger completion limit.",
+                providerMetadata: metadata
             )
         case "tool_calls":
-            return InferenceFinish(reason: .toolCall)
+            return InferenceFinish(reason: .toolCall, providerMetadata: metadata)
         case "content_filter":
-            return InferenceFinish(reason: .error, message: "The provider stopped the response because of its content filter.")
+            return InferenceFinish(reason: .error, message: "The provider stopped the response because of its content filter.", providerMetadata: metadata)
         default:
-            return InferenceFinish(reason: .stop)
+            return InferenceFinish(reason: .stop, providerMetadata: metadata)
         }
+    }
+
+    private static func openAIChatCompletionMetrics(from usage: [String: Any]) -> InferenceMetrics? {
+        let inputTokens = valueOrAlias(usage["prompt_tokens"], usage["input_tokens"])
+        let outputTokens = valueOrAlias(usage["completion_tokens"], usage["output_tokens"])
+        guard inputTokens > 0 || outputTokens > 0 else { return nil }
+        return InferenceMetrics(promptTokens: inputTokens, completionTokens: outputTokens)
     }
 
     private static func anthropicFinish(from stopReason: String, metadata: [String: String]) -> InferenceFinish {
@@ -846,6 +864,18 @@ public struct CloudProviderStreamState {
         }
         if let clientRequestID, !clientRequestID.isEmpty {
             openAIProviderMetadata[CloudProviderMetadataKeys.openAIClientRequestID] = clientRequestID
+        }
+    }
+
+    public mutating func recordOpenAIChatCompletionChunk(_ chunk: [String: Any]) {
+        if let completionID = chunk["id"] as? String, !completionID.isEmpty {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIChatCompletionID] = completionID
+        }
+        if let model = chunk["model"] as? String, !model.isEmpty {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIModel] = model
+        }
+        if let fingerprint = chunk["system_fingerprint"] as? String, !fingerprint.isEmpty {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAISystemFingerprint] = fingerprint
         }
     }
 

@@ -414,9 +414,11 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("ALTER TABLE messages ADD COLUMN updated_at"), "missing message sync timestamp")
         try expect(sql.contains("ALTER TABLE messages ADD COLUMN deleted_at"), "missing message tombstone column")
         try expect(sql.contains("ALTER TABLE messages ADD COLUMN sync_state"), "missing message sync state")
+        try expect(sql.contains("ALTER TABLE messages ADD COLUMN tool_name"), "missing message tool name column")
+        try expect(sql.contains("ALTER TABLE messages ADD COLUMN tool_calls_json"), "missing assistant tool calls column")
         try expect(sql.contains("PRIMARY KEY(chunk_id, embedding_model_id)"), "missing stable embedding merge key")
         try expect(sql.contains("PRIMARY KEY(chunk_id, profile_id)"), "missing profile-scoped embedding merge key")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 10)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 11)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")
@@ -595,6 +597,8 @@ struct PinesCoreTestRunner {
         try expectEqual(tools.count, 1)
         try expectEqual(json["tool_choice"] as? String, "auto")
         try expectEqual(json["parallel_tool_calls"] as? Bool, false)
+        let streamOptions = try expectDictionary(json["stream_options"], "OpenAI-compatible request should ask for usage in the final stream chunk")
+        try expectEqual(streamOptions["include_usage"] as? Bool, true)
 
         let toolCall = ToolCallDelta(id: "call-1", name: CalculatorTool.name, argumentsFragment: #"{"expression":"2+2"}"#, isComplete: true)
         let encoded = try JSONEncoder().encode(

@@ -267,6 +267,7 @@ struct CoreContractTests {
         #expect(json["max_tokens"] == nil)
         #expect(json["reasoning_effort"] as? String == "high")
         #expect(json["verbosity"] as? String == "medium")
+        #expect((json["stream_options"] as? [String: Any])?["include_usage"] as? Bool == true)
         #expect(json["temperature"] == nil)
         #expect(json["top_p"] == nil)
     }
@@ -278,11 +279,59 @@ struct CoreContractTests {
         #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5", requested: .none) == .low)
         #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5", requested: .xhigh) == .low)
         #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.1", requested: .none) == .none)
-        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.5") == [.none, .low, .medium, .high, .xhigh])
-        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.4") == [.none, .low, .medium, .high, .xhigh])
+        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.5") == [.none, .minimal, .low, .medium, .high, .xhigh])
+        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.4") == [.none, .minimal, .low, .medium, .high, .xhigh])
         #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5") == [.minimal, .low, .medium, .high])
         #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.5-pro") == [.high])
         #expect(!CloudProviderModelEligibility.supportsOpenAITextVerbosity(modelID: "gpt-4o"))
+    }
+
+    @Test
+    func openAIChatCompletionsParserPreservesMetadataAndUsage() {
+        var parser = CloudProviderStreamParser()
+        parser.recordRequestMetadata(providerKind: .openAI, serverRequestID: "req_header", clientRequestID: "client_1")
+        let payloads = [
+            #"{"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-4.1","system_fingerprint":"fp_123","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}"#,
+            #"{"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-4.1","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"#,
+            #"{"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-4.1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        ]
+
+        var events = [InferenceStreamEvent]()
+        var finish: InferenceFinish?
+        for payload in payloads {
+            let output = parser.parse(data: Data(payload.utf8), format: .chatCompletions, providerKind: .openAI)
+            events.append(contentsOf: output.events)
+            finish = output.finish ?? finish
+        }
+
+        #expect(events.contains(.token(TokenDelta(kind: .token, text: "hi", tokenCount: 1))))
+        #expect(events.contains(.metrics(InferenceMetrics(promptTokens: 7, completionTokens: 2))))
+        #expect(finish?.reason == .stop)
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIRequestID] == "req_header")
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIClientRequestID] == "client_1")
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIChatCompletionID] == "chatcmpl_1")
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIModel] == "gpt-4.1")
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAISystemFingerprint] == "fp_123")
+    }
+
+    @Test
+    func cloudProviderModelControlsMatchAnthropicAndGeminiCapabilities() {
+        #expect(CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-opus-4-7"))
+        #expect(CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-opus-4-6"))
+        #expect(CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-sonnet-4-6"))
+        #expect(!CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-opus-4-5"))
+        #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-7") == [.low, .medium, .high, .xhigh, .max])
+        #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-6") == [.low, .medium, .high, .max])
+        #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-sonnet-4-6") == [.low, .medium, .high, .max])
+        #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-5") == [.low, .medium, .high])
+        #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-sonnet-4-5").isEmpty)
+        #expect(CloudProviderModelEligibility.anthropicEffort(for: "claude-sonnet-4-6", requested: .xhigh) == .high)
+
+        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-pro-preview") == [.low, .medium, .high])
+        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-flash-lite") == [.minimal, .low, .medium, .high])
+        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-3-flash-preview") == [.minimal, .low, .medium, .high])
+        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-2.5-pro").isEmpty)
+        #expect(CloudProviderModelEligibility.geminiThinkingLevel(for: "gemini-3.1-pro-preview", requested: .minimal) == .low)
     }
 
     @Test
@@ -614,25 +663,33 @@ struct CoreContractTests {
         #expect(decoded.localMaxContextTokens == AppSettingsSnapshot.defaultLocalMaxContextTokens)
         #expect(decoded.openAIReasoningEffort == .low)
         #expect(decoded.openAITextVerbosity == .low)
+        #expect(decoded.anthropicEffort == .medium)
+        #expect(decoded.geminiThinkingLevel == .medium)
 
         let clamped = AppSettingsSnapshot(
             cloudMaxCompletionTokens: 1,
             localMaxCompletionTokens: 1_000_000,
             localMaxContextTokens: 1,
             openAIReasoningEffort: .high,
-            openAITextVerbosity: .medium
+            openAITextVerbosity: .medium,
+            anthropicEffort: .xhigh,
+            geminiThinkingLevel: .high
         )
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
         #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
         #expect(clamped.localMaxContextTokens == AppSettingsSnapshot.minLocalContextTokens)
         #expect(clamped.openAIReasoningEffort == .high)
         #expect(clamped.openAITextVerbosity == .medium)
+        #expect(clamped.anthropicEffort == .xhigh)
+        #expect(clamped.geminiThinkingLevel == .high)
 
         let legacySampling = try JSONDecoder().decode(ChatSampling.self, from: Data(#"{"maxTokens":256,"temperature":0.2}"#.utf8))
         #expect(legacySampling.maxTokens == 256)
         #expect(legacySampling.temperature == 0.2)
         #expect(legacySampling.openAIReasoningEffort == .low)
         #expect(legacySampling.openAITextVerbosity == .low)
+        #expect(legacySampling.anthropicEffort == .medium)
+        #expect(legacySampling.geminiThinkingLevel == .medium)
         #expect(legacySampling.openAIResponseStorage == .stateful)
     }
 

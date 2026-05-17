@@ -332,6 +332,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         var body: [String: Any] = [
             "model": chatRequest.modelID.rawValue,
             "stream": true,
+            "stream_options": ["include_usage": true],
             "messages": try chatRequest.messages.map { message in
                 try Self.openAIMessageObject(message, providerKind: configuration.kind)
             },
@@ -459,22 +460,34 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             "model": chatRequest.modelID.rawValue,
             "stream": true,
             "max_tokens": chatRequest.sampling.maxTokens ?? 1024,
-            "temperature": chatRequest.sampling.temperature,
             "messages": try chatRequest.messages.filter { $0.role != .system }.map(Self.anthropicMessageObject),
             "system": chatRequest.messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n"),
         ]
-        if chatRequest.sampling.topP < 1 {
-            body["top_p"] = chatRequest.sampling.topP
-        }
-        if chatRequest.sampling.topK > 0 {
-            body["top_k"] = chatRequest.sampling.topK
-        }
         if shouldEnableAnthropicPromptCaching(for: chatRequest) {
             body["cache_control"] = ["type": "ephemeral"]
         }
         if let thinking = anthropicThinkingConfiguration(for: chatRequest.modelID) {
             body["thinking"] = thinking
-            body["output_config"] = ["effort": "low"]
+            if chatRequest.sampling.topP >= 0.95, chatRequest.sampling.topP < 1 {
+                body["top_p"] = chatRequest.sampling.topP
+            }
+        } else {
+            body["temperature"] = chatRequest.sampling.temperature
+            if chatRequest.sampling.topP < 1 {
+                body["top_p"] = chatRequest.sampling.topP
+            }
+            if chatRequest.sampling.topK > 0 {
+                body["top_k"] = chatRequest.sampling.topK
+            }
+        }
+        let anthropicEffortOptions = CloudProviderModelEligibility.anthropicEffortOptions(for: chatRequest.modelID)
+        if !anthropicEffortOptions.isEmpty {
+            body["output_config"] = [
+                "effort": CloudProviderModelEligibility.anthropicEffort(
+                    for: chatRequest.modelID,
+                    requested: chatRequest.sampling.anthropicEffort
+                ).rawValue,
+            ]
         }
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
             body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.anthropicToolObject()) }
@@ -511,12 +524,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     private func anthropicThinkingConfiguration(for modelID: ModelID) -> [String: Any]? {
-        let id = modelID.rawValue.lowercased()
-        guard id.contains("claude-opus-4-7")
-            || id.contains("claude-opus-4-6")
-            || id.contains("claude-sonnet-4-6")
-            || id.contains("claude-mythos-preview")
-        else {
+        guard CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: modelID) else {
             return nil
         }
         return [
@@ -564,6 +572,10 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return "v1"
     }
 
+    private static func geminiRecommendedTemperature(for modelID: ModelID, requested: Float) -> Float {
+        CloudProviderModelEligibility.geminiThinkingLevelOptions(for: modelID).isEmpty ? requested : 1.0
+    }
+
     private func addOpenAIClientRequestID(to request: inout URLRequest) {
         guard usesOfficialOpenAIAPI else { return }
         request.addValue(UUID().uuidString, forHTTPHeaderField: "X-Client-Request-Id")
@@ -605,11 +617,20 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             .joined(separator: "\n\n")
         var generationConfig: [String: Any] = [
             "maxOutputTokens": chatRequest.sampling.maxTokens ?? AppSettingsSnapshot.defaultCloudMaxCompletionTokens,
-            "temperature": chatRequest.sampling.temperature,
+            "temperature": Self.geminiRecommendedTemperature(for: chatRequest.modelID, requested: chatRequest.sampling.temperature),
             "topP": chatRequest.sampling.topP,
         ]
         if chatRequest.sampling.topK > 0 {
             generationConfig["topK"] = chatRequest.sampling.topK
+        }
+        let geminiThinkingLevelOptions = CloudProviderModelEligibility.geminiThinkingLevelOptions(for: chatRequest.modelID)
+        if !geminiThinkingLevelOptions.isEmpty {
+            generationConfig["thinkingConfig"] = [
+                "thinkingLevel": CloudProviderModelEligibility.geminiThinkingLevel(
+                    for: chatRequest.modelID,
+                    requested: chatRequest.sampling.geminiThinkingLevel
+                ).rawValue,
+            ]
         }
         var body: [String: Any] = [
             "contents": try chatRequest.messages.filter { $0.role != .system }.map(Self.geminiContentObject),
@@ -655,11 +676,17 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             .joined(separator: "\n\n")
         var generationConfig: [String: Any] = [
             "max_output_tokens": chatRequest.sampling.maxTokens ?? AppSettingsSnapshot.defaultCloudMaxCompletionTokens,
-            "temperature": chatRequest.sampling.temperature,
+            "temperature": Self.geminiRecommendedTemperature(for: chatRequest.modelID, requested: chatRequest.sampling.temperature),
             "top_p": chatRequest.sampling.topP,
-            "thinking_level": "low",
             "thinking_summaries": "none",
         ]
+        let geminiThinkingLevelOptions = CloudProviderModelEligibility.geminiThinkingLevelOptions(for: chatRequest.modelID)
+        if !geminiThinkingLevelOptions.isEmpty {
+            generationConfig["thinking_level"] = CloudProviderModelEligibility.geminiThinkingLevel(
+                for: chatRequest.modelID,
+                requested: chatRequest.sampling.geminiThinkingLevel
+            ).rawValue
+        }
         if chatRequest.sampling.topK > 0 {
             generationConfig["top_k"] = chatRequest.sampling.topK
         }

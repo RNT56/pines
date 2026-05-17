@@ -44,6 +44,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var localMaxContextTokens = AppSettingsSnapshot.defaultLocalMaxContextTokens
     @Published var openAIReasoningEffort = AppSettingsSnapshot.defaultOpenAIReasoningEffort
     @Published var openAITextVerbosity = AppSettingsSnapshot.defaultOpenAITextVerbosity
+    @Published var anthropicEffort = AppSettingsSnapshot.defaultAnthropicEffort
+    @Published var geminiThinkingLevel = AppSettingsSnapshot.defaultGeminiThinkingLevel
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:]
     @Published var isRefreshingCloudModels = false
     @Published var isSavingCloudProvider = false
@@ -173,14 +175,35 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         messageID: UUID,
         content: String,
         status: PinesThreadStatus? = nil,
-        fallbackMessage: ChatMessage? = nil
+        fallbackMessage: ChatMessage? = nil,
+        providerMetadata: [String: String]? = nil,
+        toolName: String? = nil,
+        toolCalls: [ToolCallDelta]? = nil
     ) {
         guard let thread = threads.first(where: { $0.id == conversationID }) else { return }
         var messages = thread.messages
         if let index = messages.firstIndex(where: { $0.id == messageID }) {
             messages[index].content = content
+            if let providerMetadata {
+                messages[index].providerMetadata = providerMetadata
+            }
+            if let toolName {
+                messages[index].toolName = toolName
+            }
+            if let toolCalls {
+                messages[index].toolCalls = toolCalls
+            }
         } else if var fallbackMessage {
             fallbackMessage.content = content
+            if let providerMetadata {
+                fallbackMessage.providerMetadata = providerMetadata
+            }
+            if let toolName {
+                fallbackMessage.toolName = toolName
+            }
+            if let toolCalls {
+                fallbackMessage.toolCalls = toolCalls
+            }
             messages.append(fallbackMessage)
         } else {
             return
@@ -475,6 +498,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
         setIfChanged(\.openAIReasoningEffort, settings.openAIReasoningEffort)
         setIfChanged(\.openAITextVerbosity, settings.openAITextVerbosity)
+        setIfChanged(\.anthropicEffort, settings.anthropicEffort)
+        setIfChanged(\.geminiThinkingLevel, settings.geminiThinkingLevel)
         setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
         setIfChanged(\.interfaceMode, PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode)
     }
@@ -764,6 +789,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         var failureMessage: String?
         var lastRenderedContent = ""
         var lastPersistedContent = ""
+        var completedToolCalls = [ToolCallDelta]()
+        var lastPersistedToolCalls = [ToolCallDelta]()
         var lastRenderedAt = Date.distantPast
         var lastPersistedAt = Date.distantPast
 
@@ -897,7 +924,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 messageStatus: MessageStatus,
                 threadStatus: PinesThreadStatus,
                 force: Bool = false,
-                providerMetadata: [String: String]? = nil
+                providerMetadata: [String: String]? = nil,
+                toolCalls: [ToolCallDelta]? = nil
             ) async throws {
                 let now = Date()
                 if force || (content != lastRenderedContent && now.timeIntervalSince(lastRenderedAt) >= ChatStreamPerformance.renderInterval) {
@@ -906,20 +934,28 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         messageID: assistantMessage.id,
                         content: content,
                         status: threadStatus,
-                        fallbackMessage: assistantMessage
+                        fallbackMessage: assistantMessage,
+                        providerMetadata: providerMetadata,
+                        toolCalls: toolCalls
                     )
                     lastRenderedContent = content
                     lastRenderedAt = now
                 }
-                if force || (content != lastPersistedContent && now.timeIntervalSince(lastPersistedAt) >= ChatStreamPerformance.persistenceInterval) {
+                let shouldPersistToolCalls = toolCalls.map { $0 != lastPersistedToolCalls } ?? false
+                if force || shouldPersistToolCalls || (content != lastPersistedContent && now.timeIntervalSince(lastPersistedAt) >= ChatStreamPerformance.persistenceInterval) {
                     try await repository.updateMessage(
                         id: assistantMessage.id,
                         content: content,
                         status: messageStatus,
                         tokenCount: tokenCount,
-                        providerMetadata: providerMetadata
+                        providerMetadata: providerMetadata,
+                        toolName: nil,
+                        toolCalls: toolCalls
                     )
                     lastPersistedContent = content
+                    if let toolCalls {
+                        lastPersistedToolCalls = toolCalls
+                    }
                     lastPersistedAt = now
                 }
             }
@@ -995,11 +1031,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                             )
                             let message = messageWithProviderDiagnostics(baseMessage, metadata: finalProviderMetadata)
                             failureMessage = message
-                            try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata)
+                            try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata, toolCalls: completedToolCalls)
                             setChatError(message)
                             emitHaptic(.runFailed)
                         } else {
-                            try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata)
+                            try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata, toolCalls: completedToolCalls)
                             clearChatError()
                             emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
                         }
@@ -1012,7 +1048,11 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     emitHaptic(.runFailed)
                 case let .metrics(metrics):
                     services.runtimeMetrics.recordGenerationMetrics(metrics, modelID: selectedModelID)
-                case .toolCall:
+                case let .toolCall(toolCall):
+                    if toolCall.isComplete, !completedToolCalls.contains(where: { $0.id == toolCall.id }) {
+                        completedToolCalls.append(toolCall)
+                        try await flushAssistantUpdate(content: accumulated, messageStatus: .streaming, threadStatus: .streaming, toolCalls: completedToolCalls)
+                    }
                     emitHaptic(.streamMilestone)
                 }
             }
@@ -1026,7 +1066,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     setChatError(message)
                     emitHaptic(.runFailed)
                 } else {
-                    try await flushAssistantUpdate(content: accumulated, messageStatus: .complete, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata)
+                    try await flushAssistantUpdate(content: accumulated, messageStatus: .complete, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata, toolCalls: completedToolCalls)
                     clearChatError()
                     emitHaptic(.runCompleted)
                 }
@@ -1045,7 +1085,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     id: assistantMessageID,
                     content: accumulated,
                     status: .cancelled,
-                    tokenCount: tokenCount
+                    tokenCount: tokenCount,
+                    providerMetadata: nil,
+                    toolName: nil,
+                    toolCalls: completedToolCalls
                 )
             }
             if let runConversationID, let assistantMessageID {
@@ -1053,7 +1096,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     conversationID: runConversationID,
                     messageID: assistantMessageID,
                     content: accumulated,
-                    status: .local
+                    status: .local,
+                    toolCalls: completedToolCalls
                 )
             }
             if currentRunToken == runToken {
@@ -1070,7 +1114,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     id: assistantMessageID,
                     content: accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? message : accumulated,
                     status: .failed,
-                    tokenCount: tokenCount
+                    tokenCount: tokenCount,
+                    providerMetadata: nil,
+                    toolName: nil,
+                    toolCalls: completedToolCalls
                 )
             }
             if let runConversationID, let assistantMessageID {
@@ -1078,7 +1125,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     conversationID: runConversationID,
                     messageID: assistantMessageID,
                     content: accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? message : accumulated,
-                    status: .local
+                    status: .local,
+                    toolCalls: completedToolCalls
                 )
             }
             if currentRunToken == runToken {
@@ -1289,17 +1337,20 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
     func chatQuickSettingsAvailability(for conversationID: UUID?, services: PinesAppServices) -> ChatQuickSettingsAvailability? {
         guard let selection = currentModelSelection(for: conversationID, services: services),
-              supportsOpenAIQuickSettings(providerID: selection.providerID, providerKind: selection.providerKind, services: services)
+              selection.providerID != services.mlxRuntime.localProviderID
         else {
             return nil
         }
-        let reasoningEfforts = CloudProviderModelEligibility.openAIReasoningEffortOptions(for: selection.modelID)
-        let supportsVerbosity = CloudProviderModelEligibility.supportsOpenAITextVerbosity(modelID: selection.modelID)
+        let supportsOpenAI = supportsOpenAIQuickSettings(providerID: selection.providerID, providerKind: selection.providerKind, services: services)
+        let supportsAnthropic = supportsAnthropicQuickSettings(providerID: selection.providerID, providerKind: selection.providerKind, services: services)
+        let supportsGemini = supportsGeminiQuickSettings(providerID: selection.providerID, providerKind: selection.providerKind, services: services)
         let availability = ChatQuickSettingsAvailability(
             providerID: selection.providerID,
             modelID: selection.modelID,
-            reasoningEfforts: reasoningEfforts,
-            supportsVerbosity: supportsVerbosity
+            openAIReasoningEfforts: supportsOpenAI ? CloudProviderModelEligibility.openAIReasoningEffortOptions(for: selection.modelID) : [],
+            supportsOpenAITextVerbosity: supportsOpenAI ? CloudProviderModelEligibility.supportsOpenAITextVerbosity(modelID: selection.modelID) : false,
+            anthropicEfforts: supportsAnthropic ? CloudProviderModelEligibility.anthropicEffortOptions(for: selection.modelID) : [],
+            geminiThinkingLevels: supportsGemini ? CloudProviderModelEligibility.geminiThinkingLevelOptions(for: selection.modelID) : []
         )
         return availability.isEmpty ? nil : availability
     }
@@ -1315,6 +1366,16 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             return false
         }
         return host == "api.openai.com"
+    }
+
+    private func supportsAnthropicQuickSettings(providerID: ProviderID, providerKind: CloudProviderKind?, services: PinesAppServices) -> Bool {
+        guard providerID != services.mlxRuntime.localProviderID else { return false }
+        return providerKind == .anthropic
+    }
+
+    private func supportsGeminiQuickSettings(providerID: ProviderID, providerKind: CloudProviderKind?, services: PinesAppServices) -> Bool {
+        guard providerID != services.mlxRuntime.localProviderID else { return false }
+        return providerKind == .gemini
     }
 
     func saveSettings(services: PinesAppServices) async {
@@ -1338,6 +1399,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 localMaxContextTokens: localMaxContextTokens,
                 openAIReasoningEffort: openAIReasoningEffort,
                 openAITextVerbosity: openAITextVerbosity,
+                anthropicEffort: anthropicEffort,
+                geminiThinkingLevel: geminiThinkingLevel,
                 requireToolApproval: true,
                 braveSearchEnabled: braveSearchCredentialStatus.hasPrefix("Configured"),
                 onboardingCompleted: true,
@@ -1367,7 +1430,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             maxTokens: AppSettingsSnapshot.normalizedCompletionTokens(requestedMaxTokens ?? settingsMaxTokens ?? fallback),
             temperature: temperature,
             openAIReasoningEffort: openAIReasoningEffort,
-            openAITextVerbosity: openAITextVerbosity
+            openAITextVerbosity: openAITextVerbosity,
+            anthropicEffort: anthropicEffort,
+            geminiThinkingLevel: geminiThinkingLevel
         )
     }
 
@@ -2474,6 +2539,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                         self?.setIfChanged(\.cloudMaxCompletionTokens, settings.cloudMaxCompletionTokens)
                         self?.setIfChanged(\.localMaxCompletionTokens, settings.localMaxCompletionTokens)
                         self?.setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
+                        self?.setIfChanged(\.openAIReasoningEffort, settings.openAIReasoningEffort)
+                        self?.setIfChanged(\.openAITextVerbosity, settings.openAITextVerbosity)
                         if let theme = PinesThemeTemplate(rawValue: settings.themeTemplate) {
                             self?.setIfChanged(\.selectedThemeTemplate, theme)
                         }
@@ -2822,6 +2889,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         let diagnosticKeys = [
             CloudProviderMetadataKeys.openAIRequestID,
             CloudProviderMetadataKeys.openAIResponseID,
+            CloudProviderMetadataKeys.openAIChatCompletionID,
+            CloudProviderMetadataKeys.openAIModel,
+            CloudProviderMetadataKeys.openAISystemFingerprint,
             CloudProviderMetadataKeys.anthropicRequestID,
             CloudProviderMetadataKeys.anthropicMessageID,
             CloudProviderMetadataKeys.geminiRequestID,

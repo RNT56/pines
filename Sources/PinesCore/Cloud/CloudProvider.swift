@@ -312,7 +312,7 @@ public enum CloudProviderModelEligibility: Sendable {
             return [.high]
         }
         if gpt5MinorVersion(modelName) >= 2 {
-            return [.none, .low, .medium, .high, .xhigh]
+            return [.none, .minimal, .low, .medium, .high, .xhigh]
         }
         if modelName.hasPrefix("gpt-5.1") {
             return [.none, .low, .medium, .high]
@@ -325,6 +325,64 @@ public enum CloudProviderModelEligibility: Sendable {
 
     public static func supportsOpenAITextVerbosity(modelID: ModelID) -> Bool {
         !openAIReasoningEffortOptions(for: modelID).isEmpty
+    }
+
+    public static func anthropicEffort(for modelID: ModelID, requested: AnthropicEffort) -> AnthropicEffort {
+        let options = anthropicEffortOptions(for: modelID)
+        if !options.isEmpty, !options.contains(requested) {
+            return options.contains(.high) ? .high : options[0]
+        }
+        return requested
+    }
+
+    public static func anthropicEffortOptions(for modelID: ModelID) -> [AnthropicEffort] {
+        let modelName = normalizedModelName(modelID)
+        if modelName.contains("claude-opus-4-7") || modelName.contains("claude-mythos-preview") {
+            return [.low, .medium, .high, .xhigh, .max]
+        }
+        if modelName.contains("claude-opus-4-6") || modelName.contains("claude-sonnet-4-6") {
+            return [.low, .medium, .high, .max]
+        }
+        if modelName.contains("claude-opus-4-5") {
+            return [.low, .medium, .high]
+        }
+        return []
+    }
+
+    public static func usesAnthropicAdaptiveThinking(modelID: ModelID) -> Bool {
+        let modelName = normalizedModelName(modelID)
+        return modelName.contains("claude-opus-4-7")
+            || modelName.contains("claude-opus-4-6")
+            || modelName.contains("claude-sonnet-4-6")
+            || modelName.contains("claude-mythos-preview")
+    }
+
+    public static func geminiThinkingLevel(for modelID: ModelID, requested: GeminiThinkingLevel) -> GeminiThinkingLevel {
+        let options = geminiThinkingLevelOptions(for: modelID)
+        if !options.isEmpty, !options.contains(requested) {
+            return options.contains(.low) ? .low : options[0]
+        }
+        return requested
+    }
+
+    public static func geminiThinkingLevelOptions(for modelID: ModelID) -> [GeminiThinkingLevel] {
+        let modelName = normalizedModelName(modelID)
+        guard modelName.contains("gemini-3") else { return [] }
+        if modelName.contains("flash") {
+            return [.minimal, .low, .medium, .high]
+        }
+        if modelName.contains("pro") {
+            return [.low, .medium, .high]
+        }
+        return [.low, .medium, .high]
+    }
+
+    private static func normalizedModelName(_ modelID: ModelID) -> String {
+        let id = modelID.rawValue.lowercased()
+        return id
+            .split(separator: "/")
+            .last
+            .map(String.init) ?? id
     }
 
     private static func gpt5MinorVersion(_ modelName: String) -> Int {
@@ -358,6 +416,7 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
         var body: [String: Any] = [
             "model": request.modelID.rawValue,
             "stream": true,
+            "stream_options": ["include_usage": true],
             "messages": try request.messages.map(Self.messageObject),
         ]
         if let maxTokens = request.sampling.maxTokens {
@@ -407,10 +466,23 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
                 "content": message.content,
             ]
         }
-        return [
+        var object: [String: Any] = [
             "role": message.role.rawValue,
             "content": try chatContent(from: message),
         ]
+        if !message.toolCalls.isEmpty {
+            object["tool_calls"] = message.toolCalls.map { toolCall in
+                [
+                    "id": toolCall.id,
+                    "type": "function",
+                    "function": [
+                        "name": toolCall.name,
+                        "arguments": toolCall.argumentsFragment,
+                    ],
+                ] as [String: Any]
+            }
+        }
+        return object
     }
 
     private static func chatContent(from message: ChatMessage) throws -> Any {

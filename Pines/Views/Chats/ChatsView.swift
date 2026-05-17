@@ -618,6 +618,10 @@ private struct ChatBubble: View {
                 if !message.attachments.isEmpty {
                     ChatAttachmentList(attachments: message.attachments)
                 }
+
+                if !message.toolCalls.isEmpty {
+                    ChatToolCallList(toolCalls: message.toolCalls)
+                }
             }
             .padding(theme.spacing.medium)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -678,6 +682,58 @@ private struct ChatBubble: View {
             )
         }
         return actions
+    }
+}
+
+private struct ChatToolCallList: View {
+    @Environment(\.pinesTheme) private var theme
+    let toolCalls: [ToolCallDelta]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            ForEach(toolCalls, id: \.id) { toolCall in
+                HStack(alignment: .top, spacing: theme.spacing.xsmall) {
+                    Image(systemName: "wrench.and.screwdriver")
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(theme.colors.accent)
+                        .frame(width: 16, height: 16)
+
+                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                        Text(toolCall.name)
+                            .font(theme.typography.caption.weight(.semibold))
+                            .foregroundStyle(theme.colors.primaryText)
+                            .lineLimit(1)
+
+                        if let preview = argumentsPreview(for: toolCall) {
+                            Text(preview)
+                                .font(theme.typography.code)
+                                .foregroundStyle(theme.colors.secondaryText)
+                                .lineLimit(2)
+                                .textSelection(.enabled)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, theme.spacing.xsmall)
+                .padding(.horizontal, theme.spacing.small)
+                .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                        .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
+                }
+            }
+        }
+        .accessibilityLabel("\(toolCalls.count) tool calls")
+    }
+
+    private func argumentsPreview(for toolCall: ToolCallDelta) -> String? {
+        let trimmed = toolCall.argumentsFragment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty && trimmed != "{}" else { return nil }
+        let collapsed = trimmed
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+        return collapsed.count > 220 ? "\(collapsed.prefix(220))..." : collapsed
     }
 }
 
@@ -1025,18 +1081,34 @@ private struct ChatQuickSettingsButton: View {
 
     var body: some View {
         Menu {
-            if !availability.reasoningEfforts.isEmpty {
+            if !availability.openAIReasoningEfforts.isEmpty {
                 Picker("Reasoning", selection: reasoningSelection) {
-                    ForEach(availability.reasoningEfforts, id: \.self) { effort in
+                    ForEach(availability.openAIReasoningEfforts, id: \.self) { effort in
                         Text(effort.shortTitle).tag(effort)
                     }
                 }
             }
 
-            if availability.supportsVerbosity {
+            if availability.supportsOpenAITextVerbosity {
                 Picker("Verbosity", selection: verbositySelection) {
                     ForEach(OpenAITextVerbosity.quickSettingOptions, id: \.self) { verbosity in
                         Text(verbosity.shortTitle).tag(verbosity)
+                    }
+                }
+            }
+
+            if !availability.anthropicEfforts.isEmpty {
+                Picker("Effort", selection: anthropicEffortSelection) {
+                    ForEach(availability.anthropicEfforts, id: \.self) { effort in
+                        Text(effort.shortTitle).tag(effort)
+                    }
+                }
+            }
+
+            if !availability.geminiThinkingLevels.isEmpty {
+                Picker("Thinking", selection: geminiThinkingSelection) {
+                    ForEach(availability.geminiThinkingLevels, id: \.self) { level in
+                        Text(level.shortTitle).tag(level)
                     }
                 }
             }
@@ -1095,7 +1167,7 @@ private struct ChatQuickSettingsButton: View {
 
     private var reasoningSelection: Binding<OpenAIReasoningEffort> {
         Binding {
-            availability.reasoningEfforts.contains(appModel.openAIReasoningEffort)
+            availability.openAIReasoningEfforts.contains(appModel.openAIReasoningEffort)
                 ? appModel.openAIReasoningEffort
                 : defaultReasoningEffort
         } set: { effort in
@@ -1113,20 +1185,68 @@ private struct ChatQuickSettingsButton: View {
         }
     }
 
+    private var anthropicEffortSelection: Binding<AnthropicEffort> {
+        Binding {
+            availability.anthropicEfforts.contains(appModel.anthropicEffort)
+                ? appModel.anthropicEffort
+                : defaultAnthropicEffort
+        } set: { effort in
+            appModel.anthropicEffort = effort
+            haptics.play(.primaryAction)
+        }
+    }
+
+    private var geminiThinkingSelection: Binding<GeminiThinkingLevel> {
+        Binding {
+            availability.geminiThinkingLevels.contains(appModel.geminiThinkingLevel)
+                ? appModel.geminiThinkingLevel
+                : defaultGeminiThinkingLevel
+        } set: { level in
+            appModel.geminiThinkingLevel = level
+            haptics.play(.primaryAction)
+        }
+    }
+
     private var defaultReasoningEffort: OpenAIReasoningEffort {
-        if availability.reasoningEfforts.contains(.low) {
+        if availability.openAIReasoningEfforts.contains(.low) {
             return .low
         }
-        return availability.reasoningEfforts.first ?? AppSettingsSnapshot.defaultOpenAIReasoningEffort
+        return availability.openAIReasoningEfforts.first ?? AppSettingsSnapshot.defaultOpenAIReasoningEffort
+    }
+
+    private var defaultAnthropicEffort: AnthropicEffort {
+        if availability.anthropicEfforts.contains(.medium) {
+            return .medium
+        }
+        if availability.anthropicEfforts.contains(.low) {
+            return .low
+        }
+        return availability.anthropicEfforts.first ?? AppSettingsSnapshot.defaultAnthropicEffort
+    }
+
+    private var defaultGeminiThinkingLevel: GeminiThinkingLevel {
+        if availability.geminiThinkingLevels.contains(.medium) {
+            return .medium
+        }
+        if availability.geminiThinkingLevels.contains(.low) {
+            return .low
+        }
+        return availability.geminiThinkingLevels.first ?? AppSettingsSnapshot.defaultGeminiThinkingLevel
     }
 
     private var accessibilityValue: String {
         var parts = [String]()
-        if !availability.reasoningEfforts.isEmpty {
+        if !availability.openAIReasoningEfforts.isEmpty {
             parts.append("Reasoning \(reasoningSelection.wrappedValue.shortTitle)")
         }
-        if availability.supportsVerbosity {
+        if availability.supportsOpenAITextVerbosity {
             parts.append("Verbosity \(appModel.openAITextVerbosity.shortTitle)")
+        }
+        if !availability.anthropicEfforts.isEmpty {
+            parts.append("Effort \(anthropicEffortSelection.wrappedValue.shortTitle)")
+        }
+        if !availability.geminiThinkingLevels.isEmpty {
+            parts.append("Thinking \(geminiThinkingSelection.wrappedValue.shortTitle)")
         }
         return parts.joined(separator: ", ")
     }
@@ -1156,6 +1276,38 @@ private extension OpenAITextVerbosity {
 
     var shortTitle: String {
         switch self {
+        case .low:
+            "Low"
+        case .medium:
+            "Medium"
+        case .high:
+            "High"
+        }
+    }
+}
+
+private extension AnthropicEffort {
+    var shortTitle: String {
+        switch self {
+        case .low:
+            "Low"
+        case .medium:
+            "Medium"
+        case .high:
+            "High"
+        case .xhigh:
+            "X High"
+        case .max:
+            "Max"
+        }
+    }
+}
+
+private extension GeminiThinkingLevel {
+    var shortTitle: String {
+        switch self {
+        case .minimal:
+            "Minimal"
         case .low:
             "Low"
         case .medium:
@@ -1233,6 +1385,12 @@ private struct ChatComposerBar: View {
             Task { await appModel.saveSettings(services: services) }
         }
         .onChange(of: appModel.openAITextVerbosity) { _, _ in
+            Task { await appModel.saveSettings(services: services) }
+        }
+        .onChange(of: appModel.anthropicEffort) { _, _ in
+            Task { await appModel.saveSettings(services: services) }
+        }
+        .onChange(of: appModel.geminiThinkingLevel) { _, _ in
             Task { await appModel.saveSettings(services: services) }
         }
     }
