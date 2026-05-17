@@ -4,6 +4,14 @@ set -euo pipefail
 project="${PINES_XCODE_PROJECT:-Pines.xcodeproj}"
 scheme="${PINES_XCODE_SCHEME:-Pines}"
 derived_data="${PINES_DERIVED_DATA_PATH:-build/DerivedData}"
+swiftpm_resolved_file="${PINES_SWIFTPM_PACKAGE_RESOLVED_FILE:-Package.resolved}"
+xcode_resolved_file="${PINES_XCODE_PACKAGE_RESOLVED_FILE:-$project/project.xcworkspace/xcshareddata/swiftpm/Package.resolved}"
+xcode_package_flags=(
+  -skipMacroValidation
+  -skipPackagePluginValidation
+  -onlyUsePackageVersionsFromResolvedFile
+  -disableAutomaticPackageResolution
+)
 
 mkdir -p build
 
@@ -20,6 +28,20 @@ snapshot_generated_project() {
   else
     touch "$generated_project_snapshot/project-missing"
   fi
+}
+
+snapshot_package_resolution_files() {
+  if [ ! -f "$swiftpm_resolved_file" ]; then
+    echo "::error::$swiftpm_resolved_file is required for deterministic SwiftPM package resolution."
+    exit 1
+  fi
+  if [ ! -f "$xcode_resolved_file" ]; then
+    echo "::error::$xcode_resolved_file is required for deterministic Xcode app package resolution."
+    exit 1
+  fi
+  cp "$swiftpm_resolved_file" "$generated_project_snapshot/Package.resolved"
+  mkdir -p "$generated_project_snapshot/xcode-swiftpm"
+  cp "$xcode_resolved_file" "$generated_project_snapshot/xcode-swiftpm/Package.resolved"
 }
 
 check_generated_project_drift() {
@@ -39,7 +61,27 @@ check_generated_project_drift() {
   fi
 }
 
+check_package_resolution_drift() {
+  echo "Checking package resolution drift..."
+  if ! cmp -s "$generated_project_snapshot/Package.resolved" "$swiftpm_resolved_file"; then
+    echo "::error::$swiftpm_resolved_file changed during Xcode validation. Commit the resolved SwiftPM graph."
+    diff -u "$generated_project_snapshot/Package.resolved" "$swiftpm_resolved_file" || true
+    exit 1
+  fi
+  if ! cmp -s "$generated_project_snapshot/xcode-swiftpm/Package.resolved" "$xcode_resolved_file"; then
+    echo "::error::$xcode_resolved_file changed during Xcode validation. Commit the resolved Xcode app graph."
+    diff -u "$generated_project_snapshot/xcode-swiftpm/Package.resolved" "$xcode_resolved_file" || true
+    exit 1
+  fi
+}
+
+check_validation_drift() {
+  check_generated_project_drift
+  check_package_resolution_drift
+}
+
 snapshot_generated_project
+snapshot_package_resolution_files
 
 echo "Generating Xcode project..."
 xcodegen generate
@@ -49,8 +91,7 @@ xcodebuild \
   -resolvePackageDependencies \
   -project "$project" \
   -scheme "$scheme" \
-  -skipMacroValidation \
-  -skipPackagePluginValidation
+  "${xcode_package_flags[@]}"
 
 echo "Building iOS app without signing..."
 set -o pipefail
@@ -59,8 +100,7 @@ xcodebuild \
   -scheme "$scheme" \
   -destination 'generic/platform=iOS' \
   -derivedDataPath "$derived_data" \
-  -skipMacroValidation \
-  -skipPackagePluginValidation \
+  "${xcode_package_flags[@]}" \
   CODE_SIGNING_ALLOWED=NO \
   build | tee build/xcodebuild.log
 
@@ -70,21 +110,20 @@ xcodebuild \
   -scheme "$scheme" \
   -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath "$derived_data" \
-  -skipMacroValidation \
-  -skipPackagePluginValidation \
+  "${xcode_package_flags[@]}" \
   CODE_SIGNING_ALLOWED=NO \
   build-for-testing | tee build/xcodebuild-tests.log
 
 if [ "${PINES_SKIP_SIMULATOR_TEST_RUN:-0}" = "1" ]; then
   echo "Skipping simulator test run because PINES_SKIP_SIMULATOR_TEST_RUN=1."
-  check_generated_project_drift
+  check_validation_drift
   exit 0
 fi
 
 simulator_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
 if [ -z "$simulator_id" ]; then
   echo "::warning::No available iPhone simulator was found; smoke tests were build-verified only."
-  check_generated_project_drift
+  check_validation_drift
   exit 0
 fi
 
@@ -94,9 +133,8 @@ xcodebuild \
   -scheme "$scheme" \
   -destination "id=$simulator_id" \
   -derivedDataPath "$derived_data" \
-  -skipMacroValidation \
-  -skipPackagePluginValidation \
+  "${xcode_package_flags[@]}" \
   CODE_SIGNING_ALLOWED=NO \
   test-without-building | tee build/xcodebuild-test-run.log
 
-check_generated_project_drift
+check_validation_drift

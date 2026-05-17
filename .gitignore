@@ -6,7 +6,9 @@ build/
 *.moved-aside
 *.xcscmblueprint
 xcuserdata/
+# Project-local Xcode package lockfiles are ignored except for Pines' deployed app graph.
 *.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+!Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # SwiftPM
 .build/

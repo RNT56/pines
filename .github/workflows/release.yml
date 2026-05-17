@@ -111,6 +111,8 @@ jobs:
             -derivedDataPath build/DerivedData \
             -skipMacroValidation \
             -skipPackagePluginValidation \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -disableAutomaticPackageResolution \
             CODE_SIGNING_ALLOWED=NO \
             archive | tee build/archive.log
 

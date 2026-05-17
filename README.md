@@ -19,7 +19,8 @@ The repository contains:
 - `Sources/PinesCoreTestRunner/`: framework-free checks for the non-UI production contracts.
 - `.github/workflows/`: CI, GitHub Release, and MLX upstream reachability automation.
 - `project.yml`: XcodeGen configuration for the iOS project.
-- `Package.resolved`: committed SwiftPM lockfile for the package/test graph. The iOS app MLX fork pins live in `project.yml` as exact revisions.
+- `Package.resolved`: committed SwiftPM lockfile for package/test checks.
+- `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`: committed Xcode app lockfile for the deployed iOS graph. The iOS app MLX fork pins live in `project.yml` as exact revisions.
 
 ## Architecture
 
@@ -37,8 +38,8 @@ The app is split into production layers:
 
 The iOS app links the maintained MLX forks through `project.yml` and the generated Xcode project:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `2577c8856ddfb05cad0da4eda7b502cbb5d99a3f`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `8861b2d9746128f3461b71deee5bf94ec3817a78`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `221ef73921c1d2bb92fc545168120e57545bac22`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `ef066d0999150a8970025101e6f0d55cb44afca0`
 - Nested `mlx` inside `MLXSwift`: `d999c27ecd549e65f8f689bdd5c83648da977b81`
 
 These pins are intentional because the app consumes additive TurboQuant and compatibility APIs that are not assumed to exist in upstream package releases yet.
@@ -88,7 +89,7 @@ The repository keeps `PinesCoreTestRunner` as a framework-light smoke runner for
 
 ## CI And Releases
 
-CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, including privacy-manifest linting, builds the Swift package with automatic package resolution disabled, runs `swift test`, runs `PinesCoreTestRunner`, regenerates the Xcode project, checks generated-project drift, resolves Xcode package dependencies, builds the iOS app without signing, builds simulator smoke tests, and runs those tests when an iPhone simulator is available on the `macos-26` runner.
+CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, including privacy-manifest linting, builds the Swift package with automatic package resolution disabled, runs `swift test`, runs `PinesCoreTestRunner`, regenerates the Xcode project, checks generated-project drift, resolves the committed Xcode deployment package graph from `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`, builds the iOS app without signing, builds simulator smoke tests, and runs those tests when an iPhone simulator is available on the `macos-26` runner.
 
 GitHub Releases are tag-driven. Push a semantic tag such as `v0.1.0` to run release validation and publish a source/developer-preview release with checksums:
 
