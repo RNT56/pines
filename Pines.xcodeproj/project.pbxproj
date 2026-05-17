@@ -619,7 +619,6 @@
 				};
 			};
 			buildConfigurationList = 4600F55A6BF6AF12514D96AA /* Build configuration list for PBXProject "Pines" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -638,6 +637,7 @@
 				B9AD7F6A00FA0B347C765B5E /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 44B966D0C304F06A65EAD9F3 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (

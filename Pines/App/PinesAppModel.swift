@@ -550,6 +550,28 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         startSending(lastUser.content, attachments: lastUser.attachments, in: thread.id, services: services)
     }
 
+    private static func normalizedUserContent(_ content: String, attachments: [ChatAttachment]) -> String {
+        guard content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return content
+        }
+        let imageCount = attachments.filter { $0.kind == .image }.count
+        let fileCount = attachments.count - imageCount
+        switch (imageCount, fileCount) {
+        case (0, 0):
+            return ""
+        case (1, 0):
+            return "Analyze this image."
+        case (let images, 0):
+            return "Analyze these \(images) images."
+        case (0, 1):
+            return "Analyze the attached file."
+        case (0, let files):
+            return "Analyze the attached \(files) files."
+        default:
+            return "Analyze the attached image and files."
+        }
+    }
+
     func setThreadArchived(_ thread: PinesThreadPreview, archived: Bool, services: PinesAppServices) async {
         do {
             guard let repository = services.conversationRepository else {
@@ -600,7 +622,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
     private func sendMessage(_ draft: String, attachments: [ChatAttachment], in threadID: UUID?, services: PinesAppServices, runToken: UUID) async {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !attachments.isEmpty else { return }
+        let userContent = Self.normalizedUserContent(trimmed, attachments: attachments)
+        guard !userContent.isEmpty || !attachments.isEmpty else { return }
         var runRepository: (any ConversationRepository)?
         var runConversationID: UUID?
         var assistantMessageID: UUID?
@@ -631,14 +654,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             runConversationID = conversationID
             let settings = try? await services.settingsRepository?.loadSettings()
 
-            let userMessage = ChatMessage(role: .user, content: trimmed, attachments: attachments)
+            let userMessage = ChatMessage(role: .user, content: userContent, attachments: attachments)
             try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: nil, providerID: nil)
             appendThreadMessage(userMessage, conversationID: conversationID, status: .local, moveToFront: true)
 
             // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
             let availableTools: [AnyToolSpec] = []
             let messages = try await repository.messages(in: conversationID)
-            let vaultContext = trimmed.isEmpty ? nil : await vaultContextMessage(for: trimmed, services: services)
+            let vaultContext = userContent.isEmpty ? nil : await vaultContextMessage(for: userContent, services: services)
             let mcpContext = await mcpResourceContextMessages(services: services)
             let routeRequiredInputs = ProviderInputRequirements(messages: messages + mcpContext)
             let requestedSelection = selection(for: conversationID, services: services)

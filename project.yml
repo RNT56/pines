@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: com.schtack
   deploymentTarget:
     iOS: "26.0"
-  minimumXcodeGenVersion: "2.44.1"
+  minimumXcodeGenVersion: "2.45.4"
 packages:
   PinesCore:
     path: .

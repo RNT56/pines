@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import PinesCore
 import UniformTypeIdentifiers
@@ -987,7 +988,7 @@ private struct ChatComposerBar: View {
     nonisolated private static let maxInlineFileBytes = 50 * 1024 * 1024
 
     private static let allowedAttachmentTypes: [UTType] = [
-        "png", "jpg", "jpeg", "webp", "gif", "pdf", "txt", "md", "markdown", "json", "csv",
+        "png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "heics", "heifs", "pdf", "txt", "md", "markdown", "json", "csv",
     ].compactMap { UTType(filenameExtension: $0) }
 
     private struct AttachmentImportOutcome: Sendable {
@@ -1018,18 +1019,26 @@ private struct ChatComposerBar: View {
             }
         }
 
-        let contentType = normalizedAttachmentContentType(for: sourceURL)
-        guard let kind = attachmentKind(for: contentType) else {
-            throw InferenceError.unsupportedCapability("Unsupported attachment type \(contentType).")
+        let originalContentType = normalizedAttachmentContentType(for: sourceURL)
+        guard let kind = attachmentKind(for: originalContentType) else {
+            throw InferenceError.unsupportedCapability("Unsupported attachment type \(originalContentType).")
         }
 
         let directory = try chatAttachmentsDirectory()
+        let contentType = convertedAttachmentContentType(for: originalContentType)
+        let rawFileName = isHEICImageContentType(originalContentType)
+            ? "\(sourceURL.deletingPathExtension().lastPathComponent).jpg"
+            : sourceURL.lastPathComponent
         let fileName = sanitizedAttachmentFileName(
-            sourceURL.lastPathComponent,
+            rawFileName,
             fallbackExtension: fileExtension(for: contentType)
         )
         let destination = directory.appending(path: "\(UUID().uuidString)-\(fileName)")
-        try FileManager.default.copyItem(at: sourceURL, to: destination)
+        if isHEICImageContentType(originalContentType) {
+            try convertHEICImage(at: sourceURL, toJPEGAt: destination)
+        } else {
+            try FileManager.default.copyItem(at: sourceURL, to: destination)
+        }
 
         let byteCount = try fileByteCount(at: destination)
         let maxBytes = kind == .image ? maxInlineImageBytes : maxInlineFileBytes
@@ -1061,6 +1070,14 @@ private struct ChatComposerBar: View {
             return "image/webp"
         case "gif":
             return "image/gif"
+        case "heic":
+            return "image/heic"
+        case "heif":
+            return "image/heif"
+        case "heics":
+            return "image/heic-sequence"
+        case "heifs":
+            return "image/heif-sequence"
         case "pdf":
             return "application/pdf"
         case "txt", "text":
@@ -1082,7 +1099,7 @@ private struct ChatComposerBar: View {
 
     nonisolated private static func attachmentKind(for contentType: String) -> AttachmentKind? {
         switch contentType {
-        case "image/png", "image/jpeg", "image/webp", "image/gif":
+        case "image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence":
             return .image
         case "application/pdf", "text/plain", "text/markdown", "text/x-markdown", "application/json", "text/csv":
             return .document
@@ -1101,6 +1118,8 @@ private struct ChatComposerBar: View {
             "webp"
         case "image/gif":
             "gif"
+        case "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence":
+            "jpg"
         case "application/pdf":
             "pdf"
         case "text/markdown", "text/x-markdown":
@@ -1133,6 +1152,34 @@ private struct ChatComposerBar: View {
         }
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return (attributes[.size] as? NSNumber)?.intValue ?? 0
+    }
+
+    nonisolated private static func convertedAttachmentContentType(for contentType: String) -> String {
+        isHEICImageContentType(contentType) ? "image/jpeg" : contentType
+    }
+
+    nonisolated private static func isHEICImageContentType(_ contentType: String) -> Bool {
+        switch contentType.lowercased() {
+        case "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence":
+            return true
+        default:
+            return false
+        }
+    }
+
+    nonisolated private static func convertHEICImage(at sourceURL: URL, toJPEGAt destinationURL: URL) throws {
+        guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil) else {
+            throw InferenceError.invalidRequest("HEIC image could not be decoded.")
+        }
+        guard let destination = CGImageDestinationCreateWithURL(destinationURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
+            throw InferenceError.invalidRequest("HEIC image could not be converted to JPEG.")
+        }
+        CGImageDestinationAddImageFromSource(destination, source, 0, [
+            kCGImageDestinationLossyCompressionQuality: 0.92,
+        ] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            throw InferenceError.invalidRequest("HEIC image conversion could not be finalized.")
+        }
     }
 
     nonisolated private static func sanitizedAttachmentFileName(_ rawValue: String, fallbackExtension: String) -> String {

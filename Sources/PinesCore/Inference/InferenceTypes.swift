@@ -265,7 +265,10 @@ public extension ChatAttachment {
         if !rawValue.isEmpty {
             return rawValue
         }
-        switch localURL?.pathExtension.lowercased() {
+        let extensionValue = [localURL?.pathExtension, URL(fileURLWithPath: fileName).pathExtension]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .first { !$0.isEmpty }
+        switch extensionValue {
         case "jpg", "jpeg":
             return "image/jpeg"
         case "png":
@@ -274,6 +277,14 @@ public extension ChatAttachment {
             return "image/webp"
         case "gif":
             return "image/gif"
+        case "heic":
+            return "image/heic"
+        case "heif":
+            return "image/heif"
+        case "heics":
+            return "image/heic-sequence"
+        case "heifs":
+            return "image/heif-sequence"
         case "pdf":
             return "application/pdf"
         case "md", "markdown":
@@ -291,7 +302,7 @@ public extension ChatAttachment {
 
     var cloudInputKind: CloudAttachmentInputKind {
         switch normalizedContentType {
-        case "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif":
+        case "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence":
             return .image
         case "application/pdf":
             return .pdf

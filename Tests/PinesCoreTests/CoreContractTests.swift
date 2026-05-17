@@ -53,6 +53,19 @@ struct CoreContractTests {
         )
         #expect(imageRequirements.requiresImages)
 
+        let heicRequirements = ProviderInputRequirements(
+            messages: [
+                ChatMessage(
+                    role: .user,
+                    content: "describe",
+                    attachments: [ChatAttachment(kind: .image, fileName: "photo.heic", contentType: "image/heic")]
+                ),
+            ]
+        )
+        #expect(heicRequirements.requiresImages)
+        #expect(ChatAttachment(kind: .image, fileName: "photo.heif", contentType: "").cloudInputKind == .image)
+        #expect(ChatAttachment(kind: .image, fileName: "sequence.heics", contentType: "").normalizedContentType == "image/heic-sequence")
+
         let pdfRequirements = ProviderInputRequirements(
             messages: [
                 ChatMessage(
