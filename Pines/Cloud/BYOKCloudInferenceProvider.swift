@@ -21,6 +21,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
     let configuration: CloudProviderConfiguration
     let secretStore: any SecretStore
+    private let embeddingRequestBuilder = CloudEmbeddingRequestBuilder()
 
     var id: ProviderID { configuration.id }
 
@@ -111,7 +112,46 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
-        throw InferenceError.unsupportedCapability("Cloud embeddings are disabled for v1 local-first vault indexing.")
+        guard configuration.kind.supportsVaultEmbeddings else {
+            throw InferenceError.unsupportedCapability("\(configuration.displayName) does not provide a native embedding API.")
+        }
+        guard let apiKey = try await readAPIKey() else {
+            throw CloudProviderError.missingAPIKey
+        }
+
+        let urlRequest: URLRequest
+        switch configuration.kind {
+        case .openAI, .openAICompatible, .openRouter, .custom:
+            urlRequest = try openAICompatibleEmbeddingRequest(apiKey: apiKey, embeddingRequest: request)
+        case .gemini:
+            urlRequest = try geminiEmbeddingRequest(apiKey: apiKey, embeddingRequest: request)
+        case .voyageAI:
+            urlRequest = try voyageEmbeddingRequest(apiKey: apiKey, embeddingRequest: request)
+        case .anthropic:
+            throw InferenceError.unsupportedCapability("Anthropic does not provide a native embedding API. Configure Voyage AI, OpenAI, Gemini, OpenRouter, or a local embedding model.")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+        let http = try Self.httpResponse(from: response)
+        guard (200..<300).contains(http.statusCode) else {
+            throw CloudProviderError.providerRejectedRequest(
+                statusCode: http.statusCode,
+                message: Self.messageWithRequestID(
+                    Self.providerErrorMessage(from: data) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode),
+                    requestID: Self.providerRequestID(from: http, body: data, providerKind: configuration.kind),
+                    providerKind: configuration.kind
+                )
+            )
+        }
+
+        let vectors = try Self.parseEmbeddingVectors(data: data, providerKind: configuration.kind)
+        guard vectors.count == request.inputs.count else {
+            throw CloudProviderError.invalidResponse
+        }
+        return EmbeddingResult(
+            modelID: request.modelID,
+            vectors: request.normalize ? vectors.map(Self.normalizedEmbedding) : vectors
+        )
     }
 
     func listTextModels() async throws -> [CloudProviderModel] {
@@ -126,7 +166,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             return ProviderValidationResult(providerID: configuration.id, status: .invalid, message: "Missing API key.")
         }
 
-        let availableModels = (try? await listTextModels(apiKey: apiKey).map(\.id)) ?? []
+        let availableModels = configuration.kind == .voyageAI ? [] : ((try? await listTextModels(apiKey: apiKey).map(\.id)) ?? [])
 
         var request: URLRequest
         switch configuration.kind {
@@ -156,10 +196,22 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             request.httpBody = try JSONSerialization.data(withJSONObject: [
                 "contents": [["parts": [["text": "ping"]]]],
             ])
+        case .voyageAI:
+            let defaults = VaultEmbeddingDefaults.defaults(for: .voyageAI)
+            request = try voyageEmbeddingRequest(
+                apiKey: apiKey,
+                embeddingRequest: EmbeddingRequest(
+                    modelID: defaults.modelID,
+                    inputs: ["ping"],
+                    dimensions: defaults.dimensions,
+                    inputType: .query
+                )
+            )
         }
 
         try applyExtraHeaders(to: &request)
-        let (data, http) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let http = try Self.httpResponse(from: response)
         if (200..<300).contains(http.statusCode) {
             return ProviderValidationResult(providerID: configuration.id, status: .valid, message: "Provider validated.", availableModels: availableModels)
         }
@@ -188,6 +240,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             return usesGeminiInteractionsAPI(chatRequest: chatRequest)
                 ? try geminiInteractionsRequest(apiKey: apiKey, chatRequest: chatRequest)
                 : try geminiRequest(apiKey: apiKey, chatRequest: chatRequest)
+        case .voyageAI:
+            throw InferenceError.unsupportedCapability("Voyage AI is configured for embeddings only.")
         }
     }
 
@@ -200,7 +254,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             return .anthropicMessages
         case .gemini:
             return usesGeminiInteractionsAPI(chatRequest: chatRequest) ? .geminiInteractions : .geminiGenerateContent
-        case .openAI, .openAICompatible, .openRouter, .custom:
+        case .openAI, .openAICompatible, .openRouter, .custom, .voyageAI:
             return .chatCompletions
         }
     }
@@ -212,6 +266,59 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         )?
         .trimmingCharacters(in: .whitespacesAndNewlines)
         return apiKey?.isEmpty == false ? apiKey : nil
+    }
+
+    private func openAICompatibleEmbeddingRequest(apiKey: String, embeddingRequest: EmbeddingRequest) throws -> URLRequest {
+        var request = URLRequest(url: apiBaseURL.appending(path: "embeddings"))
+        request.httpMethod = "POST"
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        addOpenAIClientRequestID(to: &request)
+
+        let body = embeddingRequestBuilder.openAICompatibleBody(
+            providerKind: configuration.kind,
+            modelID: embeddingRequest.modelID,
+            inputs: embeddingRequest.inputs,
+            dimensions: embeddingRequest.dimensions,
+            inputType: embeddingRequest.inputType
+        )
+        request.httpBody = try JSONSerialization.data(withJSONObject: body.anySendable)
+        try applyExtraHeaders(to: &request)
+        return request
+    }
+
+    private func geminiEmbeddingRequest(apiKey: String, embeddingRequest: EmbeddingRequest) throws -> URLRequest {
+        let plan = embeddingRequestBuilder.geminiBatchBody(
+            modelID: embeddingRequest.modelID,
+            inputs: embeddingRequest.inputs,
+            dimensions: embeddingRequest.dimensions,
+            inputType: embeddingRequest.inputType
+        )
+        let modelName = plan.modelName
+        let url = configuration.baseURL.appending(path: "v1beta/\(modelName):batchEmbedContents")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: plan.body.anySendable)
+        try applyExtraHeaders(to: &request)
+        return request
+    }
+
+    private func voyageEmbeddingRequest(apiKey: String, embeddingRequest: EmbeddingRequest) throws -> URLRequest {
+        var request = URLRequest(url: configuration.baseURL.appending(path: "embeddings"))
+        request.httpMethod = "POST"
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = embeddingRequestBuilder.voyageBody(
+            modelID: embeddingRequest.modelID,
+            inputs: embeddingRequest.inputs,
+            dimensions: embeddingRequest.dimensions,
+            inputType: embeddingRequest.inputType
+        )
+        request.httpBody = try JSONSerialization.data(withJSONObject: body.anySendable)
+        try applyExtraHeaders(to: &request)
+        return request
     }
 
     private func openAICompatibleRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
@@ -299,10 +406,13 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             let components = URLComponents(url: configuration.baseURL.appending(path: "v1beta/models"), resolvingAgainstBaseURL: false)!
             request = URLRequest(url: components.url!)
             request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        case .voyageAI:
+            return []
         }
 
         try applyExtraHeaders(to: &request)
-        let (data, http) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let http = try Self.httpResponse(from: response)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(
                 statusCode: http.statusCode,
@@ -1099,6 +1209,59 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return fallback?.isEmpty == false ? fallback : nil
     }
 
+    private static func parseEmbeddingVectors(data: Data, providerKind: CloudProviderKind) throws -> [[Float]] {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CloudProviderError.invalidResponse
+        }
+
+        switch providerKind {
+        case .gemini:
+            if let embeddings = json["embeddings"] as? [[String: Any]] {
+                return try embeddings.map { item in
+                    guard let values = item["values"] as? [Double] else {
+                        throw CloudProviderError.invalidResponse
+                    }
+                    return values.map(Float.init)
+                }
+            }
+            if let embedding = json["embedding"] as? [String: Any],
+               let values = embedding["values"] as? [Double] {
+                return [values.map(Float.init)]
+            }
+            throw CloudProviderError.invalidResponse
+        case .openAI, .openAICompatible, .openRouter, .voyageAI, .custom:
+            guard let data = json["data"] as? [[String: Any]] else {
+                throw CloudProviderError.invalidResponse
+            }
+            return try data.sorted { lhs, rhs in
+                (lhs["index"] as? Int ?? 0) < (rhs["index"] as? Int ?? 0)
+            }.map { item in
+                if let values = item["embedding"] as? [Double] {
+                    return values.map(Float.init)
+                }
+                if let values = item["embedding"] as? [Float] {
+                    return values
+                }
+                throw CloudProviderError.invalidResponse
+            }
+        case .anthropic:
+            throw InferenceError.unsupportedCapability("Anthropic does not provide a native embedding API.")
+        }
+    }
+
+    private static func httpResponse(from response: URLResponse) throws -> HTTPURLResponse {
+        guard let http = response as? HTTPURLResponse else {
+            throw CloudProviderError.invalidResponse
+        }
+        return http
+    }
+
+    private static func normalizedEmbedding(_ vector: [Float]) -> [Float] {
+        let magnitude = vector.reduce(Float(0)) { $0 + $1 * $1 }.squareRoot()
+        guard magnitude > 0 else { return vector }
+        return vector.map { $0 / magnitude }
+    }
+
     private static func messageWithRequestID(_ message: String, requestID: String?, providerKind: CloudProviderKind) -> String {
         guard let requestID, !requestID.isEmpty else { return message }
         return "\(message) (\(requestIDLabel(for: providerKind)): \(requestID))"
@@ -1110,6 +1273,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             return "Anthropic request ID"
         case .gemini:
             return "Gemini request ID"
+        case .voyageAI:
+            return "Voyage AI request ID"
         case .openAI, .openAICompatible, .openRouter, .custom:
             return "OpenAI request ID"
         }
@@ -1125,7 +1290,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             return response.value(forHTTPHeaderField: "x-request-id")
                 ?? response.value(forHTTPHeaderField: "x-goog-request-id")
                 ?? response.value(forHTTPHeaderField: "x-cloud-trace-context")
-        case .openAI, .openAICompatible, .openRouter, .custom:
+        case .openAI, .openAICompatible, .openRouter, .voyageAI, .custom:
             return response.value(forHTTPHeaderField: "x-request-id")
         }
     }
@@ -1283,6 +1448,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             if id.contains("flash") { score += 700 }
             if id.contains("flash-lite") { score -= 60 }
             if id.contains("preview") { score += 20 }
+        case .voyageAI:
+            if id.contains("voyage") { score += 300 }
         }
         return score
     }

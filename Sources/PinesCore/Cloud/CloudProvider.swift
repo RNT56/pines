@@ -6,6 +6,7 @@ public enum CloudProviderKind: String, Codable, Sendable, CaseIterable {
     case anthropic
     case gemini
     case openRouter
+    case voyageAI
     case custom
 }
 
@@ -91,6 +92,10 @@ public extension CloudProviderConfiguration {
             imageInputs = true
             pdfInputs = true
             textDocumentInputs = false
+        case .voyageAI:
+            imageInputs = false
+            pdfInputs = false
+            textDocumentInputs = false
         case .openAICompatible, .custom:
             imageInputs = officialOpenAI
             pdfInputs = officialOpenAI
@@ -99,15 +104,15 @@ public extension CloudProviderConfiguration {
 
         return ProviderCapabilities(
             local: false,
-            streaming: true,
-            textGeneration: true,
+            streaming: kind != .voyageAI,
+            textGeneration: kind != .voyageAI,
             vision: imageInputs,
             imageInputs: imageInputs,
             pdfInputs: pdfInputs,
             textDocumentInputs: textDocumentInputs,
-            embeddings: false,
-            toolCalling: kind != .custom,
-            jsonMode: kind != .custom,
+            embeddings: kind.supportsVaultEmbeddings,
+            toolCalling: kind != .custom && kind != .voyageAI,
+            jsonMode: kind != .custom && kind != .voyageAI,
             maxContextTokens: nil
         )
     }
@@ -120,6 +125,101 @@ public extension CloudProviderConfiguration {
             return false
         }
         return host == "api.openai.com"
+    }
+}
+
+public extension CloudProviderKind {
+    var supportsVaultEmbeddings: Bool {
+        switch self {
+        case .openAI, .openAICompatible, .gemini, .openRouter, .voyageAI, .custom:
+            true
+        case .anthropic:
+            false
+        }
+    }
+}
+
+public struct CloudEmbeddingRequestBuilder: Sendable {
+    public init() {}
+
+    public func openAICompatibleBody(
+        providerKind: CloudProviderKind,
+        modelID: ModelID,
+        inputs: [String],
+        dimensions: Int?,
+        inputType: EmbeddingInputType?
+    ) -> JSONValue {
+        var body: [String: JSONValue] = [
+            "model": .string(modelID.rawValue),
+            "input": .array(inputs.map(JSONValue.string)),
+            "encoding_format": .string("float"),
+        ]
+        if let dimensions, dimensions > 0 {
+            body["dimensions"] = .number(Double(dimensions))
+        }
+        if providerKind == .openRouter, let inputType {
+            body["input_type"] = .string(inputType == .query ? "search_query" : "search_document")
+        }
+        return .object(body)
+    }
+
+    public func geminiBatchBody(
+        modelID: ModelID,
+        inputs: [String],
+        dimensions: Int?,
+        inputType: EmbeddingInputType?
+    ) -> (modelName: String, body: JSONValue) {
+        let modelName = modelID.rawValue.hasPrefix("models/")
+            ? modelID.rawValue
+            : "models/\(modelID.rawValue)"
+        let isGeminiEmbedding2 = modelName.hasSuffix("/gemini-embedding-2") || modelName == "models/gemini-embedding-2"
+        let requests: [JSONValue] = inputs.map { input in
+            let contentText = isGeminiEmbedding2
+                ? Self.geminiEmbedding2Content(input, inputType: inputType)
+                : input
+            var item: [String: JSONValue] = [
+                "model": .string(modelName),
+                "content": .object([
+                    "parts": .array([
+                        .object(["text": .string(contentText)]),
+                    ]),
+                ]),
+            ]
+            if let dimensions, dimensions > 0 {
+                item[isGeminiEmbedding2 ? "output_dimensionality" : "outputDimensionality"] = .number(Double(dimensions))
+            }
+            if !isGeminiEmbedding2 {
+                item["taskType"] = .string(inputType == .query ? "RETRIEVAL_QUERY" : "RETRIEVAL_DOCUMENT")
+            }
+            return .object(item)
+        }
+        return (modelName, .object(["requests": .array(requests)]))
+    }
+
+    public func voyageBody(
+        modelID: ModelID,
+        inputs: [String],
+        dimensions: Int?,
+        inputType: EmbeddingInputType?
+    ) -> JSONValue {
+        var body: [String: JSONValue] = [
+            "model": .string(modelID.rawValue),
+            "input": .array(inputs.map(JSONValue.string)),
+            "input_type": .string(inputType == .query ? "query" : "document"),
+        ]
+        if let dimensions, dimensions > 0 {
+            body["output_dimension"] = .number(Double(dimensions))
+        }
+        return .object(body)
+    }
+
+    public static func geminiEmbedding2Content(_ input: String, inputType: EmbeddingInputType?) -> String {
+        switch inputType {
+        case .query:
+            return "task: search result | query: \(input)"
+        case .document, .none:
+            return "title: none | text: \(input)"
+        }
     }
 }
 
@@ -156,7 +256,7 @@ public enum CloudProviderModelEligibility: Sendable {
         switch providerKind {
         case .openAI, .openAICompatible, .openRouter, .custom:
             guard !isOpenAIOSeries(modelName) else { return false }
-        case .anthropic, .gemini:
+        case .anthropic, .gemini, .voyageAI:
             break
         }
 
@@ -180,6 +280,8 @@ public enum CloudProviderModelEligibility: Sendable {
             return modelName.hasPrefix("gemini-")
         case .openAICompatible, .openRouter, .custom:
             return true
+        case .voyageAI:
+            return false
         }
     }
 

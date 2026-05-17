@@ -28,6 +28,11 @@ public struct VaultStoredEmbedding: Hashable, Codable, Sendable {
     public var chunkID: String
     public var documentID: UUID
     public var modelID: ModelID
+    public var profileID: String?
+    public var providerID: ProviderID?
+    public var providerKind: VaultEmbeddingProfileKind?
+    public var normalized: Bool
+    public var sourceChecksum: String?
     public var dimensions: Int
     public var fp16Embedding: Data
     public var turboQuantCode: Data
@@ -40,6 +45,11 @@ public struct VaultStoredEmbedding: Hashable, Codable, Sendable {
         chunkID: String,
         documentID: UUID,
         modelID: ModelID,
+        profileID: String? = nil,
+        providerID: ProviderID? = nil,
+        providerKind: VaultEmbeddingProfileKind? = nil,
+        normalized: Bool = true,
+        sourceChecksum: String? = nil,
         dimensions: Int,
         fp16Embedding: Data,
         turboQuantCode: Data,
@@ -51,6 +61,11 @@ public struct VaultStoredEmbedding: Hashable, Codable, Sendable {
         self.chunkID = chunkID
         self.documentID = documentID
         self.modelID = modelID
+        self.profileID = profileID
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.normalized = normalized
+        self.sourceChecksum = sourceChecksum
         self.dimensions = dimensions
         self.fp16Embedding = fp16Embedding
         self.turboQuantCode = turboQuantCode

@@ -538,12 +538,18 @@ extension GRDBPinesStore: CloudKitSyncRepository {
         try db.execute(
             sql: """
             INSERT INTO vault_embeddings
-                (chunk_id, document_id, embedding_model_id, dimensions, fp16_embedding,
-                 turboquant_code, norm, codec_version, checksum, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(chunk_id, embedding_model_id) DO UPDATE SET
+                (chunk_id, document_id, embedding_model_id, profile_id, provider_id, provider_kind,
+                 dimensions, normalized, source_checksum, fp16_embedding, turboquant_code,
+                 norm, codec_version, checksum, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(chunk_id, profile_id) DO UPDATE SET
                 document_id = excluded.document_id,
+                embedding_model_id = excluded.embedding_model_id,
+                provider_id = excluded.provider_id,
+                provider_kind = excluded.provider_kind,
                 dimensions = excluded.dimensions,
+                normalized = excluded.normalized,
+                source_checksum = excluded.source_checksum,
                 fp16_embedding = excluded.fp16_embedding,
                 turboquant_code = excluded.turboquant_code,
                 norm = excluded.norm,
@@ -555,7 +561,17 @@ extension GRDBPinesStore: CloudKitSyncRepository {
                 embedding.chunkID,
                 embedding.documentID.uuidString,
                 embedding.modelID.rawValue,
+                VaultEmbeddingProfile.stableID(
+                    kind: .localMLX,
+                    providerID: ProviderID(rawValue: "mlx-local"),
+                    modelID: embedding.modelID,
+                    dimensions: embedding.dimensions
+                ),
+                "mlx-local",
+                VaultEmbeddingProfileKind.localMLX.rawValue,
                 embedding.dimensions,
+                1,
+                embedding.checksum,
                 embedding.fp16Embedding,
                 embedding.turboQuantCode,
                 embedding.norm,

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^project\\.yml$/"
+      ],
+      "matchStrings": [
+        "MLXSwift:\\n\\s+url:\\s+(?<packageName>https://github\\.com/RNT56/mlx-swift)\\n\\s+revision:\\s+(?<currentDigest>[0-9a-f]{40})",
+        "MLXSwiftLM:\\n\\s+url:\\s+(?<packageName>https://github\\.com/RNT56/mlx-swift-lm)\\n\\s+revision:\\s+(?<currentDigest>[0-9a-f]{40})"
+      ],
+      "currentValueTemplate": "main",
+      "datasourceTemplate": "git-refs",
+      "depNameTemplate": "{{{packageName}}}"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "https://github.com/RNT56/mlx-swift",
+        "https://github.com/RNT56/mlx-swift-lm"
+      ],
+      "groupName": "MLX fork pins",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "mlx"
+    }
+  ]
+}

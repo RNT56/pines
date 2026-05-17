@@ -1,6 +1,9 @@
 import Foundation
 import PinesCore
 
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 #if canImport(PinesHubXetSupport)
 import PinesHubXetSupport
 #endif
@@ -348,9 +351,27 @@ private actor MLXRuntimeState {
 
     private static func validateRuntimeCompatibility(_ install: ModelInstall) throws {
         if install.verification == .experimental,
-           ModelPreflightClassifier.hasKnownRuntimeCrashSignal(repository: install.repository, modelType: install.modelType) {
-            throw InferenceError.unsupportedCapability(ModelPreflightClassifier.knownRuntimeCrashReason)
+           ModelPreflightClassifier.requiresRuntimeCompatibilityGate(
+               repository: install.repository,
+               modelType: install.modelType
+           ) {
+            try validateTurboQuantRuntimeGate()
         }
+    }
+
+    private static func validateTurboQuantRuntimeGate() throws {
+        #if canImport(MLX)
+        let availability = MLX.TurboQuantKernelAvailability.current
+        guard availability.selfTestStatus == .passed,
+              availability.runtimeBackend(for: .metalPolarQJL) == .metalPolarQJL else {
+            throw InferenceError.unsupportedCapability(
+                availability.fallbackReason(for: .metalPolarQJL)
+                    ?? ModelPreflightClassifier.runtimeCompatibilityGateReason
+            )
+        }
+        #else
+        throw InferenceError.unsupportedCapability("MLX runtime packages are not linked in this build.")
+        #endif
     }
     #endif
 
@@ -407,59 +428,98 @@ private actor MLXRuntimeState {
             guard attachment.kind == .image, let localURL = attachment.localURL else { return nil }
             return localURL
         }
+        let historyMessages = Array(request.messages[..<latestUserIndex])
         let parameters = Self.generateParameters(from: request, profile: profile, install: activeInstall)
         let toolSpecs = request.allowsTools ? Self.mlxToolSpecs(from: request.availableTools) : nil
 
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let images = imageURLs.map(UserInput.Image.url)
-                    let history = Self.chatHistory(from: request.messages[..<latestUserIndex])
-                    let session = ChatSession(
-                        container,
-                        instructions: instructions.isEmpty ? nil : instructions,
-                        history: history,
-                        generateParameters: parameters,
-                        tools: toolSpecs
-                    )
-                    var tokenCount = 0
-
-                    for try await item in session.streamDetails(to: latestPrompt, images: images, videos: []) {
-                        guard !Task.isCancelled else { throw InferenceError.cancelled }
-                        switch item {
-                        case let .chunk(text):
-                            tokenCount += 1
-                            continuation.yield(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
-                        case let .toolCall(call):
-                            let argumentsData = try JSONSerialization.data(
-                                withJSONObject: call.function.arguments.mapValues(\.anyValue)
-                            )
-                            continuation.yield(
-                                .toolCall(
-                                    ToolCallDelta(
-                                        id: UUID().uuidString,
-                                        name: call.function.name,
-                                        argumentsFragment: String(decoding: argumentsData, as: UTF8.self),
-                                        isComplete: true
-                                    )
-                                )
-                            )
-                        case let .info(info):
-                            continuation.yield(
-                                .metrics(
-                                    InferenceMetrics(
-                                        promptTokens: info.promptTokenCount,
-                                        completionTokens: info.generationTokenCount,
-                                        promptTokensPerSecond: info.promptTokensPerSecond.isFinite ? info.promptTokensPerSecond : nil,
-                                        completionTokensPerSecond: info.tokensPerSecond.isFinite ? info.tokensPerSecond : nil
-                                    )
-                                )
-                            )
-                            continuation.yield(.finish(InferenceFinish(reason: Self.finishReason(from: info.stopReason))))
+                    let result = try await container.perform { context in
+                        let images = imageURLs.map(UserInput.Image.url)
+                        let history = Self.chatHistory(from: historyMessages[...])
+                        var tokenCount = 0
+                        var finish: InferenceFinish?
+                        var messages = [Chat.Message]()
+                        if !instructions.isEmpty {
+                            messages.append(.system(instructions))
                         }
+                        messages.append(contentsOf: history)
+                        messages.append(.user(latestPrompt, images: images, videos: []))
+
+                        let userInput = UserInput(
+                            chat: messages,
+                            processing: .init(resize: CGSize(width: 512, height: 512)),
+                            tools: toolSpecs
+                        )
+                        let input = try await context.processor.prepare(input: userInput)
+                        let cache = context.model.newCache(parameters: parameters)
+                        let iterator = try TokenIterator(
+                            input: input,
+                            model: context.model,
+                            cache: cache,
+                            parameters: parameters
+                        )
+                        let (stream, generationTask) = MLXLMCommon.generateTask(
+                            promptTokenCount: input.text.tokens.size,
+                            modelConfiguration: context.configuration,
+                            tokenizer: context.tokenizer,
+                            iterator: iterator,
+                            tools: toolSpecs
+                        )
+                        var completionInfo: GenerateCompletionInfo?
+
+                        for await item in stream {
+                            guard !Task.isCancelled else { throw InferenceError.cancelled }
+                            switch item {
+                            case let .chunk(text):
+                                tokenCount += 1
+                                continuation.yield(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
+                            case let .toolCall(call):
+                                let argumentsData = try JSONSerialization.data(
+                                    withJSONObject: call.function.arguments.mapValues(\.anyValue)
+                                )
+                                continuation.yield(
+                                    .toolCall(
+                                        ToolCallDelta(
+                                            id: UUID().uuidString,
+                                            name: call.function.name,
+                                            argumentsFragment: String(decoding: argumentsData, as: UTF8.self),
+                                            isComplete: true
+                                        )
+                                    )
+                                )
+                            case let .info(info):
+                                continuation.yield(
+                                    .metrics(
+                                        InferenceMetrics(
+                                            promptTokens: info.promptTokenCount,
+                                            completionTokens: info.generationTokenCount,
+                                            promptTokensPerSecond: info.promptTokensPerSecond.isFinite ? info.promptTokensPerSecond : nil,
+                                            completionTokensPerSecond: info.tokensPerSecond.isFinite ? info.tokensPerSecond : nil
+                                        )
+                                    )
+                                )
+                                completionInfo = info
+                            }
+                        }
+
+                        await generationTask.value
+                        if let completionInfo {
+                            finish = InferenceFinish(
+                                reason: Self.finishReason(from: completionInfo.stopReason),
+                                providerMetadata: Self.localProviderMetadata(
+                                    from: cache,
+                                    fallbackProfile: profile
+                                )
+                            )
+                        }
+                        return (tokenCount: tokenCount, finish: finish)
                     }
 
-                    if tokenCount == 0 {
+                    if let finish = result.finish {
+                        continuation.yield(.finish(finish))
+                    } else if result.tokenCount == 0 {
                         continuation.yield(.finish(InferenceFinish(reason: .stop)))
                     }
                     continuation.finish()
@@ -550,6 +610,9 @@ private actor MLXRuntimeState {
             kvCacheStrategy: mlxKVCacheStrategy(from: profile.quantization.kvCacheStrategy),
             turboQuantPreset: mlxTurboQuantPreset(from: profile.quantization.preset),
             turboQuantBackend: mlxTurboQuantBackend(from: profile.quantization.requestedBackend),
+            turboQuantOptimizationPolicy: mlxTurboQuantOptimizationPolicy(
+                from: profile.quantization.turboQuantOptimizationPolicy
+            ),
             turboQuantSeed: turboQuantSeed,
             temperature: request.sampling.temperature,
             topP: request.sampling.topP,
@@ -582,6 +645,63 @@ private actor MLXRuntimeState {
     ) -> MLXLMCommon.TurboQuantBackend {
         guard let backend else { return .metalPolarQJL }
         return MLXLMCommon.TurboQuantBackend(rawValue: backend.rawValue) ?? .metalPolarQJL
+    }
+
+    private static func localProviderMetadata(
+        from cache: [KVCache],
+        fallbackProfile profile: RuntimeProfile
+    ) -> [String: String] {
+        if let turboQuantCache = cache.compactMap({ $0 as? TurboQuantCompressedKVCacheProtocol }).first {
+            let diagnostics = turboQuantCache.attentionDiagnostics
+            var metadata: [String: String] = [
+                LocalProviderMetadataKeys.turboQuantRequestedBackend: turboQuantCache.requestedBackend.rawValue,
+                LocalProviderMetadataKeys.turboQuantActiveBackend: turboQuantCache.activeBackend.rawValue,
+                LocalProviderMetadataKeys.turboQuantAttentionPath: diagnostics.activeAttentionPath.rawValue,
+                LocalProviderMetadataKeys.turboQuantKernelProfile: diagnostics.selectedKernelProfile.rawValue,
+                LocalProviderMetadataKeys.turboQuantSelfTestStatus: diagnostics.selfTestStatus.rawValue,
+                LocalProviderMetadataKeys.turboQuantRawFallbackAllocated: String(diagnostics.rawFallbackAllocated),
+            ]
+            if let fallbackReason = diagnostics.fallbackReason {
+                metadata[LocalProviderMetadataKeys.turboQuantFallbackReason] = fallbackReason
+            }
+            if let unsupportedShape = diagnostics.lastUnsupportedShape {
+                metadata[LocalProviderMetadataKeys.turboQuantLastUnsupportedShape] = unsupportedShape
+            }
+            return metadata
+        }
+
+        let quantization = profile.quantization
+        var metadata: [String: String] = [
+            LocalProviderMetadataKeys.turboQuantRawFallbackAllocated: String(quantization.rawFallbackAllocated ?? false),
+        ]
+        if let requestedBackend = quantization.requestedBackend {
+            metadata[LocalProviderMetadataKeys.turboQuantRequestedBackend] = requestedBackend.rawValue
+        }
+        if let activeBackend = quantization.activeBackend {
+            metadata[LocalProviderMetadataKeys.turboQuantActiveBackend] = activeBackend.rawValue
+        }
+        if let attentionPath = quantization.activeAttentionPath {
+            metadata[LocalProviderMetadataKeys.turboQuantAttentionPath] = attentionPath.rawValue
+        }
+        if let kernelProfile = quantization.metalKernelProfile {
+            metadata[LocalProviderMetadataKeys.turboQuantKernelProfile] = kernelProfile.rawValue
+        }
+        if let selfTestStatus = quantization.metalSelfTestStatus {
+            metadata[LocalProviderMetadataKeys.turboQuantSelfTestStatus] = selfTestStatus.rawValue
+        }
+        if let fallbackReason = quantization.activeFallbackReason {
+            metadata[LocalProviderMetadataKeys.turboQuantFallbackReason] = fallbackReason
+        }
+        if let unsupportedShape = quantization.lastUnsupportedAttentionShape {
+            metadata[LocalProviderMetadataKeys.turboQuantLastUnsupportedShape] = unsupportedShape
+        }
+        return metadata
+    }
+
+    private static func mlxTurboQuantOptimizationPolicy(
+        from policy: PinesCore.TurboQuantOptimizationPolicy
+    ) -> MLXLMCommon.TurboQuantOptimizationPolicy {
+        MLXLMCommon.TurboQuantOptimizationPolicy(rawValue: policy.rawValue) ?? .auto
     }
 
     private static func mlxToolSpecs(from tools: [AnyToolSpec]) -> [MLXLMCommon.ToolSpec]? {

@@ -131,6 +131,22 @@ struct PinesRootView: View {
             .pinesTheme(theme)
         }
         .sheet(item: Binding(
+            get: { appModel.pendingCloudVaultEmbeddingApproval },
+            set: { request in
+                if request == nil {
+                    appModel.resolvePendingCloudVaultEmbeddingApproval(false)
+                }
+            }
+        )) { request in
+            CloudVaultEmbeddingApprovalSheet(
+                request: request,
+                cancel: { appModel.resolvePendingCloudVaultEmbeddingApproval(false) },
+                approve: { appModel.resolvePendingCloudVaultEmbeddingApproval(true) }
+            )
+            .environmentObject(haptics)
+            .pinesTheme(theme)
+        }
+        .sheet(item: Binding(
             get: { appModel.pendingMCPSamplingRequest },
             set: { request in
                 if request == nil {
@@ -262,6 +278,44 @@ private struct CloudContextApprovalSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Send Context", action: sendWithContext)
+                }
+            }
+        }
+    }
+}
+
+private struct CloudVaultEmbeddingApprovalSheet: View {
+    @Environment(\.pinesTheme) private var theme
+    let request: CloudVaultEmbeddingApprovalRequest
+    let cancel: () -> Void
+    let approve: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Vault Embeddings") {
+                    LabeledContent("Provider", value: request.profile.displayName)
+                    LabeledContent("Model", value: request.profile.modelID.rawValue)
+                    LabeledContent("Dimensions", value: "\(request.profile.dimensions)")
+                }
+
+                Section("Privacy") {
+                    Text(request.reason)
+                        .font(theme.typography.body)
+                        .foregroundStyle(theme.colors.secondaryText)
+                    Text("This is separate from chat context approval. You can change the vault embedding provider later from the Vault tab.")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.tertiaryText)
+                }
+            }
+            .pinesExpressiveScrollHaptics()
+            .navigationTitle("Enable Cloud Embeddings?")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel, action: cancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Enable", action: approve)
                 }
             }
         }

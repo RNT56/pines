@@ -23,6 +23,8 @@ git ls-remote "$MLX_SWIFT_LM_UPSTREAM_URL" HEAD >/dev/null
 check_remote "MLX_SWIFT" "$MLX_SWIFT_FORK_URL"
 check_remote "MLX_SWIFT_LM" "$MLX_SWIFT_LM_FORK_URL"
 
+bash scripts/ci/check-mlx-package-pins.sh
+
 if ! grep -q "TurboQuant" Sources/PinesCore/Inference/RuntimeTypes.swift; then
   echo "TurboQuant runtime types are missing." >&2
   exit 1

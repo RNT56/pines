@@ -36,10 +36,12 @@ The app is split into production layers:
 
 The iOS app links the maintained MLX forks through `project.yml` and the generated Xcode project:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `a63a5b1b412c979b91e4e0347b35845d2bb236c0`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `85fc3225237fb41cc24f5d97eab0a92f2fef1a44`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `2577c8856ddfb05cad0da4eda7b502cbb5d99a3f`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `8861b2d9746128f3461b71deee5bf94ec3817a78`
+- Nested `mlx` inside `MLXSwift`: `d999c27ecd549e65f8f689bdd5c83648da977b81`
 
 These pins are intentional because the app consumes additive TurboQuant and compatibility APIs that are not assumed to exist in upstream package releases yet.
+Use `tools/update-mlx-pins.sh` to move the reproducible SHAs and regenerate `Pines.xcodeproj`; CI checks that `project.yml` and the generated project agree, that the pins are not below the known-good minimums, and that the nested `mlx` submodule is the expected revision. Renovate is configured to propose pin updates by PR instead of moving app builds to branch references.
 
 ## Design System
 

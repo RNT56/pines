@@ -140,6 +140,12 @@ struct MCPSamplingResultReview: Identifiable, Hashable {
     let summary: String
 }
 
+struct CloudVaultEmbeddingApprovalRequest: Identifiable, Hashable {
+    let id = UUID()
+    let profile: VaultEmbeddingProfile
+    let reason: String
+}
+
 struct MCPModelPreferenceProfile: Hashable {
     var hints: [String]
     var costPriority: Double
@@ -259,6 +265,8 @@ struct PinesVaultItemPreview: Identifiable, Hashable {
     let updatedLabel: String
     let sensitivity: PinesVaultSensitivity
     let linkedThreads: Int
+    let activeProfileEmbeddedChunks: Int
+    let activeProfileTotalChunks: Int
 }
 
 enum PinesVaultKind: String, Hashable {

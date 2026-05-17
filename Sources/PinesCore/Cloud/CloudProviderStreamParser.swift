@@ -811,7 +811,7 @@ public struct CloudProviderStreamState {
                 geminiProviderMetadata[CloudProviderMetadataKeys.geminiRequestID] = serverRequestID
                 geminiInteractionProviderMetadata[CloudProviderMetadataKeys.geminiRequestID] = serverRequestID
             }
-        case .openAI, .openAICompatible, .openRouter, .custom:
+        case .openAI, .openAICompatible, .openRouter, .voyageAI, .custom:
             recordOpenAIRequestMetadata(serverRequestID: serverRequestID, clientRequestID: clientRequestID)
         }
     }

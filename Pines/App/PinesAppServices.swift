@@ -152,7 +152,33 @@ final class PinesAppServices: @unchecked Sendable {
             vaultRepository: vaultRepository,
             settingsRepository: settingsRepository,
             inferenceProvider: mlxRuntime,
+            embeddingService: vaultEmbeddingService,
             auditRepository: auditRepository
+        )
+    }
+
+    var vaultEmbeddingService: VaultEmbeddingService? {
+        guard let vaultRepository else {
+            return nil
+        }
+        return VaultEmbeddingService(
+            vaultRepository: vaultRepository,
+            modelInstallRepository: modelInstallRepository,
+            cloudProviderRepository: cloudProviderRepository,
+            secretStore: secretStore,
+            mlxRuntime: mlxRuntime,
+            auditRepository: auditRepository
+        )
+    }
+
+    var vaultRetrievalService: VaultRetrievalService? {
+        guard let vaultRepository else {
+            return nil
+        }
+        return VaultRetrievalService(
+            vaultRepository: vaultRepository,
+            embeddingService: vaultEmbeddingService,
+            runtimeMetrics: runtimeMetrics
         )
     }
 

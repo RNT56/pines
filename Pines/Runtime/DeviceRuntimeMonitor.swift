@@ -4,6 +4,9 @@ import PinesCore
 #if canImport(Metal)
 import Metal
 #endif
+#if canImport(MLX)
+import MLX
+#endif
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -94,12 +97,22 @@ struct DeviceRuntimeMonitor: Sendable {
         selfTestStatus: PinesCore.TurboQuantSelfTestStatus?
     ) {
         let device = metalDeviceSnapshot()
+        #if canImport(MLX)
+        let availability = MLX.TurboQuantKernelAvailability.current
+        return (
+            device.architectureName,
+            device.recommendedWorkingSetBytes,
+            Self.coreTurboQuantKernelProfile(from: availability.selectedKernelProfile),
+            Self.coreTurboQuantSelfTestStatus(from: availability.selfTestStatus)
+        )
+        #else
         return (
             device.architectureName,
             device.recommendedWorkingSetBytes,
             nil,
             nil
         )
+        #endif
     }
 
     private func metalDeviceSnapshot() -> (
@@ -118,6 +131,36 @@ struct DeviceRuntimeMonitor: Sendable {
         return (nil, nil)
         #endif
     }
+
+    #if canImport(MLX)
+    private static func coreTurboQuantKernelProfile(
+        from profile: MLX.TurboQuantKernelProfile
+    ) -> PinesCore.TurboQuantKernelProfile {
+        switch profile {
+        case .portableA16A17:
+            .portableA16A17
+        case .wideA18A19:
+            .wideA18A19
+        case .sustainedA19Pro:
+            .sustainedA19Pro
+        case .mlxPackedFallback:
+            .mlxPackedFallback
+        }
+    }
+
+    private static func coreTurboQuantSelfTestStatus(
+        from status: MLX.TurboQuantRuntimeSelfTestStatus
+    ) -> PinesCore.TurboQuantSelfTestStatus {
+        switch status {
+        case .notRun:
+            .notRun
+        case .passed:
+            .passed
+        case .failed:
+            .failed
+        }
+    }
+    #endif
 }
 
 private extension ProcessInfo.ThermalState {

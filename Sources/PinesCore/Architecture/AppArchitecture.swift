@@ -199,14 +199,60 @@ public protocol VaultRepository: Sendable {
     func deleteDocument(id: UUID) async throws
     func chunks(documentID: UUID) async throws -> [VaultChunk]
     func embeddings(documentID: UUID) async throws -> [VaultStoredEmbedding]
+    func listEmbeddingProfiles() async throws -> [VaultEmbeddingProfile]
+    func observeEmbeddingProfiles() -> AsyncStream<[VaultEmbeddingProfile]>
+    func activeEmbeddingProfile() async throws -> VaultEmbeddingProfile?
+    func upsertEmbeddingProfile(_ profile: VaultEmbeddingProfile) async throws
+    func setActiveEmbeddingProfile(id: String?) async throws
+    func updateEmbeddingProfileConsent(id: String, granted: Bool) async throws
+    func upsertEmbeddingJob(_ job: VaultEmbeddingJob) async throws
+    func listEmbeddingJobs(limit: Int) async throws -> [VaultEmbeddingJob]
+    func recordRetrievalEvent(_ event: VaultRetrievalEvent) async throws
+    func listRetrievalEvents(limit: Int) async throws -> [VaultRetrievalEvent]
     func replaceChunks(_ chunks: [VaultChunk], documentID: UUID, embeddingModelID: ModelID?) async throws
     func replaceChunks(_ chunks: [VaultChunk], embeddings: VaultEmbeddingBatch?, documentID: UUID, embeddingModelID: ModelID?) async throws
+    func replaceChunks(_ chunks: [VaultChunk], embeddings: VaultEmbeddingBatch?, documentID: UUID, embeddingProfile: VaultEmbeddingProfile?) async throws
+    func upsertEmbeddings(_ embeddings: VaultEmbeddingBatch, documentID: UUID, embeddingProfile: VaultEmbeddingProfile) async throws
     func search(query: String, embedding: [Float]?, limit: Int) async throws -> [VaultSearchResult]
     func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, limit: Int) async throws -> [VaultSearchResult]
+    func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, profileID: String?, limit: Int) async throws -> [VaultSearchResult]
 }
 
 public extension VaultRepository {
     func embeddings(documentID: UUID) async throws -> [VaultStoredEmbedding] {
+        []
+    }
+
+    func listEmbeddingProfiles() async throws -> [VaultEmbeddingProfile] {
+        []
+    }
+
+    func observeEmbeddingProfiles() -> AsyncStream<[VaultEmbeddingProfile]> {
+        AsyncStream { continuation in
+            continuation.yield([])
+            continuation.finish()
+        }
+    }
+
+    func activeEmbeddingProfile() async throws -> VaultEmbeddingProfile? {
+        nil
+    }
+
+    func upsertEmbeddingProfile(_ profile: VaultEmbeddingProfile) async throws {}
+
+    func setActiveEmbeddingProfile(id: String?) async throws {}
+
+    func updateEmbeddingProfileConsent(id: String, granted: Bool) async throws {}
+
+    func upsertEmbeddingJob(_ job: VaultEmbeddingJob) async throws {}
+
+    func listEmbeddingJobs(limit: Int) async throws -> [VaultEmbeddingJob] {
+        []
+    }
+
+    func recordRetrievalEvent(_ event: VaultRetrievalEvent) async throws {}
+
+    func listRetrievalEvents(limit: Int) async throws -> [VaultRetrievalEvent] {
         []
     }
 
@@ -219,8 +265,26 @@ public extension VaultRepository {
         try await replaceChunks(chunks, documentID: documentID, embeddingModelID: embeddingModelID)
     }
 
+    func replaceChunks(
+        _ chunks: [VaultChunk],
+        embeddings: VaultEmbeddingBatch?,
+        documentID: UUID,
+        embeddingProfile: VaultEmbeddingProfile?
+    ) async throws {
+        try await replaceChunks(chunks, embeddings: embeddings, documentID: documentID, embeddingModelID: embeddingProfile?.modelID)
+    }
+
+    func upsertEmbeddings(_ embeddings: VaultEmbeddingBatch, documentID: UUID, embeddingProfile: VaultEmbeddingProfile) async throws {
+        let chunks = try await chunks(documentID: documentID)
+        try await replaceChunks(chunks, embeddings: embeddings, documentID: documentID, embeddingProfile: embeddingProfile)
+    }
+
     func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, limit: Int) async throws -> [VaultSearchResult] {
         try await search(query: query, embedding: embedding, limit: limit)
+    }
+
+    func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, profileID: String?, limit: Int) async throws -> [VaultSearchResult] {
+        try await search(query: query, embedding: embedding, embeddingModelID: embeddingModelID, limit: limit)
     }
 }
 

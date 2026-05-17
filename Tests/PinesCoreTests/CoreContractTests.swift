@@ -104,21 +104,29 @@ struct CoreContractTests {
         #expect(openAI.capabilities.imageInputs)
         #expect(openAI.capabilities.pdfInputs)
         #expect(openAI.capabilities.textDocumentInputs)
+        #expect(openAI.capabilities.embeddings)
 
         let anthropic = cloudConfiguration(kind: .anthropic, baseURL: "https://api.anthropic.com")
         #expect(anthropic.capabilities.imageInputs)
         #expect(anthropic.capabilities.pdfInputs)
         #expect(anthropic.capabilities.textDocumentInputs)
+        #expect(!anthropic.capabilities.embeddings)
 
         let gemini = cloudConfiguration(kind: .gemini, baseURL: "https://generativelanguage.googleapis.com")
         #expect(gemini.capabilities.imageInputs)
         #expect(gemini.capabilities.pdfInputs)
         #expect(gemini.capabilities.textDocumentInputs)
+        #expect(gemini.capabilities.embeddings)
 
         let openRouter = cloudConfiguration(kind: .openRouter, baseURL: "https://openrouter.ai/api/v1")
         #expect(openRouter.capabilities.imageInputs)
         #expect(openRouter.capabilities.pdfInputs)
         #expect(!openRouter.capabilities.textDocumentInputs)
+        #expect(openRouter.capabilities.embeddings)
+
+        let voyage = cloudConfiguration(kind: .voyageAI, baseURL: "https://api.voyageai.com/v1")
+        #expect(!voyage.capabilities.textGeneration)
+        #expect(voyage.capabilities.embeddings)
 
         let compatible = cloudConfiguration(kind: .openAICompatible, baseURL: "https://llm.example.test/v1")
         #expect(!compatible.capabilities.imageInputs)
@@ -129,6 +137,85 @@ struct CoreContractTests {
         #expect(customOpenAIHost.capabilities.imageInputs)
         #expect(customOpenAIHost.capabilities.pdfInputs)
         #expect(customOpenAIHost.capabilities.textDocumentInputs)
+    }
+
+    @Test
+    func vaultEmbeddingProfilesUseStableProviderScopedIDsAndDefaults() {
+        let openAI = cloudConfiguration(kind: .openAI, baseURL: "https://api.openai.com/v1")
+        let openAIProfile = VaultEmbeddingProfile.cloud(provider: openAI)
+        #expect(openAIProfile?.modelID == ModelID(rawValue: "text-embedding-3-small"))
+        #expect(openAIProfile?.dimensions == 1536)
+        #expect(openAIProfile?.kind == .openAI)
+
+        let gemini = cloudConfiguration(kind: .gemini, baseURL: "https://generativelanguage.googleapis.com")
+        let geminiProfile = VaultEmbeddingProfile.cloud(provider: gemini)
+        #expect(geminiProfile?.modelID == ModelID(rawValue: "gemini-embedding-2"))
+        #expect(geminiProfile?.dimensions == 768)
+        #expect(geminiProfile?.documentTask == "title: none | text: {content}")
+        #expect(geminiProfile?.queryTask == "task: search result | query: {content}")
+
+        let anthropic = cloudConfiguration(kind: .anthropic, baseURL: "https://api.anthropic.com")
+        #expect(VaultEmbeddingProfile.cloud(provider: anthropic) == nil)
+
+        let openRouter = cloudConfiguration(kind: .openRouter, baseURL: "https://openrouter.ai/api/v1")
+        let openRouterProfile = VaultEmbeddingProfile.cloud(provider: openRouter)
+        #expect(openRouterProfile?.modelID == ModelID(rawValue: "openai/text-embedding-3-small"))
+        #expect(openRouterProfile?.queryTask == "search_query")
+
+        let voyage = cloudConfiguration(kind: .voyageAI, baseURL: "https://api.voyageai.com/v1")
+        let voyageProfile = VaultEmbeddingProfile.cloud(provider: voyage)
+        #expect(voyageProfile?.modelID == ModelID(rawValue: "voyage-4-lite"))
+        #expect(voyageProfile?.dimensions == 1024)
+        #expect(voyageProfile?.queryTask == "query")
+    }
+
+    @Test
+    func cloudEmbeddingRequestBuilderUsesProviderSpecificEmbeddingSemantics() throws {
+        let builder = CloudEmbeddingRequestBuilder()
+
+        let openRouter = builder.openAICompatibleBody(
+            providerKind: .openRouter,
+            modelID: "openai/text-embedding-3-small",
+            inputs: ["chunk"],
+            dimensions: 1536,
+            inputType: .document
+        )
+        let openRouterObject = try #require(openRouter.objectValue)
+        #expect(openRouterObject["model"] == .string("openai/text-embedding-3-small"))
+        #expect(openRouterObject["dimensions"] == .number(1536))
+        #expect(openRouterObject["input_type"] == .string("search_document"))
+
+        let gemini = builder.geminiBatchBody(
+            modelID: "gemini-embedding-2",
+            inputs: ["find invoices"],
+            dimensions: 768,
+            inputType: .query
+        )
+        #expect(gemini.modelName == "models/gemini-embedding-2")
+        let geminiObject = try #require(gemini.body.objectValue)
+        let geminiRequests = try #require(geminiObject["requests"])
+        guard case let .array(requestArray) = geminiRequests,
+              case let .object(firstRequest) = requestArray.first,
+              case let .object(content) = firstRequest["content"],
+              case let .array(parts) = content["parts"],
+              case let .object(firstPart) = parts.first
+        else {
+            Issue.record("Gemini embedding request body did not have the expected shape.")
+            return
+        }
+        #expect(firstRequest["taskType"] == nil)
+        #expect(firstRequest["output_dimensionality"] == .number(768))
+        #expect(firstPart["text"] == .string("task: search result | query: find invoices"))
+
+        let voyage = builder.voyageBody(
+            modelID: "voyage-4-lite",
+            inputs: ["chunk"],
+            dimensions: 1024,
+            inputType: .query
+        )
+        let voyageObject = try #require(voyage.objectValue)
+        #expect(voyageObject["input_type"] == .string("query"))
+        #expect(voyageObject["output_dimension"] == .number(1024))
     }
 
     @Test
@@ -431,7 +518,7 @@ struct CoreContractTests {
     }
 
     @Test
-    func preflightMarksKnownQwen17BCrashLaneExperimental() throws {
+    func preflightMarksQwen17BRuntimeGateExperimental() throws {
         let config = try JSONSerialization.data(withJSONObject: ["model_type": "qwen3"])
         let input = ModelPreflightInput(
             repository: "mlx-community/Qwen3-1.7B-4bit",
@@ -446,7 +533,7 @@ struct CoreContractTests {
         let result = ModelPreflightClassifier().classify(input)
 
         #expect(result.verification == .experimental)
-        #expect(result.reasons.contains(ModelPreflightClassifier.knownRuntimeCrashReason))
+        #expect(result.reasons.contains(ModelPreflightClassifier.runtimeCompatibilityGateReason))
     }
 
     @Test

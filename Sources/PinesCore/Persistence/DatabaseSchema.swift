@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 9
+    public static let currentVersion = 10
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -453,6 +453,130 @@ public enum PinesDatabaseSchema {
         ]),
         DatabaseMigration(version: 9, name: "message-provider-metadata", sql: [
             "ALTER TABLE messages ADD COLUMN provider_metadata_json TEXT;",
+        ]),
+        DatabaseMigration(version: 10, name: "vault-embedding-profiles", sql: [
+            """
+            CREATE TABLE IF NOT EXISTS vault_embedding_profiles (
+                id TEXT PRIMARY KEY NOT NULL,
+                kind TEXT NOT NULL,
+                provider_id TEXT,
+                display_name TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                dimensions INTEGER NOT NULL,
+                document_task TEXT,
+                query_task TEXT,
+                normalized INTEGER NOT NULL DEFAULT 1,
+                cloud_consent_granted INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                last_error TEXT,
+                embedded_chunk_count INTEGER NOT NULL DEFAULT 0,
+                total_chunk_count INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS vault_embedding_jobs (
+                id TEXT PRIMARY KEY NOT NULL,
+                profile_id TEXT NOT NULL REFERENCES vault_embedding_profiles(id) ON DELETE CASCADE,
+                document_id TEXT REFERENCES vault_documents(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                processed_chunks INTEGER NOT NULL DEFAULT 0,
+                total_chunks INTEGER NOT NULL DEFAULT 0,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS vault_retrieval_events (
+                id TEXT PRIMARY KEY NOT NULL,
+                profile_id TEXT,
+                provider_id TEXT,
+                query_hash TEXT NOT NULL,
+                used_vector_search INTEGER NOT NULL DEFAULT 0,
+                result_count INTEGER NOT NULL DEFAULT 0,
+                elapsed_seconds REAL NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL
+            );
+            """,
+            """
+            INSERT OR IGNORE INTO vault_embedding_profiles
+                (id, kind, provider_id, display_name, model_id, dimensions, normalized,
+                 cloud_consent_granted, is_active, status, embedded_chunk_count,
+                 total_chunk_count, created_at, updated_at)
+            SELECT
+                'localMLX::mlx-local::' || embedding_model_id || '::' || dimensions,
+                'localMLX',
+                'mlx-local',
+                'Local ' || embedding_model_id,
+                embedding_model_id,
+                dimensions,
+                1,
+                1,
+                0,
+                'ready',
+                COUNT(*),
+                COUNT(*),
+                MIN(created_at),
+                MAX(created_at)
+            FROM vault_embeddings
+            GROUP BY embedding_model_id, dimensions;
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS vault_embeddings_v3 (
+                chunk_id TEXT NOT NULL REFERENCES vault_chunks(id) ON DELETE CASCADE,
+                document_id TEXT NOT NULL REFERENCES vault_documents(id) ON DELETE CASCADE,
+                embedding_model_id TEXT NOT NULL,
+                profile_id TEXT NOT NULL DEFAULT 'legacy-local',
+                provider_id TEXT,
+                provider_kind TEXT NOT NULL DEFAULT 'localMLX',
+                dimensions INTEGER NOT NULL,
+                normalized INTEGER NOT NULL DEFAULT 1,
+                source_checksum TEXT,
+                fp16_embedding BLOB NOT NULL,
+                turboquant_code BLOB NOT NULL,
+                norm REAL NOT NULL,
+                codec_version INTEGER NOT NULL,
+                checksum TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY(chunk_id, profile_id)
+            );
+            """,
+            """
+            INSERT OR REPLACE INTO vault_embeddings_v3
+                (chunk_id, document_id, embedding_model_id, profile_id, provider_id, provider_kind,
+                 dimensions, normalized, source_checksum, fp16_embedding, turboquant_code, norm,
+                 codec_version, checksum, created_at)
+            SELECT
+                chunk_id,
+                document_id,
+                embedding_model_id,
+                'localMLX::mlx-local::' || embedding_model_id || '::' || dimensions,
+                'mlx-local',
+                'localMLX',
+                dimensions,
+                1,
+                checksum,
+                fp16_embedding,
+                turboquant_code,
+                norm,
+                codec_version,
+                checksum,
+                created_at
+            FROM vault_embeddings;
+            """,
+            "DROP TABLE vault_embeddings;",
+            "ALTER TABLE vault_embeddings_v3 RENAME TO vault_embeddings;",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embedding_profiles_active ON vault_embedding_profiles(is_active, updated_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embedding_jobs_status ON vault_embedding_jobs(status, updated_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_retrieval_events_created ON vault_retrieval_events(created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_model ON vault_embeddings(embedding_model_id, dimensions);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_profile ON vault_embeddings(profile_id, dimensions);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_document ON vault_embeddings(document_id);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_scan ON vault_embeddings(dimensions, profile_id, chunk_id);",
         ]),
     ]
 }

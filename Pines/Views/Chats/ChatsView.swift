@@ -179,7 +179,8 @@ private struct ChatModelPickerButton: View {
     }
 
     private func pickerLabel(showsDisclosure: Bool, currentModelLabel: String) -> some View {
-        HStack(spacing: theme.spacing.xsmall) {
+        let shape = Capsule()
+        return HStack(spacing: theme.spacing.xsmall) {
             Text(currentModelLabel)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -196,25 +197,66 @@ private struct ChatModelPickerButton: View {
         .foregroundStyle(showsDisclosure ? theme.colors.accent : theme.colors.secondaryText)
         .padding(.horizontal, theme.spacing.medium)
         .frame(maxWidth: fillWidth ? .infinity : maxWidth, minHeight: 44)
-        .background(pickerBackgroundStyle, in: Capsule())
+        .background(pickerBackgroundStyle, in: shape)
         .overlay {
-            Capsule()
-                .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+            shape
+                .strokeBorder(pickerBorderStyle, lineWidth: theme.stroke.hairline)
         }
         .overlay {
-            Capsule()
+            shape
                 .strokeBorder(theme.colors.surfaceHighlight.opacity(0.68), lineWidth: theme.stroke.hairline)
                 .blendMode(.plusLighter)
         }
-        .shadow(color: theme.shadow.panelColor.opacity(0.22), radius: theme.shadow.panelRadius * 0.24, x: 0, y: theme.shadow.panelY * 0.18)
-        .contentShape(Capsule())
+        .shadow(color: pickerShadowColor, radius: theme.shadow.panelRadius * 0.22, x: 0, y: theme.shadow.panelY * 0.16)
+        .contentShape(shape)
     }
 
     private var pickerBackgroundStyle: AnyShapeStyle {
-        if theme.template == .paper && theme.colorScheme == .light {
-            return AnyShapeStyle(theme.colors.elevatedSurface.opacity(0.96))
+        if theme.colorScheme == .dark {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        theme.colors.elevatedSurface.opacity(0.92),
+                        theme.colors.controlFill.opacity(0.94),
+                        theme.colors.accentSoft.opacity(0.62)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
         }
-        return theme.colors.glassSurface
+        return AnyShapeStyle(
+            LinearGradient(
+                colors: [
+                    theme.colors.elevatedSurface.opacity(theme.template == .graphite || theme.template == .obsidian ? 0.98 : 0.94),
+                    theme.colors.controlFill.opacity(0.82),
+                    theme.colors.accentSoft.opacity(0.50)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+    }
+
+    private var pickerBorderStyle: AnyShapeStyle {
+        AnyShapeStyle(
+            LinearGradient(
+                colors: [
+                    theme.colors.accent.opacity(theme.colorScheme == .dark ? 0.46 : 0.34),
+                    theme.colors.controlBorder.opacity(0.94),
+                    theme.colors.surfaceHighlight.opacity(theme.colorScheme == .dark ? 0.28 : 0.72)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+    }
+
+    private var pickerShadowColor: Color {
+        if theme.colorScheme == .dark {
+            return theme.colors.accent.opacity(0.10)
+        }
+        return theme.shadow.panelColor.opacity(0.18)
     }
 
     private func currentModelLabel(in sections: [ModelPickerSection]) -> String {
@@ -291,6 +333,8 @@ private extension ModelPickerOption {
             return "diamond"
         case .openRouter:
             return "arrow.triangle.branch"
+        case .voyageAI:
+            return "point.3.connected.trianglepath.dotted"
         case .openAICompatible, .custom, nil:
             return "network"
         }

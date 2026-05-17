@@ -401,7 +401,8 @@ actor GRDBPinesStore:
             try Row.fetchAll(
                 db,
                 sql: """
-                SELECT chunk_id, document_id, embedding_model_id, dimensions, fp16_embedding,
+                SELECT chunk_id, document_id, embedding_model_id, profile_id, provider_id,
+                       provider_kind, normalized, source_checksum, dimensions, fp16_embedding,
                        turboquant_code, norm, codec_version, checksum, created_at
                 FROM vault_embeddings
                 WHERE document_id = ?
@@ -409,6 +410,135 @@ actor GRDBPinesStore:
                 """,
                 arguments: [documentID.uuidString]
             ).map(Self.vaultStoredEmbedding(from:))
+        }
+    }
+
+    func listEmbeddingProfiles() async throws -> [VaultEmbeddingProfile] {
+        try await database.read(Self.fetchEmbeddingProfiles)
+    }
+
+    nonisolated func observeEmbeddingProfiles() -> AsyncStream<[VaultEmbeddingProfile]> {
+        observationStream(Self.fetchEmbeddingProfiles)
+    }
+
+    func activeEmbeddingProfile() async throws -> VaultEmbeddingProfile? {
+        try await database.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                SELECT *
+                FROM vault_embedding_profiles
+                WHERE is_active = 1
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """
+            ).map(Self.vaultEmbeddingProfile(from:))
+        }
+    }
+
+    func upsertEmbeddingProfile(_ profile: VaultEmbeddingProfile) async throws {
+        try await database.write { db in
+            try Self.upsertEmbeddingProfile(profile, db: db)
+        }
+    }
+
+    func setActiveEmbeddingProfile(id: String?) async throws {
+        try await database.write { db in
+            try db.execute(sql: "UPDATE vault_embedding_profiles SET is_active = 0, updated_at = ?", arguments: [Date().timeIntervalSinceReferenceDate])
+            guard let id else { return }
+            try db.execute(
+                sql: "UPDATE vault_embedding_profiles SET is_active = 1, updated_at = ? WHERE id = ?",
+                arguments: [Date().timeIntervalSinceReferenceDate, id]
+            )
+        }
+    }
+
+    func updateEmbeddingProfileConsent(id: String, granted: Bool) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                UPDATE vault_embedding_profiles
+                SET cloud_consent_granted = ?, status = CASE WHEN ? = 1 THEN 'available' ELSE 'needsConsent' END, updated_at = ?
+                WHERE id = ?
+                """,
+                arguments: [granted ? 1 : 0, granted ? 1 : 0, Date().timeIntervalSinceReferenceDate, id]
+            )
+        }
+    }
+
+    func upsertEmbeddingJob(_ job: VaultEmbeddingJob) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO vault_embedding_jobs
+                    (id, profile_id, document_id, status, processed_chunks, total_chunks,
+                     attempt_count, last_error, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    document_id = excluded.document_id,
+                    status = excluded.status,
+                    processed_chunks = excluded.processed_chunks,
+                    total_chunks = excluded.total_chunks,
+                    attempt_count = excluded.attempt_count,
+                    last_error = excluded.last_error,
+                    updated_at = excluded.updated_at
+                """,
+                arguments: [
+                    job.id.uuidString,
+                    job.profileID,
+                    job.documentID?.uuidString,
+                    job.status.rawValue,
+                    job.processedChunks,
+                    job.totalChunks,
+                    job.attemptCount,
+                    job.lastError,
+                    job.createdAt.timeIntervalSinceReferenceDate,
+                    job.updatedAt.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func listEmbeddingJobs(limit: Int) async throws -> [VaultEmbeddingJob] {
+        try await database.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM vault_embedding_jobs ORDER BY updated_at DESC LIMIT ?",
+                arguments: [max(1, limit)]
+            ).map(Self.vaultEmbeddingJob(from:))
+        }
+    }
+
+    func recordRetrievalEvent(_ event: VaultRetrievalEvent) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO vault_retrieval_events
+                    (id, profile_id, provider_id, query_hash, used_vector_search, result_count, elapsed_seconds, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                arguments: [
+                    event.id.uuidString,
+                    event.profileID,
+                    event.providerID?.rawValue,
+                    event.queryHash,
+                    event.usedVectorSearch ? 1 : 0,
+                    event.resultCount,
+                    event.elapsedSeconds,
+                    event.createdAt.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func listRetrievalEvents(limit: Int) async throws -> [VaultRetrievalEvent] {
+        try await database.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM vault_retrieval_events ORDER BY created_at DESC LIMIT ?",
+                arguments: [max(1, limit)]
+            ).map(Self.vaultRetrievalEvent(from:))
         }
     }
 
@@ -421,6 +551,15 @@ actor GRDBPinesStore:
         embeddings: VaultEmbeddingBatch?,
         documentID: UUID,
         embeddingModelID: ModelID?
+    ) async throws {
+        try await replaceChunks(chunks, embeddings: embeddings, documentID: documentID, embeddingProfile: nil)
+    }
+
+    func replaceChunks(
+        _ chunks: [VaultChunk],
+        embeddings: VaultEmbeddingBatch?,
+        documentID: UUID,
+        embeddingProfile: VaultEmbeddingProfile?
     ) async throws {
         try await database.write { db in
             try db.execute(sql: "DELETE FROM vault_embeddings WHERE document_id = ?", arguments: [documentID.uuidString])
@@ -438,7 +577,7 @@ actor GRDBPinesStore:
                         chunk.ordinal,
                         chunk.text,
                         max(1, chunk.characterCount / 4),
-                        embeddingModelID?.rawValue,
+                        embeddingProfile?.modelID.rawValue ?? embeddings?.modelID.rawValue,
                         Date().timeIntervalSinceReferenceDate,
                     ]
                 )
@@ -455,6 +594,16 @@ actor GRDBPinesStore:
             }
 
             let embeddingByChunkID = Dictionary(uniqueKeysWithValues: embeddings.embeddings.map { ($0.chunkID, $0) })
+            let firstDimensions = embeddings.embeddings.first?.vector.count ?? embeddingProfile?.dimensions ?? 0
+            let profileID = embeddingProfile?.id ?? VaultEmbeddingProfile.stableID(
+                kind: .localMLX,
+                providerID: ProviderID(rawValue: "mlx-local"),
+                modelID: embeddings.modelID,
+                dimensions: firstDimensions
+            )
+            let providerID = embeddingProfile?.providerID?.rawValue
+            let providerKind = embeddingProfile?.kind.rawValue ?? VaultEmbeddingProfileKind.localMLX.rawValue
+            let normalized = embeddingProfile?.normalized ?? true
             for chunk in chunks {
                 guard let embedding = embeddingByChunkID[chunk.id], !embedding.vector.isEmpty else {
                     continue
@@ -469,15 +618,21 @@ actor GRDBPinesStore:
                 try db.execute(
                     sql: """
                     INSERT INTO vault_embeddings
-                        (chunk_id, document_id, embedding_model_id, dimensions, fp16_embedding,
-                         turboquant_code, norm, codec_version, checksum, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (chunk_id, document_id, embedding_model_id, profile_id, provider_id, provider_kind,
+                         dimensions, normalized, source_checksum, fp16_embedding, turboquant_code,
+                         norm, codec_version, checksum, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [
                         chunk.id,
                         documentID.uuidString,
                         embeddings.modelID.rawValue,
+                        profileID,
+                        providerID,
+                        providerKind,
                         embedding.vector.count,
+                        normalized ? 1 : 0,
+                        chunk.checksum,
                         Self.encodeFP16(embedding.vector),
                         codeData,
                         Double(norm),
@@ -487,6 +642,119 @@ actor GRDBPinesStore:
                     ]
                 )
             }
+            try db.execute(
+                sql: """
+                UPDATE vault_embedding_profiles
+                SET embedded_chunk_count = (
+                        SELECT COUNT(*) FROM vault_embeddings WHERE profile_id = ?
+                    ),
+                    total_chunk_count = (
+                        SELECT COUNT(*) FROM vault_chunks
+                    ),
+                    dimensions = CASE WHEN dimensions = 0 THEN ? ELSE dimensions END,
+                    status = CASE
+                        WHEN (
+                            SELECT COUNT(*) FROM vault_embeddings WHERE profile_id = ?
+                        ) > 0 THEN 'ready'
+                        ELSE status
+                    END,
+                    last_error = NULL,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                arguments: [profileID, firstDimensions, profileID, now, profileID]
+            )
+        }
+    }
+
+    func upsertEmbeddings(
+        _ embeddings: VaultEmbeddingBatch,
+        documentID: UUID,
+        embeddingProfile: VaultEmbeddingProfile
+    ) async throws {
+        try await database.write { db in
+            let chunks = try Row.fetchAll(
+                db,
+                sql: """
+                SELECT id, document_id, ordinal, text, token_estimate, created_at
+                FROM vault_chunks
+                WHERE document_id = ?
+                ORDER BY ordinal ASC
+                """,
+                arguments: [documentID.uuidString]
+            ).map(Self.vaultChunk(from:))
+            guard !chunks.isEmpty else { return }
+
+            let profileID = embeddingProfile.id
+            let now = Date().timeIntervalSinceReferenceDate
+            let embeddingByChunkID = Dictionary(uniqueKeysWithValues: embeddings.embeddings.map { ($0.chunkID, $0) })
+            try db.execute(
+                sql: "DELETE FROM vault_embeddings WHERE document_id = ? AND profile_id = ?",
+                arguments: [documentID.uuidString, profileID]
+            )
+
+            for chunk in chunks {
+                guard let embedding = embeddingByChunkID[chunk.id], !embedding.vector.isEmpty else {
+                    continue
+                }
+                let norm = Self.vectorMagnitude(embedding.vector)
+                guard norm > 0 else {
+                    continue
+                }
+                let codec = Self.vaultTurboQuantCodec(modelID: embeddings.modelID, dimensions: embedding.vector.count)
+                let encodedCode = try codec.encode(embedding.vector)
+                let codeData = try JSONEncoder().encode(encodedCode)
+                try db.execute(
+                    sql: """
+                    INSERT INTO vault_embeddings
+                        (chunk_id, document_id, embedding_model_id, profile_id, provider_id, provider_kind,
+                         dimensions, normalized, source_checksum, fp16_embedding, turboquant_code,
+                         norm, codec_version, checksum, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        chunk.id,
+                        documentID.uuidString,
+                        embeddings.modelID.rawValue,
+                        profileID,
+                        embeddingProfile.providerID?.rawValue,
+                        embeddingProfile.kind.rawValue,
+                        embedding.vector.count,
+                        embeddingProfile.normalized ? 1 : 0,
+                        chunk.checksum,
+                        Self.encodeFP16(embedding.vector),
+                        codeData,
+                        Double(norm),
+                        encodedCode.codecVersion,
+                        StableSearchHash.hexDigest(for: "\(chunk.checksum)|\(embeddings.modelID.rawValue)|\(embedding.vector.count)"),
+                        now,
+                    ]
+                )
+            }
+
+            let firstDimensions = embeddings.embeddings.first?.vector.count ?? embeddingProfile.dimensions
+            try db.execute(
+                sql: """
+                UPDATE vault_embedding_profiles
+                SET embedded_chunk_count = (
+                        SELECT COUNT(*) FROM vault_embeddings WHERE profile_id = ?
+                    ),
+                    total_chunk_count = (
+                        SELECT COUNT(*) FROM vault_chunks
+                    ),
+                    dimensions = CASE WHEN dimensions = 0 THEN ? ELSE dimensions END,
+                    status = CASE
+                        WHEN (
+                            SELECT COUNT(*) FROM vault_embeddings WHERE profile_id = ?
+                        ) > 0 THEN 'ready'
+                        ELSE status
+                    END,
+                    last_error = NULL,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                arguments: [profileID, firstDimensions, profileID, now, profileID]
+            )
         }
     }
 
@@ -495,13 +763,18 @@ actor GRDBPinesStore:
     }
 
     func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, limit: Int) async throws -> [VaultSearchResult] {
-        try await search(query: query, embedding: embedding, embeddingModelID: embeddingModelID, limit: limit, options: .default)
+        try await search(query: query, embedding: embedding, embeddingModelID: embeddingModelID, profileID: nil, limit: limit)
+    }
+
+    func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, profileID: String?, limit: Int) async throws -> [VaultSearchResult] {
+        try await search(query: query, embedding: embedding, embeddingModelID: embeddingModelID, profileID: profileID, limit: limit, options: .default)
     }
 
     private func search(
         query: String,
         embedding: [Float]?,
         embeddingModelID: ModelID?,
+        profileID: String?,
         limit: Int,
         options: VaultSearchOptions
     ) async throws -> [VaultSearchResult] {
@@ -510,6 +783,7 @@ actor GRDBPinesStore:
             let vectorResults = try await vectorSearch(
                 embedding: embedding,
                 embeddingModelID: embeddingModelID,
+                profileID: profileID,
                 limit: normalizedLimit,
                 options: options
             )
@@ -524,6 +798,7 @@ actor GRDBPinesStore:
     private func vectorSearch(
         embedding: [Float],
         embeddingModelID: ModelID?,
+        profileID: String?,
         limit: Int,
         options: VaultSearchOptions
     ) async throws -> [VaultSearchResult] {
@@ -551,7 +826,26 @@ actor GRDBPinesStore:
                 }
 
                 let rows: [Row]
-                if let embeddingModelID {
+                if let profileID {
+                    rows = try Row.fetchAll(
+                        db,
+                        sql: """
+                        SELECT e.chunk_id, e.dimensions, e.fp16_embedding, e.turboquant_code
+                        FROM vault_embeddings e
+                        JOIN vault_documents d ON d.id = e.document_id
+                        WHERE e.dimensions = ? AND e.profile_id = ? AND d.sync_state != ?
+                        ORDER BY e.chunk_id ASC
+                        LIMIT ? OFFSET ?
+                        """,
+                        arguments: [
+                            embedding.count,
+                            profileID,
+                            SyncState.deleted.rawValue,
+                            batchSize,
+                            offset,
+                        ]
+                    )
+                } else if let embeddingModelID {
                     rows = try Row.fetchAll(
                         db,
                         sql: """
@@ -1248,6 +1542,17 @@ actor GRDBPinesStore:
         ).map(vaultDocument(from:))
     }
 
+    private static func fetchEmbeddingProfiles(_ db: Database) throws -> [VaultEmbeddingProfile] {
+        try Row.fetchAll(
+            db,
+            sql: """
+            SELECT *
+            FROM vault_embedding_profiles
+            ORDER BY is_active DESC, updated_at DESC, display_name COLLATE NOCASE ASC
+            """
+        ).map(vaultEmbeddingProfile(from:))
+    }
+
     private static func fetchSettings(_ db: Database) throws -> AppSettingsSnapshot {
         guard let row = try Row.fetchOne(db, sql: "SELECT value_json FROM app_settings WHERE key = ?", arguments: ["app"]) else {
             return AppSettingsSnapshot()
@@ -1455,6 +1760,11 @@ actor GRDBPinesStore:
             chunkID: row["chunk_id"],
             documentID: UUID(uuidString: row["document_id"]) ?? UUID(),
             modelID: ModelID(rawValue: row["embedding_model_id"]),
+            profileID: row["profile_id"] as String?,
+            providerID: (row["provider_id"] as String?).map(ProviderID.init(rawValue:)),
+            providerKind: (row["provider_kind"] as String?).flatMap(VaultEmbeddingProfileKind.init(rawValue:)),
+            normalized: ((row["normalized"] as Int?) ?? 1) == 1,
+            sourceChecksum: row["source_checksum"] as String?,
             dimensions: row["dimensions"],
             fp16Embedding: row["fp16_embedding"],
             turboQuantCode: row["turboquant_code"],
@@ -1462,6 +1772,112 @@ actor GRDBPinesStore:
             codecVersion: row["codec_version"],
             checksum: row["checksum"],
             createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
+        )
+    }
+
+    private static func vaultEmbeddingProfile(from row: Row) -> VaultEmbeddingProfile {
+        VaultEmbeddingProfile(
+            id: row["id"],
+            kind: VaultEmbeddingProfileKind(rawValue: row["kind"]) ?? .custom,
+            providerID: (row["provider_id"] as String?).map(ProviderID.init(rawValue:)),
+            displayName: row["display_name"],
+            modelID: ModelID(rawValue: row["model_id"]),
+            dimensions: row["dimensions"],
+            documentTask: row["document_task"] as String?,
+            queryTask: row["query_task"] as String?,
+            normalized: (row["normalized"] as Int) == 1,
+            cloudConsentGranted: (row["cloud_consent_granted"] as Int) == 1,
+            isActive: (row["is_active"] as Int) == 1,
+            status: VaultEmbeddingProfileStatus(rawValue: row["status"]) ?? .available,
+            lastError: row["last_error"] as String?,
+            embeddedChunkCount: row["embedded_chunk_count"],
+            totalChunkCount: row["total_chunk_count"],
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"])
+        )
+    }
+
+    private static func vaultEmbeddingJob(from row: Row) -> VaultEmbeddingJob {
+        VaultEmbeddingJob(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            profileID: row["profile_id"],
+            documentID: (row["document_id"] as String?).flatMap(UUID.init(uuidString:)),
+            status: VaultEmbeddingJobStatus(rawValue: row["status"]) ?? .queued,
+            processedChunks: row["processed_chunks"],
+            totalChunks: row["total_chunks"],
+            attemptCount: row["attempt_count"],
+            lastError: row["last_error"] as String?,
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"])
+        )
+    }
+
+    private static func vaultRetrievalEvent(from row: Row) -> VaultRetrievalEvent {
+        VaultRetrievalEvent(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            profileID: row["profile_id"] as String?,
+            providerID: (row["provider_id"] as String?).map(ProviderID.init(rawValue:)),
+            queryHash: row["query_hash"],
+            usedVectorSearch: (row["used_vector_search"] as Int) == 1,
+            resultCount: row["result_count"],
+            elapsedSeconds: row["elapsed_seconds"],
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
+        )
+    }
+
+    private static func upsertEmbeddingProfile(_ profile: VaultEmbeddingProfile, db: Database) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO vault_embedding_profiles
+                (id, kind, provider_id, display_name, model_id, dimensions, document_task,
+                 query_task, normalized, cloud_consent_granted, is_active, status, last_error,
+                 embedded_chunk_count, total_chunk_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                kind = excluded.kind,
+                provider_id = excluded.provider_id,
+                display_name = excluded.display_name,
+                model_id = excluded.model_id,
+                dimensions = CASE
+                    WHEN vault_embedding_profiles.dimensions > 0 THEN vault_embedding_profiles.dimensions
+                    ELSE excluded.dimensions
+                END,
+                document_task = excluded.document_task,
+                query_task = excluded.query_task,
+                normalized = excluded.normalized,
+                cloud_consent_granted = MAX(vault_embedding_profiles.cloud_consent_granted, excluded.cloud_consent_granted),
+                is_active = CASE
+                    WHEN vault_embedding_profiles.is_active = 1 THEN 1
+                    ELSE excluded.is_active
+                END,
+                status = CASE
+                    WHEN vault_embedding_profiles.status = 'ready' THEN 'ready'
+                    ELSE excluded.status
+                END,
+                last_error = excluded.last_error,
+                embedded_chunk_count = MAX(vault_embedding_profiles.embedded_chunk_count, excluded.embedded_chunk_count),
+                total_chunk_count = MAX(vault_embedding_profiles.total_chunk_count, excluded.total_chunk_count),
+                updated_at = excluded.updated_at
+            """,
+            arguments: [
+                profile.id,
+                profile.kind.rawValue,
+                profile.providerID?.rawValue,
+                profile.displayName,
+                profile.modelID.rawValue,
+                profile.dimensions,
+                profile.documentTask,
+                profile.queryTask,
+                profile.normalized ? 1 : 0,
+                profile.cloudConsentGranted ? 1 : 0,
+                profile.isActive ? 1 : 0,
+                profile.status.rawValue,
+                profile.lastError,
+                profile.embeddedChunkCount,
+                profile.totalChunkCount,
+                profile.createdAt.timeIntervalSinceReferenceDate,
+                profile.updatedAt.timeIntervalSinceReferenceDate,
+            ]
         )
     }
 

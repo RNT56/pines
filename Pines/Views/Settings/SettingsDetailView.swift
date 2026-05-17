@@ -373,6 +373,7 @@ struct SettingsDetailView: View {
                 .textContentType(.password)
                 .pinesFieldChrome()
             Toggle("Enable for agents", isOn: $providerEnabled)
+                .disabled(providerKind == .voyageAI)
 
             Button {
                 Task {
@@ -1142,6 +1143,9 @@ struct SettingsDetailView: View {
     private func applyProviderDefaults(_ kind: CloudProviderKind) {
         providerName = kind.defaultDisplayName
         providerBaseURL = kind.defaultBaseURL
+        if kind == .voyageAI {
+            providerEnabled = false
+        }
     }
 
     private func loadMCPServer(_ server: MCPServerConfiguration) {
@@ -1429,6 +1433,8 @@ private extension CloudProviderKind {
             "Gemini"
         case .openRouter:
             "OpenRouter"
+        case .voyageAI:
+            "Voyage AI"
         case .custom:
             "Custom"
         }
@@ -1446,6 +1452,8 @@ private extension CloudProviderKind {
             "Gemini"
         case .openRouter:
             "OpenRouter"
+        case .voyageAI:
+            "Voyage AI"
         case .custom:
             "Custom"
         }
@@ -1463,6 +1471,8 @@ private extension CloudProviderKind {
             "https://generativelanguage.googleapis.com"
         case .openRouter:
             "https://openrouter.ai/api/v1"
+        case .voyageAI:
+            "https://api.voyageai.com/v1"
         case .custom:
             "https://"
         }

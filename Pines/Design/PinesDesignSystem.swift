@@ -522,7 +522,7 @@ struct PinesThemeColors {
             controlBorder = Color(hex: 0xB7F4DF).opacity(0.15)
             focusRing = Color(hex: 0x64E8BF).opacity(0.78)
             backgroundWash = AnyShapeStyle(LinearGradient(
-                colors: [Color(hex: 0x04100C), Color(hex: 0x0B241B), Color(hex: 0x123A2D), Color(hex: 0x04100C)],
+                colors: [Color(hex: 0x04100C), Color(hex: 0x061A13), Color(hex: 0x0B241B), Color(hex: 0x04100C)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ))
@@ -620,7 +620,7 @@ struct PinesThemeColors {
             controlBorder = Color(hex: 0xB9C5FF).opacity(0.13)
             focusRing = Color(hex: 0x65E0F5).opacity(0.78)
             backgroundWash = AnyShapeStyle(LinearGradient(
-                colors: [Color(hex: 0x07091D), Color(hex: 0x111A42), Color(hex: 0x27185B), Color(hex: 0x051428)],
+                colors: [Color(hex: 0x07091D), Color(hex: 0x090E29), Color(hex: 0x10183A), Color(hex: 0x071225)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ))
@@ -817,7 +817,7 @@ struct PinesThemeColors {
             controlBorder = Color(hex: 0xB9E8F2).opacity(0.14)
             focusRing = Color(hex: 0x7DD6E8).opacity(0.76)
             backgroundWash = AnyShapeStyle(LinearGradient(
-                colors: [Color(hex: 0x061116), Color(hex: 0x112A35), Color(hex: 0x1D344B), Color(hex: 0x061116)],
+                colors: [Color(hex: 0x061116), Color(hex: 0x071821), Color(hex: 0x102A36), Color(hex: 0x061116)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ))
@@ -915,7 +915,7 @@ struct PinesThemeColors {
             controlBorder = Color(hex: 0xF2D8E2).opacity(0.12)
             focusRing = Color(hex: 0xE0B7CF).opacity(0.74)
             backgroundWash = AnyShapeStyle(LinearGradient(
-                colors: [Color(hex: 0x151112), Color(hex: 0x2A2327), Color(hex: 0x312332), Color(hex: 0x151112)],
+                colors: [Color(hex: 0x151112), Color(hex: 0x1B1618), Color(hex: 0x2A2327), Color(hex: 0x151112)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ))
@@ -991,19 +991,19 @@ struct PinesThemeColors {
             success = Color(hex: 0xA9DB8E)
             warning = Color(hex: 0xFFD071)
             danger = Color(hex: 0xFF987D)
-            info = Color(hex: 0x91B8FF)
+            info = Color(hex: 0x86C8B8)
             chartA = Color(hex: 0xFFB15B)
             chartB = Color(hex: 0xFFD071)
-            chartC = Color(hex: 0x91B8FF)
+            chartC = Color(hex: 0x86C8B8)
             chartD = Color(hex: 0xFF7A57)
             chartE = Color(hex: 0xA9DB8E)
-            chartF = Color(hex: 0xE1A0FF)
+            chartF = Color(hex: 0xC9854E)
             codeBackground = Color.black.opacity(0.38)
             codeHeaderBackground = Color(hex: 0x40210F).opacity(0.92)
             inlineCodeBackground = Color(hex: 0xFFB15B).opacity(0.13)
             quoteBackground = Color(hex: 0xFFB15B).opacity(0.11)
             tableHeaderBackground = Color(hex: 0xFFD071).opacity(0.08)
-            userBubble = Color(hex: 0x91B8FF).opacity(0.18)
+            userBubble = Color(hex: 0x86C8B8).opacity(0.15)
             assistantBubble = Color(hex: 0xFFB15B).opacity(0.14)
             toolBubble = Color(hex: 0xFFD071).opacity(0.14)
             sidebarSelection = Color(hex: 0xFFB15B).opacity(0.20)
@@ -1014,7 +1014,7 @@ struct PinesThemeColors {
             controlBorder = Color(hex: 0xFFD0A0).opacity(0.14)
             focusRing = Color(hex: 0xFFB15B).opacity(0.76)
             backgroundWash = AnyShapeStyle(LinearGradient(
-                colors: [Color(hex: 0x150804), Color(hex: 0x2D160B), Color(hex: 0x3D1220), Color(hex: 0x150804)],
+                colors: [Color(hex: 0x150804), Color(hex: 0x1C0D07), Color(hex: 0x2A1409), Color(hex: 0x150804)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ))
@@ -1113,7 +1113,7 @@ struct PinesThemeColors {
             controlBorder = Color(hex: 0xA7FFF0).opacity(0.13)
             focusRing = Color(hex: 0x5EE0C4).opacity(0.75)
             backgroundWash = AnyShapeStyle(LinearGradient(
-                colors: [Color(hex: 0x030506), Color(hex: 0x0F171A), Color(hex: 0x0D2221), Color(hex: 0x030506)],
+                colors: [Color(hex: 0x030506), Color(hex: 0x05090A), Color(hex: 0x0B1516), Color(hex: 0x030506)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ))

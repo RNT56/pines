@@ -536,6 +536,12 @@ struct WatchChatOrchestrator {
             CloudProviderMetadataKeys.geminiResponseID,
             CloudProviderMetadataKeys.geminiInteractionID,
             CloudProviderMetadataKeys.geminiModelVersion,
+            LocalProviderMetadataKeys.turboQuantActiveBackend,
+            LocalProviderMetadataKeys.turboQuantAttentionPath,
+            LocalProviderMetadataKeys.turboQuantKernelProfile,
+            LocalProviderMetadataKeys.turboQuantSelfTestStatus,
+            LocalProviderMetadataKeys.turboQuantFallbackReason,
+            LocalProviderMetadataKeys.turboQuantLastUnsupportedShape,
         ]
         let diagnostics = diagnosticKeys.compactMap { key -> String? in
             guard let value = metadata[key], !value.isEmpty else { return nil }
@@ -546,37 +552,7 @@ struct WatchChatOrchestrator {
     }
 
     private func vaultContextMessage(for query: String) async -> (message: ChatMessage, documentIDs: [UUID])? {
-        guard let vaultRepository = services.vaultRepository,
-              let settings = try? await services.settingsRepository?.loadSettings(),
-              let embeddingModelID = settings.embeddingModelID,
-              let embeddingResult = try? await services.mlxRuntime.embed(
-                  EmbeddingRequest(modelID: embeddingModelID, inputs: [query])
-              ),
-              let queryEmbedding = embeddingResult.vectors.first,
-              let results = try? await vaultRepository.search(
-                  query: query,
-                  embedding: queryEmbedding,
-                  embeddingModelID: embeddingModelID,
-                  limit: 4
-              ),
-              !results.isEmpty
-        else {
-            return nil
-        }
-
-        let context = results.enumerated().map { index, result in
-            "[\(index + 1)] \(result.document.title): \(result.snippet)"
-        }.joined(separator: "\n")
-        return (
-            ChatMessage(
-                role: .system,
-                content: """
-                Use this private local vault context when it is relevant. Cite entries by bracket number.
-                \(context)
-                """
-            ),
-            uniqueDocumentIDs(from: results)
-        )
+        await services.vaultRetrievalService?.contextMessage(for: query, limit: 4)
     }
 
     private func uniqueDocumentIDs(from results: [VaultSearchResult]) -> [UUID] {

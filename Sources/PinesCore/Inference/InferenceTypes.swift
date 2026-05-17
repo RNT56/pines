@@ -12,6 +12,17 @@ public struct ProviderID: RawRepresentable, Hashable, Codable, Sendable, Express
     }
 }
 
+public enum LocalProviderMetadataKeys {
+    public static let turboQuantRequestedBackend = "local.turboquant.requested_backend"
+    public static let turboQuantActiveBackend = "local.turboquant.active_backend"
+    public static let turboQuantAttentionPath = "local.turboquant.attention_path"
+    public static let turboQuantKernelProfile = "local.turboquant.kernel_profile"
+    public static let turboQuantSelfTestStatus = "local.turboquant.self_test_status"
+    public static let turboQuantFallbackReason = "local.turboquant.fallback_reason"
+    public static let turboQuantLastUnsupportedShape = "local.turboquant.last_unsupported_shape"
+    public static let turboQuantRawFallbackAllocated = "local.turboquant.raw_fallback_allocated"
+}
+
 public struct ModelID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
     public var rawValue: String
 
@@ -495,12 +506,27 @@ public struct EmbeddingRequest: Hashable, Codable, Sendable {
     public var modelID: ModelID
     public var inputs: [String]
     public var normalize: Bool
+    public var dimensions: Int?
+    public var inputType: EmbeddingInputType?
 
-    public init(modelID: ModelID, inputs: [String], normalize: Bool = true) {
+    public init(
+        modelID: ModelID,
+        inputs: [String],
+        normalize: Bool = true,
+        dimensions: Int? = nil,
+        inputType: EmbeddingInputType? = nil
+    ) {
         self.modelID = modelID
         self.inputs = inputs
         self.normalize = normalize
+        self.dimensions = dimensions
+        self.inputType = inputType
     }
+}
+
+public enum EmbeddingInputType: String, Hashable, Codable, Sendable, CaseIterable {
+    case document
+    case query
 }
 
 public struct EmbeddingResult: Hashable, Codable, Sendable {

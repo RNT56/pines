@@ -258,34 +258,139 @@ private struct ModelRow: View {
     let isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-            PinesSidebarRow(
-                title: model.name,
-                subtitle: "\(model.family) - \(model.footprint) - \(model.contextWindow)",
-                systemImage: model.status.systemImage,
-                detail: isDefault ? "Default" : model.status.title,
-                tint: model.status.tint(in: theme),
-                isSelected: isSelected,
-                isActive: model.status == .indexing || model.install.state == .downloading
-            ) {
-                PinesStatusIndicator(
-                    color: model.status.tint(in: theme),
-                    isActive: model.status == .indexing || model.install.state == .downloading,
-                    size: 9
-                )
+        let tint = model.status.tint(in: theme)
+        let isActive = model.status == .indexing || model.install.state == .downloading
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack(spacing: theme.spacing.medium) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                        .fill(tint.opacity(isSelected ? 0.20 : 0.13))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                                .strokeBorder(tint.opacity(isSelected ? 0.30 : 0.16), lineWidth: theme.stroke.hairline)
+                        }
+
+                    Image(systemName: model.status.systemImage)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .symbolRenderingMode(.hierarchical)
+                        .symbolEffect(.pulse, options: .nonRepeating, value: isActive)
+                }
+                .frame(width: theme.row.iconTile, height: theme.row.iconTile)
+
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(model.name)
+                        .font(theme.typography.headline)
+                        .foregroundStyle(theme.colors.primaryText)
+                        .pinesFittingText()
+
+                    Text("\(model.family) - \(model.footprint) - \(model.contextWindow)")
+                        .font(theme.typography.callout)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.86)
+                }
+
+                Spacer(minLength: theme.spacing.xsmall)
+
+                VStack(alignment: .trailing, spacing: theme.spacing.xsmall) {
+                    Text(isDefault ? "Default" : model.status.title)
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .padding(.horizontal, theme.spacing.xsmall)
+                        .padding(.vertical, theme.spacing.xxsmall)
+                        .background(tint.opacity(theme.colorScheme == .dark ? 0.13 : 0.09), in: Capsule())
+
+                    PinesStatusIndicator(
+                        color: tint,
+                        isActive: isActive,
+                        size: 9
+                    )
+                }
             }
+
             if let progress = model.downloadProgress, progress.isActive {
-                PinesProgressBar(value: progress.fractionCompleted, animates: false)
-                    .padding(.horizontal, theme.spacing.small)
-                Text(progress.currentFile ?? progress.status.title)
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.tertiaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                    .padding(.horizontal, theme.spacing.small)
+                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                    PinesProgressBar(value: progress.fractionCompleted, tint: tint, animates: false)
+
+                    HStack(spacing: theme.spacing.small) {
+                        Text(progress.currentFile ?? progress.progressLabel)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.tertiaryText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        Spacer(minLength: theme.spacing.small)
+
+                        if progress.totalBytes != nil {
+                            Text(progress.fractionCompleted, format: .percent.precision(.fractionLength(0)))
+                                .font(theme.typography.code)
+                                .foregroundStyle(tint)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .padding(.top, theme.spacing.xxsmall)
             }
         }
+        .padding(.horizontal, theme.row.horizontalPadding)
+        .padding(.vertical, theme.row.verticalPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: theme.row.minHeight)
+        .background(rowBackground(tint: tint), in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
+                .strokeBorder(isSelected ? tint.opacity(0.30) : theme.colors.cardBorder.opacity(theme.colorScheme == .dark ? 0.72 : 0.58), lineWidth: theme.stroke.hairline)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
+                .strokeBorder(theme.colors.surfaceHighlight.opacity(isSelected ? 0.50 : 0.28), lineWidth: theme.stroke.hairline)
+                .blendMode(.plusLighter)
+        }
+        .shadow(color: isSelected ? tint.opacity(theme.colorScheme == .dark ? 0.11 : 0.07) : theme.shadow.panelColor.opacity(theme.colorScheme == .dark ? 0.16 : 0.10), radius: theme.shadow.panelRadius * (isSelected ? 0.22 : 0.12), x: 0, y: isSelected ? 2 : 1)
+        .contentShape(RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
         .pinesSidebarListRow()
+    }
+
+    private func rowBackground(tint: Color) -> AnyShapeStyle {
+        if isSelected {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        tint.opacity(theme.colorScheme == .dark ? 0.18 : 0.10),
+                        theme.colors.listRowBackground,
+                        theme.colors.sidebarSelection
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        }
+        if model.hasActiveDownload {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        theme.colors.listRowBackground,
+                        tint.opacity(theme.colorScheme == .dark ? 0.13 : 0.07),
+                        theme.colors.elevatedSurface.opacity(theme.colorScheme == .dark ? 0.16 : 0.38)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        }
+        return AnyShapeStyle(
+            LinearGradient(
+                colors: [
+                    theme.colors.listRowBackground,
+                    theme.colors.elevatedSurface.opacity(theme.colorScheme == .dark ? 0.18 : 0.42)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
     }
 }
 

@@ -117,11 +117,45 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build | tee build/xcodebuild.log
 
+      - name: Build iOS runtime smoke tests
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Pines.xcodeproj \
+            -scheme Pines \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            build-for-testing | tee build/xcodebuild-tests.log
+
+      - name: Run iOS runtime smoke tests
+        run: |
+          set -o pipefail
+          simulator_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+          if [ -z "$simulator_id" ]; then
+            echo "::warning::No available iPhone simulator was found; smoke tests were build-verified only."
+            exit 0
+          fi
+          xcodebuild \
+            -project Pines.xcodeproj \
+            -scheme Pines \
+            -destination "id=$simulator_id" \
+            -derivedDataPath build/DerivedData \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            test-without-building | tee build/xcodebuild-test-run.log
+
       - name: Upload Xcode build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: xcodebuild-log
-          path: build/xcodebuild.log
+          path: |
+            build/xcodebuild.log
+            build/xcodebuild-tests.log
+            build/xcodebuild-test-run.log
           if-no-files-found: ignore
           retention-days: 14

@@ -13,6 +13,7 @@ struct VaultIngestionService {
     let vaultRepository: any VaultRepository
     let settingsRepository: (any SettingsRepository)?
     let inferenceProvider: any InferenceProvider
+    let embeddingService: VaultEmbeddingService?
     let auditRepository: (any AuditEventRepository)?
     let chunker = VaultChunker()
     private let deviceMonitor = DeviceRuntimeMonitor()
@@ -33,7 +34,70 @@ struct VaultIngestionService {
 
         let chunks = chunker.chunks(for: text, sourceID: document.id.uuidString)
         try Task.checkCancellation()
-        if let embeddingModelID = try await settingsRepository?.loadSettings().embeddingModelID, !chunks.isEmpty {
+        if let embeddingProfile = try await embeddingService?.activeUsableProfile(), !chunks.isEmpty {
+            var job = VaultEmbeddingJob(
+                profileID: embeddingProfile.id,
+                documentID: document.id,
+                status: .running,
+                totalChunks: chunks.count,
+                attemptCount: 1
+            )
+            try await vaultRepository.upsertEmbeddingJob(job)
+            do {
+                let jobID = job.id
+                let jobCreatedAt = job.createdAt
+                let chunkEmbeddings = try await embeddingService?.embed(
+                    chunks: chunks,
+                    documentID: document.id,
+                    profile: embeddingProfile,
+                    progress: { processed in
+                        try await vaultRepository.upsertEmbeddingJob(
+                            VaultEmbeddingJob(
+                                id: jobID,
+                                profileID: embeddingProfile.id,
+                                documentID: document.id,
+                                status: .running,
+                                processedChunks: processed,
+                                totalChunks: chunks.count,
+                                attemptCount: 1,
+                                createdAt: jobCreatedAt,
+                                updatedAt: Date()
+                            )
+                        )
+                    }
+                ) ?? []
+                if chunkEmbeddings.count == chunks.count {
+                    try await vaultRepository.replaceChunks(
+                        chunks,
+                        embeddings: VaultEmbeddingBatch(modelID: embeddingProfile.modelID, embeddings: chunkEmbeddings),
+                        documentID: document.id,
+                        embeddingProfile: embeddingProfile
+                    )
+                    job.status = .complete
+                    job.processedChunks = chunkEmbeddings.count
+                    job.updatedAt = Date()
+                    try await vaultRepository.upsertEmbeddingJob(job)
+                } else {
+                    try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
+                    job.status = .failed
+                    job.processedChunks = chunkEmbeddings.count
+                    job.lastError = "Embedding provider returned \(chunkEmbeddings.count) vectors for \(chunks.count) chunks."
+                    job.updatedAt = Date()
+                    try await vaultRepository.upsertEmbeddingJob(job)
+                }
+            } catch is CancellationError {
+                job.status = .cancelled
+                job.updatedAt = Date()
+                try? await vaultRepository.upsertEmbeddingJob(job)
+                throw CancellationError()
+            } catch {
+                try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
+                job.status = .failed
+                job.lastError = error.localizedDescription
+                job.updatedAt = Date()
+                try? await vaultRepository.upsertEmbeddingJob(job)
+            }
+        } else if let embeddingModelID = try await settingsRepository?.loadSettings().embeddingModelID, !chunks.isEmpty {
             do {
                 if let chunkEmbeddings = try await embed(chunks: chunks, documentID: document.id, modelID: embeddingModelID) {
                     let embeddings = VaultEmbeddingBatch(

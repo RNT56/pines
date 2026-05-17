@@ -29,6 +29,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var mcpPrompts: [MCPPromptRecord] = []
     @Published var pendingToolApproval: ToolApprovalRequest?
     @Published var pendingCloudContextApproval: CloudContextApprovalRequest?
+    @Published var pendingCloudVaultEmbeddingApproval: CloudVaultEmbeddingApprovalRequest?
     @Published var pendingMCPSamplingRequest: MCPSamplingRequest?
     @Published var pendingMCPSamplingResultReview: MCPSamplingResultReview?
     @Published var mcpSamplingPromptDraft = ""
@@ -45,6 +46,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var isRefreshingCloudModels = false
     @Published var isSavingCloudProvider = false
     @Published var validatingCloudProviderIDs: Set<ProviderID> = []
+    @Published var vaultEmbeddingProfiles: [VaultEmbeddingProfile] = []
+    @Published var vaultEmbeddingJobs: [VaultEmbeddingJob] = []
+    @Published var vaultRetrievalEvents: [VaultRetrievalEvent] = []
+    @Published var vaultSearchQuery = ""
+    @Published var vaultSearchResults: [VaultSearchResult] = []
+    @Published var isVaultSearchPresented = false
+    @Published var isVaultReindexing = false
     @Published var huggingFaceCredentialStatus = "Not configured"
     @Published var braveSearchCredentialStatus = "Not configured"
     private var didBootstrap = false
@@ -56,8 +64,10 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
     private var currentRunToken: UUID?
+    private var vaultReindexToken: UUID?
     private var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
     private var cloudContextContinuation: CheckedContinuation<CloudContextApprovalDecision, Never>?
+    private var cloudVaultEmbeddingContinuation: CheckedContinuation<Bool, Never>?
     private var samplingContinuation: CheckedContinuation<Bool, Never>?
     private var samplingResultContinuation: CheckedContinuation<Bool, Never>?
     private var mcpSamplingRequestCountByServer: [MCPServerID: Int] = [:]
@@ -249,6 +259,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         repositoryObservationTasks.forEach { $0.cancel() }
         approvalContinuation?.resume(returning: .denied)
         cloudContextContinuation?.resume(returning: .cancel)
+        cloudVaultEmbeddingContinuation?.resume(returning: false)
         samplingContinuation?.resume(returning: false)
         samplingResultContinuation?.resume(returning: false)
     }
@@ -289,6 +300,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             }
 
             try await refreshModelPreviews(services: services, enrichRuntime: false)
+            await refreshVaultEmbeddingState(services: services)
             await normalizeDefaultModelIfNeeded(services: services)
             setIfChanged(\.serviceError, nil)
         } catch {
@@ -311,6 +323,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             shouldEnrichRuntimeModelPreviews = true
             try await refreshModelPreviews(services: services, enrichRuntime: true)
             await refreshCloudModelCatalog(services: services)
+            await refreshVaultEmbeddingState(services: services)
             await normalizeDefaultModelIfNeeded(services: services)
             await refreshCredentialStatuses(services: services)
             setIfChanged(\.serviceError, nil)
@@ -328,6 +341,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
             try await refreshModelPreviews(services: services)
             await normalizeDefaultModelIfNeeded(services: services)
+            await refreshVaultEmbeddingState(services: services)
 
             if let conversationRepository = services.conversationRepository {
                 let previews = try await conversationRepository.listConversationPreviews()
@@ -367,6 +381,22 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         do {
             guard let cloudProviderRepository = services.cloudProviderRepository else { return }
             setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    private func refreshVaultEmbeddingState(services: PinesAppServices) async {
+        do {
+            if let embeddingService = services.vaultEmbeddingService {
+                setIfChanged(\.vaultEmbeddingProfiles, try await embeddingService.refreshProfiles())
+            } else if let vaultRepository = services.vaultRepository {
+                setIfChanged(\.vaultEmbeddingProfiles, try await vaultRepository.listEmbeddingProfiles())
+            }
+            if let vaultRepository = services.vaultRepository {
+                setIfChanged(\.vaultEmbeddingJobs, try await vaultRepository.listEmbeddingJobs(limit: 20))
+                setIfChanged(\.vaultRetrievalEvents, try await vaultRepository.listRetrievalEvents(limit: 20))
+            }
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
@@ -509,6 +539,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         emitHaptic(.runCancelled)
         resolvePendingToolApproval(.denied)
         resolvePendingCloudContextApproval(.cancel)
+        resolvePendingCloudVaultEmbeddingApproval(false)
+        cancelVaultReindex()
         resolvePendingMCPSampling(false)
         resolvePendingMCPSamplingResultReview(false)
     }
@@ -648,7 +680,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             } else {
                 let localInstall = preferredInstalledTextModel(for: conversationID)
                 let cloudCandidate = cloudProviders
-                    .first { $0.enabledForAgents }
+                    .first { $0.enabledForAgents && $0.capabilities.textGeneration }
                     .map { configuration in
                         (
                             configuration,
@@ -908,48 +940,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         for query: String,
         services: PinesAppServices
     ) async -> (message: ChatMessage, documentIDs: [UUID])? {
-        guard let vaultRepository = services.vaultRepository,
-              let settings = try? await services.settingsRepository?.loadSettings(),
-              let embeddingModelID = settings.embeddingModelID,
-              let embeddingResult = try? await services.mlxRuntime.embed(
-                  EmbeddingRequest(modelID: embeddingModelID, inputs: [query])
-              ),
-              let queryEmbedding = embeddingResult.vectors.first
-        else {
-            return nil
-        }
-
-        let startedAt = Date()
-        guard let results = try? await vaultRepository.search(
-            query: query,
-            embedding: queryEmbedding,
-            embeddingModelID: embeddingModelID,
-            limit: 4
-        ) else {
-            return nil
-        }
-        services.runtimeMetrics.recordVaultRetrieval(
-            resultCount: results.count,
-            elapsedSeconds: Date().timeIntervalSince(startedAt)
-        )
-        guard !results.isEmpty else {
-            return nil
-        }
-
-        let context = results.enumerated().map { index, result in
-            "[\(index + 1)] \(result.document.title): \(result.snippet)"
-        }.joined(separator: "\n")
-        let documentIDs = results.map(\.document.id).uniqued()
-        return (
-            ChatMessage(
-                role: .system,
-                content: """
-                Use this private local vault context when it is relevant. Cite entries by bracket number.
-                \(context)
-                """
-            ),
-            documentIDs
-        )
+        await services.vaultRetrievalService?.contextMessage(for: query, limit: 4)
     }
 
     private func mcpResourceContextMessages(services: PinesAppServices) async -> [ChatMessage] {
@@ -1144,7 +1135,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 storeConfiguration: storeConfiguration,
                 defaultProviderID: resolvedProviderID,
                 defaultModelID: resolvedDefaultModelID,
-                embeddingModelID: models.first(where: { $0.install.modalities.contains(.embeddings) })?.install.modelID,
+                embeddingModelID: models.first(where: {
+                    $0.install.state == .installed && $0.install.modalities.contains(.embeddings)
+                })?.install.modelID,
                 cloudMaxCompletionTokens: cloudMaxCompletionTokens,
                 localMaxCompletionTokens: localMaxCompletionTokens,
                 localMaxContextTokens: localMaxContextTokens,
@@ -1220,6 +1213,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             if !isShowingModelDiscoveryResults {
                 try await refreshModelPreviews(services: services)
             }
+            await refreshVaultEmbeddingState(services: services)
         } catch InferenceError.cancelled {
             setIfChanged(\.serviceError, nil)
             if !isShowingModelDiscoveryResults {
@@ -1248,6 +1242,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             if !isShowingModelDiscoveryResults {
                 try await refreshModelPreviews(services: services)
             }
+            await refreshVaultEmbeddingState(services: services)
         } catch InferenceError.cancelled {
             setIfChanged(\.serviceError, nil)
             if !isShowingModelDiscoveryResults {
@@ -1396,10 +1391,267 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 serviceError = "Vault ingestion service is unavailable."
                 return
             }
+            _ = await ensureVaultEmbeddingProfile(services: services, reason: "Pines will send imported document chunks to this cloud embedding provider to build your private vault index.")
             _ = try await ingestion.importFile(url: url)
             await refreshAll(services: services)
         } catch {
             serviceError = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func ensureVaultEmbeddingProfile(services: PinesAppServices, reason: String) async -> VaultEmbeddingProfile? {
+        do {
+            guard let embeddingService = services.vaultEmbeddingService else { return nil }
+            let profiles = try await embeddingService.refreshProfiles()
+            setIfChanged(\.vaultEmbeddingProfiles, profiles)
+
+            if let active = profiles.first(where: \.isActive) {
+                if active.canUseWithoutPrompt {
+                    return active
+                }
+                let approved = await requestCloudVaultEmbeddingApproval(
+                    CloudVaultEmbeddingApprovalRequest(profile: active, reason: reason)
+                )
+                guard approved else { return nil }
+                let updated = try await embeddingService.setActiveProfile(active, grantConsent: true)
+                await refreshVaultEmbeddingState(services: services)
+                return updated
+            }
+
+            if let local = profiles.first(where: { $0.kind == .localMLX }) {
+                let updated = try await embeddingService.setActiveProfile(local)
+                await refreshVaultEmbeddingState(services: services)
+                return updated
+            }
+
+            let cloudProfiles = profiles.filter { $0.kind.isCloud }
+            if cloudProfiles.count == 1, let profile = cloudProfiles.first {
+                let approved = await requestCloudVaultEmbeddingApproval(
+                    CloudVaultEmbeddingApprovalRequest(profile: profile, reason: reason)
+                )
+                guard approved else { return nil }
+                let updated = try await embeddingService.setActiveProfile(profile, grantConsent: true)
+                await refreshVaultEmbeddingState(services: services)
+                return updated
+            }
+
+            if cloudProfiles.count > 1 {
+                setIfChanged(\.serviceError, "Select a vault embedding provider before semantic indexing.")
+            } else {
+                setIfChanged(\.serviceError, "Install a local embedding model or add OpenAI, Gemini, OpenRouter, or Voyage AI credentials to enable semantic vault indexing.")
+            }
+            return nil
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+            return nil
+        }
+    }
+
+    func selectVaultEmbeddingProfile(_ profile: VaultEmbeddingProfile, services: PinesAppServices) async {
+        do {
+            guard let embeddingService = services.vaultEmbeddingService else {
+                setIfChanged(\.serviceError, "Vault embedding service is unavailable.")
+                return
+            }
+            guard profile.status != .failed else {
+                setIfChanged(\.serviceError, profile.lastError ?? "This vault embedding profile is unavailable.")
+                return
+            }
+            if profile.kind.isCloud && !profile.cloudConsentGranted {
+                let approved = await requestCloudVaultEmbeddingApproval(
+                    CloudVaultEmbeddingApprovalRequest(
+                        profile: profile,
+                        reason: "Pines will use this provider for document chunk and search-query embeddings."
+                    )
+                )
+                guard approved else { return }
+                _ = try await embeddingService.setActiveProfile(profile, grantConsent: true)
+            } else {
+                _ = try await embeddingService.setActiveProfile(profile)
+            }
+            await refreshVaultEmbeddingState(services: services)
+            emitHaptic(.primaryAction)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    func searchVault(_ query: String, services: PinesAppServices) async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            setIfChanged(\.vaultSearchResults, [])
+            return
+        }
+        do {
+            if let retrieval = services.vaultRetrievalService {
+                let profile = try await services.vaultEmbeddingService?.activeUsableProfile()
+                var queryEmbedding: [Float]?
+                if let profile {
+                    queryEmbedding = try? await services.vaultEmbeddingService?.embedQuery(trimmed, profile: profile)
+                }
+                let results = try await services.vaultRepository?.search(
+                    query: trimmed,
+                    embedding: queryEmbedding,
+                    embeddingModelID: profile?.modelID,
+                    profileID: queryEmbedding == nil ? nil : profile?.id,
+                    limit: 12
+                ) ?? []
+                setIfChanged(\.vaultSearchResults, results)
+                _ = await retrieval.contextMessage(for: trimmed, limit: 1)
+            }
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    func loadVaultItemDetails(id: UUID, services: PinesAppServices) async {
+        do {
+            guard let repository = services.vaultRepository else { return }
+            let chunks = try await repository.chunks(documentID: id)
+            let storedEmbeddings = try await repository.embeddings(documentID: id)
+            let activeProfileID = vaultEmbeddingProfiles.first(where: \.isActive)?.id
+            let activeEmbeddingCount = activeProfileID.map { profileID in
+                storedEmbeddings.filter { $0.profileID == profileID }.count
+            } ?? 0
+            guard let index = vaultItems.firstIndex(where: { $0.id == id }) else { return }
+            let item = vaultItems[index]
+            var items = vaultItems
+            items[index] = PinesVaultItemPreview(
+                id: item.id,
+                title: item.title,
+                kind: item.kind,
+                detail: item.detail,
+                chunks: chunks,
+                updatedLabel: item.updatedLabel,
+                sensitivity: item.sensitivity,
+                linkedThreads: vaultRetrievalEvents.filter { $0.resultCount > 0 }.count,
+                activeProfileEmbeddedChunks: activeEmbeddingCount,
+                activeProfileTotalChunks: chunks.count
+            )
+            setIfChanged(\.vaultItems, items)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    func reindexVault(services: PinesAppServices) async {
+        guard !isVaultReindexing else { return }
+        let token = UUID()
+        vaultReindexToken = token
+        setIfChanged(\.isVaultReindexing, true)
+        defer {
+            if vaultReindexToken == token {
+                vaultReindexToken = nil
+            }
+            setIfChanged(\.isVaultReindexing, false)
+        }
+
+        guard let repository = services.vaultRepository,
+              let embeddingService = services.vaultEmbeddingService
+        else {
+            setIfChanged(\.serviceError, "Vault embedding service is unavailable.")
+            return
+        }
+
+        guard let profile = await ensureVaultEmbeddingProfile(
+            services: services,
+            reason: "Pines will send existing vault document chunks to this cloud embedding provider to rebuild your semantic index."
+        ) else {
+            return
+        }
+
+        do {
+            let documents = try await repository.listDocuments()
+            for document in documents {
+                try Task.checkCancellation()
+                guard vaultReindexToken == token else {
+                    throw CancellationError()
+                }
+                let chunks = try await repository.chunks(documentID: document.id)
+                guard !chunks.isEmpty else { continue }
+                var job = VaultEmbeddingJob(
+                    profileID: profile.id,
+                    documentID: document.id,
+                    status: .running,
+                    totalChunks: chunks.count,
+                    attemptCount: 1
+                )
+                try await repository.upsertEmbeddingJob(job)
+                await refreshVaultEmbeddingState(services: services)
+                do {
+                    let jobID = job.id
+                    let jobCreatedAt = job.createdAt
+                    let documentID = document.id
+                    let totalChunks = chunks.count
+                    let profileID = profile.id
+                    let embeddings = try await embeddingService.embed(
+                        chunks: chunks,
+                        documentID: documentID,
+                        profile: profile,
+                        progress: { [self] processed in
+                            let shouldContinue = await MainActor.run {
+                                self.vaultReindexToken == token
+                            }
+                            guard shouldContinue else {
+                                throw CancellationError()
+                            }
+                            try await repository.upsertEmbeddingJob(
+                                VaultEmbeddingJob(
+                                    id: jobID,
+                                    profileID: profileID,
+                                    documentID: documentID,
+                                    status: .running,
+                                    processedChunks: processed,
+                                    totalChunks: totalChunks,
+                                    attemptCount: 1,
+                                    createdAt: jobCreatedAt,
+                                    updatedAt: Date()
+                                )
+                            )
+                            await self.refreshVaultEmbeddingState(services: services)
+                        }
+                    )
+                    try await repository.upsertEmbeddings(
+                        VaultEmbeddingBatch(modelID: profile.modelID, embeddings: embeddings),
+                        documentID: document.id,
+                        embeddingProfile: profile
+                    )
+                    job.status = .complete
+                    job.processedChunks = embeddings.count
+                    job.updatedAt = Date()
+                    try await repository.upsertEmbeddingJob(job)
+                } catch {
+                    job.status = .failed
+                    job.lastError = error.localizedDescription
+                    job.updatedAt = Date()
+                    try await repository.upsertEmbeddingJob(job)
+                }
+            }
+            await refreshAll(services: services)
+            emitHaptic(.runCompleted)
+        } catch is CancellationError {
+            if let repository = services.vaultRepository {
+                let jobs = (try? await repository.listEmbeddingJobs(limit: 20)) ?? vaultEmbeddingJobs
+                for var job in jobs where job.status == .running {
+                    job.status = .cancelled
+                    job.updatedAt = Date()
+                    try? await repository.upsertEmbeddingJob(job)
+                }
+                await refreshVaultEmbeddingState(services: services)
+            }
+            emitHaptic(.runCancelled)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    func cancelVaultReindex() {
+        vaultReindexToken = nil
+        if isVaultReindexing {
+            emitHaptic(.runCancelled)
         }
     }
 
@@ -1441,11 +1693,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 extraHeadersJSON: existing?.extraHeadersJSON,
                 keychainService: existing?.keychainService ?? "com.schtack.pines.cloud",
                 keychainAccount: existing?.keychainAccount ?? providerID.rawValue,
-                enabledForAgents: enabledForAgents
+                enabledForAgents: kind == .voyageAI ? false : enabledForAgents
             )
             try await service.saveProvider(provider, apiKey: trimmedAPIKey.isEmpty ? nil : trimmedAPIKey)
             upsertCloudProvider(provider)
             await refreshCloudProviders(services: services)
+            await refreshVaultEmbeddingState(services: services)
             setIfChanged(\.serviceError, nil)
             Task { [weak self] in
                 await self?.refreshCloudModelCatalog(services: services)
@@ -2049,6 +2302,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     }
                 }
             })
+
+            repositoryObservationTasks.append(Task { [weak self] in
+                for await profiles in vaultRepository.observeEmbeddingProfiles() {
+                    await MainActor.run {
+                        self?.setIfChanged(\.vaultEmbeddingProfiles, profiles)
+                    }
+                }
+            })
         }
 
         if let auditRepository = services.auditRepository {
@@ -2132,6 +2393,22 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         emitHaptic(decision == .sendWithContext ? .primaryAction : .runCancelled)
         cloudContextContinuation?.resume(returning: decision)
         cloudContextContinuation = nil
+    }
+
+    func requestCloudVaultEmbeddingApproval(_ request: CloudVaultEmbeddingApprovalRequest) async -> Bool {
+        cloudVaultEmbeddingContinuation?.resume(returning: false)
+        pendingCloudVaultEmbeddingApproval = request
+        emitHaptic(.toolApprovalNeeded)
+        return await withCheckedContinuation { continuation in
+            cloudVaultEmbeddingContinuation = continuation
+        }
+    }
+
+    func resolvePendingCloudVaultEmbeddingApproval(_ approved: Bool) {
+        pendingCloudVaultEmbeddingApproval = nil
+        emitHaptic(approved ? .primaryAction : .runCancelled)
+        cloudVaultEmbeddingContinuation?.resume(returning: approved)
+        cloudVaultEmbeddingContinuation = nil
     }
 
     func resolvePendingMCPSampling(_ approved: Bool) {
@@ -2349,6 +2626,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             CloudProviderMetadataKeys.geminiResponseID,
             CloudProviderMetadataKeys.geminiInteractionID,
             CloudProviderMetadataKeys.geminiModelVersion,
+            LocalProviderMetadataKeys.turboQuantActiveBackend,
+            LocalProviderMetadataKeys.turboQuantAttentionPath,
+            LocalProviderMetadataKeys.turboQuantKernelProfile,
+            LocalProviderMetadataKeys.turboQuantSelfTestStatus,
+            LocalProviderMetadataKeys.turboQuantFallbackReason,
+            LocalProviderMetadataKeys.turboQuantLastUnsupportedShape,
         ]
         let diagnostics = diagnosticKeys.compactMap { key -> String? in
             guard let value = metadata[key], !value.isEmpty else { return nil }
@@ -2965,7 +3248,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             chunks: [],
             updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt),
             sensitivity: .local,
-            linkedThreads: 0
+            linkedThreads: 0,
+            activeProfileEmbeddedChunks: 0,
+            activeProfileTotalChunks: record.chunkCount
         )
     }
 

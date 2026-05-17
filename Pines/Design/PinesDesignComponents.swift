@@ -1166,10 +1166,15 @@ struct PinesSidebarRow<Accessory: View>: View {
         .padding(.vertical, theme.row.verticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: theme.row.minHeight)
-        .background(rowBackground, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .background(rowBackgroundStyle(resolvedTint: resolvedTint), in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
                 .strokeBorder(rowBorder, lineWidth: theme.stroke.hairline)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
+                .strokeBorder(theme.colors.surfaceHighlight.opacity(isSelected ? 0.52 : 0.30), lineWidth: theme.stroke.hairline)
+                .blendMode(.plusLighter)
         }
         .overlay(alignment: .leading) {
             if isSelected {
@@ -1181,14 +1186,34 @@ struct PinesSidebarRow<Accessory: View>: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .shadow(color: rowShadowColor(resolvedTint: resolvedTint), radius: isSelected ? theme.shadow.panelRadius * 0.22 : theme.shadow.panelRadius * 0.12, x: 0, y: isSelected ? 2 : 1)
         .animation(reduceMotion ? nil : theme.motion.selection, value: isSelected)
     }
 
-    private var rowBackground: Color {
+    private func rowBackgroundStyle(resolvedTint: Color) -> AnyShapeStyle {
         if isSelected {
-            return theme.colors.sidebarSelection
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        resolvedTint.opacity(theme.colorScheme == .dark ? 0.18 : 0.10),
+                        theme.colors.listRowBackground,
+                        theme.colors.sidebarSelection
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
         }
-        return theme.colors.listRowBackground
+        return AnyShapeStyle(
+            LinearGradient(
+                colors: [
+                    theme.colors.listRowBackground,
+                    theme.colors.elevatedSurface.opacity(theme.colorScheme == .dark ? 0.18 : 0.42)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
     }
 
     private var rowBorder: Color {
@@ -1196,6 +1221,13 @@ struct PinesSidebarRow<Accessory: View>: View {
             return (tint ?? theme.colors.accent).opacity(0.18)
         }
         return theme.colors.cardBorder.opacity(theme.colorScheme == .dark ? 0.70 : 0.58)
+    }
+
+    private func rowShadowColor(resolvedTint: Color) -> Color {
+        if isSelected {
+            return resolvedTint.opacity(theme.colorScheme == .dark ? 0.11 : 0.07)
+        }
+        return theme.shadow.panelColor.opacity(theme.colorScheme == .dark ? 0.16 : 0.10)
     }
 }
 
