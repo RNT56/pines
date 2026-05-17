@@ -42,6 +42,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     @Published var cloudMaxCompletionTokens = AppSettingsSnapshot.defaultCloudMaxCompletionTokens
     @Published var localMaxCompletionTokens = AppSettingsSnapshot.defaultLocalMaxCompletionTokens
     @Published var localMaxContextTokens = AppSettingsSnapshot.defaultLocalMaxContextTokens
+    @Published var openAIReasoningEffort = AppSettingsSnapshot.defaultOpenAIReasoningEffort
+    @Published var openAITextVerbosity = AppSettingsSnapshot.defaultOpenAITextVerbosity
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:]
     @Published var isRefreshingCloudModels = false
     @Published var isSavingCloudProvider = false
@@ -471,6 +473,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         setIfChanged(\.cloudMaxCompletionTokens, settings.cloudMaxCompletionTokens)
         setIfChanged(\.localMaxCompletionTokens, settings.localMaxCompletionTokens)
         setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
+        setIfChanged(\.openAIReasoningEffort, settings.openAIReasoningEffort)
+        setIfChanged(\.openAITextVerbosity, settings.openAITextVerbosity)
         setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
         setIfChanged(\.interfaceMode, PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode)
     }
@@ -1276,6 +1280,43 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return preferredModelSelection(services: services)
     }
 
+    func currentModelSelection(for conversationID: UUID?, services: PinesAppServices) -> ModelPickerOption? {
+        if let conversationID {
+            return selection(for: conversationID, services: services)
+        }
+        return preferredModelSelection(services: services)
+    }
+
+    func chatQuickSettingsAvailability(for conversationID: UUID?, services: PinesAppServices) -> ChatQuickSettingsAvailability? {
+        guard let selection = currentModelSelection(for: conversationID, services: services),
+              supportsOpenAIQuickSettings(providerID: selection.providerID, providerKind: selection.providerKind, services: services)
+        else {
+            return nil
+        }
+        let reasoningEfforts = CloudProviderModelEligibility.openAIReasoningEffortOptions(for: selection.modelID)
+        let supportsVerbosity = CloudProviderModelEligibility.supportsOpenAITextVerbosity(modelID: selection.modelID)
+        let availability = ChatQuickSettingsAvailability(
+            providerID: selection.providerID,
+            modelID: selection.modelID,
+            reasoningEfforts: reasoningEfforts,
+            supportsVerbosity: supportsVerbosity
+        )
+        return availability.isEmpty ? nil : availability
+    }
+
+    private func supportsOpenAIQuickSettings(providerID: ProviderID, providerKind: CloudProviderKind?, services: PinesAppServices) -> Bool {
+        guard providerID != services.mlxRuntime.localProviderID else { return false }
+        if providerKind == .openAI {
+            return true
+        }
+        guard let provider = cloudProviders.first(where: { $0.id == providerID }),
+              let host = provider.baseURL.host(percentEncoded: false)?.lowercased()
+        else {
+            return false
+        }
+        return host == "api.openai.com"
+    }
+
     func saveSettings(services: PinesAppServices) async {
         do {
             cloudMaxCompletionTokens = AppSettingsSnapshot.normalizedCompletionTokens(cloudMaxCompletionTokens)
@@ -1295,6 +1336,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 cloudMaxCompletionTokens: cloudMaxCompletionTokens,
                 localMaxCompletionTokens: localMaxCompletionTokens,
                 localMaxContextTokens: localMaxContextTokens,
+                openAIReasoningEffort: openAIReasoningEffort,
+                openAITextVerbosity: openAITextVerbosity,
                 requireToolApproval: true,
                 braveSearchEnabled: braveSearchCredentialStatus.hasPrefix("Configured"),
                 onboardingCompleted: true,
@@ -1322,7 +1365,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             : settings?.cloudMaxCompletionTokens
         return ChatSampling(
             maxTokens: AppSettingsSnapshot.normalizedCompletionTokens(requestedMaxTokens ?? settingsMaxTokens ?? fallback),
-            temperature: temperature
+            temperature: temperature,
+            openAIReasoningEffort: openAIReasoningEffort,
+            openAITextVerbosity: openAITextVerbosity
         )
     }
 

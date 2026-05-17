@@ -292,18 +292,48 @@ public enum CloudProviderModelEligibility: Sendable {
     }
 
     public static func openAIReasoningEffort(for modelID: ModelID, requested: OpenAIReasoningEffort) -> OpenAIReasoningEffort {
+        let options = openAIReasoningEffortOptions(for: modelID)
+        if !options.isEmpty, !options.contains(requested) {
+            return options.contains(.low) ? .low : options[0]
+        }
+        return requested
+    }
+
+    public static func openAIReasoningEffortOptions(for modelID: ModelID) -> [OpenAIReasoningEffort] {
         let id = modelID.rawValue.lowercased()
         let modelName = id
             .split(separator: "/")
             .last
             .map(String.init) ?? id
+        guard modelName.hasPrefix("gpt-5") || isOpenAIOSeries(modelName) else {
+            return []
+        }
         if modelName.contains("-pro") {
-            return .high
+            return [.high]
         }
-        if requested == .none, !(modelName.hasPrefix("gpt-5.1") || modelName.hasPrefix("gpt-5.5")) {
-            return .low
+        if gpt5MinorVersion(modelName) >= 2 {
+            return [.none, .low, .medium, .high, .xhigh]
         }
-        return requested
+        if modelName.hasPrefix("gpt-5.1") {
+            return [.none, .low, .medium, .high]
+        }
+        if modelName.hasPrefix("gpt-5") {
+            return [.minimal, .low, .medium, .high]
+        }
+        return [.low, .medium, .high]
+    }
+
+    public static func supportsOpenAITextVerbosity(modelID: ModelID) -> Bool {
+        !openAIReasoningEffortOptions(for: modelID).isEmpty
+    }
+
+    private static func gpt5MinorVersion(_ modelName: String) -> Int {
+        let prefix = "gpt-5"
+        guard modelName.hasPrefix(prefix) else { return -1 }
+        let suffix = modelName.dropFirst(prefix.count)
+        guard suffix.first == "." else { return 0 }
+        let digits = suffix.dropFirst().prefix { $0.isNumber }
+        return Int(digits) ?? 0
     }
 }
 

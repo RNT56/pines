@@ -369,6 +369,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let maxCompletionTokens = 128_000
     public static let minLocalContextTokens = 1_024
     public static let maxLocalContextTokens = 262_144
+    public static let defaultOpenAIReasoningEffort: OpenAIReasoningEffort = .low
+    public static let defaultOpenAITextVerbosity: OpenAITextVerbosity = .low
 
     public var executionMode: AgentExecutionMode
     public var storeConfiguration: LocalStoreConfiguration
@@ -378,6 +380,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var cloudMaxCompletionTokens: Int
     public var localMaxCompletionTokens: Int
     public var localMaxContextTokens: Int
+    public var openAIReasoningEffort: OpenAIReasoningEffort
+    public var openAITextVerbosity: OpenAITextVerbosity
     public var requireToolApproval: Bool
     public var braveSearchEnabled: Bool
     public var onboardingCompleted: Bool
@@ -393,6 +397,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         case cloudMaxCompletionTokens
         case localMaxCompletionTokens
         case localMaxContextTokens
+        case openAIReasoningEffort
+        case openAITextVerbosity
         case requireToolApproval
         case braveSearchEnabled
         case onboardingCompleted
@@ -409,6 +415,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         cloudMaxCompletionTokens: Int = Self.defaultCloudMaxCompletionTokens,
         localMaxCompletionTokens: Int = Self.defaultLocalMaxCompletionTokens,
         localMaxContextTokens: Int = Self.defaultLocalMaxContextTokens,
+        openAIReasoningEffort: OpenAIReasoningEffort = Self.defaultOpenAIReasoningEffort,
+        openAITextVerbosity: OpenAITextVerbosity = Self.defaultOpenAITextVerbosity,
         requireToolApproval: Bool = true,
         braveSearchEnabled: Bool = false,
         onboardingCompleted: Bool = false,
@@ -423,6 +431,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         self.cloudMaxCompletionTokens = Self.normalizedCompletionTokens(cloudMaxCompletionTokens)
         self.localMaxCompletionTokens = Self.normalizedCompletionTokens(localMaxCompletionTokens)
         self.localMaxContextTokens = Self.normalizedLocalContextTokens(localMaxContextTokens)
+        self.openAIReasoningEffort = openAIReasoningEffort
+        self.openAITextVerbosity = openAITextVerbosity
         self.requireToolApproval = requireToolApproval
         self.braveSearchEnabled = braveSearchEnabled
         self.onboardingCompleted = onboardingCompleted
@@ -446,6 +456,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         localMaxContextTokens = Self.normalizedLocalContextTokens(
             try container.decodeIfPresent(Int.self, forKey: .localMaxContextTokens) ?? Self.defaultLocalMaxContextTokens
         )
+        openAIReasoningEffort = try container.decodeIfPresent(OpenAIReasoningEffort.self, forKey: .openAIReasoningEffort) ?? Self.defaultOpenAIReasoningEffort
+        openAITextVerbosity = try container.decodeIfPresent(OpenAITextVerbosity.self, forKey: .openAITextVerbosity) ?? Self.defaultOpenAITextVerbosity
         requireToolApproval = try container.decodeIfPresent(Bool.self, forKey: .requireToolApproval) ?? true
         braveSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .braveSearchEnabled) ?? false
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false

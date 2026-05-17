@@ -1017,6 +1017,155 @@ private extension ChatRole {
     }
 }
 
+private struct ChatQuickSettingsButton: View {
+    @Environment(\.pinesTheme) private var theme
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
+    let availability: ChatQuickSettingsAvailability
+
+    var body: some View {
+        Menu {
+            if !availability.reasoningEfforts.isEmpty {
+                Picker("Reasoning", selection: reasoningSelection) {
+                    ForEach(availability.reasoningEfforts, id: \.self) { effort in
+                        Text(effort.shortTitle).tag(effort)
+                    }
+                }
+            }
+
+            if availability.supportsVerbosity {
+                Picker("Verbosity", selection: verbositySelection) {
+                    ForEach(OpenAITextVerbosity.quickSettingOptions, id: \.self) { verbosity in
+                        Text(verbosity.shortTitle).tag(verbosity)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            theme.colors.primaryText,
+                            theme.colors.accent
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 36, height: 36)
+                .background {
+                    RoundedRectangle(cornerRadius: theme.radius.control + 6, style: .continuous)
+                        .fill(theme.colors.glassSurface)
+                        .overlay {
+                            LinearGradient(
+                                colors: [
+                                    theme.colors.surfaceHighlight.opacity(0.95),
+                                    theme.colors.accentSoft.opacity(0.34),
+                                    theme.colors.controlFill.opacity(0.76)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: theme.radius.control + 6, style: .continuous))
+                        }
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: theme.radius.control + 6, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    theme.colors.surfaceHighlight.opacity(0.90),
+                                    theme.colors.accent.opacity(0.32),
+                                    theme.colors.controlBorder.opacity(0.70)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: theme.stroke.hairline
+                        )
+                }
+                .shadow(color: theme.colors.accent.opacity(theme.colorScheme == .dark ? 0.18 : 0.12), radius: theme.shadow.panelRadius * 0.32, x: 0, y: theme.shadow.panelY * 0.18)
+                .contentShape(RoundedRectangle(cornerRadius: theme.radius.control + 6, style: .continuous))
+        }
+        .accessibilityLabel("Model quick settings")
+        .accessibilityValue(accessibilityValue)
+        .simultaneousGesture(TapGesture().onEnded { haptics.play(.navigationSelected) })
+    }
+
+    private var reasoningSelection: Binding<OpenAIReasoningEffort> {
+        Binding {
+            availability.reasoningEfforts.contains(appModel.openAIReasoningEffort)
+                ? appModel.openAIReasoningEffort
+                : defaultReasoningEffort
+        } set: { effort in
+            appModel.openAIReasoningEffort = effort
+            haptics.play(.primaryAction)
+        }
+    }
+
+    private var verbositySelection: Binding<OpenAITextVerbosity> {
+        Binding {
+            appModel.openAITextVerbosity
+        } set: { verbosity in
+            appModel.openAITextVerbosity = verbosity
+            haptics.play(.primaryAction)
+        }
+    }
+
+    private var defaultReasoningEffort: OpenAIReasoningEffort {
+        if availability.reasoningEfforts.contains(.low) {
+            return .low
+        }
+        return availability.reasoningEfforts.first ?? AppSettingsSnapshot.defaultOpenAIReasoningEffort
+    }
+
+    private var accessibilityValue: String {
+        var parts = [String]()
+        if !availability.reasoningEfforts.isEmpty {
+            parts.append("Reasoning \(reasoningSelection.wrappedValue.shortTitle)")
+        }
+        if availability.supportsVerbosity {
+            parts.append("Verbosity \(appModel.openAITextVerbosity.shortTitle)")
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+private extension OpenAIReasoningEffort {
+    var shortTitle: String {
+        switch self {
+        case .none:
+            "None"
+        case .minimal:
+            "Minimal"
+        case .low:
+            "Low"
+        case .medium:
+            "Medium"
+        case .high:
+            "High"
+        case .xhigh:
+            "X High"
+        }
+    }
+}
+
+private extension OpenAITextVerbosity {
+    static let quickSettingOptions: [OpenAITextVerbosity] = [.low, .medium, .high]
+
+    var shortTitle: String {
+        switch self {
+        case .low:
+            "Low"
+        case .medium:
+            "Medium"
+        case .high:
+            "High"
+        }
+    }
+}
+
 private struct ChatComposerBar: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
@@ -1079,6 +1228,13 @@ private struct ChatComposerBar: View {
         .animation(theme.motion.fast, value: draft.isEmpty)
         .animation(theme.motion.fast, value: attachments)
         .animation(theme.motion.fast, value: attachmentError)
+        .animation(theme.motion.fast, value: quickSettingsAvailability)
+        .onChange(of: appModel.openAIReasoningEffort) { _, _ in
+            Task { await appModel.saveSettings(services: services) }
+        }
+        .onChange(of: appModel.openAITextVerbosity) { _, _ in
+            Task { await appModel.saveSettings(services: services) }
+        }
     }
 
     private var regularLayout: some View {
@@ -1089,6 +1245,10 @@ private struct ChatComposerBar: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
             inputField
+            if let quickSettingsAvailability {
+                ChatQuickSettingsButton(availability: quickSettingsAvailability)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
             sendButton
         }
     }
@@ -1101,6 +1261,10 @@ private struct ChatComposerBar: View {
                 attachButton
                 if !activeMCPPrompts.isEmpty {
                     promptButton
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+                if let quickSettingsAvailability {
+                    ChatQuickSettingsButton(availability: quickSettingsAvailability)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
                 Spacer(minLength: theme.spacing.small)
@@ -1223,6 +1387,10 @@ private struct ChatComposerBar: View {
         )
         guard !activeServerIDs.isEmpty else { return [] }
         return appModel.mcpPrompts.filter { activeServerIDs.contains($0.serverID) }
+    }
+
+    private var quickSettingsAvailability: ChatQuickSettingsAvailability? {
+        appModel.chatQuickSettingsAvailability(for: threadID, services: services)
     }
 
     private func sendDraft() {

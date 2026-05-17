@@ -105,6 +105,17 @@ struct ModelPickerOption: Identifiable, Hashable {
     let rank: Double
 }
 
+struct ChatQuickSettingsAvailability: Hashable {
+    let providerID: ProviderID
+    let modelID: ModelID
+    let reasoningEfforts: [OpenAIReasoningEffort]
+    let supportsVerbosity: Bool
+
+    var isEmpty: Bool {
+        reasoningEfforts.isEmpty && !supportsVerbosity
+    }
+}
+
 enum PinesThreadStatus: String, Hashable {
     case local
     case streaming

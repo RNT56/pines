@@ -276,7 +276,13 @@ struct CoreContractTests {
         #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.5", requested: .xhigh) == .xhigh)
         #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.5-pro", requested: .low) == .high)
         #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5", requested: .none) == .low)
+        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5", requested: .xhigh) == .low)
         #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.1", requested: .none) == .none)
+        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.5") == [.none, .low, .medium, .high, .xhigh])
+        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.4") == [.none, .low, .medium, .high, .xhigh])
+        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5") == [.minimal, .low, .medium, .high])
+        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.5-pro") == [.high])
+        #expect(!CloudProviderModelEligibility.supportsOpenAITextVerbosity(modelID: "gpt-4o"))
     }
 
     @Test
@@ -606,15 +612,21 @@ struct CoreContractTests {
         #expect(decoded.cloudMaxCompletionTokens == AppSettingsSnapshot.defaultCloudMaxCompletionTokens)
         #expect(decoded.localMaxCompletionTokens == AppSettingsSnapshot.defaultLocalMaxCompletionTokens)
         #expect(decoded.localMaxContextTokens == AppSettingsSnapshot.defaultLocalMaxContextTokens)
+        #expect(decoded.openAIReasoningEffort == .low)
+        #expect(decoded.openAITextVerbosity == .low)
 
         let clamped = AppSettingsSnapshot(
             cloudMaxCompletionTokens: 1,
             localMaxCompletionTokens: 1_000_000,
-            localMaxContextTokens: 1
+            localMaxContextTokens: 1,
+            openAIReasoningEffort: .high,
+            openAITextVerbosity: .medium
         )
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
         #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
         #expect(clamped.localMaxContextTokens == AppSettingsSnapshot.minLocalContextTokens)
+        #expect(clamped.openAIReasoningEffort == .high)
+        #expect(clamped.openAITextVerbosity == .medium)
 
         let legacySampling = try JSONDecoder().decode(ChatSampling.self, from: Data(#"{"maxTokens":256,"temperature":0.2}"#.utf8))
         #expect(legacySampling.maxTokens == 256)
