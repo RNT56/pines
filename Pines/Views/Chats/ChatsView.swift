@@ -360,17 +360,12 @@ private struct ChatTranscriptView: View {
 
                     LazyVStack(spacing: theme.spacing.medium) {
                         ForEach(thread.messages) { message in
-                            ChatBubble(
+                            ChatMessageRow(
+                                threadID: thread.id,
                                 message: message,
                                 isStreaming: appModel.activeRunID == message.id,
                                 canEdit: appModel.activeRunID == nil,
-                                copyMessage: { copyMessage(message) },
-                                editMessage: message.role == .user ? { editingMessage = message } : nil,
-                                addAttachmentsToVault: message.attachments.isEmpty ? nil : {
-                                    Task {
-                                        await appModel.addMessageAttachmentsToVault(message, services: services)
-                                    }
-                                }
+                                editingMessage: $editingMessage
                             )
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
@@ -475,8 +470,30 @@ private struct ChatTranscriptView: View {
     private var contentPadding: CGFloat {
         horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large
     }
+}
 
-    private func copyMessage(_ message: ChatMessage) {
+private struct ChatMessageRow: View {
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var haptics: PinesHaptics
+    let threadID: UUID
+    let message: ChatMessage
+    let isStreaming: Bool
+    let canEdit: Bool
+    @Binding var editingMessage: ChatMessage?
+
+    var body: some View {
+        ChatBubble(
+            message: message,
+            isStreaming: isStreaming,
+            canEdit: canEdit,
+            copyMessage: copyMessage,
+            editMessage: message.role == .user ? { editingMessage = message } : nil,
+            addAttachmentsToVault: message.attachments.isEmpty ? nil : addAttachmentsToVault
+        )
+    }
+
+    private func copyMessage() {
         let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
         if !content.isEmpty {
             let text = message.role == .assistant
@@ -487,6 +504,12 @@ private struct ChatTranscriptView: View {
             copyToPasteboard(message.attachments.map(\.fileName).joined(separator: "\n"))
         }
         haptics.play(.primaryAction)
+    }
+
+    private func addAttachmentsToVault() {
+        Task {
+            await appModel.addMessageAttachmentsToVault(message, services: services)
+        }
     }
 }
 
@@ -775,7 +798,8 @@ private struct ChatBubbleSwipeActionButton: View {
                     .minimumScaleFactor(0.78)
             }
             .foregroundStyle(action.tint)
-            .frame(width: 68, minHeight: 58)
+            .frame(width: 68)
+            .frame(minHeight: 58)
             .background(action.tint.opacity(0.14), in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
