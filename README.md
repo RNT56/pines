@@ -29,6 +29,7 @@ The app is split into production layers:
 - `PinesArchitecture.modules` documents feature ownership for Chats, Models, Vault, Agents, and Settings, including database tables and dependencies.
 - Repository protocols in `PinesCore` isolate persistence from SwiftUI and let GRDB/CloudKit implementations replace seed data without changing views.
 - Normal chat routing remains explicit: local models are preferred by default, selected BYOK providers can be used when configured, and private vault/MCP context requires per-turn approval before it is sent to cloud. Agent and MCP sampling flows keep their own policy gates.
+- Chat supports local attachments for common image, PDF, and text-like files. HEIC/HEIF imports are staged as JPEG chat attachments, attachment-only messages get explicit analysis prompts, and message rows expose copy, edit, and add-attachments-to-Vault actions.
 - App-level implementation files are split by concern: app model DTOs live in `PinesAppModelTypes.swift`, CloudKit persistence merge logic lives in `GRDBPinesStore+CloudKit.swift`, design components live in `PinesDesignComponents.swift`, MCP wire payloads live in `MCPStreamableHTTPPayloads.swift`, model download support lives in `ModelDownloadSupport.swift`, and MLX compatibility models are split by model family.
 - TurboQuant is the requested default local KV-cache strategy. Pine requests the paper-exact Metal backend, reports native Metal codec and compressed-attention availability, falls back to MLX packed attention when needed, and stores compressed vault embeddings locally for approximate search plus FP16 rerank. Runtime defaults adapt to iOS memory/thermal state, including compact 6 GB device guardrails. See `docs/TURBOQUANT.md`.
 
@@ -59,6 +60,8 @@ Generate the Xcode project:
 xcodegen generate
 ```
 
+Use XcodeGen `2.45.4` or newer so generated project and scheme files match CI.
+
 The generated app target is personal Apple Developer account safe by default:
 `PINES_CODE_SIGN_ENTITLEMENTS` and `PINES_ICLOUD_SWIFT_FLAGS` are empty, so
 Xcode does not request iCloud provisioning. Paid-team CloudKit builds must
@@ -76,15 +79,16 @@ xcodebuild \
 Run available local core checks:
 
 ```sh
-swift test
-swift run PinesCoreTestRunner
+swift build --disable-automatic-resolution
+swift test --disable-automatic-resolution
+swift run --disable-automatic-resolution PinesCoreTestRunner
 ```
 
 The repository keeps `PinesCoreTestRunner` as a framework-light smoke runner for CI and constrained developer environments. Full iOS compilation requires a full Xcode install selected via `xcode-select`.
 
 ## CI And Releases
 
-CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, builds the Swift package, runs `swift test`, runs `PinesCoreTestRunner`, regenerates the Xcode project, checks generated-project drift, resolves Xcode package dependencies, and builds the iOS app without signing on the `macos-26` runner.
+CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, builds the Swift package with automatic package resolution disabled, runs `swift test`, runs `PinesCoreTestRunner`, regenerates the Xcode project, checks generated-project drift, resolves Xcode package dependencies, and builds the iOS app without signing on the `macos-26` runner.
 
 GitHub Releases are tag-driven. Push a semantic tag such as `v0.1.0` to run release validation and publish a source/developer-preview release with checksums:
 

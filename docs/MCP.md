@@ -52,10 +52,10 @@ Resources are never automatically injected into chat context. Users select resou
 Binary/blob resources are decoded only after validation:
 
 - Maximum decoded attachment size is 10 MB.
-- Allowed image MIME types: `image/png`, `image/jpeg`, `image/webp`, `image/gif`.
+- Allowed image MIME types: `image/png`, `image/jpeg`, `image/webp`, and `image/gif`.
 - Allowed document MIME types: `application/pdf`, `text/plain`, `text/markdown`, `text/x-markdown`, `application/json`, `text/csv`.
 - Unknown or unsafe binary MIME types are blocked and reported as blocked previews instead of being written to disk.
-- Accepted blobs are written to temporary local files and passed as typed `ChatAttachment` values.
+- Accepted blobs are written to temporary local files and passed as typed `ChatAttachment` values. User-selected chat imports can convert HEIC/HEIF files to JPEG during local staging, but MCP blob attachments currently accept only the MIME types listed above.
 
 Recommended server behavior:
 

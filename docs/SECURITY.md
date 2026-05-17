@@ -51,4 +51,6 @@ Do not sync:
 
 Generated embeddings and compressed vector codes sync only when private iCloud sync and the separate embedding sync toggle are both enabled. Chat attachments remain local files; when a user chooses cloud execution, supported image/PDF/text attachments can be encoded into the provider request for that turn according to provider capability checks.
 
+Chat attachment imports use user-selected files, stage local copies under app support storage, and reject empty or oversized files before request construction. HEIC/HEIF inputs are converted to JPEG at import time, so the original local file is not sent directly to providers. Message row actions can copy content, edit user-authored text while no run is active, or import local message attachments into Vault; Vault import follows the normal local ingestion and embedding-approval flow.
+
 MCP bearer tokens and OAuth access/refresh tokens follow the same Keychain-only rule as BYOK provider keys.

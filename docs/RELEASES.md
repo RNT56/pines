@@ -8,10 +8,10 @@ CI runs on pull requests, pushes to `main`, and manual dispatch.
 
 Jobs:
 
-- `swift-core`: public-repo hygiene, Swift package build, `swift test`, and `PinesCoreTestRunner`.
+- `swift-core`: public-repo hygiene, Swift package build, `swift test`, and `PinesCoreTestRunner`. SwiftPM commands run with automatic resolution disabled so CI honors the committed `Package.resolved` graph.
 - `xcode-project`: XcodeGen project generation, generated-project drift check, package resolution, and unsigned generic iOS build.
 
-The iOS job uses the `macos-26` GitHub-hosted runner so Xcode 26 and iOS 26 SDKs are available.
+The iOS job uses the `macos-26` GitHub-hosted runner so Xcode 26 and iOS 26 SDKs are available. Keep local XcodeGen at `2.45.4` or newer before regenerating `Pines.xcodeproj`.
 
 The release workflow regenerates the Xcode project, runs the same package build/test/core runner checks, builds an unsigned iOS archive, and packages source artifacts. Keep `ci.yml` and `release.yml` aligned when adding required checks.
 

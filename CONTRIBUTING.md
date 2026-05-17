@@ -6,12 +6,12 @@ This project is early and intentionally modular. Keep changes aligned with the e
 
 ```sh
 xcodegen generate
-swift build
-swift test
-swift run PinesCoreTestRunner
+swift build --disable-automatic-resolution
+swift test --disable-automatic-resolution
+swift run --disable-automatic-resolution PinesCoreTestRunner
 ```
 
-Use full Xcode for iOS builds.
+Use XcodeGen `2.45.4` or newer and full Xcode for iOS builds.
 
 ## Guidelines
 

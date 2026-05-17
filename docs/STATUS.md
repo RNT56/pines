@@ -20,7 +20,9 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Vault chunking and exact cosine vector index.
 - Keychain-backed secret store for iOS.
 - GRDB-backed app store/repository implementation.
-- Chat attachments for images, PDFs, and text-like files with provider capability checks and local file staging.
+- Chat attachments for images, HEIC/HEIF imports staged as JPEG, PDFs, and text-like files with provider capability checks and local file staging.
+- Attachment-only chat sends and user-message edits normalize empty text into explicit attachment analysis prompts.
+- Chat message row actions for copying content, editing user messages while no run is active, and importing local message attachments into Vault.
 - MLX runtime bridge that loads MLX LLM/VLM/embedder containers when linked.
 - Exact app-level pins to the maintained `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` forks for TurboQuant and compatibility APIs.
 - Split MLX compatibility implementations for Llama 4 and DeepSeek V4 model families.
@@ -53,9 +55,9 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 Available in this environment:
 
 ```sh
-swift build
-swift test
-swift run PinesCoreTestRunner
+swift build --disable-automatic-resolution
+swift test --disable-automatic-resolution
+swift run --disable-automatic-resolution PinesCoreTestRunner
 xcodegen generate
 ```
 

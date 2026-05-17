@@ -39,7 +39,7 @@ SwiftUI views receive services via environment values. This keeps views from con
 
 `PinesArchitecture.modules` documents ownership for each app feature:
 
-- Chats own conversations, messages, message FTS, and attachments.
+- Chats own conversations, messages, message FTS, chat attachment staging, message editing, and attachment row actions.
 - Models own model installs and model lifecycle state.
 - Vault owns documents, chunks, vault FTS, and source attachments.
 - Agents own tool/audit policy and opt-in cloud permissions.
@@ -57,6 +57,8 @@ Repository protocols separate UI from storage:
 - `AuditEventRepository`
 
 The production local store is GRDB/SQLite with optional CloudKit private-database sync for user-enabled settings, conversations, messages, vault metadata, vault chunks, and source documents. API keys, model binaries, prompt caches, browser state, chat attachment files, and transient tool state do not sync. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
+
+Chat attachments are staged under app support storage, capped at eight files per draft, and limited to inline-safe sizes before they can enter provider requests. Supported user-selected files include PNG, JPEG, WebP, GIF, HEIC/HEIF, PDF, plain text, Markdown, JSON, and CSV. HEIC/HEIF and sequence variants are decoded through ImageIO and staged as JPEG attachments so downstream provider capability checks can use the existing image path. Attachment-only sends and edits normalize empty text into explicit prompts such as image or file analysis instructions before persistence and routing.
 
 The GRDB implementation is split by repository concern: base SQLite repository operations remain in `GRDBPinesStore.swift`, while CloudKit snapshot/apply/delete merge support lives in `GRDBPinesStore+CloudKit.swift`.
 
