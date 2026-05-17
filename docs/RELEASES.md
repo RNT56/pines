@@ -11,9 +11,9 @@ Jobs:
 - `swift-core`: public-repo hygiene, Swift package build, `swift test`, and `PinesCoreTestRunner`. SwiftPM commands run with automatic resolution disabled so CI honors the committed `Package.resolved` graph.
 - `xcode-project`: XcodeGen project generation, generated-project drift check, locked package resolution from `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`, unsigned generic iOS build, simulator build-for-testing, and simulator runtime smoke tests when an iPhone simulator is available.
 
-The iOS job uses the `macos-26` GitHub-hosted runner so Xcode 26 and iOS 26 SDKs are available. Keep local XcodeGen at `2.45.4` or newer before regenerating `Pines.xcodeproj`.
+The iOS job uses the `macos-26` GitHub-hosted runner and explicitly installs the iOS and watchOS platforms needed by the `Pines` scheme. Keep local XcodeGen at `2.45.4` or newer before regenerating `Pines.xcodeproj`.
 
-The release workflow uses the same Xcode validation script as CI, runs SwiftPM and Xcode with automatic package resolution disabled, builds an unsigned iOS archive from the committed deployment graph, and packages source artifacts. Keep both package lockfiles, `scripts/ci/run-xcode-validation.sh`, `ci.yml`, and `release.yml` aligned when adding required checks.
+The release workflow uses the same Xcode validation script as CI, installs the iOS and watchOS platforms required by the app scheme, runs SwiftPM and Xcode with automatic package resolution disabled, builds an unsigned iOS archive from the committed deployment graph, and packages source artifacts. Keep both package lockfiles, `scripts/ci/run-xcode-validation.sh`, `scripts/ci/ensure-xcode-platforms.sh`, `ci.yml`, and `release.yml` aligned when adding required checks.
 
 ## Release Tags
 

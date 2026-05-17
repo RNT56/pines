@@ -24,6 +24,7 @@ snapshot_generated_project() {
     rsync -a \
       --exclude 'xcuserdata/' \
       --exclude '*.xcuserstate' \
+      --exclude 'project.xcworkspace/xcshareddata/swiftpm/configuration/' \
       "$project/" "$generated_project_snapshot/project/"
   else
     touch "$generated_project_snapshot/project-missing"
@@ -46,6 +47,7 @@ snapshot_package_resolution_files() {
 
 check_generated_project_drift() {
   echo "Checking generated project drift..."
+  rm -rf "$project/project.xcworkspace/xcshareddata/swiftpm/configuration"
   if [ -e "$generated_project_snapshot/project-missing" ]; then
     if [ -e "$project" ]; then
       echo "::error::$project was generated but is not committed."

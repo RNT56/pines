@@ -80,13 +80,8 @@ jobs:
           fi
           xcodegen --version
 
-      - name: Ensure iOS platform is installed
-        run: |
-          sudo xcodebuild -runFirstLaunch || true
-          if ! xcodebuild -downloadPlatform iOS -architectureVariant universal; then
-            echo "::warning::xcodebuild could not download the iOS platform on this runner."
-          fi
-          xcodebuild -showsdks
+      - name: Ensure Apple platforms are installed
+        run: bash scripts/ci/ensure-xcode-platforms.sh
 
       - name: Validate Xcode project
         run: bash scripts/ci/run-xcode-validation.sh

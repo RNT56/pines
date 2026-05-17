@@ -33,7 +33,7 @@ swift run --disable-automatic-resolution PinesCoreTestRunner
 bash scripts/ci/run-xcode-validation.sh
 \`\`\`
 
-Full iOS validation requires full Xcode 26 selected via \`xcode-select\` and uses the committed Xcode app package lockfile. Real-device TurboQuant acceptance and App Store privacy review remain separate release gates before a production distribution.
+Full iOS validation requires full Xcode 26 with the iOS and watchOS platforms selected via \`xcode-select\` and uses the committed Xcode app package lockfile. Real-device TurboQuant acceptance and App Store privacy review remain separate release gates before a production distribution.
 NOTES
 
 (
