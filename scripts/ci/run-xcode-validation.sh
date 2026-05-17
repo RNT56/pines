@@ -77,9 +77,10 @@ check_package_resolution_drift() {
   fi
 }
 
-check_validation_drift() {
+restore_generated_project() {
+  echo "Restoring generated Xcode project..."
+  xcodegen generate
   check_generated_project_drift
-  check_package_resolution_drift
 }
 
 snapshot_generated_project
@@ -87,6 +88,7 @@ snapshot_package_resolution_files
 
 echo "Generating Xcode project..."
 xcodegen generate
+check_generated_project_drift
 
 echo "Resolving Xcode package dependencies..."
 xcodebuild \
@@ -118,14 +120,16 @@ xcodebuild \
 
 if [ "${PINES_SKIP_SIMULATOR_TEST_RUN:-0}" = "1" ]; then
   echo "Skipping simulator test run because PINES_SKIP_SIMULATOR_TEST_RUN=1."
-  check_validation_drift
+  restore_generated_project
+  check_package_resolution_drift
   exit 0
 fi
 
 simulator_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
 if [ -z "$simulator_id" ]; then
   echo "::warning::No available iPhone simulator was found; smoke tests were build-verified only."
-  check_validation_drift
+  restore_generated_project
+  check_package_resolution_drift
   exit 0
 fi
 
@@ -139,4 +143,5 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   test-without-building | tee build/xcodebuild-test-run.log
 
-check_validation_drift
+restore_generated_project
+check_package_resolution_drift

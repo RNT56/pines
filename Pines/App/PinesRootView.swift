@@ -94,24 +94,21 @@ struct PinesRootView: View {
                 }
             }
         }
-        .alert("Approve Tool Call", isPresented: Binding(
-            get: { appModel.pendingToolApproval != nil },
-            set: { presented in
-                if !presented {
+        .sheet(item: Binding(
+            get: { appModel.pendingToolApproval },
+            set: { request in
+                if request == nil {
                     appModel.resolvePendingToolApproval(.denied)
                 }
             }
-        )) {
-            Button("Deny", role: .cancel) {
-                appModel.resolvePendingToolApproval(.denied)
-            }
-            Button("Approve") {
-                appModel.resolvePendingToolApproval(.approved)
-            }
-        } message: {
-            if let request = appModel.pendingToolApproval {
-                Text("\(request.invocation.toolName)\n\(request.invocation.privacyImpact)")
-            }
+        )) { request in
+            ToolApprovalSheet(
+                request: request,
+                deny: { appModel.resolvePendingToolApproval(.denied) },
+                approve: { appModel.resolvePendingToolApproval(.approved) }
+            )
+            .environmentObject(haptics)
+            .pinesTheme(theme)
         }
         .sheet(item: Binding(
             get: { appModel.pendingCloudContextApproval },
@@ -234,6 +231,72 @@ extension EnvironmentValues {
     var openPinesModelsPage: PinesOpenModelsPageAction {
         get { self[PinesOpenModelsPageKey.self] }
         set { self[PinesOpenModelsPageKey.self] = newValue }
+    }
+}
+
+private struct ToolApprovalSheet: View {
+    @Environment(\.pinesTheme) private var theme
+    @EnvironmentObject private var haptics: PinesHaptics
+    let request: ToolApprovalRequest
+    let deny: () -> Void
+    let approve: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Tool") {
+                    LabeledContent("Name", value: request.invocation.toolName)
+                    LabeledContent("Access", value: request.invocation.privacyImpact.isEmpty ? "Local" : request.invocation.privacyImpact)
+                }
+
+                Section("Reason") {
+                    Text(request.invocation.reason)
+                        .font(theme.typography.body)
+                        .foregroundStyle(theme.colors.primaryText)
+
+                    Text(request.invocation.expectedOutput)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+
+                if !request.invocation.argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Section("Arguments") {
+                        Text(prettyArguments)
+                            .font(theme.typography.code)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .pinesExpressiveScrollHaptics()
+            .navigationTitle("Approve Tool")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Deny", role: .cancel) {
+                        haptics.play(.primaryAction)
+                        deny()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Approve") {
+                        haptics.play(.primaryAction)
+                        approve()
+                    }
+                }
+            }
+        }
+    }
+
+    private var prettyArguments: String {
+        let raw = request.invocation.argumentsJSON
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              JSONSerialization.isValidJSONObject(object),
+              let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        else {
+            return raw
+        }
+        return String(decoding: pretty, as: UTF8.self)
     }
 }
 

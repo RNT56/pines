@@ -82,7 +82,7 @@ struct PinesThreadPreview: Identifiable, Hashable {
         ChatRequest(
             modelID: modelID,
             messages: messages,
-            allowsTools: true,
+            allowsTools: false,
             vaultContextIDs: []
         )
     }
@@ -129,7 +129,7 @@ enum PinesThreadStatus: String, Hashable {
     var title: String {
         switch self {
         case .local:
-            "Local"
+            "Ready"
         case .streaming:
             "Live"
         case .archived:

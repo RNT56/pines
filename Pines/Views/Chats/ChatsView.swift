@@ -618,7 +618,10 @@ private struct ChatBubble: View {
                     ChatAttachmentList(attachments: message.attachments)
                 }
 
-                if !message.toolCalls.isEmpty {
+                let agentActivities = PinesAppModel.agentActivities(from: message.providerMetadata)
+                if !agentActivities.isEmpty {
+                    ChatAgentActivityList(activities: agentActivities)
+                } else if !message.toolCalls.isEmpty {
                     ChatToolCallList(toolCalls: message.toolCalls)
                 }
             }
@@ -684,6 +687,85 @@ private struct ChatBubble: View {
     }
 }
 
+private struct ChatAgentActivityList: View {
+    @Environment(\.pinesTheme) private var theme
+    let activities: [AgentActivityEvent]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            ForEach(activities) { activity in
+                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                    HStack(alignment: .top, spacing: theme.spacing.xsmall) {
+                        Image(systemName: activity.status.systemImage)
+                            .font(theme.typography.caption.weight(.semibold))
+                            .foregroundStyle(activity.status.tint(in: theme))
+                            .frame(width: 18, height: 18)
+                            .symbolEffect(.pulse, options: .repeating, value: activity.status == .running)
+
+                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                            Text(activity.title)
+                                .font(theme.typography.caption.weight(.semibold))
+                                .foregroundStyle(theme.colors.primaryText)
+                                .lineLimit(1)
+
+                            Text(activity.detail)
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+
+                    if !activity.links.isEmpty {
+                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                            ForEach(activity.links.prefix(4)) { link in
+                                AgentActivityLinkRow(link: link)
+                            }
+                        }
+                        .padding(.leading, 18 + theme.spacing.xsmall)
+                    }
+                }
+                .padding(.vertical, theme.spacing.xsmall)
+                .padding(.horizontal, theme.spacing.small)
+                .background(theme.colors.controlFill.opacity(activity.status.backgroundOpacity), in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                        .strokeBorder(activity.status.tint(in: theme).opacity(activity.status.borderOpacity), lineWidth: theme.stroke.hairline)
+                }
+            }
+        }
+        .accessibilityLabel("\(activities.count) agent activities")
+    }
+}
+
+private struct AgentActivityLinkRow: View {
+    @Environment(\.pinesTheme) private var theme
+    let link: AgentActivityLink
+
+    var body: some View {
+        Group {
+            if let url = URL(string: link.url) {
+                Link(destination: url) {
+                    rowLabel
+                }
+            }
+        }
+    }
+
+    private var rowLabel: some View {
+        HStack(spacing: theme.spacing.xxsmall) {
+            Image(systemName: "link")
+                .font(theme.typography.caption)
+            Text(link.title)
+                .font(theme.typography.caption.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .foregroundStyle(theme.colors.accent)
+    }
+}
+
 private struct ChatToolCallList: View {
     @Environment(\.pinesTheme) private var theme
     let toolCalls: [ToolCallDelta]
@@ -742,6 +824,60 @@ private struct ChatBubbleSwipeAction: Identifiable {
     let systemImage: String
     let tint: Color
     let perform: () -> Void
+}
+
+private extension AgentActivityStatus {
+    var systemImage: String {
+        switch self {
+        case .waitingForApproval:
+            "hand.raised"
+        case .running:
+            "arrow.triangle.2.circlepath"
+        case .completed:
+            "checkmark.circle.fill"
+        case .failed:
+            "exclamationmark.triangle.fill"
+        case .denied:
+            "xmark.circle.fill"
+        }
+    }
+
+    var backgroundOpacity: Double {
+        switch self {
+        case .running, .waitingForApproval:
+            0.92
+        case .completed:
+            0.72
+        case .failed, .denied:
+            0.84
+        }
+    }
+
+    var borderOpacity: Double {
+        switch self {
+        case .running:
+            0.42
+        case .waitingForApproval:
+            0.34
+        case .completed:
+            0.22
+        case .failed, .denied:
+            0.46
+        }
+    }
+
+    func tint(in theme: PinesTheme) -> Color {
+        switch self {
+        case .waitingForApproval:
+            theme.colors.warning
+        case .running:
+            theme.colors.accent
+        case .completed:
+            theme.colors.success
+        case .failed, .denied:
+            theme.colors.danger
+        }
+    }
 }
 
 private struct SwipeableChatBubble<Content: View>: View {
@@ -1005,7 +1141,7 @@ private struct ChatRunState: View {
                     .font(theme.typography.headline)
                     .pinesFittingText()
 
-                Text(request.allowsTools ? "Tool routing enabled for this request." : "Waiting for the inference session.")
+                Text(request.allowsTools && !request.availableTools.isEmpty ? "Tool routing enabled for this request." : "Waiting for the inference session.")
                     .font(theme.typography.caption)
                     .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(2)

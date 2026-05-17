@@ -3,6 +3,7 @@ import Foundation
 public enum ToolRegistryError: Error, Equatable, CustomStringConvertible, Sendable {
     case duplicateTool(name: String)
     case toolNotFound(name: String)
+    case toolTimedOut(name: String, timeoutSeconds: Int)
     case typeMismatch(
         name: String,
         expectedInput: String,
@@ -17,10 +18,16 @@ public enum ToolRegistryError: Error, Equatable, CustomStringConvertible, Sendab
             "Tool is already registered: \(name)"
         case let .toolNotFound(name):
             "Tool is not registered: \(name)"
+        case let .toolTimedOut(name, timeoutSeconds):
+            "Tool \(name) timed out after \(timeoutSeconds) seconds."
         case let .typeMismatch(name, expectedInput, expectedOutput, actualInput, actualOutput):
             "Tool \(name) expects \(expectedInput) -> \(expectedOutput), got \(actualInput) -> \(actualOutput)."
         }
     }
+}
+
+extension ToolRegistryError: LocalizedError {
+    public var errorDescription: String? { description }
 }
 
 private struct RegisteredTool: Sendable {
@@ -100,7 +107,7 @@ public actor ToolRegistry {
         }
 
         let inputData = try JSONEncoder().encode(input)
-        let outputData = try await tool.run(inputData)
+        let outputData = try await runWithTimeout(tool, name: name, inputData: inputData)
         return try JSONDecoder().decode(Output.self, from: outputData)
     }
 
@@ -119,7 +126,26 @@ public actor ToolRegistry {
             )
         }
 
-        let outputData = try await tool.run(inputData)
+        let outputData = try await runWithTimeout(tool, name: name, inputData: inputData)
         return String(decoding: outputData, as: UTF8.self)
+    }
+
+    private func runWithTimeout(_ tool: RegisteredTool, name: String, inputData: Data) async throws -> Data {
+        let timeoutSeconds = max(1, tool.metadata.timeoutSeconds)
+        return try await withThrowingTaskGroup(of: Data.self) { group in
+            group.addTask {
+                try await tool.run(inputData)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
+                throw ToolRegistryError.toolTimedOut(name: name, timeoutSeconds: timeoutSeconds)
+            }
+
+            guard let result = try await group.next() else {
+                throw ToolRegistryError.toolNotFound(name: name)
+            }
+            group.cancelAll()
+            return result
+        }
     }
 }

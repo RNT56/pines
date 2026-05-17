@@ -650,7 +650,26 @@ struct CoreContractTests {
         #expect(toolCall?.id == "call_1")
         #expect(toolCall?.name == "lookup")
         #expect(toolCall?.argumentsFragment == #"{"query":"pines"}"#)
+        #expect(finish?.reason == .toolCall)
+        #expect(finish?.message == nil)
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIOutputItemsJSON]?.contains(#""function_call""#) == true)
+    }
+
+    @Test
+    func openAIResponsesFallbackPreservesCompletedToolCall() {
+        var parser = CloudProviderStreamParser()
+        let payload = #"{"type":"response.function_call_arguments.done","output_index":0,"item":{"id":"fc_1","call_id":"call_1","type":"function_call","name":"lookup","arguments":"{\"query\":\"pines\"}"}}"#
+        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+        let finish = parser.fallbackFinish(
+            format: .openAIResponses,
+            providerKind: .openAI,
+            modelID: "gpt-5.5",
+            usesOfficialOpenAIReasoningChat: false
+        )
+
+        #expect(output.events.contains(.toolCall(ToolCallDelta(id: "call_1", name: "lookup", argumentsFragment: #"{"query":"pines"}"#, isComplete: true))))
+        #expect(finish.reason == .toolCall)
+        #expect(finish.message == nil)
     }
 
     @Test
@@ -720,6 +739,34 @@ struct CoreContractTests {
         #expect(try evaluator.evaluate("(2 + 3) * 4") == 20)
         #expect(throws: CalculatorEvaluationError.divisionByZero) {
             try evaluator.evaluate("1 / 0")
+        }
+    }
+
+    @Test
+    func toolRegistryEnforcesDeclaredTimeouts() async throws {
+        let registry = ToolRegistry()
+        let spec = try ToolSpec<CalculatorInput, CalculatorOutput>(
+            name: "calculator.slow",
+            description: "Slow calculator used to verify timeout behavior.",
+            inputSchema: ToolIOSchema(properties: ["expression": .init(type: .string)], required: ["expression"]),
+            outputSchema: ToolIOSchema(properties: ["value": .init(type: .number), "formatted": .init(type: .string)]),
+            permissions: [.localComputation],
+            sideEffect: .none,
+            networkPolicy: .noNetwork,
+            timeoutSeconds: 1,
+            explanationRequired: false
+        ) { _ in
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+            return CalculatorOutput(value: 1, formatted: "1")
+        }
+        try await registry.register(spec)
+
+        do {
+            _ = try await registry.callRaw("calculator.slow", inputJSON: #"{"expression":"1"}"#)
+            Issue.record("slow tool should time out")
+        } catch ToolRegistryError.toolTimedOut(let name, let timeoutSeconds) {
+            #expect(name == "calculator.slow")
+            #expect(timeoutSeconds == 1)
         }
     }
 

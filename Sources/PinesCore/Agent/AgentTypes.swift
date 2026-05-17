@@ -1,5 +1,10 @@
 import Foundation
 
+public enum PinesRunMode: String, Hashable, Codable, Sendable, CaseIterable {
+    case chat
+    case agent
+}
+
 public struct AgentPolicy: Hashable, Codable, Sendable {
     public var executionMode: AgentExecutionMode
     public var maxSteps: Int
@@ -97,6 +102,59 @@ public struct ToolResultEnvelope: Hashable, Codable, Sendable {
         self.outputJSON = outputJSON
         self.untrusted = untrusted
         self.networkDomains = networkDomains
+    }
+}
+
+public enum AgentActivityStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case waitingForApproval
+    case running
+    case completed
+    case failed
+    case denied
+}
+
+public struct AgentActivityLink: Hashable, Codable, Sendable, Identifiable {
+    public var id: String { url }
+    public var title: String
+    public var url: String
+
+    public init(title: String, url: String) {
+        self.title = title
+        self.url = url
+    }
+}
+
+public struct AgentActivityEvent: Hashable, Codable, Sendable, Identifiable {
+    public var id: UUID
+    public var toolCallID: String
+    public var toolName: String
+    public var title: String
+    public var detail: String
+    public var status: AgentActivityStatus
+    public var links: [AgentActivityLink]
+    public var startedAt: Date
+    public var completedAt: Date?
+
+    public init(
+        id: UUID = UUID(),
+        toolCallID: String,
+        toolName: String,
+        title: String,
+        detail: String,
+        status: AgentActivityStatus,
+        links: [AgentActivityLink] = [],
+        startedAt: Date = Date(),
+        completedAt: Date? = nil
+    ) {
+        self.id = id
+        self.toolCallID = toolCallID
+        self.toolName = toolName
+        self.title = title
+        self.detail = detail
+        self.status = status
+        self.links = links
+        self.startedAt = startedAt
+        self.completedAt = completedAt
     }
 }
 

@@ -214,11 +214,8 @@ struct WatchChatOrchestrator {
                         ),
                         providerID: providerSelection.providerID
                     )
-                    let runner = AgentRunner(
-                        toolRegistry: services.toolRegistry,
-                        policyGate: services.toolPolicyGate,
-                        auditRepository: services.auditRepository,
-                        approvalHandler: approvalHandler
+                    let runner = services.agentRuntimeFactory.makeRuntime(
+                        callbacks: AgentRuntimeCallbacks(approvalHandler: approvalHandler)
                     )
 
                     let startedAt = Date()

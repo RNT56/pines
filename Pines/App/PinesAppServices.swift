@@ -18,6 +18,8 @@ final class PinesAppServices: Sendable {
     let executionRouter: ExecutionRouter
     let toolRegistry: ToolRegistry
     let toolPolicyGate: ToolPolicyGate
+    let agentRuntimeFactory: any AgentRuntimeFactory
+    let agentToolCatalog: any AgentToolCatalog
     let redactor: Redactor
     let mlxRuntime: MLXRuntimeBridge
     let runtimeMetrics: PinesRuntimeMetrics
@@ -40,6 +42,8 @@ final class PinesAppServices: Sendable {
         executionRouter: ExecutionRouter = ExecutionRouter(),
         toolRegistry: ToolRegistry = ToolRegistry(),
         toolPolicyGate: ToolPolicyGate = ToolPolicyGate(),
+        agentRuntimeFactory: (any AgentRuntimeFactory)? = nil,
+        agentToolCatalog: (any AgentToolCatalog)? = nil,
         redactor: Redactor = Redactor(),
         mlxRuntime: MLXRuntimeBridge = MLXRuntimeBridge(),
         runtimeMetrics: PinesRuntimeMetrics = .shared,
@@ -65,6 +69,15 @@ final class PinesAppServices: Sendable {
         self.executionRouter = executionRouter
         self.toolRegistry = toolRegistry
         self.toolPolicyGate = toolPolicyGate
+        self.agentRuntimeFactory = agentRuntimeFactory ?? DefaultAgentRuntimeFactory(
+            toolRegistry: toolRegistry,
+            policyGate: toolPolicyGate,
+            auditRepository: resolvedStore
+        )
+        self.agentToolCatalog = agentToolCatalog ?? RegistryAgentToolCatalog(
+            secretStore: secretStore,
+            toolRegistry: toolRegistry
+        )
         self.redactor = redactor
         self.mlxRuntime = mlxRuntime
         self.runtimeMetrics = runtimeMetrics

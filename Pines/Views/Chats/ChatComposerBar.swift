@@ -17,6 +17,10 @@ struct ChatComposerBar: View {
     @State private var didCommitSend = false
     @State private var selectedMCPPrompt: MCPPromptRecord?
     @State private var mcpPromptArguments: [String: String] = [:]
+    @State private var runMode: PinesRunMode = .chat
+    @State private var agentToolSpecs: [AnyToolSpec] = []
+    @State private var disabledAgentToolNames: Set<String> = []
+    @State private var isRefreshingAgentTools = false
     @FocusState private var isFocused: Bool
     let threadID: UUID?
 
@@ -78,13 +82,30 @@ struct ChatComposerBar: View {
         .onChange(of: appModel.geminiThinkingLevel) { _, _ in
             Task { await appModel.saveSettings(services: services) }
         }
+        .onAppear {
+            refreshAgentToolsIfNeeded()
+        }
+        .onChange(of: runMode) { _, _ in
+            refreshAgentToolsIfNeeded()
+        }
+        .onChange(of: appModel.mcpTools) { _, _ in
+            refreshAgentToolsIfNeeded(force: true)
+        }
+        .onChange(of: appModel.braveSearchCredentialStatus) { _, _ in
+            refreshAgentToolsIfNeeded(force: true)
+        }
     }
 
     private var regularLayout: some View {
         HStack(spacing: theme.spacing.small) {
+            modePicker
             attachButton
             if !activeMCPPrompts.isEmpty {
                 promptButton
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+            if runMode == .agent {
+                agentToolsButton
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
             inputField
@@ -101,9 +122,14 @@ struct ChatComposerBar: View {
             inputField
 
             HStack(spacing: theme.spacing.small) {
+                modePicker
                 attachButton
                 if !activeMCPPrompts.isEmpty {
                     promptButton
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+                if runMode == .agent {
+                    agentToolsButton
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
                 if let quickSettingsAvailability {
@@ -150,7 +176,7 @@ struct ChatComposerBar: View {
     }
 
     private var inputField: some View {
-        TextField("Ask Pines", text: $draft, axis: .vertical)
+        TextField(runMode == .agent ? "Give Pines a task" : "Ask Pines", text: $draft, axis: .vertical)
             .lineLimit(1...4)
             .textFieldStyle(.plain)
             .focused($isFocused)
@@ -164,6 +190,17 @@ struct ChatComposerBar: View {
                 guard appModel.activeRunID == nil else { return }
                 sendDraft()
             }
+    }
+
+    private var modePicker: some View {
+        Picker("Mode", selection: $runMode) {
+            Text("Chat").tag(PinesRunMode.chat)
+            Text("Agent").tag(PinesRunMode.agent)
+        }
+        .pickerStyle(.segmented)
+        .frame(width: horizontalSizeClass == .compact ? 132 : 150)
+        .disabled(appModel.activeRunID != nil)
+        .accessibilityLabel("Run mode")
     }
 
     private var attachButton: some View {
@@ -192,6 +229,36 @@ struct ChatComposerBar: View {
             Image(systemName: "text.bubble")
         }
         .accessibilityLabel("MCP prompts")
+        .pinesButtonStyle(.icon)
+    }
+
+    private var agentToolsButton: some View {
+        Menu {
+            if isRefreshingAgentTools {
+                Label("Loading tools", systemImage: "hourglass")
+            } else if agentToolSpecs.isEmpty {
+                Label("No tools available", systemImage: "wrench.and.screwdriver")
+            } else {
+                Section("Enabled tools") {
+                    ForEach(agentToolSpecs, id: \.name) { spec in
+                        Button {
+                            toggleAgentTool(spec.name)
+                        } label: {
+                            Label(agentToolTitle(spec), systemImage: disabledAgentToolNames.contains(spec.name) ? "circle" : "checkmark.circle.fill")
+                        }
+                    }
+                }
+
+                if !disabledAgentToolNames.isEmpty {
+                    Button("Enable all") {
+                        disabledAgentToolNames.removeAll()
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "wrench.and.screwdriver")
+        }
+        .accessibilityLabel("Agent tools")
         .pinesButtonStyle(.icon)
     }
 
@@ -247,7 +314,52 @@ struct ChatComposerBar: View {
         withAnimation(theme.motion.copySuccess) {
             didCommitSend.toggle()
         }
-        appModel.startSending(pending, attachments: pendingAttachments, in: threadID, services: services)
+        let enabledToolNames = runMode == .agent ? Set(agentToolSpecs.map(\.name)).subtracting(disabledAgentToolNames) : nil
+        appModel.startSending(
+            pending,
+            attachments: pendingAttachments,
+            in: threadID,
+            mode: runMode,
+            enabledAgentToolNames: enabledToolNames,
+            services: services
+        )
+    }
+
+    private func refreshAgentToolsIfNeeded(force: Bool = false) {
+        guard runMode == .agent || force else { return }
+        guard !isRefreshingAgentTools else { return }
+        isRefreshingAgentTools = true
+        Task {
+            let specs = await appModel.agentToolSpecs(services: services)
+            await MainActor.run {
+                agentToolSpecs = specs
+                disabledAgentToolNames.formIntersection(Set(specs.map(\.name)))
+                isRefreshingAgentTools = false
+            }
+        }
+    }
+
+    private func toggleAgentTool(_ name: String) {
+        if disabledAgentToolNames.contains(name) {
+            disabledAgentToolNames.remove(name)
+        } else {
+            disabledAgentToolNames.insert(name)
+        }
+    }
+
+    private func agentToolTitle(_ spec: AnyToolSpec) -> String {
+        switch spec.name {
+        case CalculatorTool.name:
+            "Calculator"
+        case "web.search":
+            "Web Search"
+        case "browser.observe":
+            "Browser Read"
+        case "browser.action":
+            "Browser Actions"
+        default:
+            spec.name.hasPrefix("mcp.") ? spec.name.replacingOccurrences(of: "mcp.", with: "MCP ") : spec.name
+        }
     }
 
     private func seedPromptArguments(_ prompt: MCPPromptRecord) {

@@ -21,6 +21,8 @@
 - `ExecutionRouter`
 - `ToolRegistry`
 - `ToolPolicyGate`
+- `AgentRuntimeFactory`
+- `AgentToolCatalog`
 - `Redactor`
 - `MLXRuntimeBridge`
 - `PinesRuntimeMetrics`
@@ -31,7 +33,7 @@
 - `CloudKitSyncService`
 - `MCPServerService`
 
-`AgentRunner` is constructed per chat or sampling run with the selected provider, session policy, tool registry, policy gate, and audit repository. Runtime device monitoring lives inside the MLX runtime bridge and adapts local model defaults there.
+Agent execution is injected through `AgentRuntimeFactory`, which produces an `AgentRuntime` per run. The default factory builds the current tool-calling `AgentRunner` with the selected provider, session policy, tool registry, policy gate, audit repository, approval callback, and activity callback. `AgentToolCatalog` separately owns the advertised Agent-mode tool set. Chat and Watch orchestration depend only on these protocols, so a future planner/executor stack, vendor agent SDK, or different tool runtime can replace the default implementation from `PinesAppServices` without rewriting message persistence, provider selection, or SwiftUI progress rendering. Runtime device monitoring lives inside the MLX runtime bridge and adapts local model defaults there.
 
 SwiftUI views receive services via environment values. This keeps views from constructing runtime dependencies directly and makes it possible to swap live, mock, or preview implementations.
 
@@ -42,7 +44,7 @@ SwiftUI views receive services via environment values. This keeps views from con
 - Chats own conversations, messages, message FTS, chat attachment staging, message editing, and attachment row actions.
 - Models own model installs and model lifecycle state.
 - Vault owns documents, chunks, vault FTS, and source attachments.
-- Agents own tool/audit policy and opt-in cloud permissions.
+- Agents own the runtime boundary, tool/audit policy, approval callbacks, activity reporting, and opt-in cloud permissions.
 - Settings owns user preferences and service configuration.
 
 Repository protocols separate UI from storage:
@@ -121,7 +123,16 @@ Tool definitions are typed, versioned, schema-backed, and include permission met
 - timeout
 - permissions such as network, browser, files, photos, clipboard, or cloud context
 
-`ToolPolicyGate` validates invocations before execution. Calculator is implemented locally with a safe arithmetic parser. `web.search` uses a Brave Search BYOK key from Keychain, and browser automation runs through an isolated non-persistent `WKWebView` runtime with observe and user-approved action tools. Normal chat currently keeps its advertised tool list empty unless a tool mode opts in; MCP sampling can forward server-supplied tool definitions to the selected local or BYOK provider while the MCP server owns its tool loop.
+`ToolPolicyGate` validates invocations before execution. Calculator is implemented locally with a safe arithmetic parser. `web.search` uses a Brave Search BYOK key from Keychain, and browser automation runs through an isolated non-persistent `WKWebView` runtime with observe and user-approved action tools. Normal chat keeps its advertised tool list empty; Agent mode gets the explicitly enabled tool catalog and can report tool progress through `AgentActivityEvent`.
+
+The agent replacement seam has three contracts:
+
+- `AgentRuntime` owns a single run and streams normal inference events back to chat.
+- `AgentRuntimeFactory` creates runtimes from app services so dependency swaps happen at the composition root.
+- `AgentToolCatalog` supplies the Agent-mode tool inventory independently from chat orchestration.
+- `AgentRuntimeCallbacks` carries human-in-the-loop approval and activity/progress reporting, keeping UI concerns out of agent execution.
+
+MCP sampling can forward server-supplied tool definitions to the selected local or BYOK provider while the MCP server owns its tool loop.
 
 ## Source Organization Notes
 

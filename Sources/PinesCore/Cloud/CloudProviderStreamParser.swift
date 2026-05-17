@@ -67,9 +67,10 @@ public struct CloudProviderStreamParser {
     public func fallbackFinish(format: CloudProviderStreamFormat, providerKind: CloudProviderKind, modelID: ModelID, usesOfficialOpenAIReasoningChat: Bool) -> InferenceFinish {
         switch format {
         case .openAIResponses:
+            let hasToolCalls = !state.completedOpenAIToolCallIDs.isEmpty
             return InferenceFinish(
-                reason: .stop,
-                message: Self.openAIResponsesEmptyOutputMessage(response: nil, eventTypes: state.openAIResponsesEventTypes),
+                reason: hasToolCalls ? .toolCall : .stop,
+                message: hasToolCalls ? nil : Self.openAIResponsesEmptyOutputMessage(response: nil, eventTypes: state.openAIResponsesEventTypes),
                 providerMetadata: state.openAIProviderMetadata
             )
         case .chatCompletions:
@@ -542,10 +543,11 @@ public struct CloudProviderStreamParser {
                     events.append(.metrics(metrics))
                 }
             }
-            let finishReason: InferenceFinishReason = events.contains { event in
+            let hasToolCalls = !state.completedOpenAIToolCallIDs.isEmpty || events.contains { event in
                 if case .toolCall = event { return true }
                 return false
-            } ? .toolCall : .stop
+            }
+            let finishReason: InferenceFinishReason = hasToolCalls ? .toolCall : .stop
             finish = InferenceFinish(
                 reason: finishReason,
                 message: finishReason == .stop && events.isEmpty && !state.openAIResponsesTextEmitted
@@ -663,13 +665,23 @@ public struct CloudProviderStreamParser {
 
     private static func openAIResponsesEmptyOutputMessage(response: [String: Any]?, eventTypes: Set<String>) -> String {
         let status = response?["status"] as? String
-        let outputCount = (response?["output"] as? [[String: Any]])?.count
+        let outputItems = response?["output"] as? [[String: Any]]
+        let outputCount = outputItems?.count
         var details = [String]()
         if let status {
             details.append("status: \(status)")
         }
         if let outputCount {
             details.append("output items: \(outputCount)")
+        }
+        if let outputItems {
+            let outputTypes = outputItems.compactMap { item in
+                let type = item["type"] as? String
+                return type?.isEmpty == false ? type : nil
+            }
+            if !outputTypes.isEmpty {
+                details.append("output types: \(outputTypes.joined(separator: ", "))")
+            }
         }
         if !eventTypes.isEmpty {
             details.append("events: \(eventTypes.sorted().joined(separator: ", "))")

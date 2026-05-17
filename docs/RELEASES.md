@@ -9,7 +9,7 @@ CI runs on pull requests, pushes to `main`, and manual dispatch.
 Jobs:
 
 - `swift-core`: public-repo hygiene, Swift package build, `swift test`, and `PinesCoreTestRunner`. SwiftPM commands run with automatic resolution disabled so CI honors the committed `Package.resolved` graph.
-- `xcode-project`: XcodeGen project generation, generated-project drift check, locked package resolution from `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`, unsigned generic iOS build, simulator build-for-testing, and simulator runtime smoke tests when an iPhone simulator is available.
+- `xcode-project`: XcodeGen project generation, immediate generated-project drift check, locked package resolution from `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`, unsigned generic iOS build, simulator build-for-testing, simulator runtime smoke tests when an iPhone simulator is available, generated-project restoration, and final package lockfile drift checks.
 
 The iOS job uses the `macos-26` GitHub-hosted runner and explicitly refreshes the full iOS and watchOS platform payloads needed by the `Pines` scheme. SDK visibility from `xcodebuild -showsdks` is not sufficient for the generic iOS device build on hosted runners. Keep local XcodeGen at `2.45.4` or newer before regenerating `Pines.xcodeproj`.
 
