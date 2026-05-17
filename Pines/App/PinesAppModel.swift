@@ -550,6 +550,107 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         startSending(lastUser.content, attachments: lastUser.attachments, in: thread.id, services: services)
     }
 
+    func editUserMessage(_ message: ChatMessage, content: String, in threadID: UUID, services: PinesAppServices) async {
+        guard message.role == .user else {
+            setChatError("Only user messages can be edited.")
+            emitHaptic(.runFailed)
+            return
+        }
+        guard activeRunID == nil else {
+            setChatError("Stop the current run before editing a message.")
+            emitHaptic(.runFailed)
+            return
+        }
+        guard let repository = services.conversationRepository else {
+            setChatError("Conversation repository is unavailable.")
+            emitHaptic(.runFailed)
+            return
+        }
+
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedContent = Self.normalizedUserContent(trimmed, attachments: message.attachments)
+        guard !normalizedContent.isEmpty || !message.attachments.isEmpty else {
+            setChatError("Messages without attachments need text.")
+            emitHaptic(.runFailed)
+            return
+        }
+        guard normalizedContent != message.content else { return }
+
+        do {
+            try await repository.updateMessage(
+                id: message.id,
+                content: normalizedContent,
+                status: .complete,
+                tokenCount: nil,
+                providerMetadata: nil
+            )
+            updateThreadMessage(
+                conversationID: threadID,
+                messageID: message.id,
+                content: normalizedContent,
+                status: .local
+            )
+            await refreshThread(conversationID: threadID, repository: repository, status: .local)
+            clearChatError()
+            emitHaptic(.primaryAction)
+        } catch {
+            setChatError(error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    func addMessageAttachmentsToVault(_ message: ChatMessage, services: PinesAppServices) async {
+        guard !message.attachments.isEmpty else { return }
+        guard let ingestion = services.vaultIngestionService else {
+            setChatError("Vault ingestion service is unavailable.")
+            emitHaptic(.runFailed)
+            return
+        }
+
+        let importable = message.attachments.compactMap { attachment -> (attachment: ChatAttachment, url: URL)? in
+            guard let localURL = attachment.localURL else { return nil }
+            return (attachment, localURL)
+        }
+        guard !importable.isEmpty else {
+            setChatError("Attachment files are not available locally.")
+            emitHaptic(.runFailed)
+            return
+        }
+
+        _ = await ensureVaultEmbeddingProfile(
+            services: services,
+            reason: "Pines will send imported attachment chunks to this cloud embedding provider to build your private vault index."
+        )
+
+        var importedCount = 0
+        var failures = [String]()
+        for item in importable {
+            guard FileManager.default.fileExists(atPath: item.url.path) else {
+                failures.append("\(item.attachment.fileName): file is no longer available.")
+                continue
+            }
+            do {
+                _ = try await ingestion.importFile(url: item.url)
+                importedCount += 1
+            } catch {
+                failures.append("\(item.attachment.fileName): \(error.localizedDescription)")
+            }
+        }
+
+        if importedCount > 0 {
+            await refreshAll(services: services)
+            clearChatError()
+            emitHaptic(.runCompleted)
+        }
+        if importedCount == 0 {
+            setChatError(failures.first ?? "No attachments were added to Vault.")
+            emitHaptic(.runFailed)
+        } else if !failures.isEmpty {
+            setChatError("Added \(importedCount) attachment\(importedCount == 1 ? "" : "s") to Vault. \(failures.count) failed.")
+            emitHaptic(.runFailed)
+        }
+    }
+
     private static func normalizedUserContent(_ content: String, attachments: [ChatAttachment]) -> String {
         guard content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return content

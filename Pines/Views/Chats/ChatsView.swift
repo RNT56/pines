@@ -349,6 +349,7 @@ private struct ChatTranscriptView: View {
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var retrySpin = false
+    @State private var editingMessage: ChatMessage?
     let thread: PinesThreadPreview
 
     var body: some View {
@@ -361,7 +362,15 @@ private struct ChatTranscriptView: View {
                         ForEach(thread.messages) { message in
                             ChatBubble(
                                 message: message,
-                                isStreaming: appModel.activeRunID == message.id
+                                isStreaming: appModel.activeRunID == message.id,
+                                canEdit: appModel.activeRunID == nil,
+                                copyMessage: { copyMessage(message) },
+                                editMessage: message.role == .user ? { editingMessage = message } : nil,
+                                addAttachmentsToVault: message.attachments.isEmpty ? nil : {
+                                    Task {
+                                        await appModel.addMessageAttachmentsToVault(message, services: services)
+                                    }
+                                }
                             )
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
@@ -390,6 +399,18 @@ private struct ChatTranscriptView: View {
                     proxy.scrollTo("chat-bottom", anchor: .bottom)
                 }
             }
+        }
+        .sheet(item: $editingMessage) { message in
+            ChatMessageEditSheet(
+                message: message,
+                cancel: { editingMessage = nil },
+                save: { content in
+                    editingMessage = nil
+                    Task {
+                        await appModel.editUserMessage(message, content: content, in: thread.id, services: services)
+                    }
+                }
+            )
         }
         .navigationTitle(thread.title)
         .task(id: "\(thread.id.uuidString)-\(thread.lastMessage)") {
@@ -454,6 +475,19 @@ private struct ChatTranscriptView: View {
     private var contentPadding: CGFloat {
         horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large
     }
+
+    private func copyMessage(_ message: ChatMessage) {
+        let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !content.isEmpty {
+            let text = message.role == .assistant
+                ? MarkdownMessageParser().plainText(from: content)
+                : content
+            copyToPasteboard(text)
+        } else {
+            copyToPasteboard(message.attachments.map(\.fileName).joined(separator: "\n"))
+        }
+        haptics.play(.primaryAction)
+    }
 }
 
 private struct ChatTranscriptHeader: View {
@@ -504,70 +538,311 @@ private struct ChatBubble: View {
     @EnvironmentObject private var haptics: PinesHaptics
     let message: ChatMessage
     let isStreaming: Bool
+    let canEdit: Bool
+    let copyMessage: () -> Void
+    let editMessage: (() -> Void)?
+    let addAttachmentsToVault: (() -> Void)?
 
     var body: some View {
+        SwipeableChatBubble(
+            leadingActions: leadingSwipeActions,
+            trailingActions: trailingSwipeActions
+        ) {
+            bubbleContent
+        }
+    }
+
+    private var bubbleContent: some View {
         let shape = RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
-            HStack(spacing: theme.spacing.xsmall) {
-                PinesStatusIndicator(
-                    color: message.role.tint(in: theme),
-                    isActive: isStreaming,
-                    size: isStreaming ? 9 : 8
-                )
+        return VStack(alignment: .leading, spacing: theme.spacing.small) {
+                HStack(spacing: theme.spacing.xsmall) {
+                    PinesStatusIndicator(
+                        color: message.role.tint(in: theme),
+                        isActive: isStreaming,
+                        size: isStreaming ? 9 : 8
+                    )
 
-                Text(message.role.title)
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .pinesFittingText()
-
-                Spacer(minLength: theme.spacing.small)
-
-                if isStreaming {
-                    Text("streaming")
-                        .font(theme.typography.caption.weight(.medium))
-                        .foregroundStyle(theme.colors.accent)
+                    Text(message.role.title)
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(theme.colors.secondaryText)
                         .pinesFittingText()
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+
+                    Spacer(minLength: theme.spacing.small)
+
+                    if isStreaming {
+                        Text("streaming")
+                            .font(theme.typography.caption.weight(.medium))
+                            .foregroundStyle(theme.colors.accent)
+                            .pinesFittingText()
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+                }
+
+                if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    MarkdownMessageView(
+                        messageID: message.id,
+                        content: message.content,
+                        isStreaming: isStreaming
+                    )
+                }
+
+                if !message.attachments.isEmpty {
+                    ChatAttachmentList(attachments: message.attachments)
                 }
             }
+            .padding(theme.spacing.medium)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(message.role.bubbleFill(in: theme), in: shape)
+            .overlay {
+                shape
+                    .strokeBorder(message.role.bubbleBorder(in: theme), lineWidth: theme.stroke.hairline)
+            }
+            .shadow(color: theme.shadow.panelColor.opacity(message.role == .assistant ? 0.55 : 0.32), radius: theme.shadow.panelRadius * 0.25, x: 0, y: theme.shadow.panelY * 0.20)
+            .scaleEffect(isStreaming && !reduceMotion ? 1.006 : 1)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: isStreaming)
+            .contextMenu {
+                Button {
+                    haptics.play(.primaryAction)
+                    copyToPasteboard(message.content)
+                } label: {
+                    Label("Copy as Markdown", systemImage: "doc.on.doc")
+                }
 
-            if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                MarkdownMessageView(
-                    messageID: message.id,
-                    content: message.content,
-                    isStreaming: isStreaming
+                Button {
+                    haptics.play(.primaryAction)
+                    copyToPasteboard(MarkdownMessageParser().plainText(from: message.content))
+                } label: {
+                    Label("Copy as Plain Text", systemImage: "text.alignleft")
+                }
+            }
+    }
+
+    private var leadingSwipeActions: [ChatBubbleSwipeAction] {
+        guard let addAttachmentsToVault else { return [] }
+        return [
+            ChatBubbleSwipeAction(
+                title: "Vault",
+                systemImage: "tray.and.arrow.down",
+                tint: theme.colors.accent,
+                perform: addAttachmentsToVault
+            ),
+        ]
+    }
+
+    private var trailingSwipeActions: [ChatBubbleSwipeAction] {
+        var actions = [
+            ChatBubbleSwipeAction(
+                title: "Copy",
+                systemImage: "doc.on.doc",
+                tint: theme.colors.info,
+                perform: copyMessage
+            ),
+        ]
+        if canEdit, let editMessage {
+            actions.append(
+                ChatBubbleSwipeAction(
+                    title: "Edit",
+                    systemImage: "square.and.pencil",
+                    tint: theme.colors.accent,
+                    perform: editMessage
                 )
+            )
+        }
+        return actions
+    }
+}
+
+private struct ChatBubbleSwipeAction: Identifiable {
+    let id = UUID()
+    let title: String
+    let systemImage: String
+    let tint: Color
+    let perform: () -> Void
+}
+
+private struct SwipeableChatBubble<Content: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let leadingActions: [ChatBubbleSwipeAction]
+    let trailingActions: [ChatBubbleSwipeAction]
+    @ViewBuilder let content: () -> Content
+    @GestureState private var dragOffset: CGFloat = 0
+    @State private var settledOffset: CGFloat = 0
+
+    private let actionWidth: CGFloat = 74
+
+    var body: some View {
+        ZStack {
+            actionRail
+                .opacity(revealedOffset == 0 ? 0 : 1)
+
+            content()
+                .offset(x: revealedOffset)
+                .gesture(horizontalSwipeGesture)
+                .animation(reduceMotion ? nil : theme.motion.fast, value: settledOffset)
+                .animation(reduceMotion ? nil : theme.motion.fast, value: dragOffset)
+        }
+        .onChange(of: leadingActions.count) { _, _ in closeActions() }
+        .onChange(of: trailingActions.count) { _, _ in closeActions() }
+    }
+
+    private var actionRail: some View {
+        HStack(spacing: theme.spacing.xsmall) {
+            ForEach(leadingActions) { action in
+                ChatBubbleSwipeActionButton(action: action, closeActions: closeActions)
             }
 
-            if !message.attachments.isEmpty {
-                ChatAttachmentList(attachments: message.attachments)
-            }
-        }
-        .padding(theme.spacing.medium)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(message.role.bubbleFill(in: theme), in: shape)
-        .overlay {
-            shape
-                .strokeBorder(message.role.bubbleBorder(in: theme), lineWidth: theme.stroke.hairline)
-        }
-        .shadow(color: theme.shadow.panelColor.opacity(message.role == .assistant ? 0.55 : 0.32), radius: theme.shadow.panelRadius * 0.25, x: 0, y: theme.shadow.panelY * 0.20)
-        .scaleEffect(isStreaming && !reduceMotion ? 1.006 : 1)
-        .animation(reduceMotion ? nil : theme.motion.fast, value: isStreaming)
-        .contextMenu {
-            Button {
-                haptics.play(.primaryAction)
-                copyToPasteboard(message.content)
-            } label: {
-                Label("Copy as Markdown", systemImage: "doc.on.doc")
-            }
+            Spacer(minLength: theme.spacing.small)
 
-            Button {
-                haptics.play(.primaryAction)
-                copyToPasteboard(MarkdownMessageParser().plainText(from: message.content))
-            } label: {
-                Label("Copy as Plain Text", systemImage: "text.alignleft")
+            ForEach(trailingActions) { action in
+                ChatBubbleSwipeActionButton(action: action, closeActions: closeActions)
             }
         }
+        .padding(.horizontal, theme.spacing.xsmall)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var horizontalSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 16, coordinateSpace: .local)
+            .updating($dragOffset) { value, state, _ in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                state = value.translation.width
+            }
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                settle(after: value)
+            }
+    }
+
+    private var revealedOffset: CGFloat {
+        clamp(settledOffset + dragOffset)
+    }
+
+    private var leadingRevealWidth: CGFloat {
+        CGFloat(leadingActions.count) * actionWidth
+    }
+
+    private var trailingRevealWidth: CGFloat {
+        CGFloat(trailingActions.count) * actionWidth
+    }
+
+    private func settle(after value: DragGesture.Value) {
+        let projected = clamp(settledOffset + value.predictedEndTranslation.width * 0.45)
+        let current = clamp(settledOffset + value.translation.width)
+        let target = abs(projected) > abs(current) ? projected : current
+        let threshold: CGFloat = 42
+
+        withAnimation(reduceMotion ? nil : theme.motion.fast) {
+            if target > threshold, leadingRevealWidth > 0 {
+                settledOffset = leadingRevealWidth
+            } else if target < -threshold, trailingRevealWidth > 0 {
+                settledOffset = -trailingRevealWidth
+            } else {
+                settledOffset = 0
+            }
+        }
+    }
+
+    private func closeActions() {
+        withAnimation(reduceMotion ? nil : theme.motion.fast) {
+            settledOffset = 0
+        }
+    }
+
+    private func clamp(_ value: CGFloat) -> CGFloat {
+        min(max(value, -trailingRevealWidth), leadingRevealWidth)
+    }
+}
+
+private struct ChatBubbleSwipeActionButton: View {
+    @Environment(\.pinesTheme) private var theme
+    let action: ChatBubbleSwipeAction
+    let closeActions: () -> Void
+
+    var body: some View {
+        Button {
+            closeActions()
+            action.perform()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: action.systemImage)
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(height: 18)
+
+                Text(action.title)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .foregroundStyle(action.tint)
+            .frame(width: 68, minHeight: 58)
+            .background(action.tint.opacity(0.14), in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                    .strokeBorder(action.tint.opacity(0.18), lineWidth: theme.stroke.hairline)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(action.title)
+    }
+}
+
+private struct ChatMessageEditSheet: View {
+    @Environment(\.pinesTheme) private var theme
+    let message: ChatMessage
+    let cancel: () -> Void
+    let save: (String) -> Void
+    @State private var draft: String
+
+    init(message: ChatMessage, cancel: @escaping () -> Void, save: @escaping (String) -> Void) {
+        self.message = message
+        self.cancel = cancel
+        self.save = save
+        _draft = State(initialValue: message.content)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                TextEditor(text: $draft)
+                    .font(theme.typography.body)
+                    .foregroundStyle(theme.colors.primaryText)
+                    .scrollContentBackground(.hidden)
+                    .padding(theme.spacing.small)
+                    .frame(minHeight: 220)
+                    .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                            .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
+                    }
+
+                if !message.attachments.isEmpty {
+                    ChatAttachmentList(attachments: message.attachments)
+                }
+            }
+            .padding(theme.spacing.large)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(theme.colors.sheetBackground.ignoresSafeArea())
+            .navigationTitle("Edit Message")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: cancel)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        save(draft)
+                    }
+                    .disabled(!canSave || draft == message.content)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var canSave: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !message.attachments.isEmpty
     }
 }
 
