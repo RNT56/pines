@@ -486,10 +486,11 @@ private struct ChatMessageRow: View {
         ChatBubble(
             message: message,
             isStreaming: isStreaming,
-            canEdit: canEdit,
+            canEdit: canEdit && message.role == .user,
+            canAddAttachmentsToVault: !message.attachments.isEmpty,
             copyMessage: copyMessage,
-            editMessage: message.role == .user ? { editingMessage = message } : nil,
-            addAttachmentsToVault: message.attachments.isEmpty ? nil : addAttachmentsToVault
+            editMessage: editMessage,
+            addAttachmentsToVault: addAttachmentsToVault
         )
     }
 
@@ -510,6 +511,10 @@ private struct ChatMessageRow: View {
         Task {
             await appModel.addMessageAttachmentsToVault(message, services: services)
         }
+    }
+
+    private func editMessage() {
+        editingMessage = message
     }
 }
 
@@ -562,9 +567,10 @@ private struct ChatBubble: View {
     let message: ChatMessage
     let isStreaming: Bool
     let canEdit: Bool
+    let canAddAttachmentsToVault: Bool
     let copyMessage: () -> Void
-    let editMessage: (() -> Void)?
-    let addAttachmentsToVault: (() -> Void)?
+    let editMessage: () -> Void
+    let addAttachmentsToVault: () -> Void
 
     var body: some View {
         SwipeableChatBubble(
@@ -641,7 +647,7 @@ private struct ChatBubble: View {
     }
 
     private var leadingSwipeActions: [ChatBubbleSwipeAction] {
-        guard let addAttachmentsToVault else { return [] }
+        guard canAddAttachmentsToVault else { return [] }
         return [
             ChatBubbleSwipeAction(
                 title: "Vault",
@@ -661,7 +667,7 @@ private struct ChatBubble: View {
                 perform: copyMessage
             ),
         ]
-        if canEdit, let editMessage {
+        if canEdit {
             actions.append(
                 ChatBubbleSwipeAction(
                     title: "Edit",
