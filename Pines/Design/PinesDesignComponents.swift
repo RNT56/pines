@@ -3,7 +3,7 @@ import SwiftUI
 struct PinesBootMarkView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var didAppear = false
+    @State private var isAnimating = false
 
     private let stages = [
         PinesBootStage(title: "Runtime", systemImage: "cpu", tint: .accent),
@@ -14,16 +14,15 @@ struct PinesBootMarkView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                PinesAmbientBackground(animates: true)
+                PinesAmbientBackground(animates: true, showsWatermark: false)
                     .ignoresSafeArea()
 
-                PinesBootSignalField(isActive: didAppear && !reduceMotion)
+                PinesBootSignalField(isActive: isAnimating && !reduceMotion)
                     .ignoresSafeArea()
 
                 VStack(spacing: theme.spacing.xlarge) {
-                    PinesBootMarkCluster(isActive: didAppear && !reduceMotion)
-                        .scaleEffect(didAppear || reduceMotion ? 1 : 0.9)
-                        .opacity(didAppear ? 1 : 0)
+                    PinesBootMarkCluster(isActive: isAnimating && !reduceMotion)
+                        .scaleEffect(isAnimating || reduceMotion ? 1 : 0.98)
 
                     VStack(spacing: theme.spacing.small) {
                         Text("pines")
@@ -38,21 +37,20 @@ struct PinesBootMarkView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.84)
                     }
-                    .offset(y: didAppear || reduceMotion ? 0 : 10)
-                    .opacity(didAppear ? 1 : 0)
+                    .offset(y: isAnimating || reduceMotion ? 0 : 4)
 
                     HStack(spacing: theme.spacing.small) {
                         ForEach(Array(stages.enumerated()), id: \.element.id) { index, stage in
                             PinesBootStageChip(
                                 stage: stage,
-                                isActive: didAppear,
+                                isActive: isAnimating,
                                 delay: Double(index) * 0.12
                             )
                         }
                     }
 
                     VStack(spacing: theme.spacing.small) {
-                        PinesBootSignalBar(isActive: didAppear && !reduceMotion)
+                        PinesBootSignalBar(isActive: isAnimating && !reduceMotion)
 
                         Text("Starting private workspace")
                             .font(theme.typography.caption.weight(.medium))
@@ -60,7 +58,7 @@ struct PinesBootMarkView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.84)
                     }
-                    .opacity(didAppear ? 1 : 0)
+                    .opacity(isAnimating || reduceMotion ? 1 : 0.82)
                 }
                 .frame(width: max(0, min(430, proxy.size.width - 32)))
                 .padding(.horizontal, theme.spacing.large)
@@ -71,9 +69,10 @@ struct PinesBootMarkView: View {
         .ignoresSafeArea()
         .background(theme.colors.appBackground)
         .onAppear {
-            guard !didAppear else { return }
+            guard !isAnimating else { return }
+            PinesRuntimeMetrics.shared.recordStartupPhase("boot_mark_appeared", elapsedSeconds: 0)
             withAnimation(reduceMotion ? nil : .spring(duration: 0.68, bounce: 0.24)) {
-                didAppear = true
+                isAnimating = true
             }
         }
         .transition(.asymmetric(
@@ -928,6 +927,7 @@ struct PinesAmbientBackground: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var animates = false
+    var showsWatermark = true
     @State private var drift = false
 
     var body: some View {
@@ -940,22 +940,24 @@ struct PinesAmbientBackground: View {
                     .stroke(theme.colors.accent.opacity(theme.ambient.lineOpacity), lineWidth: theme.stroke.hairline)
                     .offset(x: lineOffset)
 
-                Image("PinesMark")
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundStyle(theme.colors.accent)
-                    .opacity(theme.ambient.markOpacity)
-                    .frame(width: min(proxy.size.width, proxy.size.height) * 0.46)
-                    .rotationEffect(.degrees(theme.template == .aurora ? -8 : 0))
-                    .offset(x: proxy.size.width * 0.24, y: -proxy.size.height * 0.20)
-                    .accessibilityHidden(true)
+                if showsWatermark {
+                    Image("PinesMark")
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(theme.colors.accent)
+                        .opacity(theme.ambient.markOpacity)
+                        .frame(width: min(proxy.size.width, proxy.size.height) * 0.46)
+                        .rotationEffect(.degrees(theme.template == .aurora ? -8 : 0))
+                        .offset(x: proxy.size.width * 0.24, y: -proxy.size.height * 0.20)
+                        .accessibilityHidden(true)
 
-                RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
-                    .fill(theme.colors.accent.opacity(theme.ambient.glowOpacity))
-                    .blur(radius: 34)
-                    .frame(width: proxy.size.width * 0.48, height: 20)
-                    .rotationEffect(.degrees(theme.template == .graphite ? 0 : -18))
-                    .offset(x: proxy.size.width * 0.16, y: proxy.size.height * 0.38)
+                    RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
+                        .fill(theme.colors.accent.opacity(theme.ambient.glowOpacity))
+                        .blur(radius: 34)
+                        .frame(width: proxy.size.width * 0.48, height: 20)
+                        .rotationEffect(.degrees(theme.template == .graphite ? 0 : -18))
+                        .offset(x: proxy.size.width * 0.16, y: proxy.size.height * 0.38)
+                }
             }
             .clipped()
             .onAppear {

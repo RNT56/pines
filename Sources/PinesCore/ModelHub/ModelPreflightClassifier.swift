@@ -80,6 +80,7 @@ public struct ModelPreflightClassifier: Sendable {
             || lowerRepository.contains("1-bit")
             || lowerRepository.contains("bitnet")
             || input.tags.contains { $0.localizedCaseInsensitiveContains("bitnet") }
+        let hasKnownRuntimeCrashSignal = Self.hasKnownRuntimeCrashSignal(repository: lowerRepository, modelType: modelType)
 
         let verification: ModelVerificationState
         if modalities.isEmpty
@@ -90,6 +91,9 @@ public struct ModelPreflightClassifier: Sendable {
         } else if hasExperimentalOneBitSignal || modelType == "bitnet" {
             verification = .experimental
             reasons.append("1-bit/BitNet models require exact-device verification before being marked verified.")
+        } else if hasKnownRuntimeCrashSignal {
+            verification = .experimental
+            reasons.append(Self.knownRuntimeCrashReason)
         } else if CuratedModelManifest.default.contains(repository: input.repository) {
             verification = .verified
         } else {
@@ -114,6 +118,15 @@ public struct ModelPreflightClassifier: Sendable {
 
     private static func filename(_ path: String) -> String {
         path.split(separator: "/").last.map { String($0).lowercased() } ?? path.lowercased()
+    }
+
+    public static let knownRuntimeCrashReason = "Qwen3 1.7B MLX 4-bit variants currently trigger a Swift/MLX integer conversion crash on-device in Pines. Use a curated verified Qwen3 model until this runtime path is verified."
+
+    public static func hasKnownRuntimeCrashSignal(repository: String, modelType: String?) -> Bool {
+        let normalized = repository.lowercased()
+        return modelType == "qwen3"
+            && (normalized.contains("qwen3-1.7b") || normalized.contains("qwen3_1.7b") || normalized.contains("qwen3-1_7b"))
+            && (normalized.contains("4bit") || normalized.contains("4-bit"))
     }
 
     public static let defaultSupportedLLMTypes: Set<String> = [

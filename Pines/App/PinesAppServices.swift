@@ -42,8 +42,10 @@ final class PinesAppServices: @unchecked Sendable {
         redactor: Redactor = Redactor(),
         mlxRuntime: MLXRuntimeBridge = MLXRuntimeBridge(),
         runtimeMetrics: PinesRuntimeMetrics = .shared,
-        liveStore: PinesLiveStore? = PinesAppServices.makeDefaultStore()
+        liveStore: PinesLiveStore? = nil,
+        loadsDefaultStore: Bool = true
     ) {
+        let liveStore = liveStore ?? (loadsDefaultStore ? PinesAppServices.makeDefaultStore(runtimeMetrics: runtimeMetrics) : nil)
         self.secretStore = secretStore
         self.modelCatalog = modelCatalog
         self.preflightClassifier = preflightClassifier
@@ -194,9 +196,12 @@ final class PinesAppServices: @unchecked Sendable {
         )
     }
 
-    private static func makeDefaultStore() -> PinesLiveStore? {
+    private static func makeDefaultStore(runtimeMetrics: PinesRuntimeMetrics) -> PinesLiveStore? {
         #if canImport(GRDB)
-        return try? GRDBPinesStore()
+        let startedAt = Date()
+        let store = try? GRDBPinesStore(runtimeMetrics: runtimeMetrics)
+        runtimeMetrics.recordStartupPhase("store_init", elapsedSeconds: Date().timeIntervalSince(startedAt))
+        return store
         #else
         return nil
         #endif
@@ -204,7 +209,7 @@ final class PinesAppServices: @unchecked Sendable {
 }
 
 private struct PinesAppServicesKey: EnvironmentKey {
-    static let defaultValue = PinesAppServices()
+    static let defaultValue = PinesAppServices(loadsDefaultStore: false)
 }
 
 extension EnvironmentValues {

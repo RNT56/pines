@@ -237,7 +237,6 @@ final class PinesHaptics: ObservableObject {
     init() {
         let rawMode = UserDefaults.standard.string(forKey: Self.modeKey)
         mode = rawMode.flatMap(PinesHapticMode.init(rawValue:)) ?? .standard
-        prepare()
     }
 
     func play(_ event: PinesHapticEvent) {

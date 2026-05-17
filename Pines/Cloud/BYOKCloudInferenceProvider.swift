@@ -5,15 +5,17 @@ import UniformTypeIdentifiers
 
 struct BYOKCloudInferenceProvider: InferenceProvider {
     private static let openAIReasoningDefaultMaxCompletionTokens = 16_384
-    fileprivate static let openAIResponseIDMetadataKey = "openai.response_id"
-    fileprivate static let openAIRequestIDMetadataKey = "openai.request_id"
-    fileprivate static let openAIClientRequestIDMetadataKey = "openai.client_request_id"
-    fileprivate static let anthropicMessageIDMetadataKey = "anthropic.message_id"
-    fileprivate static let anthropicRequestIDMetadataKey = "anthropic.request_id"
-    fileprivate static let geminiResponseIDMetadataKey = "gemini.response_id"
-    fileprivate static let geminiModelVersionMetadataKey = "gemini.model_version"
-    fileprivate static let geminiRequestIDMetadataKey = "gemini.request_id"
-    fileprivate static let geminiModelContentMetadataKey = "gemini.model_content_json"
+    fileprivate static let openAIResponseIDMetadataKey = CloudProviderMetadataKeys.openAIResponseID
+    fileprivate static let openAIRequestIDMetadataKey = CloudProviderMetadataKeys.openAIRequestID
+    fileprivate static let openAIClientRequestIDMetadataKey = CloudProviderMetadataKeys.openAIClientRequestID
+    fileprivate static let anthropicMessageIDMetadataKey = CloudProviderMetadataKeys.anthropicMessageID
+    fileprivate static let anthropicRequestIDMetadataKey = CloudProviderMetadataKeys.anthropicRequestID
+    fileprivate static let anthropicThinkingContentMetadataKey = CloudProviderMetadataKeys.anthropicThinkingContentJSON
+    fileprivate static let geminiResponseIDMetadataKey = CloudProviderMetadataKeys.geminiResponseID
+    fileprivate static let geminiModelVersionMetadataKey = CloudProviderMetadataKeys.geminiModelVersion
+    fileprivate static let geminiRequestIDMetadataKey = CloudProviderMetadataKeys.geminiRequestID
+    fileprivate static let geminiModelContentMetadataKey = CloudProviderMetadataKeys.geminiModelContentJSON
+    fileprivate static let geminiInteractionIDMetadataKey = CloudProviderMetadataKeys.geminiInteractionID
     fileprivate static let maxInlineImageBytes = 20 * 1024 * 1024
     fileprivate static let maxInlineFileBytes = 50 * 1024 * 1024
 
@@ -58,8 +60,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                     }
 
                     var dataLines = [String]()
-                    var toolState = CloudToolCallStreamState()
-                    toolState.recordRequestMetadata(
+                    var streamParser = CloudProviderStreamParser()
+                    streamParser.recordRequestMetadata(
                         providerKind: configuration.kind,
                         serverRequestID: Self.providerRequestID(from: http, body: nil, providerKind: configuration.kind),
                         clientRequestID: clientRequestID
@@ -69,16 +71,21 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                         guard !Task.isCancelled else { throw InferenceError.cancelled }
                         let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
                         if line.isEmpty {
-                            handleSSEDataLines(dataLines, format: streamingFormat, state: &toolState, pendingFinish: &pendingFinish, continuation: continuation)
+                            handleSSEDataLines(dataLines, format: streamingFormat, parser: &streamParser, pendingFinish: &pendingFinish, continuation: continuation)
                             dataLines.removeAll(keepingCapacity: true)
                         } else if line.hasPrefix("data:") {
                             dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
                         }
                     }
                     if !dataLines.isEmpty {
-                        handleSSEDataLines(dataLines, format: streamingFormat, state: &toolState, pendingFinish: &pendingFinish, continuation: continuation)
+                        handleSSEDataLines(dataLines, format: streamingFormat, parser: &streamParser, pendingFinish: &pendingFinish, continuation: continuation)
                     }
-                    continuation.yield(.finish(pendingFinish ?? fallbackFinish(format: streamingFormat, state: toolState, chatRequest: request)))
+                    continuation.yield(.finish(pendingFinish ?? streamParser.fallbackFinish(
+                        format: streamingFormat,
+                        providerKind: configuration.kind,
+                        modelID: request.modelID,
+                        usesOfficialOpenAIReasoningChat: usesOfficialOpenAIAPI && usesOpenAIReasoningChatParameters(modelID: request.modelID)
+                    )))
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
@@ -178,11 +185,13 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         case .anthropic:
             return try anthropicRequest(apiKey: apiKey, chatRequest: chatRequest)
         case .gemini:
-            return try geminiRequest(apiKey: apiKey, chatRequest: chatRequest)
+            return usesGeminiInteractionsAPI(chatRequest: chatRequest)
+                ? try geminiInteractionsRequest(apiKey: apiKey, chatRequest: chatRequest)
+                : try geminiRequest(apiKey: apiKey, chatRequest: chatRequest)
         }
     }
 
-    private func streamingFormat(for chatRequest: ChatRequest) -> CloudStreamingFormat {
+    private func streamingFormat(for chatRequest: ChatRequest) -> CloudProviderStreamFormat {
         if usesOpenAIResponsesAPI(chatRequest: chatRequest) {
             return .openAIResponses
         }
@@ -190,7 +199,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         case .anthropic:
             return .anthropicMessages
         case .gemini:
-            return .geminiGenerateContent
+            return usesGeminiInteractionsAPI(chatRequest: chatRequest) ? .geminiInteractions : .geminiGenerateContent
         case .openAI, .openAICompatible, .openRouter, .custom:
             return .chatCompletions
         }
@@ -331,6 +340,13 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if chatRequest.sampling.topK > 0 {
             body["top_k"] = chatRequest.sampling.topK
         }
+        if shouldEnableAnthropicPromptCaching(for: chatRequest) {
+            body["cache_control"] = ["type": "ephemeral"]
+        }
+        if let thinking = anthropicThinkingConfiguration(for: chatRequest.modelID) {
+            body["thinking"] = thinking
+            body["output_config"] = ["effort": "low"]
+        }
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
             body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.anthropicToolObject()) }
             body["tool_choice"] = ["type": "auto"]
@@ -347,6 +363,34 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
     private func usesOpenAIResponsesAPI(chatRequest: ChatRequest) -> Bool {
         usesOfficialOpenAIAPI
+    }
+
+    private func shouldEnableAnthropicPromptCaching(for chatRequest: ChatRequest) -> Bool {
+        guard configuration.kind == .anthropic else { return false }
+        return chatRequest.messages.count > 2
+            || chatRequest.allowsTools
+            || chatRequest.messages.contains { !$0.attachments.isEmpty || $0.role == .system }
+    }
+
+    private func anthropicThinkingConfiguration(for modelID: ModelID) -> [String: Any]? {
+        let id = modelID.rawValue.lowercased()
+        guard id.contains("claude-opus-4-7")
+            || id.contains("claude-opus-4-6")
+            || id.contains("claude-sonnet-4-6")
+            || id.contains("claude-mythos-preview")
+        else {
+            return nil
+        }
+        return [
+            "type": "adaptive",
+            "display": "omitted",
+        ]
+    }
+
+    private func usesGeminiInteractionsAPI(chatRequest: ChatRequest) -> Bool {
+        guard configuration.kind == .gemini else { return false }
+        let id = chatRequest.modelID.rawValue.lowercased()
+        return id.contains("gemini-3") || id.contains("deep-research")
     }
 
     private var apiBaseURL: URL {
@@ -402,36 +446,6 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return modelName.hasPrefix("gpt-5") || CloudProviderModelEligibility.isOpenAIOSeries(modelName)
     }
 
-    private func fallbackFinish(
-        format: CloudStreamingFormat,
-        state: CloudToolCallStreamState,
-        chatRequest: ChatRequest
-    ) -> InferenceFinish {
-        switch format {
-        case .openAIResponses:
-            return InferenceFinish(
-                reason: .stop,
-                message: Self.openAIResponsesEmptyOutputMessage(response: nil, eventTypes: state.openAIResponsesEventTypes),
-                providerMetadata: state.openAIProviderMetadata
-            )
-        case .chatCompletions:
-            guard usesOfficialOpenAIAPI,
-                  usesOpenAIReasoningChatParameters(modelID: chatRequest.modelID)
-            else {
-                return InferenceFinish(reason: .stop)
-            }
-            return InferenceFinish(
-                reason: .stop,
-                message: "Pines received an empty OpenAI Chat Completions stream for \(chatRequest.modelID.rawValue). Official OpenAI reasoning models should use the Responses API; check that the provider base URL is https://api.openai.com/v1.",
-                providerMetadata: state.openAIProviderMetadata
-            )
-        case .anthropicMessages:
-            return InferenceFinish(reason: .stop, providerMetadata: state.anthropicProviderMetadata)
-        case .geminiGenerateContent:
-            return InferenceFinish(reason: state.geminiCompletedToolCallIDs.isEmpty ? .stop : .toolCall, providerMetadata: state.geminiProviderMetadata)
-        }
-    }
-
     private func geminiRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
         let version = Self.geminiAPIVersion(for: chatRequest.modelID)
         var components = URLComponents(
@@ -483,6 +497,70 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try applyExtraHeaders(to: &request)
         return request
+    }
+
+    private func geminiInteractionsRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
+        var components = URLComponents(url: configuration.baseURL.appending(path: "v1beta/interactions"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "alt", value: "sse"),
+        ]
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let systemInstruction = chatRequest.messages
+            .filter { $0.role == .system }
+            .map(\.content)
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        var generationConfig: [String: Any] = [
+            "max_output_tokens": chatRequest.sampling.maxTokens ?? AppSettingsSnapshot.defaultCloudMaxCompletionTokens,
+            "temperature": chatRequest.sampling.temperature,
+            "top_p": chatRequest.sampling.topP,
+            "thinking_level": "low",
+            "thinking_summaries": "none",
+        ]
+        if chatRequest.sampling.topK > 0 {
+            generationConfig["top_k"] = chatRequest.sampling.topK
+        }
+
+        var body: [String: Any] = [
+            "stream": true,
+            "store": true,
+            "input": try Self.geminiInteractionInput(from: chatRequest.messages),
+            "response_modalities": "text",
+        ]
+        if Self.isGeminiDeepResearchAgentID(chatRequest.modelID) {
+            body["agent"] = chatRequest.modelID.rawValue
+            body["agent_config"] = [
+                "type": "deep-research",
+                "thinking_summaries": "none",
+                "visualization": "off",
+            ]
+        } else {
+            body["model"] = chatRequest.modelID.rawValue
+            body["generation_config"] = generationConfig
+        }
+        if !systemInstruction.isEmpty {
+            body["system_instruction"] = systemInstruction
+        }
+        if let previousInteractionID = Self.latestGeminiInteractionID(from: chatRequest.messages) {
+            body["previous_interaction_id"] = previousInteractionID
+        }
+        if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
+            body["tools"] = chatRequest.availableTools.map(Self.geminiInteractionFunctionToolObject)
+            body["tool_choice"] = "auto"
+        }
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        try applyExtraHeaders(to: &request)
+        return request
+    }
+
+    private static func isGeminiDeepResearchAgentID(_ modelID: ModelID) -> Bool {
+        modelID.rawValue.lowercased().contains("deep-research")
     }
 
     private static func openAIMessageObject(_ message: ChatMessage, providerKind: CloudProviderKind) throws -> [String: Any] {
@@ -691,7 +769,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             ]
         }
 
-        var content = [[String: Any]]()
+        var content = anthropicThinkingContentBlocks(from: message)
         if message.role == .user {
             for attachment in try normalizedCloudAttachments(from: message) {
                 switch attachment.kind {
@@ -721,6 +799,17 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             "role": message.role == .assistant ? "assistant" : "user",
             "content": content.isEmpty ? [["type": "text", "text": message.content]] : content,
         ]
+    }
+
+    private static func anthropicThinkingContentBlocks(from message: ChatMessage) -> [[String: Any]] {
+        guard message.role == .assistant,
+              let rawContent = message.providerMetadata[anthropicThinkingContentMetadataKey],
+              let data = rawContent.data(using: .utf8),
+              let blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else {
+            return []
+        }
+        return blocks.filter { $0["type"] as? String == "thinking" }
     }
 
     private static func geminiContentObject(_ message: ChatMessage) throws -> [String: Any] {
@@ -776,6 +865,86 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return [
             "role": message.role == .assistant ? "model" : "user",
             "parts": parts.isEmpty ? [["text": message.content]] : parts,
+        ]
+    }
+
+    private static func latestGeminiInteractionID(from messages: [ChatMessage]) -> String? {
+        messages.reversed().compactMap { message in
+            let id = message.providerMetadata[geminiInteractionIDMetadataKey]
+            return id?.isEmpty == false ? id : nil
+        }.first
+    }
+
+    private static func geminiInteractionInput(from messages: [ChatMessage]) throws -> [[String: Any]] {
+        try messages.reduce(into: [[String: Any]]()) { input, message in
+            guard message.role != .system else { return }
+            switch message.role {
+            case .user:
+                input.append([
+                    "type": "user_input",
+                    "content": try geminiInteractionContent(from: message),
+                ])
+            case .assistant:
+                if !message.content.isEmpty {
+                    input.append([
+                        "type": "model_output",
+                        "content": [["type": "text", "text": message.content]],
+                    ])
+                }
+                for toolCall in message.toolCalls {
+                    input.append([
+                        "type": "function_call",
+                        "id": toolCall.id,
+                        "name": toolCall.name,
+                        "arguments": Self.jsonObject(fromJSONString: toolCall.argumentsFragment) ?? [:],
+                    ])
+                }
+            case .tool:
+                input.append([
+                    "type": "function_result",
+                    "name": message.toolName ?? "",
+                    "call_id": message.toolCallID ?? "",
+                    "result": message.content,
+                ])
+            case .system:
+                break
+            }
+        }
+    }
+
+    private static func geminiInteractionContent(from message: ChatMessage) throws -> [[String: Any]] {
+        var content = [[String: Any]]()
+        if !message.content.isEmpty {
+            content.append(["type": "text", "text": message.content])
+        }
+        for attachment in try normalizedCloudAttachments(from: message) {
+            switch attachment.kind {
+            case .image:
+                let geminiAttachment = try geminiCompatibleAttachment(attachment)
+                content.append([
+                    "type": "image",
+                    "mime_type": geminiAttachment.contentType,
+                    "data": geminiAttachment.base64Data,
+                ])
+            case .pdf:
+                content.append([
+                    "type": "document",
+                    "mime_type": attachment.contentType,
+                    "data": attachment.base64Data,
+                ])
+            case .textDocument:
+                content.append(["type": "text", "text": try textDocumentPrompt(from: attachment)])
+            }
+        }
+        return content.isEmpty ? [["type": "text", "text": message.content]] : content
+    }
+
+    private static func geminiInteractionFunctionToolObject(_ spec: AnyToolSpec) -> [String: Any] {
+        [
+            "type": "function",
+            "name": spec.name,
+            "description": spec.description,
+            "parameters": jsonSerializable((spec.inputJSONSchema ?? spec.inputSchema.jsonValue).anySendable),
         ]
     }
 
@@ -977,15 +1146,19 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
     private func handleSSEDataLines(
         _ dataLines: [String],
-        format: CloudStreamingFormat,
-        state: inout CloudToolCallStreamState,
+        format: CloudProviderStreamFormat,
+        parser: inout CloudProviderStreamParser,
         pendingFinish: inout InferenceFinish?,
         continuation: AsyncThrowingStream<InferenceStreamEvent, Error>.Continuation
     ) {
         let payload = dataLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         guard payload != "[DONE]", let data = payload.data(using: .utf8) else { return }
 
-        for event in Self.extractEvents(from: data, format: format, providerKind: configuration.kind, state: &state, pendingFinish: &pendingFinish) {
+        let output = parser.parse(data: data, format: format, providerKind: configuration.kind)
+        if let finish = output.finish {
+            pendingFinish = finish
+        }
+        for event in output.events {
             continuation.yield(event)
         }
     }
@@ -1132,693 +1305,6 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             }
     }
 
-    private static func extractEvents(
-        from data: Data,
-        format: CloudStreamingFormat,
-        providerKind: CloudProviderKind,
-        state: inout CloudToolCallStreamState,
-        pendingFinish: inout InferenceFinish?
-    ) -> [InferenceStreamEvent] {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return []
-        }
-
-        var events = [InferenceStreamEvent]()
-        if format == .openAIResponses {
-            return extractOpenAIResponsesEvents(json, state: &state, pendingFinish: &pendingFinish)
-        }
-
-        switch providerKind {
-        case .anthropic:
-            let type = json["type"] as? String
-            if type == "message_start",
-               let message = json["message"] as? [String: Any] {
-                state.recordAnthropicMessage(message)
-                if let usage = message["usage"] as? [String: Any],
-                   let metrics = anthropicMetrics(from: usage) {
-                    events.append(.metrics(metrics))
-                }
-            }
-            if type == "content_block_start",
-               let index = json["index"] as? Int,
-               let block = json["content_block"] as? [String: Any] {
-                if block["type"] as? String == "tool_use" {
-                    state.anthropicToolIndex = index
-                    state.anthropicToolID = block["id"] as? String
-                    state.anthropicToolName = block["name"] as? String
-                    state.anthropicArguments = jsonString(from: block["input"]) ?? ""
-                }
-                if block["type"] as? String == "text",
-                   let text = block["text"] as? String,
-                   !text.isEmpty {
-                    events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
-                }
-            }
-            if let delta = json["delta"] as? [String: Any] {
-                if delta["type"] as? String == "text_delta", let text = delta["text"] as? String, !text.isEmpty {
-                    events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
-                }
-                if delta["type"] as? String == "input_json_delta", let partial = delta["partial_json"] as? String {
-                    state.anthropicArguments += partial
-                }
-            }
-            if type == "content_block_stop",
-               let index = json["index"] as? Int,
-               index == state.anthropicToolIndex,
-               let id = state.anthropicToolID,
-               let name = state.anthropicToolName {
-                events.append(
-                    .toolCall(
-                        ToolCallDelta(
-                            id: id,
-                            name: name,
-                            argumentsFragment: state.anthropicArguments.isEmpty ? "{}" : state.anthropicArguments,
-                            isComplete: true
-                        )
-                    )
-                )
-                state.clearAnthropicTool()
-            }
-            if type == "message_delta" {
-                if let usage = json["usage"] as? [String: Any],
-                   let metrics = anthropicMetrics(from: usage) {
-                    events.append(.metrics(metrics))
-                }
-                if let delta = json["delta"] as? [String: Any],
-                   let stopReason = delta["stop_reason"] as? String {
-                    pendingFinish = anthropicFinish(from: stopReason, metadata: state.anthropicProviderMetadata)
-                }
-            }
-            if type == "error" {
-                let error = json["error"] as? [String: Any]
-                pendingFinish = InferenceFinish(
-                    reason: .error,
-                    message: error?["message"] as? String ?? "Anthropic returned a streaming error.",
-                    providerMetadata: state.anthropicProviderMetadata
-                )
-            }
-        case .gemini:
-            state.recordGeminiResponse(json)
-            if let promptFeedback = json["promptFeedback"] as? [String: Any],
-               let finish = geminiPromptFeedbackFinish(from: promptFeedback, metadata: state.geminiProviderMetadata) {
-                pendingFinish = finish
-            }
-            if let usage = json["usageMetadata"] as? [String: Any],
-               let metrics = geminiMetrics(from: usage) {
-                events.append(.metrics(metrics))
-            }
-            let candidates = json["candidates"] as? [[String: Any]]
-            for candidate in candidates ?? [] {
-                if let content = candidate["content"] as? [String: Any] {
-                    state.recordGeminiModelContent(content)
-                    let parts = content["parts"] as? [[String: Any]]
-                    for part in parts ?? [] {
-                        if part["thought"] as? Bool == true {
-                            continue
-                        }
-                        if let text = part["text"] as? String, !text.isEmpty {
-                            events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
-                        }
-                        if let call = part["functionCall"] as? [String: Any],
-                           let name = call["name"] as? String {
-                            let toolCall = ToolCallDelta(
-                                id: (call["id"] as? String) ?? UUID().uuidString,
-                                name: name,
-                                argumentsFragment: jsonString(from: call["args"]) ?? "{}",
-                                isComplete: true
-                            )
-                            if state.markGeminiToolCallCompleted(toolCall) {
-                                events.append(.toolCall(toolCall))
-                            }
-                        }
-                    }
-                }
-                if let finishReason = candidate["finishReason"] as? String {
-                    pendingFinish = geminiFinish(
-                        from: finishReason,
-                        hasToolCalls: !state.geminiCompletedToolCallIDs.isEmpty,
-                        metadata: state.geminiProviderMetadata
-                    )
-                }
-            }
-        case .openAI, .openAICompatible, .openRouter, .custom:
-            let choices = json["choices"] as? [[String: Any]]
-            let delta = choices?.first?["delta"] as? [String: Any]
-            if let text = openAIChatCompletionText(from: delta?["content"]), !text.isEmpty {
-                state.openAIChatCompletionTextEmitted = true
-                events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
-            }
-            if let text = openAIChatCompletionText(from: delta?["refusal"]), !text.isEmpty {
-                state.openAIChatCompletionTextEmitted = true
-                events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
-            }
-            let message = choices?.first?["message"] as? [String: Any]
-            if !state.openAIChatCompletionTextEmitted,
-               let text = openAIChatCompletionText(from: message?["content"]),
-               !text.isEmpty {
-                state.openAIChatCompletionTextEmitted = true
-                events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
-            }
-            if let toolCalls = delta?["tool_calls"] as? [[String: Any]] {
-                for call in toolCalls {
-                    let index = call["index"] as? Int ?? 0
-                    if let id = call["id"] as? String {
-                        state.openAIToolIDs[index] = id
-                    }
-                    if let function = call["function"] as? [String: Any] {
-                        if let name = function["name"] as? String {
-                            state.openAIToolNames[index] = name
-                        }
-                        if let arguments = function["arguments"] as? String {
-                            state.openAIArguments[index, default: ""] += arguments
-                        }
-                    }
-                }
-            }
-            if let finish = choices?.first?["finish_reason"] as? String {
-                pendingFinish = openAIFinish(from: finish)
-            }
-            if let finish = choices?.first?["finish_reason"] as? String, finish == "tool_calls" {
-                for index in state.openAIToolNames.keys.sorted() {
-                    guard let name = state.openAIToolNames[index] else { continue }
-                    events.append(
-                        .toolCall(
-                            ToolCallDelta(
-                                id: state.openAIToolIDs[index] ?? UUID().uuidString,
-                                name: name,
-                                argumentsFragment: state.openAIArguments[index] ?? "{}",
-                                isComplete: true
-                            )
-                        )
-                    )
-                }
-                state.clearOpenAITools()
-            }
-        }
-
-        return events
-    }
-
-    private static func extractOpenAIResponsesEvents(
-        _ json: [String: Any],
-        state: inout CloudToolCallStreamState,
-        pendingFinish: inout InferenceFinish?
-    ) -> [InferenceStreamEvent] {
-        let type = json["type"] as? String
-        if let type {
-            state.openAIResponsesEventTypes.insert(type)
-        }
-        if let response = json["response"] as? [String: Any] {
-            state.recordOpenAIResponse(response)
-        }
-        switch type {
-        case "response.output_item.added":
-            if let index = json["output_index"] as? Int,
-               let item = json["item"] as? [String: Any],
-               item["type"] as? String == "function_call" {
-                state.openAIToolIDs[index] = (item["call_id"] as? String) ?? (item["id"] as? String)
-                state.openAIToolNames[index] = item["name"] as? String
-                if let arguments = item["arguments"] as? String {
-                    state.openAIArguments[index] = arguments
-                }
-            }
-            if !state.openAIResponsesTextEmitted,
-               let item = json["item"] as? [String: Any],
-               let text = openAIResponsesOutputText(fromOutputItem: item),
-               !text.isEmpty {
-                state.openAIResponsesTextEmitted = true
-                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
-            }
-        case "response.output_item.done":
-            if let item = json["item"] as? [String: Any] {
-                if !state.openAIResponsesTextEmitted,
-                   let text = openAIResponsesOutputText(fromOutputItem: item),
-                   !text.isEmpty {
-                    state.openAIResponsesTextEmitted = true
-                    return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
-                }
-                if let toolCall = openAIResponsesFunctionCall(fromOutputItem: item),
-                   state.markOpenAIToolCallCompleted(toolCall) {
-                    pendingFinish = InferenceFinish(reason: .toolCall, providerMetadata: state.openAIProviderMetadata)
-                    return [.toolCall(toolCall)]
-                }
-            }
-        case "response.output_text.delta":
-            if let delta = json["delta"] as? String, !delta.isEmpty {
-                state.openAIResponsesTextEmitted = true
-                return [.token(TokenDelta(kind: .token, text: delta, tokenCount: 1))]
-            }
-        case "response.output_text.done":
-            if !state.openAIResponsesTextEmitted,
-               let text = json["text"] as? String,
-               !text.isEmpty {
-                state.openAIResponsesTextEmitted = true
-                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
-            }
-        case "response.content_part.done":
-            if !state.openAIResponsesTextEmitted,
-               let part = json["part"] as? [String: Any],
-               let text = part["text"] as? String,
-               !text.isEmpty {
-                state.openAIResponsesTextEmitted = true
-                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
-            }
-        case "response.content_part.added":
-            if !state.openAIResponsesTextEmitted,
-               let part = json["part"] as? [String: Any],
-               let text = openAIResponsesOutputText(fromContentPart: part),
-               !text.isEmpty {
-                state.openAIResponsesTextEmitted = true
-                return [.token(TokenDelta(kind: .token, text: text, tokenCount: 1))]
-            }
-        case "response.refusal.delta":
-            if let delta = json["delta"] as? String, !delta.isEmpty {
-                state.openAIResponsesTextEmitted = true
-                return [.token(TokenDelta(kind: .token, text: delta, tokenCount: 1))]
-            }
-        case "response.refusal.done":
-            if !state.openAIResponsesTextEmitted,
-               let refusal = json["refusal"] as? String,
-               !refusal.isEmpty {
-                state.openAIResponsesTextEmitted = true
-                return [.token(TokenDelta(kind: .token, text: refusal, tokenCount: 1))]
-            }
-        case "response.function_call_arguments.delta":
-            let index = json["output_index"] as? Int ?? 0
-            if let itemID = json["item_id"] as? String {
-                state.openAIToolIDs[index] = state.openAIToolIDs[index] ?? itemID
-            }
-            if let delta = json["delta"] as? String {
-                state.openAIArguments[index, default: ""] += delta
-            }
-        case "response.function_call_arguments.done":
-            let index = json["output_index"] as? Int ?? 0
-            if let itemID = json["item_id"] as? String {
-                state.openAIToolIDs[index] = state.openAIToolIDs[index] ?? itemID
-            }
-            if let name = json["name"] as? String {
-                state.openAIToolNames[index] = name
-            }
-            if let arguments = json["arguments"] as? String {
-                state.openAIArguments[index] = arguments
-            }
-            if let name = state.openAIToolNames[index] {
-                let toolCall = ToolCallDelta(
-                    id: state.openAIToolIDs[index] ?? UUID().uuidString,
-                    name: name,
-                    argumentsFragment: state.openAIArguments[index] ?? "{}",
-                    isComplete: true
-                )
-                state.openAIToolIDs.removeValue(forKey: index)
-                state.openAIToolNames.removeValue(forKey: index)
-                state.openAIArguments.removeValue(forKey: index)
-                if state.markOpenAIToolCallCompleted(toolCall) {
-                    pendingFinish = InferenceFinish(reason: .toolCall, providerMetadata: state.openAIProviderMetadata)
-                    return [.toolCall(toolCall)]
-                }
-            }
-        case "response.completed", "response.done":
-            let response = json["response"] as? [String: Any]
-            var events = [InferenceStreamEvent]()
-            if !state.openAIResponsesTextEmitted,
-               let response,
-               let text = openAIResponsesOutputText(from: response),
-               !text.isEmpty {
-                state.openAIResponsesTextEmitted = true
-                events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
-            }
-            if let response {
-                for toolCall in openAIResponsesFunctionCalls(from: response) where state.markOpenAIToolCallCompleted(toolCall) {
-                    events.append(.toolCall(toolCall))
-                }
-                if let metrics = openAIResponsesMetrics(from: response) {
-                    events.append(.metrics(metrics))
-                }
-            }
-            let finishReason: InferenceFinishReason = events.contains { event in
-                if case .toolCall = event { return true }
-                return false
-            } ? .toolCall : .stop
-            pendingFinish = InferenceFinish(
-                reason: finishReason,
-                message: finishReason == .stop && events.isEmpty && !state.openAIResponsesTextEmitted
-                    ? openAIResponsesEmptyOutputMessage(response: response, eventTypes: state.openAIResponsesEventTypes)
-                    : nil,
-                providerMetadata: state.openAIProviderMetadata
-            )
-            return events
-        case "response.incomplete":
-            let response = json["response"] as? [String: Any]
-            let details = response?["incomplete_details"] as? [String: Any]
-            let reason = details?["reason"] as? String
-            pendingFinish = InferenceFinish(
-                reason: reason == "max_output_tokens" ? .length : .error,
-                message: reason == "max_output_tokens"
-                    ? "The selected OpenAI model used its max output token budget before producing visible output."
-                    : "The selected OpenAI model returned an incomplete response.",
-                providerMetadata: state.openAIProviderMetadata
-            )
-        case "response.failed":
-            let response = json["response"] as? [String: Any]
-            let error = response?["error"] as? [String: Any]
-            pendingFinish = InferenceFinish(
-                reason: .error,
-                message: error?["message"] as? String ?? "The selected OpenAI model failed to produce a response.",
-                providerMetadata: state.openAIProviderMetadata
-            )
-        default:
-            break
-        }
-        return []
-    }
-
-    private static func openAIResponsesFunctionCalls(from response: [String: Any]) -> [ToolCallDelta] {
-        guard let output = response["output"] as? [[String: Any]] else { return [] }
-        return output.compactMap(openAIResponsesFunctionCall(fromOutputItem:))
-    }
-
-    private static func openAIResponsesFunctionCall(fromOutputItem item: [String: Any]) -> ToolCallDelta? {
-        guard item["type"] as? String == "function_call",
-              let name = item["name"] as? String
-        else {
-            return nil
-        }
-        return ToolCallDelta(
-            id: (item["call_id"] as? String) ?? (item["id"] as? String) ?? UUID().uuidString,
-            name: name,
-            argumentsFragment: item["arguments"] as? String ?? "{}",
-            isComplete: true
-        )
-    }
-
-    private static func openAIResponsesMetrics(from response: [String: Any]) -> InferenceMetrics? {
-        guard let usage = response["usage"] as? [String: Any] else { return nil }
-        let inputTokens = usage["input_tokens"] as? Int
-            ?? usage["prompt_tokens"] as? Int
-            ?? 0
-        let outputTokens = usage["output_tokens"] as? Int
-            ?? usage["completion_tokens"] as? Int
-            ?? 0
-        guard inputTokens > 0 || outputTokens > 0 else { return nil }
-        return InferenceMetrics(promptTokens: inputTokens, completionTokens: outputTokens)
-    }
-
-    private static func openAIResponsesOutputText(from response: [String: Any]) -> String? {
-        guard let output = response["output"] as? [[String: Any]] else { return nil }
-        let parts = output.compactMap(openAIResponsesOutputText(fromOutputItem:))
-        let text = parts.joined()
-        return text.isEmpty ? nil : text
-    }
-
-    private static func openAIResponsesOutputText(fromOutputItem item: [String: Any]) -> String? {
-        if let text = openAIResponsesOutputText(fromContentPart: item), !text.isEmpty {
-            return text
-        }
-        guard let content = item["content"] as? [[String: Any]] else { return nil }
-        let parts = content.compactMap(openAIResponsesOutputText(fromContentPart:))
-        let text = parts.joined()
-        return text.isEmpty ? nil : text
-    }
-
-    private static func openAIResponsesOutputText(fromContentPart part: [String: Any]) -> String? {
-        let type = part["type"] as? String
-        guard type == nil || type == "output_text" || type == "text" || type == "refusal" else {
-            return nil
-        }
-        if let text = part["text"] as? String {
-            return text
-        }
-        if let refusal = part["refusal"] as? String {
-            return refusal
-        }
-        return nil
-    }
-
-    private static func openAIChatCompletionText(from value: Any?) -> String? {
-        if let text = value as? String {
-            return text
-        }
-        if let parts = value as? [[String: Any]] {
-            let text = parts.compactMap { part -> String? in
-                let type = part["type"] as? String
-                guard type == nil || type == "text" || type == "output_text" else { return nil }
-                return (part["text"] as? String)
-                    ?? ((part["text"] as? [String: Any])?["value"] as? String)
-            }.joined()
-            return text.isEmpty ? nil : text
-        }
-        return nil
-    }
-
-    private static func openAIResponsesEmptyOutputMessage(
-        response: [String: Any]?,
-        eventTypes: Set<String>
-    ) -> String {
-        let status = response?["status"] as? String
-        let outputCount = (response?["output"] as? [[String: Any]])?.count
-        var details = [String]()
-        if let status {
-            details.append("status: \(status)")
-        }
-        if let outputCount {
-            details.append("output items: \(outputCount)")
-        }
-        if !eventTypes.isEmpty {
-            details.append("events: \(eventTypes.sorted().joined(separator: ", "))")
-        }
-        let suffix = details.isEmpty ? "" : " (\(details.joined(separator: "; ")))."
-        return "OpenAI completed the Responses stream without visible output text\(suffix)"
-    }
-
-    private static func openAIFinish(from finishReason: String) -> InferenceFinish {
-        switch finishReason {
-        case "length":
-            return InferenceFinish(
-                reason: .length,
-                message: "The selected OpenAI model used its completion token budget before producing visible output. Try again; Pines now reserves more completion tokens for GPT-5 reasoning models."
-            )
-        case "tool_calls":
-            return InferenceFinish(reason: .toolCall)
-        case "content_filter":
-            return InferenceFinish(reason: .error, message: "The provider stopped the response because of its content filter.")
-        default:
-            return InferenceFinish(reason: .stop)
-        }
-    }
-
-    private static func anthropicFinish(from stopReason: String, metadata: [String: String]) -> InferenceFinish {
-        switch stopReason {
-        case "tool_use":
-            return InferenceFinish(reason: .toolCall, providerMetadata: metadata)
-        case "max_tokens", "model_context_window_exceeded":
-            return InferenceFinish(reason: .length, providerMetadata: metadata)
-        case "stop_sequence", "end_turn":
-            return InferenceFinish(reason: .stop, providerMetadata: metadata)
-        case "refusal":
-            return InferenceFinish(reason: .error, message: "Anthropic stopped the response with a refusal.", providerMetadata: metadata)
-        case "pause_turn":
-            return InferenceFinish(reason: .error, message: "Anthropic paused the turn before completing a response.", providerMetadata: metadata)
-        default:
-            return InferenceFinish(reason: .stop, providerMetadata: metadata)
-        }
-    }
-
-    private static func anthropicMetrics(from usage: [String: Any]) -> InferenceMetrics? {
-        let inputTokens = intValue(usage["input_tokens"])
-            + intValue(usage["cache_creation_input_tokens"])
-            + intValue(usage["cache_read_input_tokens"])
-        let outputTokens = intValue(usage["output_tokens"])
-        guard inputTokens > 0 || outputTokens > 0 else { return nil }
-        return InferenceMetrics(promptTokens: inputTokens, completionTokens: outputTokens)
-    }
-
-    private static func geminiFinish(
-        from finishReason: String,
-        hasToolCalls: Bool,
-        metadata: [String: String]
-    ) -> InferenceFinish {
-        if hasToolCalls {
-            return InferenceFinish(reason: .toolCall, providerMetadata: metadata)
-        }
-        switch finishReason {
-        case "STOP":
-            return InferenceFinish(reason: .stop, providerMetadata: metadata)
-        case "MAX_TOKENS":
-            return InferenceFinish(reason: .length, providerMetadata: metadata)
-        case "SAFETY":
-            return InferenceFinish(reason: .error, message: "Gemini stopped the response because of safety settings.", providerMetadata: metadata)
-        case "RECITATION":
-            return InferenceFinish(reason: .error, message: "Gemini stopped the response because of recitation policy.", providerMetadata: metadata)
-        case "LANGUAGE":
-            return InferenceFinish(reason: .error, message: "Gemini stopped the response because the language is unsupported.", providerMetadata: metadata)
-        case "BLOCKLIST":
-            return InferenceFinish(reason: .error, message: "Gemini stopped the response because the prompt or output matched a blocklist.", providerMetadata: metadata)
-        case "PROHIBITED_CONTENT":
-            return InferenceFinish(reason: .error, message: "Gemini stopped the response because it contained prohibited content.", providerMetadata: metadata)
-        case "SPII":
-            return InferenceFinish(reason: .error, message: "Gemini stopped the response because it contained sensitive personal data.", providerMetadata: metadata)
-        case "MALFORMED_FUNCTION_CALL":
-            return InferenceFinish(reason: .error, message: "Gemini returned a malformed function call.", providerMetadata: metadata)
-        default:
-            return InferenceFinish(reason: .stop, providerMetadata: metadata)
-        }
-    }
-
-    private static func geminiPromptFeedbackFinish(
-        from promptFeedback: [String: Any],
-        metadata: [String: String]
-    ) -> InferenceFinish? {
-        guard let blockReason = promptFeedback["blockReason"] as? String, !blockReason.isEmpty else {
-            return nil
-        }
-        let message = promptFeedback["blockReasonMessage"] as? String
-            ?? "Gemini blocked the prompt with reason: \(blockReason)."
-        return InferenceFinish(reason: .error, message: message, providerMetadata: metadata)
-    }
-
-    private static func geminiMetrics(from usage: [String: Any]) -> InferenceMetrics? {
-        let inputTokens = intValue(usage["promptTokenCount"])
-        let outputTokens = intValue(usage["candidatesTokenCount"])
-        guard inputTokens > 0 || outputTokens > 0 else { return nil }
-        return InferenceMetrics(promptTokens: inputTokens, completionTokens: outputTokens)
-    }
-
-    private static func intValue(_ value: Any?) -> Int {
-        if let value = value as? Int {
-            return value
-        }
-        if let value = value as? NSNumber {
-            return value.intValue
-        }
-        return 0
-    }
-
-    fileprivate static func jsonString(from value: Any?) -> String? {
-        guard let value, JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value)
-        else {
-            return nil
-        }
-        return String(decoding: data, as: UTF8.self)
-    }
-}
-
-private struct CloudToolCallStreamState {
-    var openAIToolIDs: [Int: String] = [:]
-    var openAIToolNames: [Int: String] = [:]
-    var openAIArguments: [Int: String] = [:]
-    var openAIChatCompletionTextEmitted = false
-    var openAIResponsesTextEmitted = false
-    var openAIResponsesEventTypes = Set<String>()
-    var openAIProviderMetadata = [String: String]()
-    var completedOpenAIToolCallIDs = Set<String>()
-
-    var anthropicToolIndex: Int?
-    var anthropicToolID: String?
-    var anthropicToolName: String?
-    var anthropicArguments = ""
-    var anthropicProviderMetadata = [String: String]()
-
-    var geminiProviderMetadata = [String: String]()
-    var geminiCompletedToolCallIDs = Set<String>()
-    var geminiModelContent: [String: Any]?
-
-    mutating func clearOpenAITools() {
-        openAIToolIDs.removeAll(keepingCapacity: true)
-        openAIToolNames.removeAll(keepingCapacity: true)
-        openAIArguments.removeAll(keepingCapacity: true)
-    }
-
-    mutating func recordRequestMetadata(providerKind: CloudProviderKind, serverRequestID: String?, clientRequestID: String?) {
-        switch providerKind {
-        case .anthropic:
-            if let serverRequestID, !serverRequestID.isEmpty {
-                anthropicProviderMetadata[BYOKCloudInferenceProvider.anthropicRequestIDMetadataKey] = serverRequestID
-            }
-        case .gemini:
-            if let serverRequestID, !serverRequestID.isEmpty {
-                geminiProviderMetadata[BYOKCloudInferenceProvider.geminiRequestIDMetadataKey] = serverRequestID
-            }
-        case .openAI, .openAICompatible, .openRouter, .custom:
-            recordOpenAIRequestMetadata(serverRequestID: serverRequestID, clientRequestID: clientRequestID)
-        }
-    }
-
-    mutating func recordOpenAIRequestMetadata(serverRequestID: String?, clientRequestID: String?) {
-        if let serverRequestID, !serverRequestID.isEmpty {
-            openAIProviderMetadata[BYOKCloudInferenceProvider.openAIRequestIDMetadataKey] = serverRequestID
-        }
-        if let clientRequestID, !clientRequestID.isEmpty {
-            openAIProviderMetadata[BYOKCloudInferenceProvider.openAIClientRequestIDMetadataKey] = clientRequestID
-        }
-    }
-
-    mutating func recordOpenAIResponse(_ response: [String: Any]) {
-        if let responseID = response["id"] as? String, !responseID.isEmpty {
-            openAIProviderMetadata[BYOKCloudInferenceProvider.openAIResponseIDMetadataKey] = responseID
-        }
-        if let requestID = response["_request_id"] as? String, !requestID.isEmpty {
-            openAIProviderMetadata[BYOKCloudInferenceProvider.openAIRequestIDMetadataKey] = requestID
-        }
-    }
-
-    mutating func markOpenAIToolCallCompleted(_ toolCall: ToolCallDelta) -> Bool {
-        completedOpenAIToolCallIDs.insert(toolCall.id).inserted
-    }
-
-    mutating func clearAnthropicTool() {
-        anthropicToolIndex = nil
-        anthropicToolID = nil
-        anthropicToolName = nil
-        anthropicArguments.removeAll(keepingCapacity: true)
-    }
-
-    mutating func recordAnthropicMessage(_ message: [String: Any]) {
-        if let messageID = message["id"] as? String, !messageID.isEmpty {
-            anthropicProviderMetadata[BYOKCloudInferenceProvider.anthropicMessageIDMetadataKey] = messageID
-        }
-    }
-
-    mutating func recordGeminiResponse(_ response: [String: Any]) {
-        if let responseID = response["responseId"] as? String, !responseID.isEmpty {
-            geminiProviderMetadata[BYOKCloudInferenceProvider.geminiResponseIDMetadataKey] = responseID
-        }
-        if let modelVersion = response["modelVersion"] as? String, !modelVersion.isEmpty {
-            geminiProviderMetadata[BYOKCloudInferenceProvider.geminiModelVersionMetadataKey] = modelVersion
-        }
-    }
-
-    mutating func recordGeminiModelContent(_ content: [String: Any]) {
-        guard let parts = content["parts"] as? [[String: Any]], !parts.isEmpty else { return }
-        var existingParts = (geminiModelContent?["parts"] as? [[String: Any]]) ?? []
-        for part in parts {
-            if let text = part["text"] as? String,
-               part["thought"] as? Bool != true,
-               !text.isEmpty {
-                existingParts.append(["text": text])
-                continue
-            }
-            if let functionCall = part["functionCall"] as? [String: Any] {
-                existingParts.append(["functionCall": functionCall])
-                continue
-            }
-            if part["thoughtSignature"] != nil || part["thought"] as? Bool == true {
-                existingParts.append(part)
-            }
-        }
-        guard !existingParts.isEmpty else { return }
-        geminiModelContent = [
-            "role": "model",
-            "parts": existingParts,
-        ]
-        if let json = BYOKCloudInferenceProvider.jsonString(from: geminiModelContent) {
-            geminiProviderMetadata[BYOKCloudInferenceProvider.geminiModelContentMetadataKey] = json
-        }
-    }
-
-    mutating func markGeminiToolCallCompleted(_ toolCall: ToolCallDelta) -> Bool {
-        geminiCompletedToolCallIDs.insert(toolCall.id).inserted
-    }
 }
 
 private struct OpenAIResponsesPayload {
@@ -1846,13 +1332,6 @@ private struct CloudAttachmentPayload {
     var dataURL: String {
         "data:\(contentType);base64,\(base64Data)"
     }
-}
-
-private enum CloudStreamingFormat {
-    case chatCompletions
-    case openAIResponses
-    case anthropicMessages
-    case geminiGenerateContent
 }
 
 private extension String {

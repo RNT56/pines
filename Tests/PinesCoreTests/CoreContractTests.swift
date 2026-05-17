@@ -121,7 +121,7 @@ struct CoreContractTests {
         #expect(!openRouter.capabilities.textDocumentInputs)
 
         let compatible = cloudConfiguration(kind: .openAICompatible, baseURL: "https://llm.example.test/v1")
-        #expect(compatible.capabilities.imageInputs)
+        #expect(!compatible.capabilities.imageInputs)
         #expect(!compatible.capabilities.pdfInputs)
         #expect(!compatible.capabilities.textDocumentInputs)
 
@@ -239,6 +239,179 @@ struct CoreContractTests {
     }
 
     @Test
+    func geminiModelEligibilityAcceptsInteractionsModels() {
+        #expect(CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/gemini-3-flash-preview",
+            providerKind: .gemini,
+            supportedGenerationMethods: ["createInteraction"]
+        ))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/gemini-3-flash-preview",
+            providerKind: .gemini,
+            supportedGenerationMethods: []
+        ))
+    }
+
+    @Test
+    func cloudProviderCapabilitiesAreProviderSpecific() {
+        let custom = CloudProviderConfiguration(
+            id: "custom",
+            kind: .custom,
+            displayName: "Custom",
+            baseURL: URL(string: "https://example.com")!,
+            keychainAccount: "custom"
+        )
+        let anthropic = CloudProviderConfiguration(
+            id: "anthropic",
+            kind: .anthropic,
+            displayName: "Anthropic",
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            keychainAccount: "anthropic"
+        )
+        let gemini = CloudProviderConfiguration(
+            id: "gemini",
+            kind: .gemini,
+            displayName: "Gemini",
+            baseURL: URL(string: "https://generativelanguage.googleapis.com")!,
+            keychainAccount: "gemini"
+        )
+
+        #expect(!custom.capabilities.imageInputs)
+        #expect(!custom.capabilities.pdfInputs)
+        #expect(!custom.capabilities.toolCalling)
+        #expect(anthropic.capabilities.imageInputs)
+        #expect(anthropic.capabilities.pdfInputs)
+        #expect(gemini.capabilities.imageInputs)
+        #expect(gemini.capabilities.textDocumentInputs)
+    }
+
+    @Test
+    func anthropicStreamParserEmitsTextToolMetricsAndThinkingMetadata() throws {
+        var parser = CloudProviderStreamParser()
+        parser.recordRequestMetadata(providerKind: .anthropic, serverRequestID: "req_123", clientRequestID: nil)
+
+        var allEvents = [InferenceStreamEvent]()
+        var finish: InferenceFinish?
+        for payload in [
+            #"{"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":10}}}"#,
+            #"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#,
+            #"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plan"}}"#,
+            #"{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}"#,
+            #"{"type":"content_block_stop","index":0}"#,
+            #"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hello"}}"#,
+            #"{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"tool_1","name":"lookup","input":{}}}"#,
+            #"{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"q\":\"pines\"}"}}"#,
+            #"{"type":"content_block_stop","index":2}"#,
+            #"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":3}}"#,
+        ] {
+            let output = parser.parse(data: Data(payload.utf8), format: .anthropicMessages, providerKind: .anthropic)
+            allEvents.append(contentsOf: output.events)
+            finish = output.finish ?? finish
+        }
+
+        #expect(allEvents.contains(.token(TokenDelta(kind: .token, text: "hello", tokenCount: 1))))
+        #expect(allEvents.contains(.metrics(InferenceMetrics(promptTokens: 10, completionTokens: 0))))
+        #expect(allEvents.contains(.metrics(InferenceMetrics(promptTokens: 0, completionTokens: 3))))
+        #expect(allEvents.contains(.toolCall(ToolCallDelta(id: "tool_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
+        #expect(finish?.reason == .toolCall)
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicRequestID] == "req_123")
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicMessageID] == "msg_123")
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicThinkingContentJSON]?.contains("sig_123") == true)
+    }
+
+    @Test
+    func geminiGenerateContentParserPreservesModelContentAndToolCalls() {
+        var parser = CloudProviderStreamParser()
+        let payload = """
+        {
+          "responseId": "resp_1",
+          "modelVersion": "gemini-2.5-flash",
+          "usageMetadata": { "promptTokenCount": 7, "candidatesTokenCount": 5 },
+          "candidates": [{
+            "content": {
+              "role": "model",
+              "parts": [
+                { "text": "visible" },
+                { "thought": true, "thoughtSignature": "thought_sig" },
+                { "functionCall": { "id": "call_1", "name": "lookup", "args": { "q": "pines" } } }
+              ]
+            },
+            "finishReason": "STOP"
+          }]
+        }
+        """
+
+        let output = parser.parse(data: Data(payload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
+
+        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "visible", tokenCount: 1))))
+        #expect(output.events.contains(.metrics(InferenceMetrics(promptTokens: 7, completionTokens: 5))))
+        #expect(output.events.contains(.toolCall(ToolCallDelta(id: "call_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
+        #expect(output.finish?.reason == .toolCall)
+        #expect(output.finish?.providerMetadata[CloudProviderMetadataKeys.geminiResponseID] == "resp_1")
+        #expect(parser.state.geminiProviderMetadata[CloudProviderMetadataKeys.geminiModelContentJSON]?.contains("thought_sig") == true)
+    }
+
+    @Test
+    func geminiInteractionsParserHandlesStreamingTextToolCallsAndUsage() {
+        var parser = CloudProviderStreamParser()
+        let payloads = [
+            #"{"event_type":"interaction.created","interaction":{"id":"ia_1","model":"gemini-3-flash-preview","status":"in_progress"}}"#,
+            #"{"event_type":"step.delta","index":0,"delta":{"type":"text","text":"hello"}}"#,
+            #"{"event_type":"step.start","index":1,"step":{"type":"function_call","id":"fn_1","name":"lookup","arguments":{"q":"pines"}}}"#,
+            #"{"event_type":"step.stop","index":1}"#,
+            #"{"event_type":"interaction.completed","interaction":{"id":"ia_1","model":"gemini-3-flash-preview","status":"completed","usage":{"total_input_tokens":11,"total_output_tokens":4}}}"#,
+        ]
+
+        var events = [InferenceStreamEvent]()
+        var finish: InferenceFinish?
+        for payload in payloads {
+            let output = parser.parse(data: Data(payload.utf8), format: .geminiInteractions, providerKind: .gemini)
+            events.append(contentsOf: output.events)
+            finish = output.finish ?? finish
+        }
+
+        #expect(events.contains(.token(TokenDelta(kind: .token, text: "hello", tokenCount: 1))))
+        #expect(events.contains(.toolCall(ToolCallDelta(id: "fn_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
+        #expect(events.contains(.metrics(InferenceMetrics(promptTokens: 11, completionTokens: 4))))
+        #expect(finish?.reason == .toolCall)
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.geminiInteractionID] == "ia_1")
+    }
+
+    @Test
+    func geminiInteractionsParserAcceptsGuideStreamingAliases() {
+        var parser = CloudProviderStreamParser()
+        let payloads = [
+            #"{"event_type":"interaction.created","interaction":{"id":"ia_2","model":"gemini-3-flash-preview","status":"in_progress"}}"#,
+            #"{"event_type":"content.delta","delta":{"type":"text","text":"alias"}}"#,
+            #"{"event_type":"interaction.complete","interaction":{"id":"ia_2","model":"gemini-3-flash-preview","status":"completed","usage":{"total_input_tokens":2,"total_output_tokens":1}}}"#,
+        ]
+
+        var events = [InferenceStreamEvent]()
+        var finish: InferenceFinish?
+        for payload in payloads {
+            let output = parser.parse(data: Data(payload.utf8), format: .geminiInteractions, providerKind: .gemini)
+            events.append(contentsOf: output.events)
+            finish = output.finish ?? finish
+        }
+
+        #expect(events.contains(.token(TokenDelta(kind: .token, text: "alias", tokenCount: 1))))
+        #expect(events.contains(.metrics(InferenceMetrics(promptTokens: 2, completionTokens: 1))))
+        #expect(finish?.reason == .stop)
+    }
+
+    @Test
+    func openAIResponsesParserReportsEmptyCompletions() {
+        var parser = CloudProviderStreamParser()
+        let payload = #"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}"#
+        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+
+        #expect(output.events.isEmpty)
+        #expect(output.finish?.reason == .stop)
+        #expect(output.finish?.message?.contains("without visible output text") == true)
+        #expect(output.finish?.providerMetadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_1")
+    }
+
+    @Test
     func appSettingsDecodesGenerationDefaultsAndClampsLimits() throws {
         let legacyJSON = #"{"executionMode":"cloudAllowed","themeTemplate":"graphite","interfaceMode":"dark"}"#
         let decoded = try JSONDecoder().decode(AppSettingsSnapshot.self, from: Data(legacyJSON.utf8))
@@ -255,6 +428,25 @@ struct CoreContractTests {
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
         #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
         #expect(clamped.localMaxContextTokens == AppSettingsSnapshot.minLocalContextTokens)
+    }
+
+    @Test
+    func preflightMarksKnownQwen17BCrashLaneExperimental() throws {
+        let config = try JSONSerialization.data(withJSONObject: ["model_type": "qwen3"])
+        let input = ModelPreflightInput(
+            repository: "mlx-community/Qwen3-1.7B-4bit",
+            configJSON: config,
+            files: [
+                ModelFileInfo(path: "config.json", size: 10),
+                ModelFileInfo(path: "tokenizer.json", size: 10),
+                ModelFileInfo(path: "model.safetensors", size: 10),
+            ]
+        )
+
+        let result = ModelPreflightClassifier().classify(input)
+
+        #expect(result.verification == .experimental)
+        #expect(result.reasons.contains(ModelPreflightClassifier.knownRuntimeCrashReason))
     }
 
     @Test

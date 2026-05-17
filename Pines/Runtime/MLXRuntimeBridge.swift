@@ -276,6 +276,7 @@ private actor MLXRuntimeState {
     #endif
 
     func load(_ install: ModelInstall, profile: RuntimeProfile) async throws {
+        try Self.validateRuntimeCompatibility(install)
         activeInstall = install
         activeProfile = profile
 
@@ -342,6 +343,13 @@ private actor MLXRuntimeState {
         { data in
             let configuration = try JSONDecoder.json5().decode(configurationType, from: data)
             return modelInit(configuration)
+        }
+    }
+
+    private static func validateRuntimeCompatibility(_ install: ModelInstall) throws {
+        if install.verification == .experimental,
+           ModelPreflightClassifier.hasKnownRuntimeCrashSignal(repository: install.repository, modelType: install.modelType) {
+            throw InferenceError.unsupportedCapability(ModelPreflightClassifier.knownRuntimeCrashReason)
         }
     }
     #endif

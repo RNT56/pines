@@ -52,6 +52,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private var isBootstrapping = false
     private var bootstrapBackgroundTask: Task<Void, Never>?
     private var didStartMCPServers = false
+    private var shouldEnrichRuntimeModelPreviews = false
     private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
     private var currentRunToken: UUID?
@@ -269,7 +270,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
 
         observeRepositories(services: services)
-        bootstrapBackgroundTask = Task { [weak self] in
+        bootstrapBackgroundTask = Task(priority: .utility) { [weak self] in
+            try? await Task.sleep(nanoseconds: 750_000_000)
             await self?.finishBackgroundBootstrap(services: services)
         }
         services.runtimeMetrics.recordStartupPhase("bootstrap_visible", elapsedSeconds: Date().timeIntervalSince(startedAt))
@@ -286,7 +288,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                 setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
             }
 
-            try await refreshModelPreviews(services: services)
+            try await refreshModelPreviews(services: services, enrichRuntime: false)
             await normalizeDefaultModelIfNeeded(services: services)
             setIfChanged(\.serviceError, nil)
         } catch {
@@ -306,7 +308,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
     private func refreshPostBootstrapState(services: PinesAppServices) async {
         do {
-            try await refreshModelPreviews(services: services)
+            shouldEnrichRuntimeModelPreviews = true
+            try await refreshModelPreviews(services: services, enrichRuntime: true)
             await refreshCloudModelCatalog(services: services)
             await normalizeDefaultModelIfNeeded(services: services)
             await refreshCredentialStatuses(services: services)
@@ -486,15 +489,15 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
-    func startSending(_ draft: String, in threadID: UUID?, services: PinesAppServices) {
-        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    func startSending(_ draft: String, attachments: [ChatAttachment] = [], in threadID: UUID?, services: PinesAppServices) {
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         clearChatError()
         emitHaptic(.sendCommitted)
         currentRunTask?.cancel()
         let runToken = UUID()
         currentRunToken = runToken
         currentRunTask = Task { [weak self] in
-            await self?.sendMessage(draft, in: threadID, services: services, runToken: runToken)
+            await self?.sendMessage(draft, attachments: attachments, in: threadID, services: services, runToken: runToken)
         }
     }
 
@@ -512,7 +515,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
     func retryLastUserMessage(in thread: PinesThreadPreview, services: PinesAppServices) {
         guard let lastUser = thread.messages.last(where: { $0.role == .user }) else { return }
-        startSending(lastUser.content, in: thread.id, services: services)
+        startSending(lastUser.content, attachments: lastUser.attachments, in: thread.id, services: services)
     }
 
     func setThreadArchived(_ thread: PinesThreadPreview, archived: Bool, services: PinesAppServices) async {
@@ -563,9 +566,9 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func sendMessage(_ draft: String, in threadID: UUID?, services: PinesAppServices, runToken: UUID) async {
+    private func sendMessage(_ draft: String, attachments: [ChatAttachment], in threadID: UUID?, services: PinesAppServices, runToken: UUID) async {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return }
         var runRepository: (any ConversationRepository)?
         var runConversationID: UUID?
         var assistantMessageID: UUID?
@@ -596,14 +599,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             runConversationID = conversationID
             let settings = try? await services.settingsRepository?.loadSettings()
 
-            let userMessage = ChatMessage(role: .user, content: trimmed)
+            let userMessage = ChatMessage(role: .user, content: trimmed, attachments: attachments)
             try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: nil, providerID: nil)
             appendThreadMessage(userMessage, conversationID: conversationID, status: .local, moveToFront: true)
 
             // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
             let availableTools: [AnyToolSpec] = []
             let messages = try await repository.messages(in: conversationID)
-            let vaultContext = await vaultContextMessage(for: trimmed, services: services)
+            let vaultContext = trimmed.isEmpty ? nil : await vaultContextMessage(for: trimmed, services: services)
             let mcpContext = await mcpResourceContextMessages(services: services)
             let routeRequiredInputs = ProviderInputRequirements(messages: messages + mcpContext)
             let requestedSelection = selection(for: conversationID, services: services)
@@ -795,11 +798,12 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                     if failureMessage == nil {
                         let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                         if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            let message = finish.message ?? emptyCloudOutputMessage(
+                            let baseMessage = finish.message ?? emptyCloudOutputMessage(
                                 providerID: selectedProviderID,
                                 modelID: selectedModelID,
                                 services: services
                             )
+                            let message = messageWithProviderDiagnostics(baseMessage, metadata: finalProviderMetadata)
                             failureMessage = message
                             try await flushAssistantUpdate(content: message, messageStatus: .failed, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata)
                             setChatError(message)
@@ -1922,7 +1926,13 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         if let modelRepository = services.modelInstallRepository {
             repositoryObservationTasks.append(Task { [weak self] in
                 for await installs in modelRepository.observeInstalledAndCuratedModels() {
-                    let downloads = await MainActor.run { self?.modelDownloads ?? [] }
+                    let snapshot = await MainActor.run {
+                        (
+                            downloads: self?.modelDownloads ?? [],
+                            enrichRuntime: self?.shouldEnrichRuntimeModelPreviews ?? false
+                        )
+                    }
+                    let downloads = snapshot.downloads
                     let downloadByRepository = Self.latestDownloadByRepository(downloads)
                     let installByRepository = Dictionary(uniqueKeysWithValues: installs.map { ($0.repository.lowercased(), $0) })
                     await MainActor.run {
@@ -1934,7 +1944,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                                     return Self.modelPreview(
                                         from: install,
                                         runtime: services.mlxRuntime,
-                                        download: downloadByRepository[key]
+                                        download: downloadByRepository[key],
+                                        enrichRuntime: snapshot.enrichRuntime
                                     )
                                 }
 
@@ -1946,7 +1957,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                                 return Self.modelPreview(
                                     from: remoteInstall,
                                     runtime: services.mlxRuntime,
-                                    download: downloadByRepository[key]
+                                    download: downloadByRepository[key],
+                                    enrichRuntime: snapshot.enrichRuntime
                                 )
                             }
                             self.setIfChanged(\.models, Self.downloadingFirst(previews))
@@ -1955,7 +1967,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                                 Self.modelPreview(
                                     from: install,
                                     runtime: services.mlxRuntime,
-                                    download: downloadByRepository[install.repository.lowercased()]
+                                    download: downloadByRepository[install.repository.lowercased()],
+                                    enrichRuntime: snapshot.enrichRuntime
                                 )
                             }
                             self.setIfChanged(\.models, Self.downloadingFirst(previews))
@@ -1985,7 +1998,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
                             return Self.modelPreview(
                                 from: preview.install,
                                 runtime: services.mlxRuntime,
-                                download: downloadByRepository[key]
+                                download: downloadByRepository[key],
+                                enrichRuntime: self.shouldEnrichRuntimeModelPreviews
                             )
                         }
                         self.setIfChanged(\.models, Self.downloadingFirst(previews))
@@ -2325,6 +2339,25 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         return "\(providerName) returned a successful stream for \(modelID.rawValue), but Pines did not receive visible text. Check the provider event diagnostics above and retry with a text-capable chat model."
     }
 
+    private func messageWithProviderDiagnostics(_ message: String, metadata: [String: String]) -> String {
+        let diagnosticKeys = [
+            CloudProviderMetadataKeys.openAIRequestID,
+            CloudProviderMetadataKeys.openAIResponseID,
+            CloudProviderMetadataKeys.anthropicRequestID,
+            CloudProviderMetadataKeys.anthropicMessageID,
+            CloudProviderMetadataKeys.geminiRequestID,
+            CloudProviderMetadataKeys.geminiResponseID,
+            CloudProviderMetadataKeys.geminiInteractionID,
+            CloudProviderMetadataKeys.geminiModelVersion,
+        ]
+        let diagnostics = diagnosticKeys.compactMap { key -> String? in
+            guard let value = metadata[key], !value.isEmpty else { return nil }
+            return "\(key)=\(value)"
+        }
+        guard !diagnostics.isEmpty else { return message }
+        return "\(message)\n\nProvider diagnostics: \(diagnostics.joined(separator: ", "))"
+    }
+
     private func providerKind(for providerID: ProviderID, services: PinesAppServices) -> CloudProviderKind? {
         if providerID == services.mlxRuntime.localProviderID {
             return nil
@@ -2648,7 +2681,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         ))?.isEmpty == false ? "Configured" : "Not configured")
     }
 
-    private func refreshModelPreviews(services: PinesAppServices) async throws {
+    private func refreshModelPreviews(services: PinesAppServices, enrichRuntime: Bool? = nil) async throws {
         let downloads = try await services.modelDownloadRepository?.listDownloads() ?? []
         setIfChanged(\.modelDownloads, downloads)
 
@@ -2658,13 +2691,15 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         }
 
         let downloadByRepository = Self.latestDownloadByRepository(downloads)
+        let shouldEnrichRuntime = enrichRuntime ?? shouldEnrichRuntimeModelPreviews
         let previews = try await modelRepository
             .listInstalledAndCuratedModels()
             .map { install in
                 Self.modelPreview(
                     from: install,
                     runtime: services.mlxRuntime,
-                    download: downloadByRepository[install.repository.lowercased()]
+                    download: downloadByRepository[install.repository.lowercased()],
+                    enrichRuntime: shouldEnrichRuntime
                 )
             }
         setIfChanged(\.models, Self.downloadingFirst(previews))
@@ -2676,14 +2711,14 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         status: PinesThreadStatus? = nil,
         updatedAt: Date? = nil
     ) -> PinesThreadPreview {
-        let lastMessage = messages.last?.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lastMessage = previewText(for: messages.last)
         return PinesThreadPreview(
             id: record.id,
             title: record.title,
             modelName: record.defaultModelID.map { friendlyModelName($0.rawValue) } ?? "No model selected",
             modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
             providerID: record.defaultProviderID,
-            lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
+            lastMessage: lastMessage ?? "No messages yet.",
             messages: messages,
             status: record.archived ? .archived : (status ?? .local),
             isPinned: record.pinned,
@@ -2732,7 +2767,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
         status: PinesThreadStatus? = nil,
         updatedAt: Date = Date()
     ) -> PinesThreadPreview {
-        let lastMessage = messages.last?.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lastMessage = previewText(for: messages.last)
         let resolvedStatus = existing.status == .archived ? PinesThreadStatus.archived : (status ?? existing.status)
         return PinesThreadPreview(
             id: existing.id,
@@ -2740,7 +2775,7 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             modelName: existing.modelName,
             modelID: existing.modelID,
             providerID: existing.providerID,
-            lastMessage: lastMessage?.isEmpty == false ? lastMessage! : "No messages yet.",
+            lastMessage: lastMessage ?? "No messages yet.",
             messages: messages,
             status: resolvedStatus,
             isPinned: existing.isPinned,
@@ -2751,6 +2786,18 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
 
     private static func threadTokenCount(_ messages: [ChatMessage]) -> Int {
         messages.reduce(0) { $0 + max(1, $1.content.split(separator: " ").count) }
+    }
+
+    private static func previewText(for message: ChatMessage?) -> String? {
+        guard let message else { return nil }
+        let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            return text
+        }
+        guard !message.attachments.isEmpty else { return nil }
+        return message.attachments.count == 1
+            ? "1 attachment"
+            : "\(message.attachments.count) attachments"
     }
 
     private static func install(from summary: RemoteModelSummary, preflight: ModelPreflightResult) -> ModelInstall {
@@ -2785,7 +2832,8 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
     private static func modelPreview(
         from install: ModelInstall,
         runtime: MLXRuntimeBridge,
-        download: ModelDownloadProgress? = nil
+        download: ModelDownloadProgress? = nil,
+        enrichRuntime: Bool = true
     ) -> PinesModelPreview {
         let status: PinesModelStatus
         switch download?.status {
@@ -2835,14 +2883,33 @@ final class PinesAppModel: ObservableObject, @unchecked Sendable {
             compatibilityWarnings = []
         }
 
+        let runtimeProfile = enrichRuntime
+            ? runtime.defaultRuntimeProfile(for: install)
+            : RuntimeProfile(
+                name: "Pending",
+                quantization: QuantizationProfile(
+                    algorithm: .none,
+                    kvCacheStrategy: .none,
+                    preset: nil,
+                    requestedBackend: nil,
+                    activeBackend: nil,
+                    activeAttentionPath: nil,
+                    activeFallbackReason: "Runtime diagnostics load after startup."
+                ),
+                promptCacheIdentifier: install.repository
+            )
+        let contextWindow = enrichRuntime
+            ? (runtime.capabilities.maxContextTokens.map { "\($0 / 1000)K" } ?? "Unknown")
+            : "Pending"
+
         return PinesModelPreview(
             id: install.id,
             install: install,
-            runtimeProfile: runtime.defaultRuntimeProfile(for: install),
+            runtimeProfile: runtimeProfile,
             name: install.displayName,
             family: install.modelType ?? install.modalities.map(\.rawValue).sorted().joined(separator: ", "),
             footprint: install.estimatedBytes.map(Self.byteLabel) ?? download?.totalBytes.map(Self.byteLabel) ?? "Remote",
-            contextWindow: runtime.capabilities.maxContextTokens.map { "\($0 / 1000)K" } ?? "Unknown",
+            contextWindow: contextWindow,
             runtime: install.modalities.contains(.embeddings) ? "MLX Embedders" : (install.modalities.contains(.vision) ? "MLX VLM" : "MLX"),
             status: status,
             capabilities: install.modalities.map(\.rawValue).sorted(),

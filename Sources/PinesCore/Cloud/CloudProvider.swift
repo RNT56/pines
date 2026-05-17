@@ -92,7 +92,7 @@ public extension CloudProviderConfiguration {
             pdfInputs = true
             textDocumentInputs = false
         case .openAICompatible, .custom:
-            imageInputs = true
+            imageInputs = officialOpenAI
             pdfInputs = officialOpenAI
             textDocumentInputs = officialOpenAI
         }
@@ -106,8 +106,8 @@ public extension CloudProviderConfiguration {
             pdfInputs: pdfInputs,
             textDocumentInputs: textDocumentInputs,
             embeddings: false,
-            toolCalling: true,
-            jsonMode: true,
+            toolCalling: kind != .custom,
+            jsonMode: kind != .custom,
             maxContextTokens: nil
         )
     }
@@ -161,7 +161,12 @@ public enum CloudProviderModelEligibility: Sendable {
         }
 
         if providerKind == .gemini {
-            guard supportedGenerationMethods.contains(where: { $0 == "generateContent" || $0 == "streamGenerateContent" }) else {
+            guard supportedGenerationMethods.contains(where: { method in
+                method == "generateContent"
+                    || method == "streamGenerateContent"
+                    || method == "createInteraction"
+                    || method == "interactions"
+            }) else {
                 return false
             }
         }

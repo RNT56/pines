@@ -1,10 +1,6 @@
 import SwiftUI
 import PinesCore
 
-#if canImport(UIKit)
-import UIKit
-#endif
-
 #if canImport(WatchConnectivity)
 import WatchConnectivity
 #endif
@@ -13,12 +9,15 @@ struct PinesRootView: View {
     @Environment(\.colorScheme) private var systemScheme
     @StateObject private var appModel = PinesAppModel()
     @StateObject private var haptics = PinesHaptics()
-    @State private var services = PinesAppServices()
+    @State private var services: PinesAppServices?
     @State private var watchSessionService: PhoneWatchSessionService?
     @State private var selectedTab: PinesTab = .chats
+    @State private var isMainUIReady = false
     @State private var showsBootMark = true
     @State private var didStartBootstrap = false
+    @State private var didReportMainUIAppeared = false
     @State private var isBootstrapping = false
+    @State private var rootCreatedAt = Date()
 
     private var theme: PinesTheme {
         PinesTheme.resolve(
@@ -30,14 +29,17 @@ struct PinesRootView: View {
 
     var body: some View {
         ZStack {
-            tabShell
-                .environmentObject(appModel)
-                .environmentObject(haptics)
-                .environment(\.pinesServices, services)
-                .environment(\.openPinesModelsPage, PinesOpenModelsPageAction {
-                    selectedTab = .models
-                })
-                .pinesTheme(theme)
+            if isMainUIReady, let services {
+                tabShell(services: services)
+                    .environmentObject(appModel)
+                    .environmentObject(haptics)
+                    .environment(\.pinesServices, services)
+                    .environment(\.openPinesModelsPage, PinesOpenModelsPageAction {
+                        selectedTab = .models
+                    })
+                    .pinesTheme(theme)
+                    .transition(.opacity)
+            }
 
             if showsBootMark {
                 PinesBootMarkView()
@@ -46,20 +48,23 @@ struct PinesRootView: View {
                     .ignoresSafeArea()
                     .zIndex(1)
             }
-
-            #if canImport(UIKit)
-            PinesKeyboardWarmupView()
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            #endif
         }
         .preferredColorScheme(appModel.interfaceMode.colorScheme)
         .task {
             guard !didStartBootstrap, !isBootstrapping else { return }
             isBootstrapping = true
             defer { isBootstrapping = false }
+
+            let totalStartedAt = Date()
+            PinesRuntimeMetrics.shared.start()
+            PinesRuntimeMetrics.shared.recordStartupPhase("root_task_visible", elapsedSeconds: Date().timeIntervalSince(rootCreatedAt))
+            await Task.yield()
+            PinesRuntimeMetrics.shared.recordStartupPhase("boot_first_frame_yield", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
+
+            let servicesStartedAt = Date()
+            let services = PinesAppServices()
+            self.services = services
+            services.runtimeMetrics.recordStartupPhase("services_init", elapsedSeconds: Date().timeIntervalSince(servicesStartedAt))
 
             await services.prepareForFirstFrame()
             #if canImport(WatchConnectivity)
@@ -68,11 +73,14 @@ struct PinesRootView: View {
             self.watchSessionService = watchSessionService
             #endif
             await appModel.bootstrap(services: services)
+            isMainUIReady = true
             withAnimation(theme.motion.emphasized) {
                 showsBootMark = false
             }
             haptics.play(.appReady)
+            haptics.prepare()
             didStartBootstrap = true
+            services.runtimeMetrics.recordStartupPhase("root_boot_to_main", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
         }
         .onChange(of: appModel.hapticSignal) { _, signal in
             guard let signal else { return }
@@ -80,8 +88,10 @@ struct PinesRootView: View {
         }
         .onPinesMemoryWarning {
             appModel.stopCurrentRun()
-            Task {
-                await services.handleMemoryPressure()
+            if let services {
+                Task {
+                    await services.handleMemoryPressure()
+                }
             }
         }
         .alert("Approve Tool Call", isPresented: Binding(
@@ -155,7 +165,7 @@ struct PinesRootView: View {
         }
     }
 
-    private var tabShell: some View {
+    private func tabShell(services: PinesAppServices) -> some View {
         TabView(selection: $selectedTab) {
             ChatsView()
                 .tabItem { Label(PinesTab.chats.title, systemImage: PinesTab.chats.systemImage) }
@@ -179,6 +189,11 @@ struct PinesRootView: View {
             Rectangle()
                 .fill(theme.colors.backgroundWash)
                 .ignoresSafeArea()
+        }
+        .onAppear {
+            guard !didReportMainUIAppeared else { return }
+            didReportMainUIAppeared = true
+            services.runtimeMetrics.recordStartupPhase("main_ui_appeared", elapsedSeconds: 0)
         }
         .onChange(of: selectedTab) { _, _ in
             haptics.play(.tabChanged)
@@ -205,58 +220,6 @@ extension EnvironmentValues {
         set { self[PinesOpenModelsPageKey.self] = newValue }
     }
 }
-
-#if canImport(UIKit)
-private struct PinesKeyboardWarmupView: UIViewRepresentable {
-    final class Coordinator {
-        var didWarm = false
-        var retryCount = 0
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeUIView(context: Context) -> UITextField {
-        let textField = UITextField(frame: .zero)
-        textField.inputView = UIView(frame: .zero)
-        textField.textColor = .clear
-        textField.tintColor = .clear
-        textField.backgroundColor = .clear
-        textField.isAccessibilityElement = false
-        textField.autocorrectionType = .no
-        textField.spellCheckingType = .no
-        textField.smartDashesType = .no
-        textField.smartQuotesType = .no
-        textField.smartInsertDeleteType = .no
-        return textField
-    }
-
-    func updateUIView(_ uiView: UITextField, context: Context) {
-        guard !context.coordinator.didWarm else { return }
-        context.coordinator.didWarm = true
-        warmKeyboardInput(uiView, coordinator: context.coordinator)
-    }
-
-    private func warmKeyboardInput(_ textField: UITextField, coordinator: Coordinator) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            guard textField.window != nil else {
-                guard coordinator.retryCount < 8 else { return }
-                coordinator.retryCount += 1
-                warmKeyboardInput(textField, coordinator: coordinator)
-                return
-            }
-
-            guard !textField.isFirstResponder else { return }
-            if textField.becomeFirstResponder() {
-                DispatchQueue.main.async {
-                    textField.resignFirstResponder()
-                }
-            }
-        }
-    }
-}
-#endif
 
 private struct CloudContextApprovalSheet: View {
     @Environment(\.pinesTheme) private var theme

@@ -20,11 +20,22 @@ actor GRDBPinesStore:
     private let decoder = JSONDecoder()
     private static let retrievalLogger = Logger(subsystem: "com.schtack.pines", category: "vault-retrieval")
 
-    init(configuration: LocalStoreConfiguration = .init()) throws {
+    init(configuration: LocalStoreConfiguration = .init(), runtimeMetrics: PinesRuntimeMetrics = .shared) throws {
+        let urlStartedAt = Date()
         let url = try Self.databaseURL(fileName: configuration.databaseFileName)
+        runtimeMetrics.recordStartupPhase("store_url", elapsedSeconds: Date().timeIntervalSince(urlStartedAt))
+
+        let openStartedAt = Date()
         database = try DatabasePool(path: url.path)
+        runtimeMetrics.recordStartupPhase("store_open", elapsedSeconds: Date().timeIntervalSince(openStartedAt))
+
+        let migrationStartedAt = Date()
         try Self.migrator.migrate(database)
+        runtimeMetrics.recordStartupPhase("store_migrate", elapsedSeconds: Date().timeIntervalSince(migrationStartedAt))
+
+        let seedStartedAt = Date()
         try Self.seedCuratedModels(in: database)
+        runtimeMetrics.recordStartupPhase("store_seed", elapsedSeconds: Date().timeIntervalSince(seedStartedAt))
     }
 
     private static func databaseURL(fileName: String) throws -> URL {
@@ -1159,7 +1170,7 @@ actor GRDBPinesStore:
     }
 
     private static func fetchMessages(_ db: Database, conversationID: UUID) throws -> [ChatMessage] {
-        try Row.fetchAll(
+        var messages = try Row.fetchAll(
             db,
             sql: """
             SELECT id, role, content, created_at, tool_call_id, provider_metadata_json
@@ -1169,6 +1180,31 @@ actor GRDBPinesStore:
             """,
             arguments: [conversationID.uuidString]
         ).map(message(from:))
+
+        guard !messages.isEmpty else { return [] }
+
+        let messageIDs = messages.map { $0.id.uuidString }
+        let placeholders = Array(repeating: "?", count: messageIDs.count).joined(separator: ",")
+        let attachmentRows = try Row.fetchAll(
+            db,
+            sql: """
+            SELECT id, message_id, kind, file_name, content_type, local_path, byte_count
+            FROM attachments
+            WHERE message_id IN (\(placeholders))
+            ORDER BY created_at ASC
+            """,
+            arguments: StatementArguments(messageIDs)
+        )
+        let attachmentsByMessageID = Dictionary(grouping: attachmentRows, by: { row in
+            row["message_id"] as String
+        }).mapValues { rows in
+            rows.map(attachment(from:))
+        }
+
+        for index in messages.indices {
+            messages[index].attachments = attachmentsByMessageID[messages[index].id.uuidString] ?? []
+        }
+        return messages
     }
 
     private static func fetchInstalledAndCuratedModels(_ db: Database) throws -> [ModelInstall] {
@@ -1357,6 +1393,18 @@ actor GRDBPinesStore:
             createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
             toolCallID: row["tool_call_id"] as String?,
             providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?)
+        )
+    }
+
+    private static func attachment(from row: Row) -> ChatAttachment {
+        let localPath = row["local_path"] as String
+        return ChatAttachment(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            kind: AttachmentKind(rawValue: row["kind"]) ?? .document,
+            fileName: row["file_name"],
+            contentType: row["content_type"],
+            localURL: localPath.isEmpty ? nil : URL(fileURLWithPath: localPath),
+            byteCount: row["byte_count"]
         )
     }
 

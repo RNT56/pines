@@ -5,15 +5,11 @@ import WebKit
 
 @MainActor
 final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
-    private let webView: WKWebView
+    private var webView: WKWebView?
     private var navigationContinuation: CheckedContinuation<Void, Never>?
 
     override init() {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
-        webView.navigationDelegate = self
     }
 
     func observeSpec() throws -> ToolSpec<BrowserObserveInput, BrowserObserveOutput> {
@@ -59,6 +55,7 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
     }
 
     func observe(_ input: BrowserObserveInput) async throws -> BrowserObserveOutput {
+        let webView = ensureWebView()
         if let url = URL(string: input.url), webView.url != url {
             try await navigate(to: url)
         }
@@ -120,7 +117,7 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
                 screenshotBase64: data?.base64EncodedString()
             )
         case .stop:
-            webView.stopLoading()
+            ensureWebView().stopLoading()
             return BrowserActionOutput(summary: "Stopped loading.", snapshot: try await snapshotText())
         }
     }
@@ -136,8 +133,20 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
     }
 
     private func navigate(to url: URL) async throws {
-        webView.load(URLRequest(url: url))
+        ensureWebView().load(URLRequest(url: url))
         await waitForNavigation()
+    }
+
+    private func ensureWebView() -> WKWebView {
+        if let webView {
+            return webView
+        }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = self
+        self.webView = webView
+        return webView
     }
 
     private func waitForNavigation() async {
@@ -168,7 +177,7 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
 
     private func evaluateJavaScript(_ script: String) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            webView.evaluateJavaScript(script) { _, error in
+            ensureWebView().evaluateJavaScript(script) { _, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
@@ -180,7 +189,7 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
 
     private func evaluateJavaScriptString(_ script: String) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
-            webView.evaluateJavaScript(script) { value, error in
+            ensureWebView().evaluateJavaScript(script) { value, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
@@ -192,7 +201,7 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
 
     private func takeSnapshot(configuration: WKSnapshotConfiguration) async throws -> UIImage {
         try await withCheckedThrowingContinuation { continuation in
-            webView.takeSnapshot(with: configuration) { image, error in
+            ensureWebView().takeSnapshot(with: configuration) { image, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else if let image {

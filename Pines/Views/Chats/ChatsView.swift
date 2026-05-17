@@ -1,5 +1,6 @@
 import SwiftUI
 import PinesCore
+import UniformTypeIdentifiers
 
 struct ChatsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -485,11 +486,17 @@ private struct ChatBubble: View {
                 }
             }
 
-            MarkdownMessageView(
-                messageID: message.id,
-                content: message.content,
-                isStreaming: isStreaming
-            )
+            if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                MarkdownMessageView(
+                    messageID: message.id,
+                    content: message.content,
+                    isStreaming: isStreaming
+                )
+            }
+
+            if !message.attachments.isEmpty {
+                ChatAttachmentList(attachments: message.attachments)
+            }
         }
         .padding(theme.spacing.medium)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -516,6 +523,67 @@ private struct ChatBubble: View {
                 Label("Copy as Plain Text", systemImage: "text.alignleft")
             }
         }
+    }
+}
+
+private struct ChatAttachmentList: View {
+    @Environment(\.pinesTheme) private var theme
+    let attachments: [ChatAttachment]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            ForEach(attachments.indices, id: \.self) { index in
+                let attachment = attachments[index]
+                HStack(spacing: theme.spacing.xsmall) {
+                    Image(systemName: Self.iconName(for: attachment))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(theme.colors.accent)
+                        .frame(width: 18)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(attachment.fileName)
+                            .font(theme.typography.caption.weight(.medium))
+                            .foregroundStyle(theme.colors.primaryText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        Text(Self.detailText(for: attachment))
+                            .font(.caption2)
+                            .foregroundStyle(theme.colors.tertiaryText)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: theme.spacing.small)
+                }
+                .padding(.horizontal, theme.spacing.small)
+                .padding(.vertical, theme.spacing.xsmall)
+                .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(attachments.count) attachments")
+    }
+
+    static func iconName(for attachment: ChatAttachment) -> String {
+        switch attachment.kind {
+        case .image:
+            "photo"
+        case .document:
+            attachment.normalizedContentType == "application/pdf" ? "doc.richtext" : "doc.text"
+        case .webCapture:
+            "globe"
+        case .audio:
+            "waveform"
+        case .video:
+            "film"
+        }
+    }
+
+    static func detailText(for attachment: ChatAttachment) -> String {
+        let size = attachment.byteCount > 0
+            ? ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file)
+            : "Unknown size"
+        return "\(attachment.contentType) - \(size)"
     }
 }
 
@@ -606,6 +674,10 @@ private struct ChatComposerBar: View {
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var draft = ""
+    @State private var attachments: [ChatAttachment] = []
+    @State private var attachmentError: String?
+    @State private var isImportingAttachments = false
+    @State private var showingAttachmentImporter = false
     @State private var didCommitSend = false
     @State private var selectedMCPPrompt: MCPPromptRecord?
     @State private var mcpPromptArguments: [String: String] = [:]
@@ -613,11 +685,18 @@ private struct ChatComposerBar: View {
     let threadID: UUID?
 
     var body: some View {
-        Group {
-            if horizontalSizeClass == .compact {
-                compactLayout
-            } else {
-                regularLayout
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            if !attachments.isEmpty || attachmentError != nil || isImportingAttachments {
+                attachmentTray
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+
+            Group {
+                if horizontalSizeClass == .compact {
+                    compactLayout
+                } else {
+                    regularLayout
+                }
             }
         }
         .sheet(item: $selectedMCPPrompt) { prompt in
@@ -641,13 +720,24 @@ private struct ChatComposerBar: View {
         .onTapGesture {
             isFocused = true
         }
+        .fileImporter(
+            isPresented: $showingAttachmentImporter,
+            allowedContentTypes: Self.allowedAttachmentTypes,
+            allowsMultipleSelection: true,
+            onCompletion: importAttachments
+        )
         .animation(theme.motion.fast, value: draft.isEmpty)
+        .animation(theme.motion.fast, value: attachments)
+        .animation(theme.motion.fast, value: attachmentError)
     }
 
     private var regularLayout: some View {
         HStack(spacing: theme.spacing.small) {
             attachButton
-            promptButton
+            if !activeMCPPrompts.isEmpty {
+                promptButton
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
             inputField
             sendButton
         }
@@ -659,9 +749,45 @@ private struct ChatComposerBar: View {
 
             HStack(spacing: theme.spacing.small) {
                 attachButton
-                promptButton
+                if !activeMCPPrompts.isEmpty {
+                    promptButton
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
                 Spacer(minLength: theme.spacing.small)
                 sendButton
+            }
+        }
+    }
+
+    private var attachmentTray: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            if let attachmentError {
+                Text(attachmentError)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if isImportingAttachments {
+                Label("Adding attachments", systemImage: "paperclip")
+                    .font(theme.typography.caption.weight(.medium))
+                    .foregroundStyle(theme.colors.secondaryText)
+            }
+
+            if !attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: theme.spacing.xsmall) {
+                        ForEach(attachments.indices, id: \.self) { index in
+                            let attachment = attachments[index]
+                            PendingChatAttachmentPill(
+                                attachment: attachment,
+                                remove: { removeAttachment(attachment) }
+                            )
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
+                .scrollClipDisabled()
             }
         }
     }
@@ -671,6 +797,8 @@ private struct ChatComposerBar: View {
             .lineLimit(1...4)
             .textFieldStyle(.plain)
             .focused($isFocused)
+            .textInputAutocapitalization(.sentences)
+            .autocorrectionDisabled()
             .font(theme.typography.body)
             .foregroundStyle(theme.colors.primaryText)
             .padding(.vertical, theme.spacing.xsmall)
@@ -684,16 +812,19 @@ private struct ChatComposerBar: View {
     private var attachButton: some View {
         Button {
             haptics.play(.primaryAction)
+            attachmentError = nil
+            showingAttachmentImporter = true
         } label: {
             Image(systemName: "paperclip")
         }
         .accessibilityLabel("Attach")
+        .disabled(appModel.activeRunID != nil || isImportingAttachments || attachments.count >= Self.maxAttachmentCount)
         .pinesButtonStyle(.icon)
     }
 
     private var promptButton: some View {
         Menu {
-            ForEach(appModel.mcpPrompts) { prompt in
+            ForEach(activeMCPPrompts) { prompt in
                 Button(prompt.title ?? prompt.name) {
                     haptics.play(.primaryAction)
                     selectedMCPPrompt = prompt
@@ -704,31 +835,58 @@ private struct ChatComposerBar: View {
             Image(systemName: "text.bubble")
         }
         .accessibilityLabel("MCP prompts")
-        .disabled(appModel.mcpPrompts.isEmpty)
         .pinesButtonStyle(.icon)
     }
 
     private var sendButton: some View {
         Button {
-            sendDraft()
+            if appModel.activeRunID == nil {
+                sendDraft()
+            } else {
+                appModel.stopCurrentRun()
+            }
         } label: {
             Image(systemName: appModel.activeRunID == nil ? "arrow.up" : "stop.fill")
                 .symbolEffect(.bounce, options: .nonRepeating, value: didCommitSend)
         }
-        .accessibilityLabel("Send")
-        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.activeRunID != nil)
-        .pinesButtonStyle(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.activeRunID != nil ? .secondary : .primary)
+        .accessibilityLabel(appModel.activeRunID == nil ? "Send" : "Stop")
+        .disabled(appModel.activeRunID == nil && !canSend)
+        .pinesButtonStyle(sendButtonStyle)
+    }
+
+    private var canSend: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+    }
+
+    private var sendButtonStyle: PinesButtonKind {
+        if appModel.activeRunID != nil {
+            return .destructive
+        }
+        return canSend ? .primary : .secondary
+    }
+
+    private var activeMCPPrompts: [MCPPromptRecord] {
+        let activeServerIDs = Set(
+            appModel.mcpServers
+                .filter { $0.enabled && $0.promptsEnabled && $0.status == .ready }
+                .map(\.id)
+        )
+        guard !activeServerIDs.isEmpty else { return [] }
+        return appModel.mcpPrompts.filter { activeServerIDs.contains($0.serverID) }
     }
 
     private func sendDraft() {
-        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard canSend else { return }
         let pending = draft
+        let pendingAttachments = attachments
         draft = ""
+        attachments = []
+        attachmentError = nil
         isFocused = false
         withAnimation(theme.motion.copySuccess) {
             didCommitSend.toggle()
         }
-        appModel.startSending(pending, in: threadID, services: services)
+        appModel.startSending(pending, attachments: pendingAttachments, in: threadID, services: services)
     }
 
     private func seedPromptArguments(_ prompt: MCPPromptRecord) {
@@ -745,6 +903,253 @@ private struct ChatComposerBar: View {
 
     private func promptArgumentKey(prompt: MCPPromptRecord, argument: MCPPromptArgument) -> String {
         "\(prompt.id):\(argument.name)"
+    }
+
+    private func removeAttachment(_ attachment: ChatAttachment) {
+        attachments.removeAll { $0.id == attachment.id }
+        if let localURL = attachment.localURL {
+            try? FileManager.default.removeItem(at: localURL)
+        }
+    }
+
+    private func importAttachments(_ result: Result<[URL], Error>) {
+        switch result {
+        case let .failure(error):
+            attachmentError = error.localizedDescription
+        case let .success(urls):
+            let remainingSlots = Self.maxAttachmentCount - attachments.count
+            guard remainingSlots > 0 else {
+                attachmentError = "Remove an attachment before adding another file."
+                return
+            }
+            let selectedURLs = Array(urls.prefix(remainingSlots))
+            let overflowCount = max(0, urls.count - remainingSlots)
+            isImportingAttachments = true
+            attachmentError = overflowCount > 0 ? "Only the first \(remainingSlots) selected files were added." : nil
+
+            Task {
+                let outcome = await Self.importAttachmentFiles(selectedURLs)
+                attachments.append(contentsOf: outcome.attachments)
+                if !outcome.failures.isEmpty {
+                    attachmentError = outcome.failures.joined(separator: "\n")
+                }
+                isImportingAttachments = false
+            }
+        }
+    }
+
+    private static let maxAttachmentCount = 8
+    nonisolated private static let maxInlineImageBytes = 20 * 1024 * 1024
+    nonisolated private static let maxInlineFileBytes = 50 * 1024 * 1024
+
+    private static let allowedAttachmentTypes: [UTType] = [
+        "png", "jpg", "jpeg", "webp", "gif", "pdf", "txt", "md", "markdown", "json", "csv",
+    ].compactMap { UTType(filenameExtension: $0) }
+
+    private struct AttachmentImportOutcome: Sendable {
+        var attachments: [ChatAttachment]
+        var failures: [String]
+    }
+
+    nonisolated private static func importAttachmentFiles(_ urls: [URL]) async -> AttachmentImportOutcome {
+        await Task.detached(priority: .userInitiated) {
+            var imported = [ChatAttachment]()
+            var failures = [String]()
+            for url in urls {
+                do {
+                    imported.append(try chatAttachment(from: url))
+                } catch {
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            return AttachmentImportOutcome(attachments: imported, failures: failures)
+        }.value
+    }
+
+    nonisolated private static func chatAttachment(from sourceURL: URL) throws -> ChatAttachment {
+        let didAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let contentType = normalizedAttachmentContentType(for: sourceURL)
+        guard let kind = attachmentKind(for: contentType) else {
+            throw InferenceError.unsupportedCapability("Unsupported attachment type \(contentType).")
+        }
+
+        let directory = try chatAttachmentsDirectory()
+        let fileName = sanitizedAttachmentFileName(
+            sourceURL.lastPathComponent,
+            fallbackExtension: fileExtension(for: contentType)
+        )
+        let destination = directory.appending(path: "\(UUID().uuidString)-\(fileName)")
+        try FileManager.default.copyItem(at: sourceURL, to: destination)
+
+        let byteCount = try fileByteCount(at: destination)
+        let maxBytes = kind == .image ? maxInlineImageBytes : maxInlineFileBytes
+        guard byteCount > 0 else {
+            try? FileManager.default.removeItem(at: destination)
+            throw InferenceError.invalidRequest("Attachment is empty.")
+        }
+        guard byteCount <= maxBytes else {
+            try? FileManager.default.removeItem(at: destination)
+            throw InferenceError.invalidRequest("Attachment exceeds the \(ByteCountFormatter.string(fromByteCount: Int64(maxBytes), countStyle: .file)) limit.")
+        }
+
+        return ChatAttachment(
+            kind: kind,
+            fileName: fileName,
+            contentType: contentType,
+            localURL: destination,
+            byteCount: byteCount
+        )
+    }
+
+    nonisolated private static func normalizedAttachmentContentType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "png":
+            return "image/png"
+        case "jpg", "jpeg":
+            return "image/jpeg"
+        case "webp":
+            return "image/webp"
+        case "gif":
+            return "image/gif"
+        case "pdf":
+            return "application/pdf"
+        case "txt", "text":
+            return "text/plain"
+        case "md", "markdown":
+            return "text/markdown"
+        case "json":
+            return "application/json"
+        case "csv":
+            return "text/csv"
+        default:
+            if let values = try? url.resourceValues(forKeys: [.contentTypeKey]),
+               let mime = values.contentType?.preferredMIMEType?.lowercased() {
+                return mime == "image/jpg" ? "image/jpeg" : mime
+            }
+            return "application/octet-stream"
+        }
+    }
+
+    nonisolated private static func attachmentKind(for contentType: String) -> AttachmentKind? {
+        switch contentType {
+        case "image/png", "image/jpeg", "image/webp", "image/gif":
+            return .image
+        case "application/pdf", "text/plain", "text/markdown", "text/x-markdown", "application/json", "text/csv":
+            return .document
+        default:
+            return nil
+        }
+    }
+
+    nonisolated private static func fileExtension(for contentType: String) -> String {
+        switch contentType {
+        case "image/png":
+            "png"
+        case "image/jpeg":
+            "jpg"
+        case "image/webp":
+            "webp"
+        case "image/gif":
+            "gif"
+        case "application/pdf":
+            "pdf"
+        case "text/markdown", "text/x-markdown":
+            "md"
+        case "application/json":
+            "json"
+        case "text/csv":
+            "csv"
+        default:
+            "txt"
+        }
+    }
+
+    nonisolated private static func chatAttachmentsDirectory() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = base.appending(path: "Pines/ChatAttachments", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    nonisolated private static func fileByteCount(at url: URL) throws -> Int {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        if let size = values.fileSize {
+            return size
+        }
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes[.size] as? NSNumber)?.intValue ?? 0
+    }
+
+    nonisolated private static func sanitizedAttachmentFileName(_ rawValue: String, fallbackExtension: String) -> String {
+        let candidate = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "attachment.\(fallbackExtension)"
+            : rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._- "))
+        var sanitized = candidate.unicodeScalars
+            .map { allowed.contains($0) ? String($0) : "-" }
+            .joined()
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".- ").union(.whitespacesAndNewlines))
+        if sanitized.isEmpty {
+            sanitized = "attachment.\(fallbackExtension)"
+        }
+        if URL(fileURLWithPath: sanitized).pathExtension.isEmpty {
+            sanitized += ".\(fallbackExtension)"
+        }
+        return String(sanitized.prefix(96))
+    }
+}
+
+private struct PendingChatAttachmentPill: View {
+    @Environment(\.pinesTheme) private var theme
+    let attachment: ChatAttachment
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: theme.spacing.xsmall) {
+            Image(systemName: ChatAttachmentList.iconName(for: attachment))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.colors.accent)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(attachment.fileName)
+                    .font(theme.typography.caption.weight(.medium))
+                    .foregroundStyle(theme.colors.primaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 160, alignment: .leading)
+
+                Text(ChatAttachmentList.detailText(for: attachment))
+                    .font(.caption2)
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .lineLimit(1)
+            }
+
+            Button(action: remove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .accessibilityLabel("Remove \(attachment.fileName)")
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.colors.secondaryText)
+        }
+        .padding(.horizontal, theme.spacing.small)
+        .padding(.vertical, theme.spacing.xsmall)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+        }
     }
 }
 

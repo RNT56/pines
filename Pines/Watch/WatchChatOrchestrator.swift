@@ -247,7 +247,10 @@ struct WatchChatOrchestrator {
                                 let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
                                 let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if status == .complete && finalText.isEmpty {
-                                    let message = finish.message ?? "The selected model finished without producing output."
+                                    let message = Self.messageWithProviderDiagnostics(
+                                        finish.message ?? "The selected model finished without producing output.",
+                                        metadata: finalProviderMetadata
+                                    )
                                     didFail = true
                                     try await repository.updateMessage(
                                         id: pendingAssistant.id,
@@ -521,6 +524,25 @@ struct WatchChatOrchestrator {
         capabilities.imageInputs = capabilities.imageInputs && install.modalities.contains(.vision)
         capabilities.embeddings = capabilities.embeddings && install.modalities.contains(.embeddings)
         return (services.mlxRuntime.localProviderID, capabilities)
+    }
+
+    private static func messageWithProviderDiagnostics(_ message: String, metadata: [String: String]) -> String {
+        let diagnosticKeys = [
+            CloudProviderMetadataKeys.openAIRequestID,
+            CloudProviderMetadataKeys.openAIResponseID,
+            CloudProviderMetadataKeys.anthropicRequestID,
+            CloudProviderMetadataKeys.anthropicMessageID,
+            CloudProviderMetadataKeys.geminiRequestID,
+            CloudProviderMetadataKeys.geminiResponseID,
+            CloudProviderMetadataKeys.geminiInteractionID,
+            CloudProviderMetadataKeys.geminiModelVersion,
+        ]
+        let diagnostics = diagnosticKeys.compactMap { key -> String? in
+            guard let value = metadata[key], !value.isEmpty else { return nil }
+            return "\(key)=\(value)"
+        }
+        guard !diagnostics.isEmpty else { return message }
+        return "\(message)\n\nProvider diagnostics: \(diagnostics.joined(separator: ", "))"
     }
 
     private func vaultContextMessage(for query: String) async -> (message: ChatMessage, documentIDs: [UUID])? {
