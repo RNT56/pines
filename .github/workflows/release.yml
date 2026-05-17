@@ -115,7 +115,7 @@ jobs:
         run: bash scripts/ci/package-release.sh "${{ steps.release-tag.outputs.tag }}"
 
       - name: Upload release validation artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: pines-${{ steps.release-tag.outputs.tag }}-validation
           path: |
