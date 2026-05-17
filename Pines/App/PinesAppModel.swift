@@ -11,6 +11,11 @@ private enum ChatMetadataKeys {
     static let agentActivities = "pines.agent.activities.v1"
 }
 
+private struct PreparedRemoteModelInstall: Sendable {
+    var install: ModelInstall
+    var download: ModelDownloadProgress?
+}
+
 @MainActor
 final class PinesAppModel: ObservableObject {
     @Published var threads: [PinesThreadPreview]
@@ -1847,20 +1852,30 @@ final class PinesAppModel: ObservableObject {
                 let filters = ModelSearchFilters(query: trimmed, task: task, limit: 50, includeConfig: false)
                 let remoteModels = try await services.modelCatalog.search(filters: filters, accessToken: token)
                 let installed = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
-                let installedByRepository = Dictionary(uniqueKeysWithValues: installed.map { ($0.repository.lowercased(), $0) })
-                let downloadByRepository = Self.latestDownloadByRepository(modelDownloads)
-                let previews = remoteModels.compactMap { summary -> PinesModelPreview? in
-                    let preflight = services.preflightClassifier.classify(summary.preflightInput)
-                    let existingInstall = installedByRepository[summary.repository.lowercased()]
-                    let install = existingInstall?.enriched(with: preflight)
-                        ?? Self.install(from: summary, preflight: preflight)
-                    guard preflight.verification != .unsupported || verification == .unsupported || installState == .unsupported else { return nil }
-                    guard verification == nil || install.verification == verification else { return nil }
-                    guard installState == nil || install.state == installState else { return nil }
-                    return Self.modelPreview(
-                        from: install,
+                try Task.checkCancellation()
+                let downloads = modelDownloads
+                let classifier = services.preflightClassifier
+                let preparationTask = Task.detached(priority: .userInitiated) {
+                    try Self.prepareRemoteModelInstalls(
+                        remoteModels: remoteModels,
+                        installed: installed,
+                        downloads: downloads,
+                        verification: verification,
+                        installState: installState,
+                        classifier: classifier
+                    )
+                }
+                let preparedModels = try await withTaskCancellationHandler {
+                    try await preparationTask.value
+                } onCancel: {
+                    preparationTask.cancel()
+                }
+                try Task.checkCancellation()
+                let previews = preparedModels.map { prepared in
+                    Self.modelPreview(
+                        from: prepared.install,
                         runtime: services.mlxRuntime,
-                        download: downloadByRepository[install.repository.lowercased()]
+                        download: prepared.download
                     )
                 }
                 guard isCurrentSearch() else { return }
@@ -1889,6 +1904,37 @@ final class PinesAppModel: ObservableObject {
             setIfChanged(\.modelSearchError, error.localizedDescription)
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    private nonisolated static func prepareRemoteModelInstalls(
+        remoteModels: [RemoteModelSummary],
+        installed: [ModelInstall],
+        downloads: [ModelDownloadProgress],
+        verification: ModelVerificationState?,
+        installState: ModelInstallState?,
+        classifier: ModelPreflightClassifier
+    ) throws -> [PreparedRemoteModelInstall] {
+        let installedByRepository = Dictionary(uniqueKeysWithValues: installed.map { ($0.repository.lowercased(), $0) })
+        let downloadByRepository = latestDownloadByRepository(downloads)
+        var prepared = [PreparedRemoteModelInstall]()
+        prepared.reserveCapacity(remoteModels.count)
+
+        for summary in remoteModels {
+            try Task.checkCancellation()
+            let preflight = classifier.classify(summary.preflightInput)
+            let existingInstall = installedByRepository[summary.repository.lowercased()]
+            let install = existingInstall?.enriched(with: preflight)
+                ?? install(from: summary, preflight: preflight)
+            guard preflight.verification != .unsupported || verification == .unsupported || installState == .unsupported else { continue }
+            guard verification == nil || install.verification == verification else { continue }
+            guard installState == nil || install.state == installState else { continue }
+            prepared.append(PreparedRemoteModelInstall(
+                install: install,
+                download: downloadByRepository[install.repository.lowercased()]
+            ))
+        }
+
+        return prepared
     }
 
     func preflightModel(repository: String, services: PinesAppServices) async {

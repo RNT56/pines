@@ -12,6 +12,7 @@ struct ModelsView: View {
     @State private var selectedVerificationFilter: ModelVerificationState?
     @State private var selectedInstallStateFilter: ModelInstallState?
     @State private var scheduledSearchTask: Task<Void, Never>?
+    @State private var appliedSearchCriteria = ModelSearchCriteria()
 
     private var selectedModel: PinesModelPreview? {
         guard let selectedModelKey else { return nil }
@@ -19,7 +20,7 @@ struct ModelsView: View {
     }
 
     private var displayedModels: [PinesModelPreview] {
-        guard !isDiscovering else { return appModel.models }
+        guard !appliedSearchCriteria.hasDiscoveryCriteria else { return appModel.models }
         return appModel.models.filter { model in
             model.install.state == .installed || model.install.state == .failed || model.hasActiveDownload
         }
@@ -35,7 +36,7 @@ struct ModelsView: View {
     }
 
     private var isDiscovering: Bool {
-        searchCriteria.hasDiscoveryCriteria
+        appliedSearchCriteria.hasDiscoveryCriteria
     }
 
     private var modelSectionTitle: String {
@@ -120,6 +121,7 @@ struct ModelsView: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .task {
+                appliedSearchCriteria = ModelSearchCriteria()
                 await appModel.searchModels(query: "", services: services)
             }
             .onChange(of: searchCriteria) { _, criteria in
@@ -138,7 +140,7 @@ struct ModelsView: View {
                     self.selectedModelKey = nil
                 }
             }
-            .onChange(of: searchCriteria) { _, _ in
+            .onChange(of: appliedSearchCriteria) { _, _ in
                 guard let currentSelection = selectedModelKey else { return }
                 if !displayedModels.contains(where: { $0.selectionKey == currentSelection }) {
                     self.selectedModelKey = nil
@@ -168,6 +170,9 @@ struct ModelsView: View {
                 return
             }
             guard !Task.isCancelled else { return }
+            await MainActor.run {
+                appliedSearchCriteria = criteria
+            }
             await appModel.searchModels(
                 query: criteria.query,
                 task: criteria.task,
@@ -192,10 +197,10 @@ private struct ModelSearchCriteria: Hashable {
     var installState: ModelInstallState?
 
     init(
-        query: String,
-        task: HubTask?,
-        verification: ModelVerificationState?,
-        installState: ModelInstallState?
+        query: String = "",
+        task: HubTask? = nil,
+        verification: ModelVerificationState? = nil,
+        installState: ModelInstallState? = nil
     ) {
         self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         self.task = task

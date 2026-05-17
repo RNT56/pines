@@ -98,7 +98,7 @@ extension PinesAppModel {
             : "\(message.attachments.count) attachments"
     }
 
-    static func install(from summary: RemoteModelSummary, preflight: ModelPreflightResult) -> ModelInstall {
+    nonisolated static func install(from summary: RemoteModelSummary, preflight: ModelPreflightResult) -> ModelInstall {
         return ModelInstall(
             modelID: ModelID(rawValue: summary.repository),
             displayName: summary.repository.components(separatedBy: "/").last ?? summary.repository,
@@ -113,7 +113,7 @@ extension PinesAppModel {
         )
     }
 
-    static func modalities(from summary: RemoteModelSummary) -> Set<ModelModality> {
+    nonisolated static func modalities(from summary: RemoteModelSummary) -> Set<ModelModality> {
         if summary.tags.contains(where: { $0 == "feature-extraction" || $0 == "sentence-similarity" || $0 == "sentence-transformers" }) {
             return [.embeddings]
         }
@@ -216,7 +216,7 @@ extension PinesAppModel {
         )
     }
 
-    static func latestDownloadByRepository(_ downloads: [ModelDownloadProgress]) -> [String: ModelDownloadProgress] {
+    nonisolated static func latestDownloadByRepository(_ downloads: [ModelDownloadProgress]) -> [String: ModelDownloadProgress] {
         Dictionary(grouping: downloads, by: { $0.repository.lowercased() }).mapValues { values in
             values.sorted { $0.updatedAt > $1.updatedAt }.first!
         }
