@@ -357,6 +357,8 @@ private struct ChatTranscriptView: View {
     @State private var retrySpin = false
     @State private var editingMessage: ChatMessage?
     @State private var isNearTranscriptBottom = true
+    @State private var isAutoScrollPinned = true
+    @State private var isComposerFocused = false
     let thread: PinesThreadPreview
 
     var body: some View {
@@ -376,8 +378,6 @@ private struct ChatTranscriptView: View {
                             )
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
-
-                        ChatRunState(request: thread.request)
                     }
                     .animation(theme.motion.standard, value: thread.messages.count)
 
@@ -389,23 +389,37 @@ private struct ChatTranscriptView: View {
                 .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
-            .scrollDismissesKeyboard(.interactively)
+            .scrollDismissesKeyboard(.immediately)
+            .simultaneousGesture(transcriptDragGesture)
             .pinesExpressiveScrollHaptics()
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 Self.isNearBottom(geometry)
             } action: { _, isNearBottom in
                 isNearTranscriptBottom = isNearBottom
+                if isNearBottom {
+                    isAutoScrollPinned = true
+                } else if !isComposerFocused {
+                    isAutoScrollPinned = false
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                jumpToLatestButton(proxy: proxy)
+                    .padding(.trailing, contentPadding)
+                    .padding(.bottom, theme.spacing.small)
             }
             .onAppear {
                 scrollToBottom(proxy, animated: false)
             }
             .onChange(of: thread.messages.count) { _, _ in
-                if isNearTranscriptBottom || thread.messages.last?.role == .user {
+                if thread.messages.last?.role == .user {
+                    isAutoScrollPinned = true
+                    scrollToBottom(proxy, animated: true)
+                } else if isAutoScrollPinned || isNearTranscriptBottom {
                     scrollToBottom(proxy, animated: true)
                 }
             }
             .onChange(of: chatState.activeRunID) { _, _ in
-                if isNearTranscriptBottom {
+                if isAutoScrollPinned || isNearTranscriptBottom {
                     scrollToBottom(proxy, animated: true)
                 }
             }
@@ -473,7 +487,7 @@ private struct ChatTranscriptView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
 
-                ChatComposerBar(threadID: thread.id)
+                ChatComposerBar(threadID: thread.id, isFocused: $isComposerFocused)
                     .padding(.horizontal, contentPadding)
             }
             .padding(.top, theme.spacing.xsmall)
@@ -484,6 +498,30 @@ private struct ChatTranscriptView: View {
 
     private var contentPadding: CGFloat {
         horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large
+    }
+
+    @ViewBuilder
+    private func jumpToLatestButton(proxy: ScrollViewProxy) -> some View {
+        if !isAutoScrollPinned {
+            Button {
+                haptics.play(.navigationSelected)
+                isAutoScrollPinned = true
+                scrollToBottom(proxy, animated: true)
+            } label: {
+                Image(systemName: "arrow.down")
+            }
+            .accessibilityLabel("Jump to latest message")
+            .pinesButtonStyle(.icon)
+            .transition(.opacity.combined(with: .scale(scale: 0.94)))
+        }
+    }
+
+    private var transcriptDragGesture: some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .local)
+            .onChanged { _ in
+                guard isComposerFocused else { return }
+                isComposerFocused = false
+            }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
@@ -937,7 +975,7 @@ private struct SwipeableChatBubble<Content: View>: View {
 
             content()
                 .offset(x: revealedOffset)
-                .gesture(horizontalSwipeGesture)
+                .simultaneousGesture(horizontalSwipeGesture)
                 .animation(reduceMotion ? nil : theme.motion.fast, value: settledOffset)
         }
         .onChange(of: leadingActions.count) { _, _ in closeActions() }
@@ -1163,32 +1201,6 @@ struct ChatAttachmentList: View {
             ? ByteCountFormatter.string(fromByteCount: Int64(attachment.byteCount), countStyle: .file)
             : "Unknown size"
         return "\(attachment.contentType) - \(size)"
-    }
-}
-
-private struct ChatRunState: View {
-    @Environment(\.pinesTheme) private var theme
-    let request: ChatRequest
-
-    var body: some View {
-        HStack(spacing: theme.spacing.medium) {
-            PinesStatusIndicator(color: theme.colors.accent, isActive: false, size: 10)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Runtime standby")
-                    .font(theme.typography.headline)
-                    .pinesFittingText()
-
-                Text(request.allowsTools && !request.availableTools.isEmpty ? "Tool routing enabled for this request." : "Waiting for the inference session.")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.9)
-            }
-
-            Spacer()
-        }
-        .pinesSurface(theme.template == .paper && theme.colorScheme == .light ? .panel : .glass)
     }
 }
 

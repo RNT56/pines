@@ -774,7 +774,7 @@ struct PinesButtonStyle: ButtonStyle {
     }
 
     private var minHeight: CGFloat {
-        kind == .icon ? 36 : theme.dashboard.actionMinHeight
+        kind == .icon ? 44 : theme.dashboard.actionMinHeight
     }
 
     private var cornerRadius: CGFloat {

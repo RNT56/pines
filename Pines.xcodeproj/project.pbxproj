@@ -79,11 +79,11 @@
 		E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */; };
 		E64DF5CED9F4BECBE5446731 /* ModelDownloadLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EB6A8EFD9FE940BEFE80119 /* ModelDownloadLiveActivityController.swift */; };
 		E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */; };
-		BEE51A1E0000000000000001 /* PinesAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEE51A1E0000000000000002 /* PinesAppState.swift */; };
 		E96F244C6E13B6BBAD411CE0 /* WKWebViewBrowserRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */; };
 		EF023CED82C75823EC051432 /* VaultEmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46107CC67D229C2D05C33A59 /* VaultEmbeddingService.swift */; };
 		EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */; };
 		F1BB293494A6B2AA162BD7D9 /* MLXRuntimeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */; };
+		F2465549DA286C8B1EE82D75 /* PinesAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */; };
 		F3D59B7E54F622FED196570C /* PinesAppModel+Presentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27F8A15281AD531830EEBB98 /* PinesAppModel+Presentation.swift */; };
 		F726DC5360EC760DFADDE5FE /* ModelLifecycleService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */; };
 		FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */; };
@@ -181,9 +181,9 @@
 		8E832CA92705405D1734D955 /* ModelsViewComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsViewComponents.swift; sourceTree = "<group>"; };
 		92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
 		948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchTool.swift; sourceTree = "<group>"; };
+		95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppState.swift; sourceTree = "<group>"; };
 		989263AE706043656C31B580 /* CoreSurfaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSurfaceTests.swift; sourceTree = "<group>"; };
 		9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
-		BEE51A1E0000000000000002 /* PinesAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppState.swift; sourceTree = "<group>"; };
 		9CB6251B36A1F706D8884A9E /* ModelDownloadSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadSupport.swift; sourceTree = "<group>"; };
 		A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHaptics.swift; sourceTree = "<group>"; };
 		A790E0D7CCFB1AF34B214B13 /* PinesHuggingFaceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHuggingFaceBridge.swift; sourceTree = "<group>"; };
@@ -473,11 +473,11 @@
 			children = (
 				82DE8010D019802F630AAF0B /* PinesApp.swift */,
 				9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */,
-				BEE51A1E0000000000000002 /* PinesAppState.swift */,
 				2CE279F766D8B0CC93D1D150 /* PinesAppModel+MCP.swift */,
 				27F8A15281AD531830EEBB98 /* PinesAppModel+Presentation.swift */,
 				0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */,
 				DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */,
+				95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */,
 				77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */,
 			);
 			path = App;
@@ -719,9 +719,9 @@
 				52B797063FB95D83A2D63E7A /* PinesAppModel+MCP.swift in Sources */,
 				F3D59B7E54F622FED196570C /* PinesAppModel+Presentation.swift in Sources */,
 				E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */,
-				BEE51A1E0000000000000001 /* PinesAppState.swift in Sources */,
 				2DC7F4355DC8D047D2D5460C /* PinesAppModelTypes.swift in Sources */,
 				D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */,
+				F2465549DA286C8B1EE82D75 /* PinesAppState.swift in Sources */,
 				036707C7BBCC21868B91CAA4 /* PinesDesignComponents.swift in Sources */,
 				55937CA552490AEA6ED46131 /* PinesDesignSystem.swift in Sources */,
 				5DEFA11F0FB695B117D0E944 /* PinesHaptics.swift in Sources */,
@@ -1172,7 +1172,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift";
 			requirement = {
 				kind = revision;
-				revision = 221ef73921c1d2bb92fc545168120e57545bac22;
+				revision = 5db40d34a96a9c6889b6583d6cc09f8b8f05ea5e;
 			};
 		};
 		E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {
@@ -1180,7 +1180,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift-lm";
 			requirement = {
 				kind = revision;
-				revision = ef066d0999150a8970025101e6f0d55cb44afca0;
+				revision = e39787395c977549e1ba112ee2fd7eb509d57f30;
 			};
 		};
 		ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {

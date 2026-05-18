@@ -23,8 +23,14 @@ struct ChatComposerBar: View {
     @State private var agentToolSpecs: [AnyToolSpec] = []
     @State private var disabledAgentToolNames: Set<String> = []
     @State private var isRefreshingAgentTools = false
-    @FocusState private var isFocused: Bool
+    @FocusState private var isInputFocused: Bool
+    @Binding private var isFocused: Bool
     let threadID: UUID?
+
+    init(threadID: UUID?, isFocused: Binding<Bool>) {
+        self.threadID = threadID
+        _isFocused = isFocused
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.small) {
@@ -60,7 +66,7 @@ struct ChatComposerBar: View {
         .pinesSurface(.chrome, padding: theme.spacing.small)
         .contentShape(RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
         .onTapGesture {
-            isFocused = true
+            setFocus(true)
         }
         .fileImporter(
             isPresented: $showingAttachmentImporter,
@@ -83,6 +89,14 @@ struct ChatComposerBar: View {
         }
         .onChange(of: settingsState.geminiThinkingLevel) { _, _ in
             Task { await appModel.saveSettings(services: services) }
+        }
+        .onChange(of: isInputFocused) { _, focused in
+            guard isFocused != focused else { return }
+            isFocused = focused
+        }
+        .onChange(of: isFocused) { _, focused in
+            guard isInputFocused != focused else { return }
+            isInputFocused = focused
         }
         .onAppear {
             refreshAgentToolsIfNeeded()
@@ -181,12 +195,13 @@ struct ChatComposerBar: View {
         TextField(runMode == .agent ? "Give Pines a task" : "Ask Pines", text: $draft, axis: .vertical)
             .lineLimit(1...4)
             .textFieldStyle(.plain)
-            .focused($isFocused)
+            .focused($isInputFocused)
             .textInputAutocapitalization(.sentences)
             .autocorrectionDisabled()
             .font(theme.typography.body)
             .foregroundStyle(theme.colors.primaryText)
             .padding(.vertical, theme.spacing.xsmall)
+            .frame(minHeight: 44, alignment: .center)
             .submitLabel(.send)
             .onSubmit {
                 guard chatState.activeRunID == nil else { return }
@@ -312,7 +327,7 @@ struct ChatComposerBar: View {
         draft = ""
         attachments = []
         attachmentError = nil
-        isFocused = false
+        setFocus(false)
         withAnimation(theme.motion.copySuccess) {
             didCommitSend.toggle()
         }
@@ -325,6 +340,11 @@ struct ChatComposerBar: View {
             enabledAgentToolNames: enabledToolNames,
             services: services
         )
+    }
+
+    private func setFocus(_ focused: Bool) {
+        isInputFocused = focused
+        isFocused = focused
     }
 
     private func refreshAgentToolsIfNeeded(force: Bool = false) {

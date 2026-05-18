@@ -2,14 +2,14 @@
 
 This file documents third-party software dependencies used by Pines. The Pines repository license does not relicense third-party software. Each dependency remains available under its own license.
 
-This inventory was checked against `project.yml`, `Package.swift`, dependency manifests, and the committed package lockfile on May 17, 2026. The iOS app package graph was last resolved by `xcodebuild -resolvePackageDependencies` on May 16, 2026. The Swift package lockfile covers package/test dependencies; the iOS app MLX fork dependencies are exact revision pins in `project.yml`.
+This inventory was checked against `project.yml`, `Package.swift`, dependency manifests, and the committed package lockfile on May 18, 2026. The iOS app package graph was last resolved by `xcodebuild -resolvePackageDependencies` on May 18, 2026. The Swift package lockfile covers package/test dependencies; the iOS app MLX fork dependencies are exact revision pins in `project.yml`.
 
 ## Direct Swift Package Dependencies
 
 | Package | Source | Version or revision | Products used | License | Notice |
 | --- | --- | --- | --- | --- | --- |
-| MLXSwift | <https://github.com/RNT56/mlx-swift> | `2577c8856ddfb05cad0da4eda7b502cbb5d99a3f` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
-| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `8861b2d9746128f3461b71deee5bf94ec3817a78` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
+| MLXSwift | <https://github.com/RNT56/mlx-swift> | `5db40d34a96a9c6889b6583d6cc09f8b8f05ea5e` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
+| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `e39787395c977549e1ba112ee2fd7eb509d57f30` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
 | SwiftHuggingFace | <https://github.com/huggingface/swift-huggingface.git> | `0.9.0`, with `Xet` trait enabled through `PinesHubXetSupport` | `HuggingFace` | Apache-2.0 | See Apache-2.0 text below. |
 | SwiftTransformers | <https://github.com/huggingface/swift-transformers> | `1.3.2` | `Tokenizers` | Apache-2.0 | See Apache-2.0 text below. |
 | GRDB | <https://github.com/groue/GRDB.swift.git> | `7.10.0` | `GRDB` | MIT | Copyright (C) 2015-2025 Gwendal Roué |
