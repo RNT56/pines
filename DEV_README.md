@@ -252,16 +252,41 @@ The current filter level is tied to `DeviceProfile.recommendedMaxModelBytes`, wh
 | `proPhone` / A18 Pro | 5.0 GB | Allows selected 4B-class quantized models while leaving KV-cache and UI headroom. |
 | A19 standard / A19 Pro thin | 5.5 GB | Uses the stronger latest phone silicon, but keeps thin chassis and sustained-memory risk conservative. |
 | A19 Pro sustained | 7.0 GB | Allows larger quantized models only on the sustained Pro profile. |
-| `maxTabletOrMac` | 8.0 GB | For high-memory iPad/Mac-class devices. Future verified devices with less than 14 GB physical memory are capped back to 5.5 GB. |
+| M-series iPad 8 GB | 3.5 GB | Covers M1/M2/M3 Air and lower-storage M1/M2/M4 Pro devices. This keeps the same 8 GB-class ceiling as A17 Pro because iPadOS, MLX heaps, KV cache, and app state still need sustained headroom. |
+| M-series iPad 12 GB | 5.5 GB | Covers 12 GB M-series iPads, including M4 Air and lower-storage M5 Pro. This allows selected larger quantized models while staying below the 16 GB-class profile. |
+| M-series iPad 16 GB | 8.0 GB | Covers 1 TB/2 TB iPad Pro storage tiers with 16 GB RAM. This is the largest iOS/iPadOS discovery ceiling currently exposed. |
+| `maxTabletOrMac` | 8.0 GB | For high-memory Mac-class devices and future verified devices with at least 14 GB physical memory. Future verified devices with less than 14 GB physical memory are capped back to 5.5 GB. |
 
 These are download/weight ceilings, not total process-memory ceilings. Local inference also needs KV cache, prompt cache, processor tensors for VLMs, temporary MLX allocations, vault embeddings, app UI state, and free memory for iOS. A model that barely fits on disk can still be a bad runtime default if it leaves no sustained headroom.
 
-As of 2026-05-18, Apple Support lists iPhone 17 as A19, iPhone 17 Pro as A19 Pro, iPad mini as A17 Pro, and iPad Pro M5 as 12 GB RAM for 256/512 GB storage or 16 GB RAM for 1/2 TB storage:
+As of 2026-05-18, Apple Support lists iPhone 17 as A19, iPhone 17 Pro as A19 Pro, iPad mini as A17 Pro, and the following M-series iPad memory tiers:
+
+| iPad family | Apple-reported RAM | Discovery profile |
+| --- | ---: | --- |
+| iPad Air M1 | 8 GB | M-series iPad 8 GB, 3.5 GB ceiling |
+| iPad Air M2 | 8 GB | M-series iPad 8 GB, 3.5 GB ceiling |
+| iPad Air M3 | 8 GB | M-series iPad 8 GB, 3.5 GB ceiling |
+| iPad Air M4 | 12 GB unified memory | M-series iPad 12 GB, 5.5 GB ceiling |
+| iPad Pro M1 | 8 GB on 128/256/512 GB storage, 16 GB on 1/2 TB storage | M-series iPad 8 GB or 16 GB, based on measured RAM |
+| iPad Pro M2 | 8 GB on 128/256/512 GB storage, 16 GB on 1/2 TB storage | M-series iPad 8 GB or 16 GB, based on measured RAM |
+| iPad Pro M4 | 8 GB on 256/512 GB storage, 16 GB on 1/2 TB storage | M-series iPad 8 GB or 16 GB, based on measured RAM |
+| iPad Pro M5 | 12 GB on 256/512 GB storage, 16 GB on 1/2 TB storage | M-series iPad 12 GB or 16 GB, based on measured RAM |
+
+There is no shipped M3 iPad Pro generation in this matrix. Because iPad Pro RAM can change by storage capacity inside the same chip generation, `DeviceProfile` uses the iPad hardware identifier only to recognize M-series iPads and uses `ProcessInfo.processInfo.physicalMemory` to choose the 8 GB, 12 GB, or 16 GB ceiling.
+
+Source links used for the current device matrix:
 
 - https://support.apple.com/125089
 - https://support.apple.com/125090
 - https://support.apple.com/en-us/121456
-- https://support.apple.com/en-za/125406
+- https://support.apple.com/en-us/111887
+- https://support.apple.com/en-gb/119894
+- https://support.apple.com/en-us/122241
+- https://support.apple.com/es-es/126471
+- https://support.apple.com/en-us/111896
+- https://support.apple.com/en-us/111841
+- https://support.apple.com/en-us/119891
+- https://support.apple.com/es-es/125406
 
 Apple's iPhone technical specs do not publish RAM, so the runtime must keep using `ProcessInfo.processInfo.physicalMemory`, the hardware identifier map in `DeviceProfile`, and MLX/Metal self-test status rather than hard-coding phone RAM assumptions from third-party teardown reports.
 
@@ -277,7 +302,7 @@ Unknown-size repositories with no parameter or quantization signal are not rejec
 
 To adjust this for new devices or runtime changes:
 
-- Update `DeviceProfile` byte ceilings and hardware identifier mapping first. That is the source of truth for the app's local-runtime resource class.
+- Update `DeviceProfile` byte ceilings and hardware identifier mapping first. That is the source of truth for the app's local-runtime resource class. For iPads, keep storage-tier RAM differences modeled through measured `physicalMemoryBytes`.
 - If MLX quantized safetensor storage becomes materially smaller or larger, adjust `ModelDiscoveryResourcePolicy.quantizedBytesPerParameterFloor`.
 - Add parser coverage in `CoreContractTests` for new naming patterns before relying on them in discovery.
 - Keep curated models separate. Curated status can make a model recommended or verified, but it must not bypass the resource filter.
