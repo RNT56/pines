@@ -2168,7 +2168,7 @@ final class PinesAppModel: ObservableObject {
 
         let enrichmentID = UUID()
         modelSearchMetadataEnrichmentID = enrichmentID
-        modelSearchMetadataTask = Task.detached(priority: .utility) { [weak self] in
+        modelSearchMetadataTask = Task(priority: .utility) { [weak self] in
             let batchSize = 6
             var pending = ArraySlice(repositories)
             var activeCount = 0
@@ -2219,9 +2219,7 @@ final class PinesAppModel: ObservableObject {
                     if batch.count >= batchSize {
                         let update = batch
                         batch.removeAll(keepingCapacity: true)
-                        await MainActor.run {
-                            self?.applyModelSearchMetadata(update, enrichmentID: enrichmentID, runtime: runtime)
-                        }
+                        self?.applyModelSearchMetadata(update, enrichmentID: enrichmentID, runtime: runtime)
                     }
 
                     enqueueNext()
@@ -2229,21 +2227,19 @@ final class PinesAppModel: ObservableObject {
             }
 
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard let self, self.modelSearchMetadataEnrichmentID == enrichmentID else { return }
-                if !batch.isEmpty {
-                    self.applyModelSearchMetadata(batch, enrichmentID: enrichmentID, runtime: runtime)
-                }
-                if failureCount > 0 {
-                    self.recordRecoverableIssue(
-                        "models.search_size_metadata",
-                        message: "Failed to load download size metadata for \(failureCount) Hugging Face model search results.",
-                        services: services
-                    )
-                }
-                self.modelSearchMetadataTask = nil
-                self.modelSearchMetadataEnrichmentID = nil
+            guard let self, self.modelSearchMetadataEnrichmentID == enrichmentID else { return }
+            if !batch.isEmpty {
+                self.applyModelSearchMetadata(batch, enrichmentID: enrichmentID, runtime: runtime)
             }
+            if failureCount > 0 {
+                self.recordRecoverableIssue(
+                    "models.search_size_metadata",
+                    message: "Failed to load download size metadata for \(failureCount) Hugging Face model search results.",
+                    services: services
+                )
+            }
+            self.modelSearchMetadataTask = nil
+            self.modelSearchMetadataEnrichmentID = nil
         }
     }
 

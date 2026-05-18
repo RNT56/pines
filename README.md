@@ -1,113 +1,84 @@
 <p align="center">
-  <img src="Pines/Assets.xcassets/AppIcon.appiconset/Icon-1024.png" alt="pines logo" width="144" height="144">
+  <img src="Pines/Assets.xcassets/AppIcon.appiconset/Icon-1024.png" alt="Pines logo" width="144" height="144">
 </p>
 
-<h1 align="center">pines</h1>
+<h1 align="center">Pines</h1>
+
+<p align="center">
+  <strong>Your local-first AI workbench for iOS. Quiet when it should be. Powerful when you ask it to be.</strong>
+</p>
 
 <p align="center">
   <a href="https://github.com/RNT56/pines/actions/workflows/ci.yml"><img src="https://github.com/RNT56/pines/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-informational" alt="License: PolyForm Noncommercial 1.0.0"></a>
 </p>
 
-`pines` is an iOS 26-only, local-first AI workbench for MLX Swift inference, BYOK cloud routing, private vault context, MCP servers, and pinned Schtack-maintained MLX forks.
+Most AI apps feel like a room you visit.
 
-The repository contains:
+You bring a file. You bring a question. You bring a piece of work that already had a life before the app arrived. Then the app asks you to trust a route you cannot see, a memory you cannot inspect, and a cloud you did not exactly choose.
 
-- `Pines/`: SwiftUI iOS application shell, design system, app icon assets, runtime bridge points, GRDB store, CloudKit sync, MCP client, and feature views.
-- `Sources/PinesCore/`: testable core domain, routing, model catalog, tools, vault, persistence schema, and cloud/BYOK abstractions.
-- `Sources/PinesCore/Architecture/`: module ownership and repository contracts for production feature boundaries.
-- `Sources/PinesCoreTestRunner/`: framework-free checks for the non-UI production contracts.
-- `.github/workflows/`: CI, GitHub Release, and MLX upstream reachability automation.
-- `project.yml`: XcodeGen configuration for the iOS project.
-- `Package.resolved`: committed SwiftPM lockfile for package/test checks.
-- `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`: committed Xcode app lockfile for the deployed iOS graph. The iOS app MLX fork pins live in `project.yml` as exact revisions.
+Pines is built from a different instinct.
 
-## Architecture
+It treats your phone like a real computer. It keeps the model close when local is enough. It lets cloud models help when you deliberately invite them. It gives your documents a private vault instead of turning every note into a remote dependency. It connects to tools and MCP servers, but with gates you can understand.
 
-The app is split into production layers:
+Pines is not trying to be the loudest AI product in the room. It is trying to be the one you keep reaching for because it respects the shape of your work.
 
-- `PinesAppServices` is the composition root for secrets, model catalog, preflight, execution routing, tool policy, redaction, MLX bridge services, and the GRDB-backed repository set. The default SwiftUI environment uses a no-store preview instance; live services are created after the boot mark is visible.
-- `PinesArchitecture.modules` documents feature ownership for Chats, Models, Vault, Agents, and Settings, including database tables and dependencies.
-- Repository protocols in `PinesCore` isolate persistence from SwiftUI and let GRDB/CloudKit implementations replace seed data without changing views.
-- Normal chat routing remains explicit: local models are preferred by default, selected BYOK providers can be used when configured, and private vault/MCP context requires per-turn approval before it is sent to cloud. Agent and MCP sampling flows keep their own policy gates.
-- Chat supports local attachments for common image, PDF, and text-like files. HEIC/HEIF imports are staged as JPEG chat attachments, attachment-only messages get explicit analysis prompts, and message rows expose copy, edit, and add-attachments-to-Vault actions.
-- App-level implementation files are split by concern: app model DTOs live in `PinesAppModelTypes.swift`, CloudKit persistence merge logic lives in `GRDBPinesStore+CloudKit.swift`, design components live in `PinesDesignComponents.swift`, MCP wire payloads live in `MCPStreamableHTTPPayloads.swift`, model download support lives in `ModelDownloadSupport.swift`, and MLX compatibility models are split by model family.
-- TurboQuant is the requested default local KV-cache strategy. Pine requests the paper-exact Metal backend, reports native Metal codec and compressed-attention availability, falls back to MLX packed attention when needed, and stores compressed vault embeddings locally for approximate search plus FP16 rerank. Runtime defaults adapt to iOS memory/thermal state, including compact 6 GB device guardrails. See `docs/TURBOQUANT.md`.
+## The Feel
 
-## MLX Fork Pins
+Open Pines and the first promise is simple: your workspace belongs to you.
 
-The iOS app links the maintained MLX forks through `project.yml` and the generated Xcode project:
+Chats are where the thinking starts. Attach an image, a PDF, a Markdown note, a JSON file, a CSV, or plain text, and ask the question the work actually needs. Pines is built for those normal, messy moments where useful context lives across files, notes, models, and memory.
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `221ef73921c1d2bb92fc545168120e57545bac22`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `ef066d0999150a8970025101e6f0d55cb44afca0`
-- Nested `mlx` inside `MLXSwift`: `d999c27ecd549e65f8f689bdd5c83648da977b81`
+The vault is where your material becomes reachable without becoming public. It is not a mystical memory layer. It is a place for your documents, chunks, and retrieval to stay grounded.
 
-These pins are intentional because the app consumes additive TurboQuant and compatibility APIs that are not assumed to exist in upstream package releases yet.
-Use `tools/update-mlx-pins.sh` to move the reproducible SHAs and regenerate `Pines.xcodeproj`; CI checks that `project.yml` and the generated project agree, that the pins are not below the known-good minimums, and that the nested `mlx` submodule is the expected revision. Renovate is configured to propose pin updates by PR instead of moving app builds to branch references.
+Models are treated like tools, not subscriptions. You can discover MLX-ready models, install them, and see the route Pines is taking. When cloud makes sense, bring your own key and choose that path on purpose.
 
-## Design System
+Tools are not hidden trapdoors. Search, browser actions, agent flows, and MCP servers live behind visible policy. If something wants context, network access, or a meaningful action, Pines is designed to make that boundary legible before it crosses it.
 
-`PinesDesignSystem.swift` defines theme tokens and environment plumbing. `PinesDesignComponents.swift` contains reusable SwiftUI components and modifiers.
+## Local First, Not Local Only
 
-- User-selectable templates: Evergreen, Graphite, Aurora, Paper, Slate, Porcelain, Sunset, and Obsidian.
-- Interface modes: System, Light, and Dark.
-- Semantic colors, typography, spacing, radii, strokes, shadows, materials, and motion curves.
-- Environment injection through `\.pinesTheme`, so every screen inherits the selected template.
-- Settings includes live template previews and mode selection.
+Local-first does not mean pretending the cloud is useless.
 
-Generate the Xcode project:
+It means the default center of gravity is yours. Your chats, vault, attachments, model state, and private context start on device. Cloud providers are optional, BYOK, and explicit. Private vault or MCP context does not quietly ride along just because a remote model might be convenient.
 
-```sh
-xcodegen generate
-```
+That distinction matters. A good assistant should know when to help, and it should also know when to ask.
 
-Use XcodeGen `2.45.4` or newer so generated project and scheme files match CI.
+## A Workbench With Trails
 
-The generated app target is personal Apple Developer account safe by default:
-`PINES_CODE_SIGN_ENTITLEMENTS` and `PINES_ICLOUD_SWIFT_FLAGS` are empty, so
-Xcode does not request iCloud provisioning. Paid-team CloudKit builds must
-override both settings together:
+Pines brings together the pieces that usually live in separate apps:
 
-```sh
-xcodebuild \
-  -project Pines.xcodeproj \
-  -scheme Pines \
-  PINES_CODE_SIGN_ENTITLEMENTS=Pines/Pines.entitlements \
-  PINES_ICLOUD_SWIFT_FLAGS="-D PINES_CLOUDKIT_ENABLED" \
-  build
-```
+- local MLX inference for on-device model work
+- BYOK cloud routing for OpenAI-compatible providers, OpenRouter, Anthropic, and Gemini
+- a private vault for document context and retrieval
+- attachments for images, PDFs, and common text-like files
+- MCP Streamable HTTP for tools, resources, prompts, and user-approved sampling
+- policy-gated tools for search, browser work, calculator use, and agent flows
+- optional private iCloud sync when you choose to widen the boundary
+- a theme system that lets the app feel personal without becoming noisy
 
-Run available local core checks:
+The result is not a chatbot with a few extras taped on. It is a place to explore, compare, ask, revise, inspect, and keep moving.
 
-```sh
-swift build --disable-automatic-resolution
-swift test --disable-automatic-resolution
-swift run --disable-automatic-resolution PinesCoreTestRunner
-```
+## The Personality
 
-The repository keeps `PinesCoreTestRunner` as a framework-light smoke runner for CI and constrained developer environments. Full iOS compilation requires a full Xcode install selected via `xcode-select`.
+Pines is deliberately calm.
 
-## CI And Releases
+It does not need to turn every feature into a spectacle. The best version of this app feels like a clear desk, a sharp pencil, and a window cracked open just enough for air. You should know where your keys are. You should know when a model is local. You should know when a tool is about to act. You should be able to bring in more power without giving up the room.
 
-CI runs on pull requests, pushes to `main`, and manual dispatch. It performs public-repo hygiene checks, including privacy-manifest linting, builds the Swift package with automatic package resolution disabled, runs `swift test`, runs `PinesCoreTestRunner`, verifies the iOS and watchOS build destinations required by the app schemes on hosted runners and installs missing platform payloads, regenerates the Xcode project, checks generated-project drift immediately after XcodeGen writes the project, resolves the committed Xcode deployment package graph from `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`, builds the iOS app without signing, builds simulator smoke tests, runs those tests when an iPhone simulator is available on the `macos-26` runner, restores the XcodeGen project output, and then checks package lockfile drift.
+That is the line Pines keeps walking: capable without being slippery, private without being isolated, technical without making the user feel like a sysadmin just to ask a good question.
 
-GitHub Releases are tag-driven. Push a semantic tag such as `v0.1.0` to run release validation and publish a source/developer-preview release with checksums:
+## For Builders
 
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
+Pines is source-available. If you want to build it, audit it, understand the architecture, or work on the internals, start with the [Developer README](DEV_README.md).
 
-See:
+Useful field notes:
 
-- `docs/ARCHITECTURE.md`
-- `docs/DESIGN_SYSTEM.md`
-- `docs/SECURITY.md`
-- `docs/STATUS.md`
-- `docs/RELEASES.md`
+- [Security And Privacy](docs/SECURITY.md)
+- [MCP Support](docs/MCP.md)
+- [Design System](docs/DESIGN_SYSTEM.md)
+- [Architecture](docs/ARCHITECTURE.md)
 
 ## License
 
-Pines is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE) (`PolyForm-Noncommercial-1.0.0`). You may use, modify, and redistribute this repository only for permitted noncommercial purposes under that license. Commercial use requires a separate written license from Schtack.
+Pines is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE) (`PolyForm-Noncommercial-1.0.0`). Commercial use requires a separate written license from Schtack.
 
 Redistributions must preserve the required notices in [NOTICE](NOTICE). Third-party dependencies keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
