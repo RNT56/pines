@@ -4,6 +4,7 @@ import PinesWatchSupport
 struct WatchTranscriptView: View {
     @EnvironmentObject private var model: WatchChatViewModel
     @State private var draft = ""
+    @State private var lastAutoScrolledMessageID: UUID?
     let conversationID: UUID
 
     var body: some View {
@@ -31,11 +32,10 @@ struct WatchTranscriptView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .onChange(of: model.messages) { _, messages in
-                    guard let last = messages.last else { return }
-                    withAnimation {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
+                .onChange(of: model.messages.last?.id) { _, messageID in
+                    guard let messageID, messageID != lastAutoScrolledMessageID else { return }
+                    lastAutoScrolledMessageID = messageID
+                    proxy.scrollTo(messageID, anchor: .bottom)
                 }
             }
 

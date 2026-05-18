@@ -3,6 +3,10 @@ import PinesWatchSupport
 import UserNotifications
 @preconcurrency import WatchConnectivity
 
+private enum WatchCachePerformance {
+    static let cachedStateSaveDelayNanoseconds: UInt64 = 750_000_000
+}
+
 @MainActor
 final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     @Published var conversations: [WatchConversationSummary] = []
@@ -39,12 +43,17 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
     private var lastSequenceByRequestID: [UUID: Int] = [:]
     private var isSceneActive = true
     private var streamHaptics = WatchStreamHapticGate()
+    private var cachedStateSaveTask: Task<Void, Never>?
 
     init(session: WCSession = .default) {
         self.session = session
         super.init()
         restoreCachedState()
         restorePendingRequests()
+    }
+
+    deinit {
+        cachedStateSaveTask?.cancel()
     }
 
     func activate() {
@@ -69,7 +78,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
 
     func selectConversation(_ id: UUID) {
         selectedConversationID = id
-        saveCachedState()
+        scheduleCachedStateSave()
         send(kind: .loadConversation, payload: WatchLoadConversationRequest(conversationID: id))
     }
 
@@ -124,7 +133,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
                     createdAt: Date()
                 )
             )
-            saveCachedState()
+            scheduleCachedStateSave()
         }
         isWorking = true
         sendTracked(kind: .sendMessage, requestID: requestID, payload: request, summary: trimmed)
@@ -382,7 +391,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
         isReachable = snapshot.status.reachable
         statusText = snapshot.status.summary
         isWorking = snapshot.activeRunID != nil
-        saveCachedState()
+        saveCachedStateNow()
     }
 
     private func apply(_ update: WatchChatRunUpdate) {
@@ -419,7 +428,11 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
         } else {
             statusText = update.status == .streaming ? "Streaming" : "Connected"
         }
-        saveCachedState()
+        if update.status.isTerminal {
+            saveCachedStateNow()
+        } else {
+            scheduleCachedStateSave()
+        }
     }
 
     private func trackPendingRequest(
@@ -495,7 +508,21 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
         statusText = state.statusText
     }
 
-    private func saveCachedState() {
+    private func scheduleCachedStateSave() {
+        cachedStateSaveTask?.cancel()
+        cachedStateSaveTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: WatchCachePerformance.cachedStateSaveDelayNanoseconds)
+            } catch {
+                return
+            }
+            await self?.saveCachedStateNow()
+        }
+    }
+
+    private func saveCachedStateNow() {
+        cachedStateSaveTask?.cancel()
+        cachedStateSaveTask = nil
         let state = CachedWatchState(
             conversations: conversations,
             selectedConversationID: selectedConversationID,

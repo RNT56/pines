@@ -7,6 +7,9 @@ struct WatchChatOrchestrator {
     let services: PinesAppServices
     let approvalHandler: @Sendable (ToolApprovalRequest) async -> ToolApprovalStatus
     private static let logger = Logger(subsystem: "com.schtack.pines", category: "watch-chat")
+    private static let streamingPersistenceInterval: TimeInterval = 0.30
+    private static let streamingDeliveryInterval: TimeInterval = 0.35
+    private static let streamingTokenBatch = 8
 
     init(
         services: PinesAppServices,
@@ -21,15 +24,9 @@ struct WatchChatOrchestrator {
             throw WatchChatError.unavailable("Conversation repository is unavailable.")
         }
 
-        let conversations = try await repository.listConversations()
-        let selectedID = selectedConversationID ?? conversations.first?.id
-        var summaries = [WatchConversationSummary]()
-        summaries.reserveCapacity(conversations.count)
-
-        for conversation in conversations {
-            let messages = try await repository.messages(in: conversation.id)
-            summaries.append(Self.summary(from: conversation, messages: messages))
-        }
+        let previews = try await repository.listConversationPreviews()
+        let selectedID = selectedConversationID ?? previews.first?.id
+        let summaries = previews.map(Self.summary(from:))
 
         let selectedMessages: [WatchChatMessage]
         if let selectedID {
@@ -223,28 +220,67 @@ struct WatchChatOrchestrator {
                     var didReceiveTerminalEvent = false
                     var didFail = false
                     var finalProviderMetadata = [String: String]()
+                    var lastPersistedAt = Date.distantPast
+                    var lastDeliveredAt = Date.distantPast
+                    var lastPersistedTokenCount = 0
+                    var lastDeliveredTokenCount = 0
+                    var lastPersistedContent = ""
+                    var lastDeliveredContent = ""
+
+                    func shouldFlush(
+                        now: Date,
+                        lastFlushedAt: Date,
+                        lastFlushedTokenCount: Int,
+                        lastFlushedContent: String
+                    ) -> Bool {
+                        guard accumulated != lastFlushedContent else { return false }
+                        return tokenCount - lastFlushedTokenCount >= Self.streamingTokenBatch
+                            || now.timeIntervalSince(lastFlushedAt) >= Self.streamingPersistenceInterval
+                    }
+
                     for try await event in stream {
                         try Task.checkCancellation()
                         switch event {
                         case let .token(delta):
                             accumulated += delta.text
                             tokenCount += max(delta.tokenCount, 1)
-                            try await repository.updateMessage(
-                                id: pendingAssistant.id,
-                                content: accumulated,
-                                status: .streaming,
-                                tokenCount: tokenCount
-                            )
-                            continuation.yield(
-                                WatchChatRunUpdate(
-                                    runID: runID,
-                                    conversationID: conversationID,
-                                    assistantMessageID: pendingAssistant.id,
+
+                            let now = Date()
+                            if shouldFlush(
+                                now: now,
+                                lastFlushedAt: lastPersistedAt,
+                                lastFlushedTokenCount: lastPersistedTokenCount,
+                                lastFlushedContent: lastPersistedContent
+                            ) {
+                                try await repository.updateMessage(
+                                    id: pendingAssistant.id,
+                                    content: accumulated,
                                     status: .streaming,
-                                    text: accumulated,
                                     tokenCount: tokenCount
                                 )
-                            )
+                                lastPersistedAt = now
+                                lastPersistedTokenCount = tokenCount
+                                lastPersistedContent = accumulated
+                            }
+                            if accumulated != lastDeliveredContent
+                                && (
+                                    tokenCount - lastDeliveredTokenCount >= Self.streamingTokenBatch
+                                        || now.timeIntervalSince(lastDeliveredAt) >= Self.streamingDeliveryInterval
+                                ) {
+                                continuation.yield(
+                                    WatchChatRunUpdate(
+                                        runID: runID,
+                                        conversationID: conversationID,
+                                        assistantMessageID: pendingAssistant.id,
+                                        status: .streaming,
+                                        text: accumulated,
+                                        tokenCount: tokenCount
+                                    )
+                                )
+                                lastDeliveredAt = now
+                                lastDeliveredTokenCount = tokenCount
+                                lastDeliveredContent = accumulated
+                            }
                         case let .finish(finish):
                             didReceiveTerminalEvent = true
                             finalProviderMetadata = finish.providerMetadata
@@ -648,8 +684,8 @@ struct WatchChatOrchestrator {
         )
     }
 
-    private static func summary(from record: ConversationRecord, messages: [ChatMessage]) -> WatchConversationSummary {
-        let lastMessage = messages.last?.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func summary(from record: ConversationPreviewRecord) -> WatchConversationSummary {
+        let lastMessage = record.lastMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
         return WatchConversationSummary(
             id: record.id,
             title: record.title,
