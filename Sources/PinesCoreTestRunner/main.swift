@@ -427,6 +427,34 @@ struct PinesCoreTestRunner {
         try expectEqual(lightweightClassified.verification, .installable)
         try expectEqual(lightweightClassified.modalities, [.text])
         try expectEqual(lightweightClassified.estimatedBytes, 4_200_250_000)
+
+        let metadataClient = RecordingHTTPClient(
+            payload: """
+            {
+              "modelId": "example/Qwen3-4B-4bit-MLX",
+              "author": "example",
+              "downloads": 21,
+              "likes": 4,
+              "library_name": "mlx",
+              "pipeline_tag": "text-generation",
+              "tags": ["mlx", "safetensors", "qwen3", "text-generation", "license:apache-2.0"],
+              "siblings": [
+                { "rfilename": "model.safetensors", "size": 4200000000, "lfs": { "sha256": "def", "size": 4200000000 } },
+                { "rfilename": "tokenizer.json", "size": 250000 }
+              ]
+            }
+            """
+        )
+        let metadataService = HuggingFaceModelCatalogService(client: metadataClient, baseURL: URL(string: "https://hub.test")!)
+        let metadata = try await metadataService.modelMetadata(repository: "example/Qwen3-4B-4bit-MLX")
+        let metadataURL = try await metadataClient.lastURL()
+        let metadataQueryItems = Dictionary(uniqueKeysWithValues: URLComponents(url: metadataURL, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
+        try expect(metadataURL.path.hasSuffix("/api/models/example/Qwen3-4B-4bit-MLX"), "metadata endpoint should target the model info API")
+        try expectEqual(metadataQueryItems["blobs"], "true")
+        try expectEqual(metadata.files[0].size, 4_200_000_000)
+        try expectEqual(metadata.files[0].oid, "def")
+        let metadataClassified = ModelPreflightClassifier().classify(metadata.preflightInput)
+        try expectEqual(metadataClassified.estimatedBytes, 4_200_250_000)
     }
 
     private static func testPersistenceSchema() throws {

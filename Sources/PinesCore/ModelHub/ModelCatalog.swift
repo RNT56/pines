@@ -283,11 +283,36 @@ public struct HuggingFaceModelCatalogService: Sendable {
         }
     }
 
+    public func modelMetadata(repository: String, accessToken: String? = nil) async throws -> RemoteModelSummary {
+        let encodedRepository = Self.encodedRepository(repository)
+        var components = URLComponents(url: baseURL.appending(path: "/api/models/\(encodedRepository)"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "blobs", value: "true")]
+        let url = components.url!
+        let (data, response) = try await client.data(for: authorizedRequest(url: url, accessToken: accessToken))
+        guard (200 ..< 300).contains(response.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        let info = try decoder.decode(HubModelInfoDTO.self, from: data)
+        return RemoteModelSummary(
+            repository: info.id,
+            author: info.author,
+            downloads: info.downloads,
+            likes: info.likes,
+            libraryName: info.libraryName,
+            tags: info.tags ?? [],
+            task: info.pipelineTag.flatMap(HubTask.init(rawValue:)),
+            lastModified: info.lastModified,
+            files: info.siblings?.map {
+                ModelFileInfo(path: $0.rfilename, size: $0.size ?? $0.lfs?.size, oid: $0.lfs?.oid ?? $0.blobID)
+            } ?? [],
+            modelType: info.config?.modelType ?? info.tags?.modelTypeTagValue,
+            license: info.cardData?.license ?? info.tags?.licenseTagValue
+        )
+    }
+
     public func preflight(repository: String, revision: String = "main", accessToken: String? = nil) async throws -> ModelPreflightInput {
-        let encodedRepository = repository
-            .split(separator: "/")
-            .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
-            .joined(separator: "/")
+        let encodedRepository = Self.encodedRepository(repository)
         var components = URLComponents(url: baseURL.appending(path: "/api/models/\(encodedRepository)"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "blobs", value: "true")]
         let infoURL = components.url!
@@ -337,6 +362,13 @@ public struct HuggingFaceModelCatalogService: Sendable {
         return request
     }
 
+    private static func encodedRepository(_ repository: String) -> String {
+        repository
+            .split(separator: "/")
+            .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+            .joined(separator: "/")
+    }
+
     private static func encodedPath(_ path: String) -> String {
         path.split(separator: "/")
             .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
@@ -382,14 +414,28 @@ private struct HubModelConfigDTO: Decodable {
 
 private struct HubModelInfoDTO: Decodable {
     var id: String
+    var author: String?
+    var downloads: Int?
+    var likes: Int?
+    var libraryName: String?
     var tags: [String]?
+    var pipelineTag: String?
+    var lastModified: Date?
     var siblings: [HubSiblingDTO]?
+    var config: HubModelConfigDTO?
     var cardData: HubCardDataDTO?
 
     enum CodingKeys: String, CodingKey {
         case id = "modelId"
+        case author
+        case downloads
+        case likes
+        case libraryName = "library_name"
         case tags
+        case pipelineTag = "pipeline_tag"
+        case lastModified = "lastModified"
         case siblings
+        case config
         case cardData
     }
 }

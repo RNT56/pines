@@ -16,6 +16,11 @@ private struct PreparedRemoteModelInstall: Sendable {
     var download: ModelDownloadProgress?
 }
 
+private struct RemoteModelFileMetadata: Sendable {
+    var repository: String
+    var estimatedBytes: Int64
+}
+
 @MainActor
 final class PinesAppModel: ObservableObject {
     @Published var threads: [PinesThreadPreview]
@@ -86,6 +91,8 @@ final class PinesAppModel: ObservableObject {
     private var liveAgentActivitiesByMessageID: [UUID: [AgentActivityEvent]] = [:]
     private var isShowingModelDiscoveryResults = false
     private var modelSearchRequestID: UUID?
+    private var modelSearchMetadataTask: Task<Void, Never>?
+    private var modelSearchMetadataEnrichmentID: UUID?
 
     private func setIfChanged<Value: Equatable>(
         _ keyPath: ReferenceWritableKeyPath<PinesAppModel, Value>,
@@ -317,6 +324,7 @@ final class PinesAppModel: ObservableObject {
     deinit {
         bootstrapBackgroundTask?.cancel()
         currentRunTask?.cancel()
+        modelSearchMetadataTask?.cancel()
         repositoryObservationTasks.forEach { $0.cancel() }
         approvalContinuation?.resume(returning: .denied)
         cloudContextContinuation?.resume(returning: .cancel)
@@ -1822,6 +1830,7 @@ final class PinesAppModel: ObservableObject {
         installState: ModelInstallState? = nil,
         services: PinesAppServices
     ) async {
+        cancelModelSearchMetadataEnrichment()
         let requestID = UUID()
         modelSearchRequestID = requestID
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1894,6 +1903,13 @@ final class PinesAppModel: ObservableObject {
                 }
                 setIfChanged(\.models, previews)
                 setIfChanged(\.isSearchingModels, false)
+                startModelSearchMetadataEnrichment(
+                    for: previews,
+                    catalog: services.modelCatalog,
+                    accessToken: token,
+                    runtime: runtime,
+                    services: services
+                )
             }
             modelSearchRequestID = nil
             setIfChanged(\.serviceError, nil)
@@ -1912,6 +1928,150 @@ final class PinesAppModel: ObservableObject {
             setIfChanged(\.modelSearchError, error.localizedDescription)
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    private func cancelModelSearchMetadataEnrichment() {
+        modelSearchMetadataTask?.cancel()
+        modelSearchMetadataTask = nil
+        modelSearchMetadataEnrichmentID = nil
+    }
+
+    private func startModelSearchMetadataEnrichment(
+        for previews: [PinesModelPreview],
+        catalog: HuggingFaceModelCatalogService,
+        accessToken: String?,
+        runtime: MLXRuntimeBridge,
+        services: PinesAppServices
+    ) {
+        let repositories = previews.compactMap { preview -> String? in
+            guard preview.install.estimatedBytes == nil,
+                  preview.downloadProgress?.totalBytes == nil,
+                  preview.install.state != .installed
+            else {
+                return nil
+            }
+            return preview.install.repository
+        }
+        .uniqued()
+        guard !repositories.isEmpty else { return }
+
+        let enrichmentID = UUID()
+        modelSearchMetadataEnrichmentID = enrichmentID
+        modelSearchMetadataTask = Task.detached(priority: .utility) { [weak self] in
+            let batchSize = 6
+            var pending = ArraySlice(repositories)
+            var activeCount = 0
+            var batch: [RemoteModelFileMetadata] = []
+            var failureCount = 0
+
+            await withTaskGroup(of: RemoteModelFileMetadata?.self) { group in
+                func enqueueNext() {
+                    guard let repository = pending.popFirst() else { return }
+                    activeCount += 1
+                    group.addTask {
+                        guard !Task.isCancelled else { return nil }
+                        do {
+                            let metadata = try await catalog.modelMetadata(repository: repository, accessToken: accessToken)
+                            try Task.checkCancellation()
+                            guard let estimatedBytes = Self.estimatedDownloadBytes(from: metadata) else { return nil }
+                            return RemoteModelFileMetadata(
+                                repository: metadata.repository,
+                                estimatedBytes: estimatedBytes
+                            )
+                        } catch is CancellationError {
+                            return nil
+                        } catch {
+                            return RemoteModelFileMetadata(repository: repository, estimatedBytes: -1)
+                        }
+                    }
+                }
+
+                while activeCount < 4, !pending.isEmpty {
+                    enqueueNext()
+                }
+
+                while let result = await group.next() {
+                    activeCount -= 1
+                    guard !Task.isCancelled else {
+                        group.cancelAll()
+                        return
+                    }
+
+                    if let result {
+                        if result.estimatedBytes > 0 {
+                            batch.append(result)
+                        } else {
+                            failureCount += 1
+                        }
+                    }
+
+                    if batch.count >= batchSize {
+                        let update = batch
+                        batch.removeAll(keepingCapacity: true)
+                        await MainActor.run {
+                            self?.applyModelSearchMetadata(update, enrichmentID: enrichmentID, runtime: runtime)
+                        }
+                    }
+
+                    enqueueNext()
+                }
+            }
+
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, self.modelSearchMetadataEnrichmentID == enrichmentID else { return }
+                if !batch.isEmpty {
+                    self.applyModelSearchMetadata(batch, enrichmentID: enrichmentID, runtime: runtime)
+                }
+                if failureCount > 0 {
+                    self.recordRecoverableIssue(
+                        "models.search_size_metadata",
+                        message: "Failed to load download size metadata for \(failureCount) Hugging Face model search results.",
+                        services: services
+                    )
+                }
+                self.modelSearchMetadataTask = nil
+                self.modelSearchMetadataEnrichmentID = nil
+            }
+        }
+    }
+
+    private func applyModelSearchMetadata(
+        _ metadata: [RemoteModelFileMetadata],
+        enrichmentID: UUID,
+        runtime: MLXRuntimeBridge
+    ) {
+        guard modelSearchMetadataEnrichmentID == enrichmentID, isShowingModelDiscoveryResults else { return }
+        let estimatedBytesByRepository = Dictionary(
+            metadata.map { ($0.repository.lowercased(), $0.estimatedBytes) },
+            uniquingKeysWith: { current, _ in current }
+        )
+        let downloadByRepository = Self.latestDownloadByRepository(modelDownloads)
+        var didUpdate = false
+        let previews = models.map { preview in
+            let key = preview.install.repository.lowercased()
+            guard let estimatedBytes = estimatedBytesByRepository[key],
+                  preview.install.estimatedBytes != estimatedBytes
+            else {
+                return preview
+            }
+            var install = preview.install
+            install.estimatedBytes = estimatedBytes
+            didUpdate = true
+            return Self.modelPreview(
+                from: install,
+                runtime: runtime,
+                download: downloadByRepository[key],
+                enrichRuntime: false
+            )
+        }
+        guard didUpdate else { return }
+        setIfChanged(\.models, Self.downloadingFirst(previews))
+    }
+
+    private nonisolated static func estimatedDownloadBytes(from summary: RemoteModelSummary) -> Int64? {
+        let totalBytes = summary.files.compactMap(\.size).reduce(Int64(0), +)
+        return totalBytes > 0 ? totalBytes : nil
     }
 
     private nonisolated static func prepareRemoteModelInstalls(
