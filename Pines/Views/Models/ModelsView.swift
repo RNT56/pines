@@ -7,11 +7,10 @@ struct ModelsView: View {
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedModelKey: String?
-    @State private var searchText = ""
     @State private var selectedTaskFilter: HubTask?
     @State private var selectedVerificationFilter: ModelVerificationState?
     @State private var selectedInstallStateFilter: ModelInstallState?
-    @State private var scheduledSearchTask: Task<Void, Never>?
+    @State private var searchInput = ModelSearchInputState()
     @State private var appliedSearchCriteria = ModelSearchCriteria()
 
     private var selectedModel: PinesModelPreview? {
@@ -28,7 +27,7 @@ struct ModelsView: View {
 
     private var searchCriteria: ModelSearchCriteria {
         ModelSearchCriteria(
-            query: searchText,
+            query: searchInput.text,
             task: selectedTaskFilter,
             verification: selectedVerificationFilter,
             installState: selectedInstallStateFilter
@@ -117,19 +116,18 @@ struct ModelsView: View {
                     .disabled(selectedModel == nil || selectedModel?.canDeleteModel != true)
                 }
             }
-            .searchable(text: $searchText, prompt: "Search Hugging Face")
+            .searchable(text: searchTextBinding, prompt: "Search Hugging Face")
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .task {
                 appliedSearchCriteria = ModelSearchCriteria()
                 await appModel.searchModels(query: "", services: services)
             }
-            .onChange(of: searchCriteria) { _, criteria in
-                scheduleModelSearch(criteria)
-            }
+            .onChange(of: selectedTaskFilter) { _, _ in scheduleModelSearch(searchCriteria) }
+            .onChange(of: selectedVerificationFilter) { _, _ in scheduleModelSearch(searchCriteria) }
+            .onChange(of: selectedInstallStateFilter) { _, _ in scheduleModelSearch(searchCriteria) }
             .onDisappear {
-                scheduledSearchTask?.cancel()
-                scheduledSearchTask = nil
+                searchInput.cancelScheduledSearch()
             }
             .onChange(of: selectedModelKey) { _, _ in
                 haptics.play(.navigationSelected)
@@ -161,9 +159,19 @@ struct ModelsView: View {
         }
     }
 
+    private var searchTextBinding: Binding<String> {
+        Binding(
+            get: { searchInput.text },
+            set: { newValue in
+                searchInput.text = newValue
+                scheduleModelSearch(searchCriteria)
+            }
+        )
+    }
+
     private func scheduleModelSearch(_ criteria: ModelSearchCriteria) {
-        scheduledSearchTask?.cancel()
-        scheduledSearchTask = Task {
+        searchInput.scheduledTask?.cancel()
+        searchInput.scheduledTask = Task {
             do {
                 try await Task.sleep(nanoseconds: 350_000_000)
             } catch {
@@ -181,6 +189,16 @@ struct ModelsView: View {
                 services: services
             )
         }
+    }
+}
+
+private final class ModelSearchInputState {
+    var text = ""
+    var scheduledTask: Task<Void, Never>?
+
+    func cancelScheduledSearch() {
+        scheduledTask?.cancel()
+        scheduledTask = nil
     }
 }
 

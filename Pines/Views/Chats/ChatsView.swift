@@ -23,6 +23,10 @@ struct ChatsView: View {
         shouldAutoSelectSidebarItem ? appModel.threads.first?.id : nil
     }
 
+    private var threadIDs: [PinesThreadPreview.ID] {
+        appModel.threads.map(\.id)
+    }
+
     private var shouldAutoSelectSidebarItem: Bool {
         horizontalSizeClass != .compact
     }
@@ -92,8 +96,8 @@ struct ChatsView: View {
             .onChange(of: horizontalSizeClass) { _, _ in
                 selectDefaultThreadIfNeeded()
             }
-            .onChange(of: appModel.threads) { _, threads in
-                if let selectedThreadID, !threads.contains(where: { $0.id == selectedThreadID }) {
+            .onChange(of: threadIDs) { _, ids in
+                if let selectedThreadID, !ids.contains(selectedThreadID) {
                     self.selectedThreadID = nil
                 }
                 selectDefaultThreadIfNeeded()
@@ -349,6 +353,7 @@ private struct ChatTranscriptView: View {
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var retrySpin = false
     @State private var editingMessage: ChatMessage?
+    @State private var isNearTranscriptBottom = true
     let thread: PinesThreadPreview
 
     var body: some View {
@@ -383,14 +388,22 @@ private struct ChatTranscriptView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .pinesExpressiveScrollHaptics()
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                Self.isNearBottom(geometry)
+            } action: { _, isNearBottom in
+                isNearTranscriptBottom = isNearBottom
+            }
+            .onAppear {
+                scrollToBottom(proxy, animated: false)
+            }
             .onChange(of: thread.messages.count) { _, _ in
-                withAnimation(theme.motion.standard) {
-                    proxy.scrollTo("chat-bottom", anchor: .bottom)
+                if isNearTranscriptBottom || thread.messages.last?.role == .user {
+                    scrollToBottom(proxy, animated: true)
                 }
             }
             .onChange(of: appModel.activeRunID) { _, _ in
-                withAnimation(theme.motion.standard) {
-                    proxy.scrollTo("chat-bottom", anchor: .bottom)
+                if isNearTranscriptBottom {
+                    scrollToBottom(proxy, animated: true)
                 }
             }
         }
@@ -407,7 +420,7 @@ private struct ChatTranscriptView: View {
             )
         }
         .navigationTitle(thread.title)
-        .task(id: "\(thread.id.uuidString)-\(thread.lastMessage)") {
+        .task(id: thread.id) {
             await appModel.loadThreadMessages(
                 threadID: thread.id,
                 services: services,
@@ -468,6 +481,26 @@ private struct ChatTranscriptView: View {
 
     private var contentPadding: CGFloat {
         horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        if animated {
+            withAnimation(theme.motion.standard) {
+                proxy.scrollTo("chat-bottom", anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo("chat-bottom", anchor: .bottom)
+        }
+    }
+
+    private static func isNearBottom(_ geometry: ScrollGeometry) -> Bool {
+        let minOffset = -geometry.contentInsets.top
+        let maxOffset = geometry.contentSize.height - geometry.containerSize.height + geometry.contentInsets.bottom
+        let hasScrollableContent = maxOffset > minOffset + 6
+        guard hasScrollableContent else {
+            return true
+        }
+        return geometry.contentOffset.y >= maxOffset - 96
     }
 }
 
@@ -656,6 +689,7 @@ private struct ChatBubble: View {
         guard canAddAttachmentsToVault else { return [] }
         return [
             ChatBubbleSwipeAction(
+                id: "vault",
                 title: "Vault",
                 systemImage: "tray.and.arrow.down",
                 tint: theme.colors.accent,
@@ -667,6 +701,7 @@ private struct ChatBubble: View {
     private var trailingSwipeActions: [ChatBubbleSwipeAction] {
         var actions = [
             ChatBubbleSwipeAction(
+                id: "copy",
                 title: "Copy",
                 systemImage: "doc.on.doc",
                 tint: theme.colors.info,
@@ -676,6 +711,7 @@ private struct ChatBubble: View {
         if canEdit {
             actions.append(
                 ChatBubbleSwipeAction(
+                    id: "edit",
                     title: "Edit",
                     systemImage: "square.and.pencil",
                     tint: theme.colors.accent,
@@ -819,7 +855,7 @@ private struct ChatToolCallList: View {
 }
 
 private struct ChatBubbleSwipeAction: Identifiable {
-    let id = UUID()
+    let id: String
     let title: String
     let systemImage: String
     let tint: Color
@@ -900,7 +936,6 @@ private struct SwipeableChatBubble<Content: View>: View {
                 .offset(x: revealedOffset)
                 .gesture(horizontalSwipeGesture)
                 .animation(reduceMotion ? nil : theme.motion.fast, value: settledOffset)
-                .animation(reduceMotion ? nil : theme.motion.fast, value: dragOffset)
         }
         .onChange(of: leadingActions.count) { _, _ in closeActions() }
         .onChange(of: trailingActions.count) { _, _ in closeActions() }

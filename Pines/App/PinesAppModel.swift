@@ -3,7 +3,7 @@ import SwiftUI
 import PinesCore
 
 private enum ChatStreamPerformance {
-    static let renderInterval: TimeInterval = 0.05
+    static let renderInterval: TimeInterval = 0.10
     static let persistenceInterval: TimeInterval = 0.25
 }
 
@@ -62,7 +62,6 @@ final class PinesAppModel: ObservableObject {
     @Published var vaultEmbeddingProfiles: [VaultEmbeddingProfile] = []
     @Published var vaultEmbeddingJobs: [VaultEmbeddingJob] = []
     @Published var vaultRetrievalEvents: [VaultRetrievalEvent] = []
-    @Published var vaultSearchQuery = ""
     @Published var vaultSearchResults: [VaultSearchResult] = []
     @Published var isVaultSearchPresented = false
     @Published var isVaultReindexing = false

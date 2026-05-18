@@ -11,6 +11,7 @@ struct VaultView: View {
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedItemID: PinesVaultItemPreview.ID?
     @State private var showingImporter = false
+    @State private var searchInput = VaultSearchInputState()
 
     private var selectedItem: PinesVaultItemPreview? {
         guard let selectedItemID = selectedItemID ?? defaultItemID else {
@@ -24,6 +25,10 @@ struct VaultView: View {
         shouldAutoSelectSidebarItem ? appModel.vaultItems.first?.id : nil
     }
 
+    private var vaultItemIDs: [PinesVaultItemPreview.ID] {
+        appModel.vaultItems.map(\.id)
+    }
+
     private var shouldAutoSelectSidebarItem: Bool {
         horizontalSizeClass != .compact
     }
@@ -33,7 +38,7 @@ struct VaultView: View {
             List(selection: $selectedItemID) {
                 VaultEmbeddingSetupSection()
 
-                if !appModel.vaultSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if !searchInput.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Section("Search results") {
                         ForEach(appModel.vaultSearchResults) { result in
                             NavigationLink(value: result.document.id) {
@@ -74,20 +79,16 @@ struct VaultView: View {
                     .accessibilityLabel("Search vault")
                 }
             }
-            .searchable(text: $appModel.vaultSearchQuery, isPresented: $appModel.isVaultSearchPresented, prompt: "Search vault")
+            .searchable(text: vaultSearchBinding, isPresented: $appModel.isVaultSearchPresented, prompt: "Search vault")
             .onSubmit(of: .search) {
-                Task { await appModel.searchVault(appModel.vaultSearchQuery, services: services) }
-            }
-            .onChange(of: appModel.vaultSearchQuery) { _, query in
-                guard query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                appModel.vaultSearchResults = []
+                Task { await appModel.searchVault(searchInput.text, services: services) }
             }
             .onAppear(perform: selectDefaultItemIfNeeded)
             .onChange(of: horizontalSizeClass) { _, _ in
                 selectDefaultItemIfNeeded()
             }
-            .onChange(of: appModel.vaultItems) { _, items in
-                if let selectedItemID, !items.contains(where: { $0.id == selectedItemID }) {
+            .onChange(of: vaultItemIDs) { _, ids in
+                if let selectedItemID, !ids.contains(selectedItemID) {
                     self.selectedItemID = nil
                 }
                 selectDefaultItemIfNeeded()
@@ -124,6 +125,22 @@ struct VaultView: View {
         guard shouldAutoSelectSidebarItem else { return }
         selectedItemID = selectedItemID ?? appModel.vaultItems.first?.id
     }
+
+    private var vaultSearchBinding: Binding<String> {
+        Binding(
+            get: { searchInput.text },
+            set: { newValue in
+                searchInput.text = newValue
+                if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    appModel.vaultSearchResults = []
+                }
+            }
+        )
+    }
+}
+
+private final class VaultSearchInputState {
+    var text = ""
 }
 
 private struct VaultEmbeddingSetupSection: View {
