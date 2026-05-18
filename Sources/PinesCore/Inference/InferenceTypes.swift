@@ -21,6 +21,15 @@ public enum LocalProviderMetadataKeys {
     public static let turboQuantFallbackReason = "local.turboquant.fallback_reason"
     public static let turboQuantLastUnsupportedShape = "local.turboquant.last_unsupported_shape"
     public static let turboQuantRawFallbackAllocated = "local.turboquant.raw_fallback_allocated"
+    public static let ssdThroughputMBperS = "local.ssd.throughput_mb_per_s"
+    public static let ssdTotalBytesRead = "local.ssd.total_bytes_read"
+    public static let ssdTotalChunks = "local.ssd.total_chunks"
+    public static let ssdAvgChunkLatencyMS = "local.ssd.avg_chunk_latency_ms"
+    public static let partitionSummary = "local.partition.summary"
+    public static let mtpEnabled = "local.mtp.enabled"
+    public static let mtpAcceptanceRate = "local.mtp.acceptance_rate"
+    public static let audioEnabled = "local.audio.enabled"
+    public static let dflashEnabled = "local.dflash.enabled"
 }
 
 public struct ModelID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {

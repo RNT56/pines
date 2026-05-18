@@ -3,18 +3,21 @@ set -euo pipefail
 
 MLX_SWIFT_REPO="${MLX_SWIFT_REPO:-https://github.com/RNT56/mlx-swift}"
 MLX_SWIFT_LM_REPO="${MLX_SWIFT_LM_REPO:-https://github.com/RNT56/mlx-swift-lm}"
-MLX_SWIFT_MIN_REVISION="5db40d34a96a9c6889b6583d6cc09f8b8f05ea5e"
-MLX_SWIFT_LM_MIN_REVISION="e39787395c977549e1ba112ee2fd7eb509d57f30"
-MLX_SWIFT_NESTED_MLX_REVISION="d999c27ecd549e65f8f689bdd5c83648da977b81"
+MLX_SWIFT_MIN_REVISION="48375f1d8f0694dee2ce8aab7f46be50c5297aec"
+MLX_SWIFT_LM_MIN_REVISION="fbae29300f38e9988a010997828e2aa08a32c338"
+MLX_SWIFT_NESTED_MLX_REVISION="292c54b7bbf95a7061b3d70c05c1785dfb9b9a85"
+MLX_SWIFT_NESTED_MLX_C_REVISION="f53f40c7a5d0db5cb2a8661e67e29a18470d8863"
 PROJECT_FILE="Pines.xcodeproj/project.pbxproj"
 
 OLD_MLX_SWIFT_REVISIONS=(
+  "5db40d34a96a9c6889b6583d6cc09f8b8f05ea5e"
   "a63a5b1b412c979b91e4e0347b35845d2bb236c0"
   "c22a4b50e041295c53c303a5b3f60791dcd9967f"
   "2577c8856ddfb05cad0da4eda7b502cbb5d99a3f"
   "221ef73921c1d2bb92fc545168120e57545bac22"
 )
 OLD_MLX_SWIFT_LM_REVISIONS=(
+  "e39787395c977549e1ba112ee2fd7eb509d57f30"
   "85fc3225237fb41cc24f5d97eab0a92f2fef1a44"
   "c5a41b3995b67ad399b6f5a3bef324054447dc21"
   "8861b2d9746128f3461b71deee5bf94ec3817a78"
@@ -94,7 +97,7 @@ verify_not_below_minimum() {
   rm -rf "$tmp_dir"
 }
 
-verify_nested_mlx_revision() {
+verify_nested_mlx_revisions() {
   local revision="$1"
   local tmp_dir
   tmp_dir="$(mktemp -d)"
@@ -110,6 +113,15 @@ verify_nested_mlx_revision() {
   )"
   if [[ "$nested_revision" != "$MLX_SWIFT_NESTED_MLX_REVISION" ]]; then
     fail "mlx-swift revision $revision embeds mlx $nested_revision, expected $MLX_SWIFT_NESTED_MLX_REVISION."
+  fi
+
+  local nested_mlx_c_revision
+  nested_mlx_c_revision="$(
+    git -C "$tmp_dir" ls-tree FETCH_HEAD:Source/Cmlx mlx-c |
+      awk '$2 == "commit" && $4 == "mlx-c" { print $3 }'
+  )"
+  if [[ "$nested_mlx_c_revision" != "$MLX_SWIFT_NESTED_MLX_C_REVISION" ]]; then
+    fail "mlx-swift revision $revision embeds mlx-c $nested_mlx_c_revision, expected $MLX_SWIFT_NESTED_MLX_C_REVISION."
   fi
   rm -rf "$tmp_dir"
 }
@@ -144,6 +156,6 @@ done
 
 verify_not_below_minimum "mlx-swift" "$MLX_SWIFT_REPO" "$project_mlx_swift_revision" "$MLX_SWIFT_MIN_REVISION"
 verify_not_below_minimum "mlx-swift-lm" "$MLX_SWIFT_LM_REPO" "$project_mlx_swift_lm_revision" "$MLX_SWIFT_LM_MIN_REVISION"
-verify_nested_mlx_revision "$project_mlx_swift_revision"
+verify_nested_mlx_revisions "$project_mlx_swift_revision"
 
 echo "MLX fork package pins are aligned and at or above the known-good minimum revisions."

@@ -42,6 +42,15 @@ public struct ModelPreflightClassifier: Sendable {
                 let lowerTag = tag.lowercased()
                 return lowerTag == "image-text-to-text" || lowerTag == "any-to-any"
             }
+        let hasAudioSignal = config?["audio_config"] != nil
+            || config?["audio_tower"] != nil
+            || lowerRepository.contains("audio")
+            || input.tags.contains { tag in
+                let lowerTag = tag.lowercased()
+                return lowerTag == "audio-text-to-text"
+                    || lowerTag == "automatic-speech-recognition"
+                    || lowerTag == "audio"
+            }
 
         var modalities = Set<ModelModality>()
         var reasons = [String]()
@@ -53,6 +62,9 @@ public struct ModelPreflightClassifier: Sendable {
            supportedVLMTypes.contains(modelType) && (!supportedLLMTypes.contains(modelType) || hasVisionSignal) {
             modalities.insert(.text)
             modalities.insert(.vision)
+            if hasAudioSignal {
+                modalities.insert(.audio)
+            }
         }
         if let modelType, supportedEmbedderTypes.contains(modelType), hasEmbeddingSignal || !supportedLLMTypes.contains(modelType) {
             modalities.insert(.embeddings)

@@ -58,6 +58,18 @@ struct MLXRuntimeBridge: Sendable {
         let memoryCounters = deviceMonitor.memoryCounters()
         let backend = turboQuantBackendSnapshot()
         let linked = isLinked
+        #if canImport(MLX)
+        let ssdMetrics = linked ? MLXFast.ssdMetricsSnapshot() : nil
+        let ssdThroughputMBperS = ssdMetrics?.throughputMBperS
+        let ssdTotalBytesRead = ssdMetrics?.totalBytesRead
+        let ssdTotalChunks = ssdMetrics?.totalChunks
+        let ssdAvgChunkLatencyMS = ssdMetrics?.avgChunkLatencyMS
+        #else
+        let ssdThroughputMBperS: Double? = nil
+        let ssdTotalBytesRead: UInt64? = nil
+        let ssdTotalChunks: UInt64? = nil
+        let ssdAvgChunkLatencyMS: Double? = nil
+        #endif
         return RuntimeQuantizationDiagnostics(
             requestedAlgorithm: .turboQuant,
             activeAlgorithm: linked ? .turboQuant : .none,
@@ -80,7 +92,11 @@ struct MLXRuntimeBridge: Sendable {
             activeFallbackReason: linked
                 ? backend.fallbackReason
                 : "MLX runtime packages are not linked in this build.",
-            memoryCounters: memoryCounters
+            memoryCounters: memoryCounters,
+            ssdThroughputMBperS: ssdThroughputMBperS,
+            ssdTotalBytesRead: ssdTotalBytesRead,
+            ssdTotalChunks: ssdTotalChunks,
+            ssdAvgChunkLatencyMS: ssdAvgChunkLatencyMS
         )
     }
 
@@ -129,6 +145,12 @@ struct MLXRuntimeBridge: Sendable {
                 activeFallbackReason: linked ? fallbackReason : "MLX runtime packages are not linked in this build.",
                 memoryCounters: deviceMonitor.memoryCounters()
             ),
+            streamExperts: false,
+            expertStreamingMode: .disabled,
+            gpuLayerCount: nil,
+            mtpEnabled: false,
+            audioEnabled: install.modalities.contains(.audio),
+            dflashEnabled: false,
             prefillStepSize: hasVision || isCompact
                 ? min(deviceProfile.recommendedPrefillStepSize, 256)
                 : deviceProfile.recommendedPrefillStepSize,
@@ -267,6 +289,7 @@ extension MLXRuntimeBridge: InferenceProvider {
 private actor MLXRuntimeState {
     private var activeInstall: ModelInstall?
     private var activeProfile = RuntimeProfile()
+    private var activePartitionSummary: String?
     private var didRegisterModelAliases = false
 
     #if canImport(MLXLMCommon)
@@ -285,13 +308,17 @@ private actor MLXRuntimeState {
 
         #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await registerModelAliasesIfNeeded()
-        let configuration = try Self.lmConfiguration(for: install)
-        if install.modalities.contains(.vision) {
+        var configuration = try Self.lmConfiguration(for: install)
+        configuration.lazyLoad = profile.streamExperts
+        try Self.configureGlobalRuntimePolicy(profile: profile, install: install)
+        if install.modalities.contains(.vision) || install.modalities.contains(.audio) {
             visionContainer = try await VLMModelFactory.shared.loadContainer(
                 from: PinesHubDownloader(),
                 using: PinesTokenizerLoader(),
                 configuration: configuration
             )
+            activePartitionSummary = await Self.configureLoadedContainer(
+                visionContainer, profile: profile)
             textContainer = nil
         } else if install.modalities.contains(.text) {
             textContainer = try await LLMModelFactory.shared.loadContainer(
@@ -299,6 +326,8 @@ private actor MLXRuntimeState {
                 using: PinesTokenizerLoader(),
                 configuration: configuration
             )
+            activePartitionSummary = await Self.configureLoadedContainer(
+                textContainer, profile: profile)
             visionContainer = nil
         }
         #else
@@ -380,6 +409,9 @@ private actor MLXRuntimeState {
         #if canImport(MLXLMCommon)
         textContainer = nil
         visionContainer = nil
+        activePartitionSummary = nil
+        ExpertStreamingConfig.shared.deactivate()
+        MTPConfig.retainMTPWeights = false
         #endif
         #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await embeddingRuntime.unload()
@@ -393,13 +425,15 @@ private actor MLXRuntimeState {
 
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
         #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon)
-        let requiresVision = request.messages.contains { message in
-            message.attachments.contains { $0.kind == .image }
+        let requiresVLM = request.messages.contains { message in
+            message.attachments.contains { attachment in
+                attachment.kind == .image || attachment.kind == .video || attachment.kind == .audio
+            }
         }
         let container: MLXLMCommon.ModelContainer
-        if requiresVision {
+        if requiresVLM {
             if visionContainer == nil || activeInstall?.modelID != request.modelID {
-                try await load(Self.install(for: request.modelID, modalities: [.text, .vision]), profile: activeProfile)
+                try await load(Self.install(for: request.modelID, modalities: [.text, .vision, .audio]), profile: activeProfile)
             }
             guard let visionContainer else { throw InferenceError.modelNotLoaded(request.modelID) }
             container = visionContainer
@@ -428,6 +462,14 @@ private actor MLXRuntimeState {
             guard attachment.kind == .image, let localURL = attachment.localURL else { return nil }
             return localURL
         }
+        let audioURLs = latestUser.attachments.compactMap { attachment -> URL? in
+            guard attachment.kind == .audio, let localURL = attachment.localURL else { return nil }
+            return localURL
+        }
+        if !audioURLs.isEmpty && !profile.audioEnabled {
+            throw InferenceError.unsupportedCapability("Audio input is disabled for this local runtime profile.")
+        }
+        let partitionSummary = activePartitionSummary
         let historyMessages = Array(request.messages[..<latestUserIndex])
         let parameters = Self.generateParameters(from: request, profile: profile, install: activeInstall)
         let toolSpecs = request.allowsTools ? Self.mlxToolSpecs(from: request.availableTools) : nil
@@ -437,6 +479,7 @@ private actor MLXRuntimeState {
                 do {
                     let result = try await container.perform { context in
                         let images = imageURLs.map(UserInput.Image.url)
+                        let audio = audioURLs.map(UserInput.Audio.url)
                         let history = Self.chatHistory(from: historyMessages[...])
                         var tokenCount = 0
                         var finish: InferenceFinish?
@@ -445,7 +488,7 @@ private actor MLXRuntimeState {
                             messages.append(.system(instructions))
                         }
                         messages.append(contentsOf: history)
-                        messages.append(.user(latestPrompt, images: images, videos: []))
+                        messages.append(.user(latestPrompt, images: images, videos: [], audio: audio))
 
                         let userInput = UserInput(
                             chat: messages,
@@ -454,19 +497,39 @@ private actor MLXRuntimeState {
                         )
                         let input = try await context.processor.prepare(input: userInput)
                         let cache = context.model.newCache(parameters: parameters)
-                        let iterator = try TokenIterator(
-                            input: input,
-                            model: context.model,
-                            cache: cache,
-                            parameters: parameters
-                        )
-                        let (stream, generationTask) = MLXLMCommon.generateTask(
-                            promptTokenCount: input.text.tokens.size,
-                            modelConfiguration: context.configuration,
-                            tokenizer: context.tokenizer,
-                            iterator: iterator,
-                            tools: toolSpecs
-                        )
+                        let stream: AsyncStream<Generation>
+                        let generationTask: Task<Void, Never>
+                        if profile.mtpEnabled,
+                           let mtpModel = context.model as? any MTPLanguageModel {
+                            let iterator = try MTPTokenIterator(
+                                input: input,
+                                model: mtpModel,
+                                cache: cache,
+                                parameters: parameters,
+                                numMTPTokens: 1
+                            )
+                            (stream, generationTask) = MLXLMCommon.generateTask(
+                                promptTokenCount: input.text.tokens.size,
+                                modelConfiguration: context.configuration,
+                                tokenizer: context.tokenizer,
+                                iterator: iterator,
+                                tools: toolSpecs
+                            )
+                        } else {
+                            let iterator = try TokenIterator(
+                                input: input,
+                                model: context.model,
+                                cache: cache,
+                                parameters: parameters
+                            )
+                            (stream, generationTask) = MLXLMCommon.generateTask(
+                                promptTokenCount: input.text.tokens.size,
+                                modelConfiguration: context.configuration,
+                                tokenizer: context.tokenizer,
+                                iterator: iterator,
+                                tools: toolSpecs
+                            )
+                        }
                         var completionInfo: GenerateCompletionInfo?
 
                         for await item in stream {
@@ -510,7 +573,8 @@ private actor MLXRuntimeState {
                                 reason: Self.finishReason(from: completionInfo.stopReason),
                                 providerMetadata: Self.localProviderMetadata(
                                     from: cache,
-                                    fallbackProfile: profile
+                                    fallbackProfile: profile,
+                                    partitionSummary: partitionSummary
                                 )
                             )
                         }
@@ -573,18 +637,60 @@ private actor MLXRuntimeState {
 
     #if canImport(MLXLMCommon)
     private static func lmConfiguration(for install: ModelInstall) throws -> MLXLMCommon.ModelConfiguration {
-        if let localURL = install.localURL {
-            guard let resolvedURL = ModelLifecycleService.resolvedModelDirectory(
-                from: localURL,
-                modalities: install.modalities
-            ) else {
-                throw InferenceError.invalidRequest(
-                    "The installed model \(install.repository) is incomplete. Delete it and download it again."
-                )
-            }
+        if install.localURL != nil {
+            let resolvedURL = try resolvedModelDirectory(for: install)
             return MLXLMCommon.ModelConfiguration(directory: resolvedURL)
         }
         return MLXLMCommon.ModelConfiguration(id: install.repository, revision: install.revision ?? "main")
+    }
+
+    private static func resolvedModelDirectory(for install: ModelInstall) throws -> URL {
+        guard let localURL = install.localURL,
+              let resolvedURL = ModelLifecycleService.resolvedModelDirectory(
+                  from: localURL,
+                  modalities: install.modalities
+              ) else {
+            throw InferenceError.invalidRequest(
+                "The installed model \(install.repository) is incomplete. Delete it and download it again."
+            )
+        }
+        return resolvedURL
+    }
+
+    private static func configureGlobalRuntimePolicy(
+        profile: RuntimeProfile,
+        install: ModelInstall
+    ) throws {
+        MTPConfig.retainMTPWeights = profile.mtpEnabled
+        guard profile.streamExperts, profile.expertStreamingMode != .disabled else {
+            ExpertStreamingConfig.shared.deactivate()
+            return
+        }
+
+        let directory = try resolvedModelDirectory(for: install)
+        ExpertStreamingConfig.shared.activate(
+            modelDirectory: directory,
+            useDirectIO: profile.expertStreamingMode == .directNVMe
+        )
+    }
+
+    private static func configureLoadedContainer(
+        _ container: MLXLMCommon.ModelContainer?,
+        profile: RuntimeProfile
+    ) async -> String? {
+        guard let container else { return nil }
+        let clampedGPULayers = await container.setGPULayers(profile.gpuLayerCount)
+        _ = await container.setStreamExperts(profile.streamExperts)
+
+        if let requested = profile.gpuLayerCount {
+            guard let clampedGPULayers else {
+                return "Layer partition unsupported"
+            }
+            return requested == clampedGPULayers
+                ? "GPU layers: \(clampedGPULayers)"
+                : "GPU layers: \(clampedGPULayers) (requested \(requested))"
+        }
+        return nil
     }
 
     private static func generateParameters(
@@ -649,7 +755,8 @@ private actor MLXRuntimeState {
 
     private static func localProviderMetadata(
         from cache: [KVCache],
-        fallbackProfile profile: RuntimeProfile
+        fallbackProfile profile: RuntimeProfile,
+        partitionSummary: String? = nil
     ) -> [String: String] {
         if let turboQuantCache = cache.compactMap({ $0 as? TurboQuantCompressedKVCacheProtocol }).first {
             let diagnostics = turboQuantCache.attentionDiagnostics
@@ -660,7 +767,11 @@ private actor MLXRuntimeState {
                 LocalProviderMetadataKeys.turboQuantKernelProfile: diagnostics.selectedKernelProfile.rawValue,
                 LocalProviderMetadataKeys.turboQuantSelfTestStatus: diagnostics.selfTestStatus.rawValue,
                 LocalProviderMetadataKeys.turboQuantRawFallbackAllocated: String(diagnostics.rawFallbackAllocated),
+                LocalProviderMetadataKeys.mtpEnabled: String(profile.mtpEnabled),
+                LocalProviderMetadataKeys.audioEnabled: String(profile.audioEnabled),
+                LocalProviderMetadataKeys.dflashEnabled: String(profile.dflashEnabled),
             ]
+            appendRuntimeFeatureMetadata(to: &metadata, partitionSummary: partitionSummary)
             if let fallbackReason = diagnostics.fallbackReason {
                 metadata[LocalProviderMetadataKeys.turboQuantFallbackReason] = fallbackReason
             }
@@ -673,7 +784,11 @@ private actor MLXRuntimeState {
         let quantization = profile.quantization
         var metadata: [String: String] = [
             LocalProviderMetadataKeys.turboQuantRawFallbackAllocated: String(quantization.rawFallbackAllocated ?? false),
+            LocalProviderMetadataKeys.mtpEnabled: String(profile.mtpEnabled),
+            LocalProviderMetadataKeys.audioEnabled: String(profile.audioEnabled),
+            LocalProviderMetadataKeys.dflashEnabled: String(profile.dflashEnabled),
         ]
+        appendRuntimeFeatureMetadata(to: &metadata, partitionSummary: partitionSummary)
         if let requestedBackend = quantization.requestedBackend {
             metadata[LocalProviderMetadataKeys.turboQuantRequestedBackend] = requestedBackend.rawValue
         }
@@ -696,6 +811,22 @@ private actor MLXRuntimeState {
             metadata[LocalProviderMetadataKeys.turboQuantLastUnsupportedShape] = unsupportedShape
         }
         return metadata
+    }
+
+    private static func appendRuntimeFeatureMetadata(
+        to metadata: inout [String: String],
+        partitionSummary: String?
+    ) {
+        #if canImport(MLX)
+        let ssdMetrics = MLXFast.ssdMetricsSnapshot()
+        metadata[LocalProviderMetadataKeys.ssdThroughputMBperS] = String(ssdMetrics.throughputMBperS)
+        metadata[LocalProviderMetadataKeys.ssdTotalBytesRead] = String(ssdMetrics.totalBytesRead)
+        metadata[LocalProviderMetadataKeys.ssdTotalChunks] = String(ssdMetrics.totalChunks)
+        metadata[LocalProviderMetadataKeys.ssdAvgChunkLatencyMS] = String(ssdMetrics.avgChunkLatencyMS)
+        #endif
+        if let partitionSummary {
+            metadata[LocalProviderMetadataKeys.partitionSummary] = partitionSummary
+        }
     }
 
     private static func mlxTurboQuantOptimizationPolicy(

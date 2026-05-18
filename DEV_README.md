@@ -111,9 +111,10 @@ TurboQuant is the requested default local KV-cache strategy. Pines requests the 
 
 The iOS app links maintained MLX forks through `project.yml` and the generated Xcode project:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `5db40d34a96a9c6889b6583d6cc09f8b8f05ea5e`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `e39787395c977549e1ba112ee2fd7eb509d57f30`
-- Nested `mlx` inside `MLXSwift`: `d999c27ecd549e65f8f689bdd5c83648da977b81`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `48375f1d8f0694dee2ce8aab7f46be50c5297aec`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `fbae29300f38e9988a010997828e2aa08a32c338`
+- Nested `mlx` inside `MLXSwift`: `292c54b7bbf95a7061b3d70c05c1785dfb9b9a85`
+- Nested `mlx-c` inside `MLXSwift`: `f53f40c7a5d0db5cb2a8661e67e29a18470d8863`
 
 These pins are intentional because the app consumes additive TurboQuant and compatibility APIs that are not assumed to exist in upstream package releases yet.
 

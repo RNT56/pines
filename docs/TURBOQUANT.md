@@ -10,9 +10,10 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 - iOS memory warnings stop the active local run and unload transient MLX containers through the runtime bridge.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `5db40d34a96a9c6889b6583d6cc09f8b8f05ea5e`
-  - `RNT56/mlx-swift-lm`: `e39787395c977549e1ba112ee2fd7eb509d57f30`
-  - Nested `mlx` inside `RNT56/mlx-swift`: `d999c27ecd549e65f8f689bdd5c83648da977b81`
+  - `RNT56/mlx-swift`: `48375f1d8f0694dee2ce8aab7f46be50c5297aec`
+  - `RNT56/mlx-swift-lm`: `fbae29300f38e9988a010997828e2aa08a32c338`
+  - Nested `mlx` inside `RNT56/mlx-swift`: `292c54b7bbf95a7061b3d70c05c1785dfb9b9a85`
+  - Nested `mlx-c` inside `RNT56/mlx-swift`: `f53f40c7a5d0db5cb2a8661e67e29a18470d8863`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, a tiled online fused decode path, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
 - `mlx-swift-lm` exposes `KVCacheStrategy.turboQuant`, `TurboQuantKVCache`, a raw-free physical-slot `RotatingTurboQuantKVCache` for supported `.metalPolarQJL` `maxKVSize` paths, prompt-cache serialization hooks, `TurboQuantCompressedKVCacheProtocol`, and `GenerateParameters` fields for cache strategy, preset, requested backend selection, device-adaptive optimization policy, and compressed-attention diagnostics.
 - The app-level runtime smoke tests link MLX/MLXLMCommon, assert those fixed pins are present, validate high-bit TurboQuant seed propagation, and run a tiny Metal codec round trip when the executing device exposes the TurboQuant Metal codec.

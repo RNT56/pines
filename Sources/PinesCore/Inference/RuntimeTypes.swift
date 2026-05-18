@@ -3,6 +3,7 @@ import Foundation
 public enum ModelModality: String, Codable, Sendable, CaseIterable {
     case text
     case vision
+    case audio
     case embeddings
 }
 
@@ -294,6 +295,13 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
     public var lastUnsupportedAttentionShape: String?
     public var activeFallbackReason: String?
     public var memoryCounters: RuntimeMemoryCounters
+    public var ssdThroughputMBperS: Double?
+    public var ssdTotalBytesRead: UInt64?
+    public var ssdTotalChunks: UInt64?
+    public var ssdAvgChunkLatencyMS: Double?
+    public var partitionSummary: String?
+    public var mtpAcceptanceRate: Double?
+    public var audioCapability: Bool?
 
     public init(
         requestedAlgorithm: QuantizationAlgorithm = .turboQuant,
@@ -313,7 +321,14 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         thermalDownshiftActive: Bool? = nil,
         lastUnsupportedAttentionShape: String? = nil,
         activeFallbackReason: String? = nil,
-        memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters()
+        memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters(),
+        ssdThroughputMBperS: Double? = nil,
+        ssdTotalBytesRead: UInt64? = nil,
+        ssdTotalChunks: UInt64? = nil,
+        ssdAvgChunkLatencyMS: Double? = nil,
+        partitionSummary: String? = nil,
+        mtpAcceptanceRate: Double? = nil,
+        audioCapability: Bool? = nil
     ) {
         self.requestedAlgorithm = requestedAlgorithm
         self.activeAlgorithm = activeAlgorithm
@@ -333,6 +348,13 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         self.lastUnsupportedAttentionShape = lastUnsupportedAttentionShape
         self.activeFallbackReason = activeFallbackReason
         self.memoryCounters = memoryCounters
+        self.ssdThroughputMBperS = ssdThroughputMBperS
+        self.ssdTotalBytesRead = ssdTotalBytesRead
+        self.ssdTotalChunks = ssdTotalChunks
+        self.ssdAvgChunkLatencyMS = ssdAvgChunkLatencyMS
+        self.partitionSummary = partitionSummary
+        self.mtpAcceptanceRate = mtpAcceptanceRate
+        self.audioCapability = audioCapability
     }
 }
 
@@ -465,9 +487,21 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     }
 }
 
+public enum RuntimeExpertStreamingMode: String, Hashable, Codable, Sendable, CaseIterable {
+    case disabled
+    case mmapPageCache
+    case directNVMe
+}
+
 public struct RuntimeProfile: Hashable, Codable, Sendable {
     public var name: String
     public var quantization: QuantizationProfile
+    public var streamExperts: Bool
+    public var expertStreamingMode: RuntimeExpertStreamingMode
+    public var gpuLayerCount: Int?
+    public var mtpEnabled: Bool
+    public var audioEnabled: Bool
+    public var dflashEnabled: Bool
     public var prefillStepSize: Int
     public var promptCacheEnabled: Bool
     public var promptCacheIdentifier: String?
@@ -480,6 +514,12 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
     public init(
         name: String = "Balanced",
         quantization: QuantizationProfile = .init(kvBits: 8),
+        streamExperts: Bool = false,
+        expertStreamingMode: RuntimeExpertStreamingMode = .disabled,
+        gpuLayerCount: Int? = nil,
+        mtpEnabled: Bool = false,
+        audioEnabled: Bool = false,
+        dflashEnabled: Bool = false,
         prefillStepSize: Int = 512,
         promptCacheEnabled: Bool = true,
         promptCacheIdentifier: String? = nil,
@@ -491,6 +531,12 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
     ) {
         self.name = name
         self.quantization = quantization
+        self.streamExperts = streamExperts
+        self.expertStreamingMode = expertStreamingMode
+        self.gpuLayerCount = gpuLayerCount
+        self.mtpEnabled = mtpEnabled
+        self.audioEnabled = audioEnabled
+        self.dflashEnabled = dflashEnabled
         self.prefillStepSize = prefillStepSize
         self.promptCacheEnabled = promptCacheEnabled
         self.promptCacheIdentifier = promptCacheIdentifier
@@ -499,6 +545,45 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
         self.unloadOnMemoryPressure = unloadOnMemoryPressure
         self.repetitionContextSize = repetitionContextSize
         self.maxConcurrentSessions = maxConcurrentSessions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case quantization
+        case streamExperts
+        case expertStreamingMode
+        case gpuLayerCount
+        case mtpEnabled
+        case audioEnabled
+        case dflashEnabled
+        case prefillStepSize
+        case promptCacheEnabled
+        case promptCacheIdentifier
+        case speculativeDraftModelID
+        case speculativeDecodingEnabled
+        case unloadOnMemoryPressure
+        case repetitionContextSize
+        case maxConcurrentSessions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Balanced"
+        quantization = try container.decodeIfPresent(QuantizationProfile.self, forKey: .quantization) ?? .init(kvBits: 8)
+        streamExperts = try container.decodeIfPresent(Bool.self, forKey: .streamExperts) ?? false
+        expertStreamingMode = try container.decodeIfPresent(RuntimeExpertStreamingMode.self, forKey: .expertStreamingMode) ?? .disabled
+        gpuLayerCount = try container.decodeIfPresent(Int.self, forKey: .gpuLayerCount)
+        mtpEnabled = try container.decodeIfPresent(Bool.self, forKey: .mtpEnabled) ?? false
+        audioEnabled = try container.decodeIfPresent(Bool.self, forKey: .audioEnabled) ?? false
+        dflashEnabled = try container.decodeIfPresent(Bool.self, forKey: .dflashEnabled) ?? false
+        prefillStepSize = try container.decodeIfPresent(Int.self, forKey: .prefillStepSize) ?? 512
+        promptCacheEnabled = try container.decodeIfPresent(Bool.self, forKey: .promptCacheEnabled) ?? true
+        promptCacheIdentifier = try container.decodeIfPresent(String.self, forKey: .promptCacheIdentifier)
+        speculativeDraftModelID = try container.decodeIfPresent(ModelID.self, forKey: .speculativeDraftModelID)
+        speculativeDecodingEnabled = try container.decodeIfPresent(Bool.self, forKey: .speculativeDecodingEnabled) ?? false
+        unloadOnMemoryPressure = try container.decodeIfPresent(Bool.self, forKey: .unloadOnMemoryPressure) ?? true
+        repetitionContextSize = try container.decodeIfPresent(Int.self, forKey: .repetitionContextSize) ?? 20
+        maxConcurrentSessions = try container.decodeIfPresent(Int.self, forKey: .maxConcurrentSessions) ?? 1
     }
 }
 
