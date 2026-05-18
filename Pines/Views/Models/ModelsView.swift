@@ -145,7 +145,6 @@ struct ModelsView: View {
                 }
             }
             .pinesSidebarListChrome()
-            .animation(theme.motion.fast, value: appModel.isSearchingModels)
         } detail: {
             if let selectedModel {
                 ModelDetailView(model: selectedModel)

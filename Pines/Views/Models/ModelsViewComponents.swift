@@ -54,7 +54,7 @@ struct ModelSidebarList: View {
 
     @ViewBuilder
     private var statusRows: some View {
-        if isSearching {
+        if isSearching && models.isEmpty {
             ModelListStatusRow(
                 title: "Searching Hugging Face",
                 detail: "Checking MLX metadata",

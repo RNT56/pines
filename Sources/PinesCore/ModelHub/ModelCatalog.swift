@@ -79,6 +79,7 @@ public struct ModelSearchFilters: Hashable, Codable, Sendable {
     public var sort: ModelCatalogSort
     public var descending: Bool
     public var includeConfig: Bool
+    public var includeFileMetadata: Bool
 
     public init(
         query: String = "",
@@ -86,7 +87,8 @@ public struct ModelSearchFilters: Hashable, Codable, Sendable {
         limit: Int = 25,
         sort: ModelCatalogSort = .downloads,
         descending: Bool = true,
-        includeConfig: Bool = true
+        includeConfig: Bool = true,
+        includeFileMetadata: Bool = true
     ) {
         self.query = query
         self.task = task
@@ -94,6 +96,7 @@ public struct ModelSearchFilters: Hashable, Codable, Sendable {
         self.sort = sort
         self.descending = descending
         self.includeConfig = includeConfig
+        self.includeFileMetadata = includeFileMetadata
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -103,6 +106,7 @@ public struct ModelSearchFilters: Hashable, Codable, Sendable {
         case sort
         case descending
         case includeConfig
+        case includeFileMetadata
     }
 
     public init(from decoder: Decoder) throws {
@@ -113,6 +117,7 @@ public struct ModelSearchFilters: Hashable, Codable, Sendable {
         sort = try container.decodeIfPresent(ModelCatalogSort.self, forKey: .sort) ?? .downloads
         descending = try container.decodeIfPresent(Bool.self, forKey: .descending) ?? true
         includeConfig = try container.decodeIfPresent(Bool.self, forKey: .includeConfig) ?? true
+        includeFileMetadata = try container.decodeIfPresent(Bool.self, forKey: .includeFileMetadata) ?? true
     }
 }
 
@@ -241,6 +246,8 @@ public struct HuggingFaceModelCatalogService: Sendable {
         ]
         if filters.includeConfig {
             components.queryItems?.append(URLQueryItem(name: "config", value: "true"))
+        }
+        if filters.includeFileMetadata {
             components.queryItems?.append(URLQueryItem(name: "blobs", value: "true"))
         }
 

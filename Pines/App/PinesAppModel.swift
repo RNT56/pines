@@ -1848,14 +1848,21 @@ final class PinesAppModel: ObservableObject {
                 setIfChanged(\.isSearchingModels, true)
                 isShowingModelDiscoveryResults = true
                 let token = try await services.huggingFaceCredentialService.readToken()
-                let filters = ModelSearchFilters(query: trimmed, task: task, limit: 50, includeConfig: false)
+                let filters = ModelSearchFilters(
+                    query: trimmed,
+                    task: task,
+                    limit: 50,
+                    includeConfig: false,
+                    includeFileMetadata: true
+                )
                 let remoteModels = try await services.modelCatalog.search(filters: filters, accessToken: token)
                 let installed = try await services.modelInstallRepository?.listInstalledAndCuratedModels() ?? []
                 try Task.checkCancellation()
                 let downloads = modelDownloads
                 let classifier = services.preflightClassifier
-                let preparationTask = Task.detached(priority: .userInitiated) {
-                    try Self.prepareRemoteModelInstalls(
+                let runtime = services.mlxRuntime
+                let preparationTask = Task.detached(priority: .utility) {
+                    let preparedModels = try Self.prepareRemoteModelInstalls(
                         remoteModels: remoteModels,
                         installed: installed,
                         downloads: downloads,
@@ -1863,27 +1870,29 @@ final class PinesAppModel: ObservableObject {
                         installState: installState,
                         classifier: classifier
                     )
+                    let previews = preparedModels.map { prepared in
+                        Self.modelPreview(
+                            from: prepared.install,
+                            runtime: runtime,
+                            download: prepared.download,
+                            enrichRuntime: false
+                        )
+                    }
+                    return Self.downloadingFirst(previews)
                 }
-                let preparedModels = try await withTaskCancellationHandler {
+                let previews = try await withTaskCancellationHandler {
                     try await preparationTask.value
                 } onCancel: {
                     preparationTask.cancel()
                 }
                 try Task.checkCancellation()
-                let previews = preparedModels.map { prepared in
-                    Self.modelPreview(
-                        from: prepared.install,
-                        runtime: services.mlxRuntime,
-                        download: prepared.download
-                    )
-                }
                 guard isCurrentSearch() else { return }
                 guard !Task.isCancelled else {
                     modelSearchRequestID = nil
                     setIfChanged(\.isSearchingModels, false)
                     return
                 }
-                setIfChanged(\.models, Self.downloadingFirst(previews))
+                setIfChanged(\.models, previews)
                 setIfChanged(\.isSearchingModels, false)
             }
             modelSearchRequestID = nil
@@ -2791,7 +2800,7 @@ final class PinesAppModel: ObservableObject {
                                         from: install,
                                         runtime: services.mlxRuntime,
                                         download: downloadByRepository[key],
-                                        enrichRuntime: snapshot.enrichRuntime
+                                        enrichRuntime: false
                                     )
                                 }
 
@@ -2804,7 +2813,7 @@ final class PinesAppModel: ObservableObject {
                                     from: remoteInstall,
                                     runtime: services.mlxRuntime,
                                     download: downloadByRepository[key],
-                                    enrichRuntime: snapshot.enrichRuntime
+                                    enrichRuntime: false
                                 )
                             }
                             self.setIfChanged(\.models, Self.downloadingFirst(previews))
@@ -2845,7 +2854,7 @@ final class PinesAppModel: ObservableObject {
                                 from: preview.install,
                                 runtime: services.mlxRuntime,
                                 download: downloadByRepository[key],
-                                enrichRuntime: self.shouldEnrichRuntimeModelPreviews
+                                enrichRuntime: self.isShowingModelDiscoveryResults ? false : self.shouldEnrichRuntimeModelPreviews
                             )
                         }
                         self.setIfChanged(\.models, Self.downloadingFirst(previews))

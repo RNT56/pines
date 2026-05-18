@@ -127,7 +127,7 @@ extension PinesAppModel {
         }
     }
 
-    static func modelPreview(
+    nonisolated static func modelPreview(
         from install: ModelInstall,
         runtime: MLXRuntimeBridge,
         download: ModelDownloadProgress? = nil,
@@ -205,7 +205,7 @@ extension PinesAppModel {
             runtimeProfile: runtimeProfile,
             name: install.displayName,
             family: install.modelType ?? install.modalities.map(\.rawValue).sorted().joined(separator: ", "),
-            footprint: install.estimatedBytes.map(Self.byteLabel) ?? download?.totalBytes.map(Self.byteLabel) ?? "Remote",
+            footprint: install.estimatedBytes.map(Self.byteLabel) ?? download?.totalBytes.map(Self.byteLabel) ?? "Size unavailable",
             contextWindow: contextWindow,
             runtime: install.modalities.contains(.embeddings) ? "MLX Embedders" : (install.modalities.contains(.vision) ? "MLX VLM" : "MLX"),
             status: status,
@@ -222,7 +222,7 @@ extension PinesAppModel {
         }
     }
 
-    static func downloadingFirst(_ previews: [PinesModelPreview]) -> [PinesModelPreview] {
+    nonisolated static func downloadingFirst(_ previews: [PinesModelPreview]) -> [PinesModelPreview] {
         previews.enumerated()
             .sorted { lhs, rhs in
                 let lhsActive = lhs.element.isDownloadActive
@@ -268,7 +268,7 @@ extension PinesAppModel {
         )
     }
 
-    static func byteLabel(_ bytes: Int64) -> String {
+    nonisolated static func byteLabel(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }

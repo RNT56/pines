@@ -404,8 +404,8 @@ struct PinesCoreTestRunner {
                 "pipeline_tag": "text-generation",
                 "tags": ["mlx", "safetensors", "qwen3", "text-generation", "license:apache-2.0"],
                 "siblings": [
-                  { "rfilename": "model.safetensors" },
-                  { "rfilename": "tokenizer.json" }
+                  { "rfilename": "model.safetensors", "size": 4200000000, "lfs": { "sha256": "def", "size": 4200000000 } },
+                  { "rfilename": "tokenizer.json", "size": 250000 }
                 ]
               }
             ]
@@ -419,11 +419,14 @@ struct PinesCoreTestRunner {
         let lightweightQueryItems = Dictionary(uniqueKeysWithValues: URLComponents(url: lightweightURL, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
 
         try expectEqual(lightweightQueryItems["config"], nil)
-        try expectEqual(lightweightQueryItems["blobs"], nil)
+        try expectEqual(lightweightQueryItems["blobs"], "true")
         try expectEqual(lightweightModels[0].modelType, "qwen3")
+        try expectEqual(lightweightModels[0].files[0].size, 4_200_000_000)
+        try expectEqual(lightweightModels[0].files[0].oid, "def")
         let lightweightClassified = ModelPreflightClassifier().classify(lightweightModels[0].preflightInput)
         try expectEqual(lightweightClassified.verification, .installable)
         try expectEqual(lightweightClassified.modalities, [.text])
+        try expectEqual(lightweightClassified.estimatedBytes, 4_200_250_000)
     }
 
     private static func testPersistenceSchema() throws {
