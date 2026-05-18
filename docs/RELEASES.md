@@ -54,7 +54,7 @@ Production distribution remains blocked until signed archive export, TestFlight/
 
 ## v0.1.0 Preview Readiness
 
-`v0.1.0` is ready to cut as a source/developer-preview release once CI for the target commit is complete. The app and extension marketing versions are already `0.1.0`, release packaging emits only source artifacts plus SHA-256 checksums, and the release workflow keeps unsigned archive validation separate from production distribution.
+`v0.1.0` is ready to cut as a source/developer-preview release once CI for the target commit is complete. The app and extension marketing versions are already `0.1.0`, release packaging emits only source artifacts plus SHA-256 checksums, and the release workflow keeps unsigned archive validation separate from production distribution. The release validation job has a two-hour timeout because hosted macOS platform setup, simulator validation, and archive builds can exceed one hour.
 
 Before pushing the tag, verify:
 
