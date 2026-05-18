@@ -501,6 +501,7 @@ private struct ChatTranscriptView: View {
                 .disabled(chatState.activeRunID != nil || !thread.messages.contains { $0.role == .user })
             }
         }
+        .toolbar(tabBarVisibility, for: .tabBar)
         .pinesAppBackground()
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: theme.spacing.small) {
@@ -524,6 +525,10 @@ private struct ChatTranscriptView: View {
 
     private var contentPadding: CGFloat {
         horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large
+    }
+
+    private var tabBarVisibility: Visibility {
+        horizontalSizeClass == .compact ? .hidden : .automatic
     }
 
     @ViewBuilder
