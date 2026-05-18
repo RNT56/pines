@@ -22,6 +22,7 @@ struct PinesRootView: View {
     @State private var didStartBootstrap = false
     @State private var didReportMainUIAppeared = false
     @State private var isBootstrapping = false
+    @State private var bootstrapTask: Task<Void, Never>?
     @State private var rootCreatedAt = Date()
 
     init() {
@@ -85,8 +86,8 @@ struct PinesRootView: View {
         .preferredColorScheme(settingsState.interfaceMode.colorScheme)
         .task {
             guard !didStartBootstrap, !isBootstrapping else { return }
+            didStartBootstrap = true
             isBootstrapping = true
-            defer { isBootstrapping = false }
 
             let totalStartedAt = Date()
             PinesRuntimeMetrics.shared.start()
@@ -105,15 +106,21 @@ struct PinesRootView: View {
             watchSessionService.start()
             self.watchSessionService = watchSessionService
             #endif
-            await appModel.bootstrap(services: services)
+
             isMainUIReady = true
             withAnimation(theme.motion.emphasized) {
                 showsBootMark = false
             }
             haptics.play(.appReady)
-            haptics.prepare()
-            didStartBootstrap = true
             services.runtimeMetrics.recordStartupPhase("root_boot_to_main", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
+
+            bootstrapTask = Task { @MainActor in
+                defer { isBootstrapping = false }
+                await Task.yield()
+                await appModel.bootstrap(services: services)
+                haptics.prepare()
+                services.runtimeMetrics.recordStartupPhase("root_bootstrap_complete", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
+            }
         }
         .onChange(of: workflowState.hapticSignal) { _, signal in
             guard let signal else { return }

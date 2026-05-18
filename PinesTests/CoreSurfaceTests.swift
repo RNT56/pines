@@ -57,6 +57,6 @@ final class CoreSurfaceTests: XCTestCase {
         )
         XCTAssertTrue(refreshSupport.contains("UIUpdateLink"))
         XCTAssertTrue(refreshSupport.contains("preferredFrameRateRange"))
-        XCTAssertTrue(refreshSupport.contains("requiresContinuousUpdates = false"))
+        XCTAssertFalse(refreshSupport.contains("requiresContinuousUpdates"))
     }
 }

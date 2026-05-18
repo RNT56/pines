@@ -88,9 +88,7 @@ private final class PinesHighRefreshRateView: UIView {
             linkedWindow = window
         }
 
-        link.requiresContinuousUpdates = false
-        link.wantsImmediatePresentation = false
-        link.wantsLowLatencyEventDispatch = false
+        // Keep the link passive. iOS traps if continuous-update flags are set without phase actions.
         link.preferredFrameRateRange = PinesRefreshRatePolicy.preferredFrameRateRange(
             maximumFramesPerSecond: maximumFramesPerSecond
         )
