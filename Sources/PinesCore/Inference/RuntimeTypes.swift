@@ -773,7 +773,7 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
     public static let balancedPhone = DeviceProfile(
         memoryTier: .balanced,
         performanceClass: .a17Pro,
-        recommendedMaxModelBytes: 3_500_000_000,
+        recommendedMaxModelBytes: 3_800_000_000,
         recommendedContextTokens: 16_384,
         recommendedSmallModelContextTokens: 24_576,
         recommendedPrefillStepSize: 512,

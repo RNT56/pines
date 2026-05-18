@@ -363,6 +363,7 @@ private actor MLXRuntimeState {
     private var activeInstall: ModelInstall?
     private var activeProfile = RuntimeProfile()
     private var activePartitionSummary: String?
+    private var activeStopStrings = Set<String>()
     private var didRegisterModelAliases = false
 
     #if canImport(MLXLMCommon)
@@ -381,23 +382,27 @@ private actor MLXRuntimeState {
 
         #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await registerModelAliasesIfNeeded()
-        var configuration = try Self.lmConfiguration(for: install)
-        configuration.lazyLoad = profile.streamExperts
         try Self.configureGlobalRuntimePolicy(profile: profile, install: install)
         if install.modalities.contains(.vision) || install.modalities.contains(.audio) {
+            var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .visionLanguage)
+            resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
+            activeStopStrings = resolvedConfiguration.hints.stopStrings
             visionContainer = try await VLMModelFactory.shared.loadContainer(
                 from: PinesHubDownloader(),
                 using: PinesTokenizerLoader(),
-                configuration: configuration
+                configuration: resolvedConfiguration.configuration
             )
             activePartitionSummary = await Self.configureLoadedContainer(
                 visionContainer, profile: profile)
             textContainer = nil
         } else if install.modalities.contains(.text) {
+            var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .language)
+            resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
+            activeStopStrings = resolvedConfiguration.hints.stopStrings
             textContainer = try await LLMModelFactory.shared.loadContainer(
                 from: PinesHubDownloader(),
                 using: PinesTokenizerLoader(),
-                configuration: configuration
+                configuration: resolvedConfiguration.configuration
             )
             activePartitionSummary = await Self.configureLoadedContainer(
                 textContainer, profile: profile)
@@ -483,6 +488,7 @@ private actor MLXRuntimeState {
         textContainer = nil
         visionContainer = nil
         activePartitionSummary = nil
+        activeStopStrings = []
         ExpertStreamingConfig.shared.deactivate()
         MTPConfig.retainMTPWeights = false
         #endif
@@ -546,6 +552,7 @@ private actor MLXRuntimeState {
         let historyMessages = Array(request.messages[..<latestUserIndex])
         let parameters = Self.generateParameters(from: request, profile: profile, install: activeInstall)
         let toolSpecs = request.allowsTools ? Self.mlxToolSpecs(from: request.availableTools) : nil
+        let stopStrings = activeStopStrings
 
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -572,6 +579,7 @@ private actor MLXRuntimeState {
                         let cache = context.model.newCache(parameters: parameters)
                         let stream: AsyncStream<Generation>
                         let generationTask: Task<Void, Never>
+                        var stopFilter = TextStopSequenceFilter(stopSequences: stopStrings)
                         if profile.mtpEnabled,
                            let mtpModel = context.model as? any MTPLanguageModel {
                             let iterator = try MTPTokenIterator(
@@ -605,13 +613,32 @@ private actor MLXRuntimeState {
                         }
                         var completionInfo: GenerateCompletionInfo?
 
-                        for await item in stream {
+                        generationLoop: for await item in stream {
                             guard !Task.isCancelled else { throw InferenceError.cancelled }
                             switch item {
                             case let .chunk(text):
                                 tokenCount += 1
-                                continuation.yield(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
+                                let filtered = stopFilter.append(text)
+                                if !filtered.text.isEmpty {
+                                    continuation.yield(.token(TokenDelta(kind: .token, text: filtered.text, tokenCount: 1)))
+                                }
+                                if filtered.didStop {
+                                    finish = InferenceFinish(
+                                        reason: .stop,
+                                        providerMetadata: Self.localProviderMetadata(
+                                            from: cache,
+                                            fallbackProfile: profile,
+                                            partitionSummary: partitionSummary
+                                        )
+                                    )
+                                    generationTask.cancel()
+                                    break generationLoop
+                                }
                             case let .toolCall(call):
+                                let pendingText = stopFilter.flush()
+                                if !pendingText.isEmpty {
+                                    continuation.yield(.token(TokenDelta(kind: .token, text: pendingText, tokenCount: 1)))
+                                }
                                 let argumentsData = try JSONSerialization.data(
                                     withJSONObject: call.function.arguments.mapValues(\.anyValue)
                                 )
@@ -626,6 +653,10 @@ private actor MLXRuntimeState {
                                     )
                                 )
                             case let .info(info):
+                                let pendingText = stopFilter.flush()
+                                if !pendingText.isEmpty {
+                                    continuation.yield(.token(TokenDelta(kind: .token, text: pendingText, tokenCount: 1)))
+                                }
                                 continuation.yield(
                                     .metrics(
                                         InferenceMetrics(
@@ -641,7 +672,11 @@ private actor MLXRuntimeState {
                         }
 
                         await generationTask.value
-                        if let completionInfo {
+                        let pendingText = stopFilter.flush()
+                        if !pendingText.isEmpty {
+                            continuation.yield(.token(TokenDelta(kind: .token, text: pendingText, tokenCount: 1)))
+                        }
+                        if finish == nil, let completionInfo {
                             finish = InferenceFinish(
                                 reason: Self.finishReason(from: completionInfo.stopReason),
                                 providerMetadata: Self.localProviderMetadata(
@@ -709,12 +744,66 @@ private actor MLXRuntimeState {
     }
 
     #if canImport(MLXLMCommon)
-    private static func lmConfiguration(for install: ModelInstall) throws -> MLXLMCommon.ModelConfiguration {
+    private enum ModelConfigurationKind {
+        case language
+        case visionLanguage
+    }
+
+    private struct ResolvedRuntimeModelConfiguration {
+        var configuration: MLXLMCommon.ModelConfiguration
+        var hints: ModelRuntimeConfigurationHints
+    }
+
+    private static func lmConfiguration(
+        for install: ModelInstall,
+        kind: ModelConfigurationKind
+    ) throws -> ResolvedRuntimeModelConfiguration {
+        let registryConfiguration: MLXLMCommon.ModelConfiguration
+        switch kind {
+        case .language:
+            registryConfiguration = LLMModelFactory.shared.configuration(id: install.repository)
+        case .visionLanguage:
+            registryConfiguration = VLMModelFactory.shared.configuration(id: install.repository)
+        }
+
         if install.localURL != nil {
             let resolvedURL = try resolvedModelDirectory(for: install)
-            return MLXLMCommon.ModelConfiguration(directory: resolvedURL)
+            let hints = ModelRuntimeConfigurationHints.infer(
+                repository: install.repository,
+                modelType: install.modelType,
+                processorClass: install.processorClass,
+                directory: resolvedURL
+            )
+            return ResolvedRuntimeModelConfiguration(
+                configuration: MLXLMCommon.ModelConfiguration(
+                    directory: resolvedURL,
+                    tokenizerSource: registryConfiguration.tokenizerSource,
+                    defaultPrompt: registryConfiguration.defaultPrompt,
+                    extraEOSTokens: registryConfiguration.extraEOSTokens.union(hints.extraEOSTokens),
+                    eosTokenIds: registryConfiguration.eosTokenIds,
+                    toolCallFormat: registryConfiguration.toolCallFormat
+                ),
+                hints: ModelRuntimeConfigurationHints(
+                    extraEOSTokens: registryConfiguration.extraEOSTokens.union(hints.extraEOSTokens),
+                    stopStrings: registryConfiguration.extraEOSTokens.union(hints.stopStrings)
+                )
+            )
         }
-        return MLXLMCommon.ModelConfiguration(id: install.repository, revision: install.revision ?? "main")
+
+        let inferredHints = ModelRuntimeConfigurationHints.infer(
+            repository: install.repository,
+            modelType: install.modelType,
+            processorClass: install.processorClass,
+            metadataFiles: [:]
+        )
+        var configuration = registryConfiguration
+        configuration.id = .id(install.repository, revision: install.revision ?? "main")
+        configuration.extraEOSTokens.formUnion(inferredHints.extraEOSTokens)
+        let hints = ModelRuntimeConfigurationHints(
+            extraEOSTokens: configuration.extraEOSTokens,
+            stopStrings: configuration.extraEOSTokens.union(inferredHints.stopStrings)
+        )
+        return ResolvedRuntimeModelConfiguration(configuration: configuration, hints: hints)
     }
 
     private static func resolvedModelDirectory(for install: ModelInstall) throws -> URL {
@@ -999,6 +1088,80 @@ private actor MLXRuntimeState {
         }
     }
     #endif
+
+    private struct TextStopSequenceFilter {
+        private let stopSequences: [String]
+        private var buffer = ""
+
+        init(stopSequences: Set<String>) {
+            self.stopSequences = stopSequences
+                .filter { !$0.isEmpty }
+                .sorted { lhs, rhs in
+                    if lhs.count != rhs.count {
+                        return lhs.count > rhs.count
+                    }
+                    return lhs < rhs
+                }
+        }
+
+        mutating func append(_ text: String) -> (text: String, didStop: Bool) {
+            guard !stopSequences.isEmpty else {
+                return (text, false)
+            }
+
+            buffer.append(text)
+            if let stopRange = firstStopRange(in: buffer) {
+                let output = String(buffer[..<stopRange.lowerBound])
+                buffer.removeAll()
+                return (output, true)
+            }
+
+            let keepCount = pendingStopPrefixSuffixLength(in: buffer)
+            guard keepCount < buffer.count else {
+                return ("", false)
+            }
+
+            let splitIndex = buffer.index(buffer.endIndex, offsetBy: -keepCount)
+            let output = String(buffer[..<splitIndex])
+            buffer = String(buffer[splitIndex...])
+            return (output, false)
+        }
+
+        mutating func flush() -> String {
+            defer { buffer.removeAll() }
+            return buffer
+        }
+
+        private func firstStopRange(in text: String) -> Range<String.Index>? {
+            var selected: Range<String.Index>?
+            for stopSequence in stopSequences {
+                guard let range = text.range(of: stopSequence) else { continue }
+                if let current = selected {
+                    if range.lowerBound < current.lowerBound {
+                        selected = range
+                    }
+                } else {
+                    selected = range
+                }
+            }
+            return selected
+        }
+
+        private func pendingStopPrefixSuffixLength(in text: String) -> Int {
+            var best = 0
+            for stopSequence in stopSequences {
+                let maxLength = min(max(stopSequence.count - 1, 0), text.count)
+                guard maxLength > best else { continue }
+                for length in stride(from: maxLength, through: best + 1, by: -1) {
+                    if text.hasSuffix(stopSequence.prefix(length)) {
+                        best = length
+                        break
+                    }
+                }
+            }
+            return best
+        }
+    }
 
     private static func install(for modelID: ModelID, modalities: Set<ModelModality>) -> ModelInstall {
         ModelInstall(

@@ -9,6 +9,7 @@ struct PinesCoreTestRunner {
     static func main() async throws {
         try testExecutionRouter()
         try testModelPreflight()
+        try testModelRuntimeConfigurationHints()
         try await testModelCatalogSearch()
         try testPersistenceSchema()
         try testPersistenceFTSTriggers()
@@ -348,6 +349,47 @@ struct PinesCoreTestRunner {
         )
     }
 
+    private static func testModelRuntimeConfigurationHints() throws {
+        let gemmaHints = ModelRuntimeConfigurationHints.infer(
+            repository: "mlx-community/gemma-3-1b-it-qat-4bit",
+            metadataFiles: [
+                "config.json": #"{"model_type":"gemma3_text"}"#.data(using: .utf8)!,
+                "tokenizer_config.json": #"{"chat_template":"<start_of_turn>user\n{{ content }}<end_of_turn>\n<start_of_turn>model\n","additional_special_tokens":["<start_of_turn>","<end_of_turn>"]}"#.data(using: .utf8)!,
+            ]
+        )
+        try expect(gemmaHints.extraEOSTokens.contains("<end_of_turn>"), "Gemma end-of-turn token should be an EOS hint")
+        try expect(gemmaHints.stopStrings.contains("<end_of_turn>"), "Gemma end-of-turn token should be a text stop")
+        try expect(!gemmaHints.stopStrings.contains("<start_of_turn>"), "start-of-turn token must not be treated as a stop")
+
+        let generationHints = ModelRuntimeConfigurationHints.infer(
+            repository: "example/custom-chat",
+            metadataFiles: [
+                "config.json": #"{"model_type":"custom"}"#.data(using: .utf8)!,
+                "generation_config.json": #"{"stop_strings":["<custom_stop>","END_OF_RESPONSE"]}"#.data(using: .utf8)!,
+                "special_tokens_map.json": #"{"additional_special_tokens":[{"content":"<|im_end|>"},{"content":"<|im_start|>"}]}"#.data(using: .utf8)!,
+            ]
+        )
+        try expect(generationHints.stopStrings.contains("<custom_stop>"), "generation_config stop strings should be honored")
+        try expect(generationHints.stopStrings.contains("END_OF_RESPONSE"), "arbitrary generation_config stop strings should be honored")
+        try expect(generationHints.extraEOSTokens.contains("<|im_end|>"), "special-token stop markers should become EOS hints")
+        try expect(!generationHints.stopStrings.contains("<|im_start|>"), "start markers should be ignored")
+
+        let qwenHints = ModelRuntimeConfigurationHints.infer(
+            repository: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
+            modelType: "qwen3_5",
+            metadataFiles: [:]
+        )
+        try expect(qwenHints.extraEOSTokens.contains("<|im_end|>"), "Qwen chat models should get im_end as an EOS fallback")
+
+        let gemma4Hints = ModelRuntimeConfigurationHints.infer(
+            repository: "mlx-community/gemma-4-e2b-it-4bit",
+            modelType: "gemma4",
+            metadataFiles: [:]
+        )
+        try expect(gemma4Hints.extraEOSTokens.contains("<turn|>"), "Gemma 4 text models should get turn stop fallback")
+        try expect(gemma4Hints.extraEOSTokens.contains("<end_of_turn>"), "Gemma 4 VLM models should get end-of-turn fallback")
+    }
+
     private static func testModelCatalogSearch() async throws {
         let client = RecordingHTTPClient(
             payload: """
@@ -633,6 +675,36 @@ struct PinesCoreTestRunner {
         try expectEqual(compact.recommendedSmallModelContextTokens, 16_384)
         try expectEqual(compact.recommendedEmbeddingBatchSize, 8)
         try expectEqual(compact.recommendedVectorScanLimit, 2048)
+
+        let a17Pro = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_000_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPhone16,2",
+                metalRecommendedWorkingSetBytes: 5_330_000_000,
+                metalKernelProfile: .wideA18A19,
+                metalSelfTestStatus: .passed
+            )
+        )
+        try expectEqual(a17Pro.memoryTier, .balanced)
+        try expectEqual(a17Pro.performanceClass, .a17Pro)
+        try expectEqual(a17Pro.recommendedMaxModelBytes, 3_800_000_000)
+        let a17ProPolicy = ModelDiscoveryResourcePolicy.deviceDefault(for: a17Pro)
+        let gemma4E2BDecision = a17ProPolicy.evaluate(
+            ModelPreflightInput(
+                repository: "mlx-community/gemma-4-e2b-it-4bit",
+                configJSON: #"{"model_type":"gemma4"}"#.data(using: .utf8)!,
+                files: [
+                    .init(path: "config.json", size: 6_000),
+                    .init(path: "tokenizer.json", size: 8_000_000),
+                    .init(path: "model.safetensors", size: 3_610_000_000),
+                ],
+                tags: ["mlx", "gemma4", "4bit"]
+            ),
+            modalities: [.text]
+        )
+        try expect(!gemma4E2BDecision.isRejected, "A17 Pro should not hide Gemma 4 E2B 4-bit at 3.61 GB")
 
         let a19Sustained = DeviceProfile.recommended(
             for: RuntimeMemorySnapshot(
