@@ -495,6 +495,48 @@ final class PinesAppModel: ObservableObject {
         }
     }
 
+    private func applyThreadTitle(_ title: String, conversationID: UUID) {
+        guard let thread = threads.first(where: { $0.id == conversationID }),
+              thread.title != title
+        else { return }
+        upsertThreadPreview(
+            PinesThreadPreview(
+                id: thread.id,
+                title: title,
+                modelName: thread.modelName,
+                modelID: thread.modelID,
+                providerID: thread.providerID,
+                lastMessage: thread.lastMessage,
+                messages: thread.messages,
+                status: thread.status,
+                isPinned: thread.isPinned,
+                updatedLabel: thread.updatedLabel,
+                tokenCount: thread.tokenCount
+            ),
+            moveToFront: false
+        )
+    }
+
+    private func persistDerivedTitleIfNeeded(
+        conversationID: UUID,
+        storedTitleWasPlaceholder: Bool,
+        messages: [ChatMessage],
+        repository: any ConversationRepository,
+        services: PinesAppServices
+    ) async {
+        guard storedTitleWasPlaceholder,
+              let derivedTitle = ConversationTitleDeriver.title(from: messages),
+              !ConversationTitleDeriver.isPlaceholder(derivedTitle)
+        else { return }
+
+        applyThreadTitle(derivedTitle, conversationID: conversationID)
+        do {
+            try await repository.updateConversationTitle(derivedTitle, conversationID: conversationID)
+        } catch {
+            recordRecoverableIssue("chat.update_derived_title", error: error, services: services)
+        }
+    }
+
     private func appendThreadMessage(
         _ message: ChatMessage,
         conversationID: UUID,
@@ -1462,6 +1504,14 @@ final class PinesAppModel: ObservableObject {
                 return
             }
             runConversationID = conversationID
+            let titleWasPlaceholder: Bool
+            if let threadTitle = threads.first(where: { $0.id == conversationID })?.title {
+                titleWasPlaceholder = ConversationTitleDeriver.isPlaceholder(threadTitle)
+            } else {
+                titleWasPlaceholder = try await repository.listConversations()
+                    .first { $0.id == conversationID }
+                    .map { ConversationTitleDeriver.isPlaceholder($0.title) } ?? true
+            }
             let settings: AppSettingsSnapshot?
             do {
                 settings = try await services.settingsRepository?.loadSettings()
@@ -1490,8 +1540,16 @@ final class PinesAppModel: ObservableObject {
                 return
             }
             let requiresTools = isAgentMode && !availableTools.isEmpty
+            let persistedMessages = try await repository.messages(in: conversationID)
+            await persistDerivedTitleIfNeeded(
+                conversationID: conversationID,
+                storedTitleWasPlaceholder: titleWasPlaceholder,
+                messages: persistedMessages,
+                repository: repository,
+                services: services
+            )
             let messages = try Self.providerReadyMessages(
-                try await repository.messages(in: conversationID),
+                persistedMessages,
                 requiredAttachmentMessageIDs: [userMessage.id]
             )
             let vaultContext = userContent.isEmpty ? nil : await vaultContextMessage(for: userContent, services: services)

@@ -31,6 +31,12 @@ public enum QuantizationAlgorithm: String, Codable, Sendable, CaseIterable {
 public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
     case turbo2_5
     case turbo3_5
+    case turbo4
+    case turbo4v2
+
+    public static let defaultGeneration: Self = .turbo4v2
+    public static let conservativeFallback: Self = .turbo3_5
+    public static let vaultVectorDefault: Self = .turbo3_5
 
     public var displayName: String {
         switch self {
@@ -38,6 +44,19 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             "TurboQuant 2.5-bit"
         case .turbo3_5:
             "TurboQuant 3.5-bit"
+        case .turbo4:
+            "TurboQuant 4-bit"
+        case .turbo4v2:
+            "TurboQuant 4-bit V2"
+        }
+    }
+
+    public var effectiveBits: Int {
+        switch self {
+        case .turbo2_5:
+            2
+        case .turbo3_5, .turbo4, .turbo4v2:
+            4
         }
     }
 
@@ -47,11 +66,38 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             2
         case .turbo3_5:
             3
+        case .turbo4, .turbo4v2:
+            4
         }
     }
 
     public var outlierBits: Int {
-        baseBits + 1
+        switch self {
+        case .turbo2_5:
+            3
+        case .turbo3_5, .turbo4, .turbo4v2:
+            4
+        }
+    }
+
+    public var targetMagnitudeBits: Float {
+        switch self {
+        case .turbo2_5:
+            2.5
+        case .turbo3_5:
+            3.5
+        case .turbo4, .turbo4v2:
+            4
+        }
+    }
+
+    public var defaultValueBits: Int {
+        switch self {
+        case .turbo2_5:
+            2
+        case .turbo3_5, .turbo4, .turbo4v2:
+            4
+        }
     }
 }
 
@@ -166,6 +212,9 @@ public enum DevicePerformanceClass: String, Codable, Sendable, CaseIterable {
     case a19Standard
     case a19ProThin
     case a19ProSustained
+    case mSeriesTabletBalanced
+    case mSeriesTabletPro
+    case mSeriesTabletMax
     case futureVerified
 
     public var displayName: String {
@@ -184,6 +233,12 @@ public enum DevicePerformanceClass: String, Codable, Sendable, CaseIterable {
             "A19 Pro thin"
         case .a19ProSustained:
             "A19 Pro sustained"
+        case .mSeriesTabletBalanced:
+            "M-series iPad 8 GB"
+        case .mSeriesTabletPro:
+            "M-series iPad 12 GB"
+        case .mSeriesTabletMax:
+            "M-series iPad 16 GB"
         case .futureVerified:
             "Future verified"
         }
@@ -291,6 +346,7 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
     public var rawFallbackAllocated: Bool?
     public var devicePerformanceClass: DevicePerformanceClass?
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy?
+    public var turboQuantValueBits: Int?
     public var thermalDownshiftActive: Bool?
     public var lastUnsupportedAttentionShape: String?
     public var activeFallbackReason: String?
@@ -306,7 +362,7 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
     public init(
         requestedAlgorithm: QuantizationAlgorithm = .turboQuant,
         activeAlgorithm: QuantizationAlgorithm = .turboQuant,
-        preset: TurboQuantPreset? = .turbo3_5,
+        preset: TurboQuantPreset? = .defaultGeneration,
         requestedBackend: TurboQuantRuntimeBackend? = .metalPolarQJL,
         activeBackend: TurboQuantRuntimeBackend? = .mlxPacked,
         metalCodecAvailable: Bool = false,
@@ -318,6 +374,7 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         rawFallbackAllocated: Bool? = nil,
         devicePerformanceClass: DevicePerformanceClass? = nil,
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy? = nil,
+        turboQuantValueBits: Int? = nil,
         thermalDownshiftActive: Bool? = nil,
         lastUnsupportedAttentionShape: String? = nil,
         activeFallbackReason: String? = nil,
@@ -344,6 +401,7 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         self.rawFallbackAllocated = rawFallbackAllocated
         self.devicePerformanceClass = devicePerformanceClass
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
+        self.turboQuantValueBits = turboQuantValueBits
         self.thermalDownshiftActive = thermalDownshiftActive
         self.lastUnsupportedAttentionShape = lastUnsupportedAttentionShape
         self.activeFallbackReason = activeFallbackReason
@@ -378,6 +436,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var rawFallbackAllocated: Bool?
     public var devicePerformanceClass: DevicePerformanceClass?
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy
+    public var turboQuantValueBits: Int?
     public var thermalDownshiftActive: Bool
     public var lastUnsupportedAttentionShape: String?
     public var activeFallbackReason: String?
@@ -403,6 +462,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case rawFallbackAllocated
         case devicePerformanceClass
         case turboQuantOptimizationPolicy
+        case turboQuantValueBits
         case thermalDownshiftActive
         case lastUnsupportedAttentionShape
         case activeFallbackReason
@@ -417,7 +477,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         maxKVSize: Int? = nil,
         algorithm: QuantizationAlgorithm = .turboQuant,
         kvCacheStrategy: KVCacheStrategy = .turboQuant,
-        preset: TurboQuantPreset? = .turbo3_5,
+        preset: TurboQuantPreset? = .defaultGeneration,
         requestedBackend: TurboQuantRuntimeBackend? = .metalPolarQJL,
         activeBackend: TurboQuantRuntimeBackend? = .mlxPacked,
         metalCodecAvailable: Bool = false,
@@ -429,6 +489,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         rawFallbackAllocated: Bool? = nil,
         devicePerformanceClass: DevicePerformanceClass? = nil,
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy = .auto,
+        turboQuantValueBits: Int? = nil,
         thermalDownshiftActive: Bool = false,
         lastUnsupportedAttentionShape: String? = nil,
         activeFallbackReason: String? = nil,
@@ -453,6 +514,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.rawFallbackAllocated = rawFallbackAllocated
         self.devicePerformanceClass = devicePerformanceClass
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
+        self.turboQuantValueBits = turboQuantValueBits
         self.thermalDownshiftActive = thermalDownshiftActive
         self.lastUnsupportedAttentionShape = lastUnsupportedAttentionShape
         self.activeFallbackReason = activeFallbackReason
@@ -468,7 +530,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         maxKVSize = try container.decodeIfPresent(Int.self, forKey: .maxKVSize)
         algorithm = try container.decodeIfPresent(QuantizationAlgorithm.self, forKey: .algorithm) ?? .turboQuant
         kvCacheStrategy = try container.decodeIfPresent(KVCacheStrategy.self, forKey: .kvCacheStrategy) ?? .turboQuant
-        preset = try container.decodeIfPresent(TurboQuantPreset.self, forKey: .preset) ?? .turbo3_5
+        preset = try container.decodeIfPresent(TurboQuantPreset.self, forKey: .preset) ?? .conservativeFallback
         requestedBackend = try container.decodeIfPresent(TurboQuantRuntimeBackend.self, forKey: .requestedBackend) ?? .metalPolarQJL
         activeBackend = try container.decodeIfPresent(TurboQuantRuntimeBackend.self, forKey: .activeBackend) ?? .mlxPacked
         metalCodecAvailable = try container.decodeIfPresent(Bool.self, forKey: .metalCodecAvailable) ?? false
@@ -480,6 +542,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         rawFallbackAllocated = try container.decodeIfPresent(Bool.self, forKey: .rawFallbackAllocated)
         devicePerformanceClass = try container.decodeIfPresent(DevicePerformanceClass.self, forKey: .devicePerformanceClass)
         turboQuantOptimizationPolicy = try container.decodeIfPresent(TurboQuantOptimizationPolicy.self, forKey: .turboQuantOptimizationPolicy) ?? .auto
+        turboQuantValueBits = try container.decodeIfPresent(Int.self, forKey: .turboQuantValueBits)
         thermalDownshiftActive = try container.decodeIfPresent(Bool.self, forKey: .thermalDownshiftActive) ?? false
         lastUnsupportedAttentionShape = try container.decodeIfPresent(String.self, forKey: .lastUnsupportedAttentionShape)
         activeFallbackReason = try container.decodeIfPresent(String.self, forKey: .activeFallbackReason)
@@ -842,6 +905,43 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
                 recommendedVectorScanLimit: 16_384,
                 unloadsOnThermalPressure: false
             )
+        case .mSeriesTabletBalanced:
+            return DeviceProfile(
+                memoryTier: .balanced,
+                performanceClass: .mSeriesTabletBalanced,
+                recommendedMaxModelBytes: 3_500_000_000,
+                recommendedContextTokens: 16_384,
+                recommendedSmallModelContextTokens: 24_576,
+                recommendedPrefillStepSize: 512,
+                allowsVisionModels: true,
+                recommendedEmbeddingBatchSize: 12,
+                recommendedVectorScanLimit: 4096
+            )
+        case .mSeriesTabletPro:
+            return DeviceProfile(
+                memoryTier: .pro,
+                performanceClass: .mSeriesTabletPro,
+                recommendedMaxModelBytes: 5_500_000_000,
+                recommendedContextTokens: 24_576,
+                recommendedSmallModelContextTokens: 32_768,
+                recommendedPrefillStepSize: 768,
+                allowsVisionModels: true,
+                recommendedEmbeddingBatchSize: 16,
+                recommendedVectorScanLimit: 8192
+            )
+        case .mSeriesTabletMax:
+            return DeviceProfile(
+                memoryTier: .max,
+                performanceClass: .mSeriesTabletMax,
+                recommendedMaxModelBytes: 8_000_000_000,
+                recommendedContextTokens: 32_768,
+                recommendedSmallModelContextTokens: 65_536,
+                recommendedPrefillStepSize: 1024,
+                allowsVisionModels: true,
+                recommendedEmbeddingBatchSize: 32,
+                recommendedVectorScanLimit: 16_384,
+                unloadsOnThermalPressure: false
+            )
         case .futureVerified:
             var profile = maxTabletOrMac
             if physicalMemoryBytes < 14_000_000_000 {
@@ -853,6 +953,13 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
 
     private static func performanceClass(for snapshot: RuntimeMemorySnapshot) -> DevicePerformanceClass {
         if let hardware = snapshot.hardwareModelIdentifier {
+            if let iPadClass = mSeriesIPadPerformanceClass(
+                hardware,
+                physicalMemoryBytes: snapshot.physicalMemoryBytes
+            ) {
+                return iPadClass
+            }
+
             switch hardware {
             case "iPhone16,1", "iPhone16,2":
                 return .a17Pro
@@ -894,6 +1001,31 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
     private static func iphoneIdentifierMajor(_ hardware: String) -> Int? {
         guard hardware.hasPrefix("iPhone") else { return nil }
         let suffix = hardware.dropFirst("iPhone".count)
+        let major = suffix.split(separator: ",").first
+        return major.flatMap { Int($0) }
+    }
+
+    private static func mSeriesIPadPerformanceClass(
+        _ hardware: String,
+        physicalMemoryBytes: Int64
+    ) -> DevicePerformanceClass? {
+        guard let major = ipadIdentifierMajor(hardware), major >= 13 else { return nil }
+
+        switch physicalMemoryBytes {
+        case 14_000_000_000...:
+            return .mSeriesTabletMax
+        case 11_000_000_000...:
+            return .mSeriesTabletPro
+        case 7_000_000_000...:
+            return .mSeriesTabletBalanced
+        default:
+            return nil
+        }
+    }
+
+    private static func ipadIdentifierMajor(_ hardware: String) -> Int? {
+        guard hardware.hasPrefix("iPad") else { return nil }
+        let suffix = hardware.dropFirst("iPad".count)
         let major = suffix.split(separator: ",").first
         return major.flatMap { Int($0) }
     }

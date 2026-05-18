@@ -1572,6 +1572,7 @@ actor GRDBPinesStore:
                 c.pinned,
                 lm.content AS last_message,
                 lm.status AS last_message_status,
+                tm.content AS title_source_message,
                 COALESCE(stats.token_count, 0) AS token_count
             FROM conversations c
             LEFT JOIN messages lm ON lm.id = (
@@ -1579,6 +1580,19 @@ actor GRDBPinesStore:
                 FROM messages
                 WHERE conversation_id = c.id AND deleted_at IS NULL
                 ORDER BY created_at DESC
+                LIMIT 1
+            )
+            LEFT JOIN messages tm ON tm.id = (
+                SELECT id
+                FROM messages
+                WHERE conversation_id = c.id
+                    AND deleted_at IS NULL
+                    AND role IN ('user', 'assistant')
+                    AND TRIM(content) != ''
+                ORDER BY
+                    CASE WHEN role = 'user' THEN 0 ELSE 1 END,
+                    created_at ASC,
+                    rowid ASC
                 LIMIT 1
             )
             LEFT JOIN (

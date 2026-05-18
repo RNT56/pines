@@ -112,6 +112,48 @@ struct CoreContractTests {
     }
 
     @Test
+    func conversationTitleDeriverNamesPlaceholderChatsFromUserContent() {
+        let messages = [
+            ChatMessage(role: .assistant, content: "Sure."),
+            ChatMessage(
+                role: .user,
+                content: "Can we properly derive chat titles from chat conversation content? So chats are not just new chat."
+            ),
+        ]
+
+        let title = ConversationTitleDeriver.title(forStoredTitle: "New chat", messages: messages)
+
+        #expect(title == "Properly Derive Chat Titles from Chat Conversation Content")
+    }
+
+    @Test
+    func conversationTitleDeriverKeepsManualTitles() {
+        let title = ConversationTitleDeriver.title(
+            forStoredTitle: "Release planning",
+            messages: [ChatMessage(role: .user, content: "Can you summarize this release plan?")]
+        )
+
+        #expect(title == "Release planning")
+    }
+
+    @Test
+    func conversationTitleDeriverUsesAttachmentNamesForGenericPrompts() {
+        let title = ConversationTitleDeriver.title(
+            from: [
+                ChatMessage(
+                    role: .user,
+                    content: "Analyze the attached file.",
+                    attachments: [
+                        ChatAttachment(kind: .document, fileName: "meeting_notes.md", contentType: "text/markdown"),
+                    ]
+                ),
+            ]
+        )
+
+        #expect(title == "Meeting Notes")
+    }
+
+    @Test
     func cloudProviderCapabilitiesMatchAttachmentSupportMatrix() {
         let openAI = cloudConfiguration(kind: .openAI, baseURL: "https://api.openai.com/v1")
         #expect(openAI.capabilities.imageInputs)
@@ -1045,6 +1087,45 @@ struct CoreContractTests {
                 tags: []
             ) == 4
         )
+    }
+
+    @Test
+    func mSeriesIPadProfilesUsePhysicalMemoryTiers() throws {
+        let baseProOrAir = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_000_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPad13,4",
+                metalSelfTestStatus: .passed
+            )
+        )
+        #expect(baseProOrAir.performanceClass == .mSeriesTabletBalanced)
+        #expect(baseProOrAir.recommendedMaxModelBytes == 3_500_000_000)
+
+        let m4AirOrM5Base = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 12_000_000_000,
+                availableMemoryBytes: 4_000_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPad17,1",
+                metalSelfTestStatus: .passed
+            )
+        )
+        #expect(m4AirOrM5Base.performanceClass == .mSeriesTabletPro)
+        #expect(m4AirOrM5Base.recommendedMaxModelBytes == 5_500_000_000)
+
+        let highStoragePro = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 16_000_000_000,
+                availableMemoryBytes: 8_000_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPad16,6",
+                metalSelfTestStatus: .passed
+            )
+        )
+        #expect(highStoragePro.performanceClass == .mSeriesTabletMax)
+        #expect(highStoragePro.recommendedMaxModelBytes == 8_000_000_000)
     }
 
     @Test

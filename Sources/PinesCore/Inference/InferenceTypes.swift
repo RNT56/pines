@@ -13,8 +13,10 @@ public struct ProviderID: RawRepresentable, Hashable, Codable, Sendable, Express
 }
 
 public enum LocalProviderMetadataKeys {
+    public static let turboQuantPreset = "local.turboquant.preset"
     public static let turboQuantRequestedBackend = "local.turboquant.requested_backend"
     public static let turboQuantActiveBackend = "local.turboquant.active_backend"
+    public static let turboQuantValueBits = "local.turboquant.value_bits"
     public static let turboQuantAttentionPath = "local.turboquant.attention_path"
     public static let turboQuantKernelProfile = "local.turboquant.kernel_profile"
     public static let turboQuantSelfTestStatus = "local.turboquant.self_test_status"

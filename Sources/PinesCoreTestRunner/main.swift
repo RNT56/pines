@@ -584,10 +584,18 @@ struct PinesCoreTestRunner {
         let runtimeProfile = RuntimeProfile()
         try expectEqual(runtimeProfile.quantization.algorithm, .turboQuant)
         try expectEqual(runtimeProfile.quantization.kvCacheStrategy, .turboQuant)
-        try expectEqual(runtimeProfile.quantization.preset, .turbo3_5)
+        try expectEqual(runtimeProfile.quantization.preset, .turbo4v2)
         try expectEqual(runtimeProfile.quantization.requestedBackend, .metalPolarQJL)
         try expectEqual(runtimeProfile.quantization.activeBackend, .mlxPacked)
         try expectEqual(runtimeProfile.quantization.metalCodecAvailable, false)
+        try expectEqual(TurboQuantPreset.allCases, [.turbo2_5, .turbo3_5, .turbo4, .turbo4v2])
+        try expectEqual(TurboQuantPreset.defaultGeneration, .turbo4v2)
+        try expectEqual(TurboQuantPreset.conservativeFallback, .turbo3_5)
+        try expectEqual(TurboQuantPreset.vaultVectorDefault, .turbo3_5)
+        try expectEqual(TurboQuantPreset.turbo4v2.effectiveBits, 4)
+        try expectEqual(TurboQuantPreset.turbo4v2.baseBits, 4)
+        try expectEqual(TurboQuantPreset.turbo4v2.outlierBits, 4)
+        try expectEqual(TurboQuantPreset.turbo4v2.defaultValueBits, 4)
         let legacyQuantization = try JSONDecoder().decode(
             QuantizationProfile.self,
             from: #"{"kvBits":8,"kvGroupSize":64,"quantizedKVStart":256}"#.data(using: .utf8)!
@@ -640,6 +648,42 @@ struct PinesCoreTestRunner {
         try expectEqual(a19Sustained.recommendedContextTokens, 32_768)
         try expectEqual(a19Sustained.recommendedSmallModelContextTokens, 65_536)
         try expectEqual(a19Sustained.recommendedPrefillStepSize, 1024)
+
+        let mSeriesIPad8GB = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_000_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPad13,4",
+                metalSelfTestStatus: .passed
+            )
+        )
+        try expectEqual(mSeriesIPad8GB.performanceClass, .mSeriesTabletBalanced)
+        try expectEqual(mSeriesIPad8GB.recommendedMaxModelBytes, 3_500_000_000)
+
+        let mSeriesIPad12GB = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 12_000_000_000,
+                availableMemoryBytes: 4_000_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPad17,1",
+                metalSelfTestStatus: .passed
+            )
+        )
+        try expectEqual(mSeriesIPad12GB.performanceClass, .mSeriesTabletPro)
+        try expectEqual(mSeriesIPad12GB.recommendedMaxModelBytes, 5_500_000_000)
+
+        let mSeriesIPad16GB = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 16_000_000_000,
+                availableMemoryBytes: 8_000_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPad16,6",
+                metalSelfTestStatus: .passed
+            )
+        )
+        try expectEqual(mSeriesIPad16GB.performanceClass, .mSeriesTabletMax)
+        try expectEqual(mSeriesIPad16GB.recommendedMaxModelBytes, 8_000_000_000)
 
         let pressured = DeviceProfile.recommended(
             for: RuntimeMemorySnapshot(
@@ -973,6 +1017,7 @@ struct PinesCoreTestRunner {
     }
 
     private static func testTurboQuantVectorCodec() throws {
+        try expectEqual(TurboQuantVectorCodec().preset, .turbo3_5)
         let codec = TurboQuantVectorCodec(preset: .turbo3_5, seed: 42)
         let vector: [Float] = [0.42, -0.2, 0.7, 0.1, -0.3, 0.15, 0.05, -0.4]
         let encoded = try codec.encode(vector)

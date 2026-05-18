@@ -12,7 +12,7 @@ extension PinesAppModel {
         let lastMessage = previewText(for: messages.last)
         return PinesThreadPreview(
             id: record.id,
-            title: record.title,
+            title: ConversationTitleDeriver.title(forStoredTitle: record.title, messages: messages),
             modelName: record.defaultModelID.map { friendlyModelName($0.rawValue) } ?? "No model selected",
             modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
             providerID: record.defaultProviderID,
@@ -46,7 +46,7 @@ extension PinesAppModel {
         let status: PinesThreadStatus = record.archived ? .archived : .local
         return PinesThreadPreview(
             id: record.id,
-            title: record.title,
+            title: ConversationTitleDeriver.title(forStoredTitle: record.title, titleSource: record.titleSourceMessage),
             modelName: record.defaultModelID.map { friendlyModelName($0.rawValue) } ?? "No model selected",
             modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
             providerID: record.defaultProviderID,
@@ -69,7 +69,7 @@ extension PinesAppModel {
         let resolvedStatus = existing.status == .archived ? PinesThreadStatus.archived : (status ?? existing.status)
         return PinesThreadPreview(
             id: existing.id,
-            title: existing.title,
+            title: ConversationTitleDeriver.title(forStoredTitle: existing.title, messages: messages),
             modelName: existing.modelName,
             modelID: existing.modelID,
             providerID: existing.providerID,

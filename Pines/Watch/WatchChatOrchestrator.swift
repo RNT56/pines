@@ -113,7 +113,7 @@ struct WatchChatOrchestrator {
                     if conversationID == nil {
                         let modelID = try await defaultModelID()
                         let conversation = try await repository.createConversation(
-                            title: Self.title(from: trimmed),
+                            title: Self.derivedTitle(from: trimmed),
                             defaultModelID: modelID,
                             defaultProviderID: modelID == nil ? nil : services.mlxRuntime.localProviderID
                         )
@@ -124,6 +124,9 @@ struct WatchChatOrchestrator {
                     }
 
                     let existingMessages = try await repository.messages(in: conversationID)
+                    let titleWasPlaceholder = try await repository.listConversations()
+                        .first { $0.id == conversationID }
+                        .map { ConversationTitleDeriver.isPlaceholder($0.title) } ?? false
                     let shouldAppendUserMessage = !existingMessages.contains { $0.id == input.clientMessageID }
                     if let existingUserIndex = existingMessages.firstIndex(where: { $0.id == input.clientMessageID }) {
                         if let existingAssistant = existingMessages
@@ -157,6 +160,14 @@ struct WatchChatOrchestrator {
                             modelID: providerSelection.modelID,
                             providerID: nil
                         )
+                        if titleWasPlaceholder,
+                           let derivedTitle = ConversationTitleDeriver.title(from: [userMessage]) {
+                            do {
+                                try await repository.updateConversationTitle(derivedTitle, conversationID: conversationID)
+                            } catch {
+                                Self.logger.error("watch_chat_title_update_failed error=\(error.localizedDescription, privacy: .public)")
+                            }
+                        }
                     }
 
                     let pendingAssistant = ChatMessage(role: .assistant, content: "")
@@ -705,12 +716,8 @@ struct WatchChatOrchestrator {
         )
     }
 
-    private static func title(from text: String) -> String {
-        let title = text
-            .split(separator: " ")
-            .prefix(6)
-            .joined(separator: " ")
-        return title.isEmpty ? "Watch chat" : title
+    private static func derivedTitle(from text: String) -> String {
+        ConversationTitleDeriver.title(from: text) ?? "Watch chat"
     }
 }
 

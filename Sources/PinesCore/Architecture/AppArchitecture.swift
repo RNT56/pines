@@ -214,6 +214,7 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
     public var pinned: Bool
     public var lastMessage: String?
     public var lastMessageStatus: MessageStatus?
+    public var titleSourceMessage: String?
     public var tokenCount: Int
 
     public init(
@@ -226,6 +227,7 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
         pinned: Bool = false,
         lastMessage: String? = nil,
         lastMessageStatus: MessageStatus? = nil,
+        titleSourceMessage: String? = nil,
         tokenCount: Int = 0
     ) {
         self.id = id
@@ -237,6 +239,7 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
         self.pinned = pinned
         self.lastMessage = lastMessage
         self.lastMessageStatus = lastMessageStatus
+        self.titleSourceMessage = titleSourceMessage
         self.tokenCount = tokenCount
     }
 }

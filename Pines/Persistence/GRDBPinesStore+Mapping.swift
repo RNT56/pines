@@ -62,6 +62,7 @@ extension GRDBPinesStore {
             pinned: (row["pinned"] as Int) == 1,
             lastMessage: row["last_message"] as String?,
             lastMessageStatus: (row["last_message_status"] as String?).flatMap(MessageStatus.init(rawValue:)),
+            titleSourceMessage: row["title_source_message"] as String?,
             tokenCount: row["token_count"] as Int
         )
     }
@@ -283,7 +284,7 @@ extension GRDBPinesStore {
 
     static func vaultTurboQuantCodec(modelID: ModelID, dimensions: Int) -> TurboQuantVectorCodec {
         TurboQuantVectorCodec(
-            preset: .turbo3_5,
+            preset: .vaultVectorDefault,
             seed: TurboQuantVectorCodec.stableSeed(for: "\(modelID.rawValue)|\(dimensions)|vault-v1")
         )
     }

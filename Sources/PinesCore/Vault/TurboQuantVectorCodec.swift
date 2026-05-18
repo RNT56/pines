@@ -60,7 +60,10 @@ public struct TurboQuantVectorCodec: Sendable {
     public var preset: TurboQuantPreset
     public var seed: UInt64
 
-    public init(preset: TurboQuantPreset = .turbo3_5, seed: UInt64 = 0x7069_6e65_735f_7471) {
+    public init(
+        preset: TurboQuantPreset = .vaultVectorDefault,
+        seed: UInt64 = 0x7069_6e65_735f_7471
+    ) {
         self.preset = preset
         self.seed = seed
     }

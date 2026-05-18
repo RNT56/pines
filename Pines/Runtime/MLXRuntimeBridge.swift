@@ -81,7 +81,7 @@ struct MLXRuntimeBridge: Sendable {
         return RuntimeQuantizationDiagnostics(
             requestedAlgorithm: .turboQuant,
             activeAlgorithm: linked ? .turboQuant : .none,
-            preset: .turbo3_5,
+            preset: .defaultGeneration,
             requestedBackend: backend.requested,
             activeBackend: linked ? backend.active : nil,
             metalCodecAvailable: linked && backend.metalCodecAvailable,
@@ -95,6 +95,7 @@ struct MLXRuntimeBridge: Sendable {
             turboQuantOptimizationPolicy: memoryCounters.devicePerformanceClass == nil
                 ? nil
                 : deviceMonitor.currentProfile().turboQuantOptimizationPolicy,
+            turboQuantValueBits: PinesCore.TurboQuantPreset.defaultGeneration.defaultValueBits,
             thermalDownshiftActive: memoryCounters.thermalDownshiftActive,
             lastUnsupportedAttentionShape: backend.lastUnsupportedAttentionShape,
             activeFallbackReason: linked
@@ -126,18 +127,25 @@ struct MLXRuntimeBridge: Sendable {
         let fallbackReason = usesTurboQuant
             ? backend.fallbackReason
             : "Using plain MLX KV cache until this community model is device-verified."
+        let turboQuantDefaults = usesTurboQuant
+            ? Self.turboQuantRuntimeDefaults(
+                for: install,
+                contextLength: maxKVSize,
+                deviceOptimizationPolicy: deviceProfile.turboQuantOptimizationPolicy
+            )
+            : nil
         return RuntimeProfile(
             name: hasVision ? "Vision balanced" : "Local balanced",
             quantization: QuantizationProfile(
                 weightBits: install.repository.localizedCaseInsensitiveContains("4bit") ? 4 : nil,
                 kvBits: nil,
-                kvGroupSize: 64,
+                kvGroupSize: turboQuantDefaults?.groupSize ?? 64,
                 quantizedKVStart: 0,
                 maxKVSize: maxKVSize,
                 algorithm: usesTurboQuant ? .turboQuant : .none,
                 kvCacheStrategy: usesTurboQuant ? .turboQuant : .none,
-                preset: usesTurboQuant ? .turbo3_5 : nil,
-                requestedBackend: usesTurboQuant ? backend.requested : nil,
+                preset: usesTurboQuant ? turboQuantDefaults?.preset : nil,
+                requestedBackend: usesTurboQuant ? (turboQuantDefaults?.requestedBackend ?? backend.requested) : nil,
                 activeBackend: usesTurboQuant && linked ? backend.active : nil,
                 metalCodecAvailable: usesTurboQuant && linked && backend.metalCodecAvailable,
                 metalAttentionAvailable: usesTurboQuant && linked && backend.metalAttentionAvailable,
@@ -147,7 +155,9 @@ struct MLXRuntimeBridge: Sendable {
                 metalSelfTestFailureReason: usesTurboQuant ? backend.selfTestFailureReason : nil,
                 rawFallbackAllocated: usesTurboQuant ? backend.rawFallbackAllocated : false,
                 devicePerformanceClass: deviceProfile.performanceClass,
-                turboQuantOptimizationPolicy: deviceProfile.turboQuantOptimizationPolicy,
+                turboQuantOptimizationPolicy: turboQuantDefaults?.optimizationPolicy
+                    ?? deviceProfile.turboQuantOptimizationPolicy,
+                turboQuantValueBits: turboQuantDefaults?.valueBits,
                 thermalDownshiftActive: deviceProfile.thermalDownshiftActive,
                 lastUnsupportedAttentionShape: usesTurboQuant ? backend.lastUnsupportedAttentionShape : nil,
                 activeFallbackReason: linked ? fallbackReason : "MLX runtime packages are not linked in this build.",
@@ -174,6 +184,47 @@ struct MLXRuntimeBridge: Sendable {
 
     private static func usesTurboQuantByDefault(for install: ModelInstall) -> Bool {
         install.verification == .verified
+    }
+
+    private struct TurboQuantRuntimeDefaults {
+        var preset: PinesCore.TurboQuantPreset
+        var requestedBackend: PinesCore.TurboQuantRuntimeBackend
+        var groupSize: Int
+        var valueBits: Int?
+        var optimizationPolicy: PinesCore.TurboQuantOptimizationPolicy
+    }
+
+    private static func turboQuantRuntimeDefaults(
+        for install: ModelInstall,
+        contextLength: Int?,
+        deviceOptimizationPolicy: PinesCore.TurboQuantOptimizationPolicy
+    ) -> TurboQuantRuntimeDefaults {
+        #if canImport(MLXLMCommon) && canImport(MLX)
+        let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
+        let identifiers = [install.repository, install.modelID.rawValue, install.displayName]
+        for identifier in identifiers {
+            guard let profile = registry.profile(
+                for: identifier,
+                contextLength: contextLength
+            ) else { continue }
+            let profilePolicy = Self.coreTurboQuantOptimizationPolicy(from: profile.optimizationPolicy)
+            return TurboQuantRuntimeDefaults(
+                preset: Self.coreTurboQuantPreset(from: profile.recommendedScheme.preset),
+                requestedBackend: Self.coreTurboQuantBackend(from: profile.backend),
+                groupSize: profile.groupSize,
+                valueBits: profile.valueBits,
+                optimizationPolicy: profilePolicy == .auto ? deviceOptimizationPolicy : profilePolicy
+            )
+        }
+        #endif
+
+        return TurboQuantRuntimeDefaults(
+            preset: .conservativeFallback,
+            requestedBackend: .metalPolarQJL,
+            groupSize: 64,
+            valueBits: PinesCore.TurboQuantPreset.conservativeFallback.defaultValueBits,
+            optimizationPolicy: deviceOptimizationPolicy
+        )
     }
 
     private func turboQuantBackendSnapshot() -> (
@@ -228,6 +279,12 @@ struct MLXRuntimeBridge: Sendable {
     }
 
     #if canImport(MLX)
+    private static func coreTurboQuantPreset(
+        from preset: MLX.TurboQuantPreset
+    ) -> PinesCore.TurboQuantPreset {
+        PinesCore.TurboQuantPreset(rawValue: preset.rawValue) ?? .conservativeFallback
+    }
+
     private static func coreTurboQuantBackend(
         from backend: MLX.TurboQuantBackend
     ) -> PinesCore.TurboQuantRuntimeBackend {
@@ -269,6 +326,14 @@ struct MLXRuntimeBridge: Sendable {
         }
     }
 
+    #endif
+
+    #if canImport(MLXLMCommon)
+    private static func coreTurboQuantOptimizationPolicy(
+        from policy: MLXLMCommon.TurboQuantOptimizationPolicy
+    ) -> PinesCore.TurboQuantOptimizationPolicy {
+        PinesCore.TurboQuantOptimizationPolicy(rawValue: policy.rawValue) ?? .auto
+    }
     #endif
 
     func load(_ install: ModelInstall, profile: RuntimeProfile? = nil) async throws {
@@ -728,6 +793,7 @@ private actor MLXRuntimeState {
                 from: profile.quantization.turboQuantOptimizationPolicy
             ),
             turboQuantSeed: turboQuantSeed,
+            turboQuantValueBits: resolvedTurboQuantValueBits(for: profile, install: install),
             temperature: request.sampling.temperature,
             topP: request.sampling.topP,
             repetitionPenalty: request.sampling.repetitionPenalty,
@@ -750,8 +816,31 @@ private actor MLXRuntimeState {
     }
 
     private static func mlxTurboQuantPreset(from preset: PinesCore.TurboQuantPreset?) -> MLX.TurboQuantPreset {
-        guard let preset else { return .turbo3_5 }
-        return MLX.TurboQuantPreset(rawValue: preset.rawValue) ?? .turbo3_5
+        let rawValue = preset?.rawValue ?? PinesCore.TurboQuantPreset.defaultGeneration.rawValue
+        return MLX.TurboQuantPreset(rawValue: rawValue)
+            ?? MLX.TurboQuantPreset(rawValue: PinesCore.TurboQuantPreset.conservativeFallback.rawValue)
+            ?? .turbo3_5
+    }
+
+    private static func resolvedTurboQuantValueBits(
+        for profile: RuntimeProfile,
+        install: ModelInstall?
+    ) -> Int? {
+        guard profile.quantization.kvCacheStrategy == .turboQuant else { return nil }
+        if let valueBits = profile.quantization.turboQuantValueBits {
+            return valueBits
+        }
+        #if canImport(MLXLMCommon)
+        if let install,
+           let registryProfile = MLXLMCommon.TurboQuantProfileRegistry.bundled.profile(
+               for: install.repository,
+               contextLength: profile.quantization.maxKVSize
+           ) {
+            return registryProfile.valueBits
+        }
+        #endif
+        return profile.quantization.preset?.defaultValueBits
+            ?? PinesCore.TurboQuantPreset.conservativeFallback.defaultValueBits
     }
 
     private static func mlxTurboQuantBackend(
@@ -759,6 +848,16 @@ private actor MLXRuntimeState {
     ) -> MLXLMCommon.TurboQuantBackend {
         guard let backend else { return .metalPolarQJL }
         return MLXLMCommon.TurboQuantBackend(rawValue: backend.rawValue) ?? .metalPolarQJL
+    }
+
+    private static func turboQuantValueBits(from cache: any TurboQuantCompressedKVCacheProtocol) -> Int {
+        if let cache = cache as? TurboQuantKVCache {
+            return cache.valueBits
+        }
+        if let cache = cache as? RotatingTurboQuantKVCache {
+            return cache.valueBits
+        }
+        return cache.preset.defaultValueBits
     }
 
     private static func localProviderMetadata(
@@ -769,8 +868,10 @@ private actor MLXRuntimeState {
         if let turboQuantCache = cache.compactMap({ $0 as? TurboQuantCompressedKVCacheProtocol }).first {
             let diagnostics = turboQuantCache.attentionDiagnostics
             var metadata: [String: String] = [
+                LocalProviderMetadataKeys.turboQuantPreset: turboQuantCache.preset.rawValue,
                 LocalProviderMetadataKeys.turboQuantRequestedBackend: turboQuantCache.requestedBackend.rawValue,
                 LocalProviderMetadataKeys.turboQuantActiveBackend: turboQuantCache.activeBackend.rawValue,
+                LocalProviderMetadataKeys.turboQuantValueBits: String(turboQuantValueBits(from: turboQuantCache)),
                 LocalProviderMetadataKeys.turboQuantAttentionPath: diagnostics.activeAttentionPath.rawValue,
                 LocalProviderMetadataKeys.turboQuantKernelProfile: diagnostics.selectedKernelProfile.rawValue,
                 LocalProviderMetadataKeys.turboQuantSelfTestStatus: diagnostics.selfTestStatus.rawValue,
@@ -797,6 +898,12 @@ private actor MLXRuntimeState {
             LocalProviderMetadataKeys.dflashEnabled: String(profile.dflashEnabled),
         ]
         appendRuntimeFeatureMetadata(to: &metadata, partitionSummary: partitionSummary)
+        if let preset = quantization.preset {
+            metadata[LocalProviderMetadataKeys.turboQuantPreset] = preset.rawValue
+        }
+        if let valueBits = quantization.turboQuantValueBits {
+            metadata[LocalProviderMetadataKeys.turboQuantValueBits] = String(valueBits)
+        }
         if let requestedBackend = quantization.requestedBackend {
             metadata[LocalProviderMetadataKeys.turboQuantRequestedBackend] = requestedBackend.rawValue
         }

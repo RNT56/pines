@@ -7,7 +7,7 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
     func testFixedTurboQuantPinsExposeHighBitSeedPath() throws {
         let highBitSeed = UInt64(0xDEAD_BEEF_0000_0017)
         let configuration = MLX.TurboQuantConfiguration(
-            preset: .turbo3_5,
+            preset: .turbo4v2,
             role: .key,
             groupSize: 64,
             backend: .metalPolarQJL,
@@ -19,17 +19,44 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         let parameters = MLXLMCommon.GenerateParameters(
             maxKVSize: 48,
             kvCacheStrategy: .turboQuant,
-            turboQuantPreset: .turbo2_5,
+            turboQuantPreset: .turbo4v2,
             turboQuantBackend: .metalPolarQJL,
             turboQuantOptimizationPolicy: .conservative,
             turboQuantSeed: highBitSeed
         )
 
         XCTAssertEqual(parameters.kvCacheStrategy, .turboQuant)
-        XCTAssertEqual(parameters.turboQuantPreset, .turbo2_5)
+        XCTAssertEqual(parameters.turboQuantPreset, .turbo4v2)
         XCTAssertEqual(parameters.turboQuantBackend, .metalPolarQJL)
         XCTAssertEqual(parameters.turboQuantOptimizationPolicy, .conservative)
         XCTAssertEqual(parameters.turboQuantSeed, highBitSeed)
+        XCTAssertEqual(MLX.TurboQuantPreset.turbo4.effectiveBits, 4)
+        XCTAssertEqual(MLX.TurboQuantPreset.turbo4v2.defaultValueBits, 4)
+    }
+
+    func testBundledTurboQuantProfileRegistryRecommendsCurrentGenerationPreset() throws {
+        let profile = try XCTUnwrap(
+            MLXLMCommon.TurboQuantProfileRegistry.bundled.profile(
+                for: "mlx-community/Qwen3-4B-4bit",
+                keyHeadDimension: 128,
+                valueHeadDimension: 128,
+                contextLength: 4096
+            )
+        )
+
+        XCTAssertEqual(profile.recommendedScheme, .turbo4v2)
+        XCTAssertEqual(profile.fallbackScheme, .turbo3_5)
+        XCTAssertEqual(profile.recommendedScheme.preset, .turbo4v2)
+
+        let parameters = MLXLMCommon.GenerateParameters(
+            turboQuantModelID: "mlx-community/Qwen3-4B-4bit",
+            keyHeadDimension: 128,
+            valueHeadDimension: 128,
+            contextLength: 4096
+        )
+        XCTAssertEqual(parameters.kvCacheStrategy, .turboQuant)
+        XCTAssertEqual(parameters.turboQuantPreset, .turbo4v2)
+        XCTAssertEqual(parameters.turboQuantValueBits, 4)
     }
 
     func testTurboQuantCacheUsesFixedHighBitSeedOnDevice() throws {
@@ -88,7 +115,7 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         }
         let input = MLXArray(values, [2, 64])
         let configuration = MLX.TurboQuantConfiguration(
-            preset: .turbo3_5,
+            preset: .turbo4v2,
             role: .key,
             groupSize: 64,
             backend: .metalPolarQJL,

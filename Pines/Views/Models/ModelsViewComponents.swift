@@ -748,6 +748,7 @@ struct ModelDetailView: View {
             .init("Optimization", quantization.turboQuantOptimizationPolicy.displayName, systemImage: "gauge")
         ]
         if let preset = quantization.preset { items.append(.init("KV preset", preset.displayName)) }
+        if let valueBits = quantization.turboQuantValueBits { items.append(.init("Value bits", "\(valueBits)")) }
         if let requestedBackend = quantization.requestedBackend { items.append(.init("Requested backend", requestedBackend.displayName)) }
         if let activeBackend = quantization.activeBackend { items.append(.init("Active backend", activeBackend.displayName)) }
         if let attentionPath = quantization.activeAttentionPath { items.append(.init("Attention path", attentionPath.displayName)) }
