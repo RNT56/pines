@@ -373,6 +373,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let defaultOpenAITextVerbosity: OpenAITextVerbosity = .low
     public static let defaultAnthropicEffort: AnthropicEffort = .medium
     public static let defaultGeminiThinkingLevel: GeminiThinkingLevel = .medium
+    public static let defaultCloudWebSearchMode: CloudWebSearchMode = .off
 
     public var executionMode: AgentExecutionMode
     public var storeConfiguration: LocalStoreConfiguration
@@ -386,6 +387,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var openAITextVerbosity: OpenAITextVerbosity
     public var anthropicEffort: AnthropicEffort
     public var geminiThinkingLevel: GeminiThinkingLevel
+    public var cloudWebSearchMode: CloudWebSearchMode
     public var requireToolApproval: Bool
     public var braveSearchEnabled: Bool
     public var onboardingCompleted: Bool
@@ -405,6 +407,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         case openAITextVerbosity
         case anthropicEffort
         case geminiThinkingLevel
+        case cloudWebSearchMode
         case requireToolApproval
         case braveSearchEnabled
         case onboardingCompleted
@@ -425,6 +428,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         openAITextVerbosity: OpenAITextVerbosity = Self.defaultOpenAITextVerbosity,
         anthropicEffort: AnthropicEffort = Self.defaultAnthropicEffort,
         geminiThinkingLevel: GeminiThinkingLevel = Self.defaultGeminiThinkingLevel,
+        cloudWebSearchMode: CloudWebSearchMode = Self.defaultCloudWebSearchMode,
         requireToolApproval: Bool = true,
         braveSearchEnabled: Bool = false,
         onboardingCompleted: Bool = false,
@@ -443,6 +447,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         self.openAITextVerbosity = openAITextVerbosity
         self.anthropicEffort = anthropicEffort
         self.geminiThinkingLevel = geminiThinkingLevel
+        self.cloudWebSearchMode = cloudWebSearchMode
         self.requireToolApproval = requireToolApproval
         self.braveSearchEnabled = braveSearchEnabled
         self.onboardingCompleted = onboardingCompleted
@@ -470,6 +475,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         openAITextVerbosity = try container.decodeIfPresent(OpenAITextVerbosity.self, forKey: .openAITextVerbosity) ?? Self.defaultOpenAITextVerbosity
         anthropicEffort = try container.decodeIfPresent(AnthropicEffort.self, forKey: .anthropicEffort) ?? Self.defaultAnthropicEffort
         geminiThinkingLevel = try container.decodeIfPresent(GeminiThinkingLevel.self, forKey: .geminiThinkingLevel) ?? Self.defaultGeminiThinkingLevel
+        cloudWebSearchMode = try container.decodeIfPresent(CloudWebSearchMode.self, forKey: .cloudWebSearchMode) ?? Self.defaultCloudWebSearchMode
         requireToolApproval = try container.decodeIfPresent(Bool.self, forKey: .requireToolApproval) ?? true
         braveSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .braveSearchEnabled) ?? false
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false

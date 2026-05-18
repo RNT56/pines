@@ -95,6 +95,7 @@ final class PinesSettingsState: ObservableObject {
     @Published var openAITextVerbosity: OpenAITextVerbosity
     @Published var anthropicEffort: AnthropicEffort
     @Published var geminiThinkingLevel: GeminiThinkingLevel
+    @Published var cloudWebSearchMode: CloudWebSearchMode
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]]
     @Published var isRefreshingCloudModels: Bool
     @Published var isSavingCloudProvider: Bool
@@ -122,6 +123,7 @@ final class PinesSettingsState: ObservableObject {
         openAITextVerbosity: OpenAITextVerbosity = AppSettingsSnapshot.defaultOpenAITextVerbosity,
         anthropicEffort: AnthropicEffort = AppSettingsSnapshot.defaultAnthropicEffort,
         geminiThinkingLevel: GeminiThinkingLevel = AppSettingsSnapshot.defaultGeminiThinkingLevel,
+        cloudWebSearchMode: CloudWebSearchMode = AppSettingsSnapshot.defaultCloudWebSearchMode,
         cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:],
         isRefreshingCloudModels: Bool = false,
         isSavingCloudProvider: Bool = false,
@@ -148,6 +150,7 @@ final class PinesSettingsState: ObservableObject {
         self.openAITextVerbosity = openAITextVerbosity
         self.anthropicEffort = anthropicEffort
         self.geminiThinkingLevel = geminiThinkingLevel
+        self.cloudWebSearchMode = cloudWebSearchMode
         self.cloudModelCatalog = cloudModelCatalog
         self.isRefreshingCloudModels = isRefreshingCloudModels
         self.isSavingCloudProvider = isSavingCloudProvider

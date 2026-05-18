@@ -834,6 +834,44 @@ struct CoreContractTests {
     }
 
     @Test
+    func providerNativeWebSearchMetadataIsPreserved() throws {
+        var openAIParser = CloudProviderStreamParser()
+        let openAIPayload = #"""
+        {"type":"response.completed","response":{"id":"resp_search","status":"completed","output":[
+          {"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"pines native search"}},
+          {"type":"message","content":[{"type":"output_text","text":"Pines supports native search.","annotations":[{"type":"url_citation","url":"https://example.com/openai","title":"OpenAI source"}]}]}
+        ]}}
+        """#
+        let openAIOutput = openAIParser.parse(data: Data(openAIPayload.utf8), format: .openAIResponses, providerKind: .openAI)
+        let openAIFinish = try #require(openAIOutput.finish)
+        let openAICitations = try decodedCitations(openAIFinish.providerMetadata)
+        let openAIQueries = try decodedQueries(openAIFinish.providerMetadata)
+        #expect(openAICitations == [WebSearchCitation(title: "OpenAI source", url: "https://example.com/openai", source: "OpenAI")])
+        #expect(openAIQueries == ["pines native search"])
+
+        var anthropicParser = CloudProviderStreamParser()
+        let anthropicPayload = #"""
+        {"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","title":"Anthropic source","url":"https://example.com/anthropic"}]}}
+        """#
+        _ = anthropicParser.parse(data: Data(anthropicPayload.utf8), format: .anthropicMessages, providerKind: .anthropic)
+        let anthropicFinish = anthropicParser.fallbackFinish(format: .anthropicMessages, providerKind: .anthropic, modelID: "claude-sonnet-4-6", usesOfficialOpenAIReasoningChat: false)
+        let anthropicCitations = try decodedCitations(anthropicFinish.providerMetadata)
+        #expect(anthropicCitations == [WebSearchCitation(title: "Anthropic source", url: "https://example.com/anthropic", source: "Anthropic")])
+
+        var geminiParser = CloudProviderStreamParser()
+        let geminiPayload = #"""
+        {"candidates":[{"content":{"parts":[{"text":"Gemini grounded response."}],"role":"model"},"groundingMetadata":{"webSearchQueries":["pines gemini search"],"searchEntryPoint":{"renderedContent":"<div>Search suggestions</div>"},"groundingChunks":[{"web":{"uri":"https://example.com/gemini","title":"Gemini source"}}]},"finishReason":"STOP"}]}
+        """#
+        let geminiOutput = geminiParser.parse(data: Data(geminiPayload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
+        let geminiFinish = try #require(geminiOutput.finish)
+        let geminiCitations = try decodedCitations(geminiFinish.providerMetadata)
+        let geminiQueries = try decodedQueries(geminiFinish.providerMetadata)
+        #expect(geminiCitations == [WebSearchCitation(title: "Gemini source", url: "https://example.com/gemini", source: "Gemini")])
+        #expect(geminiQueries == ["pines gemini search"])
+        #expect(geminiFinish.providerMetadata[CloudProviderMetadataKeys.webSearchSuggestionsHTML] == "<div>Search suggestions</div>")
+    }
+
+    @Test
     func appSettingsDecodesGenerationDefaultsAndClampsLimits() throws {
         let legacyJSON = #"{"executionMode":"cloudAllowed","themeTemplate":"graphite","interfaceMode":"dark"}"#
         let decoded = try JSONDecoder().decode(AppSettingsSnapshot.self, from: Data(legacyJSON.utf8))
@@ -845,6 +883,7 @@ struct CoreContractTests {
         #expect(decoded.openAITextVerbosity == .low)
         #expect(decoded.anthropicEffort == .medium)
         #expect(decoded.geminiThinkingLevel == .medium)
+        #expect(decoded.cloudWebSearchMode == .off)
 
         let clamped = AppSettingsSnapshot(
             cloudMaxCompletionTokens: 1,
@@ -853,7 +892,8 @@ struct CoreContractTests {
             openAIReasoningEffort: .high,
             openAITextVerbosity: .medium,
             anthropicEffort: .xhigh,
-            geminiThinkingLevel: .high
+            geminiThinkingLevel: .high,
+            cloudWebSearchMode: .automatic
         )
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
         #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
@@ -862,6 +902,7 @@ struct CoreContractTests {
         #expect(clamped.openAITextVerbosity == .medium)
         #expect(clamped.anthropicEffort == .xhigh)
         #expect(clamped.geminiThinkingLevel == .high)
+        #expect(clamped.cloudWebSearchMode == .automatic)
 
         let legacySampling = try JSONDecoder().decode(ChatSampling.self, from: Data(#"{"maxTokens":256,"temperature":0.2}"#.utf8))
         #expect(legacySampling.maxTokens == 256)
@@ -871,6 +912,33 @@ struct CoreContractTests {
         #expect(legacySampling.anthropicEffort == .medium)
         #expect(legacySampling.geminiThinkingLevel == .medium)
         #expect(legacySampling.openAIResponseStorage == .stateful)
+        #expect(legacySampling.cloudWebSearchMode == .off)
+
+        let webSearchRequest = ChatRequest(
+            modelID: "gpt-5.5",
+            messages: [ChatMessage(role: .user, content: "search")],
+            webSearchOptions: CloudWebSearchOptions(
+                contextSize: .high,
+                userLocation: CloudWebSearchUserLocation(city: "Berlin", region: "Berlin", country: "DE", timezone: "Europe/Berlin"),
+                allowedDomains: ["example.com"],
+                blockedDomains: ["blocked.example"],
+                externalWebAccess: true
+            )
+        )
+        let decodedWebSearchRequest = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(webSearchRequest))
+        #expect(decodedWebSearchRequest.webSearchOptions?.contextSize == .high)
+        #expect(decodedWebSearchRequest.webSearchOptions?.userLocation?.city == "Berlin")
+        #expect(decodedWebSearchRequest.webSearchOptions?.allowedDomains == ["example.com"])
+    }
+
+    private func decodedCitations(_ metadata: [String: String]) throws -> [WebSearchCitation] {
+        let raw = try #require(metadata[CloudProviderMetadataKeys.webSearchCitationsJSON])
+        return try JSONDecoder().decode([WebSearchCitation].self, from: Data(raw.utf8))
+    }
+
+    private func decodedQueries(_ metadata: [String: String]) throws -> [String] {
+        let raw = try #require(metadata[CloudProviderMetadataKeys.webSearchQueriesJSON])
+        return try JSONDecoder().decode([String].self, from: Data(raw.utf8))
     }
 
     @Test
@@ -901,6 +969,97 @@ struct CoreContractTests {
         #expect(throws: CalculatorEvaluationError.divisionByZero) {
             try evaluator.evaluate("1 / 0")
         }
+    }
+
+    @Test
+    func timeAndDateToolsReturnDeterministicLocalResults() async throws {
+        let fixed = ISO8601DateFormatter().date(from: "2026-05-18T10:30:00Z")!
+        let timeSpec = try TimeNowTool.spec(now: { fixed })
+        let timeOutput = try await timeSpec.call(TimeNowInput(timeZone: "UTC"))
+        #expect(timeOutput.iso8601 == "2026-05-18T10:30:00.000Z")
+        #expect(timeOutput.secondsFromGMT == 0)
+
+        let dateSpec = try DateCalculateTool.spec(now: { fixed })
+        let friday = try await dateSpec.call(
+            DateCalculateInput(
+                operation: "nextWeekday",
+                date: "2026-05-18",
+                weekday: "Friday",
+                timeZone: "UTC"
+            )
+        )
+        #expect(friday.resultDate == "2026-05-22")
+
+        let added = try await dateSpec.call(
+            DateCalculateInput(
+                operation: "add",
+                date: "2026-05-18",
+                amount: 2,
+                unit: "weeks",
+                timeZone: "UTC"
+            )
+        )
+        #expect(added.resultDate == "2026-06-01")
+    }
+
+    @Test
+    func attachmentReadToolOnlyReadsProviderApprovedAttachment() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appending(path: "notes.txt")
+        try "alpha beta gamma delta".write(to: url, atomically: true, encoding: .utf8)
+        let attachment = ChatAttachment(
+            kind: .document,
+            fileName: "notes.txt",
+            contentType: "text/plain",
+            localURL: url,
+            byteCount: 22
+        )
+
+        let spec = try AttachmentReadTool.spec { requestedID in
+            requestedID == attachment.id ? attachment : nil
+        }
+        let output = try await spec.call(
+            AttachmentReadInput(
+                attachmentID: attachment.id.uuidString,
+                offset: 6,
+                maxCharacters: 4
+            )
+        )
+        #expect(output.text == "beta")
+        #expect(output.truncated)
+
+        do {
+            _ = try await spec.call(AttachmentReadInput(attachmentID: UUID().uuidString))
+            Issue.record("attachment.read should reject attachments outside the current run context")
+        } catch AgentError.permissionDenied {
+        }
+    }
+
+    @Test
+    func webFetchExtractsReadableHTMLText() {
+        let html = """
+        <html><head><title>Example &amp; Test</title><style>.x{}</style></head>
+        <body><h1>Hello</h1><script>ignore()</script><p>Readable&nbsp;text.</p></body></html>
+        """
+        let parsed = WebFetchTool.readableText(data: Data(html.utf8), contentType: "text/html")
+        #expect(parsed.title == "Example & Test")
+        #expect(parsed.text.contains("Hello"))
+        #expect(parsed.text.contains("Readable text."))
+        #expect(!parsed.text.contains("ignore"))
+    }
+
+    @Test
+    func privateLocalToolsAreMarkedAsCloudContext() throws {
+        let attachmentSpec = try AnyToolSpec(AttachmentReadTool.spec { _ in nil })
+        let vaultSpec = try AnyToolSpec(VaultSearchTool.spec { query, _ in
+            VaultSearchOutput(query: query, searchMode: "lexical", results: [])
+        })
+        let conversationSpec = try AnyToolSpec(ConversationSearchTool.spec(repository: EmptyConversationRepository()))
+
+        #expect(attachmentSpec.permissions.contains(.cloudContext))
+        #expect(vaultSpec.permissions.contains(.cloudContext))
+        #expect(conversationSpec.permissions.contains(.cloudContext))
     }
 
     @Test
@@ -943,4 +1102,31 @@ struct CoreContractTests {
             keychainAccount: "test"
         )
     }
+}
+
+private struct EmptyConversationRepository: ConversationRepository {
+    func listConversations() async throws -> [ConversationRecord] { [] }
+    func listConversationPreviews() async throws -> [ConversationPreviewRecord] { [] }
+    func observeConversations() -> AsyncStream<[ConversationRecord]> { AsyncStream { $0.finish() } }
+    func observeConversationPreviews() -> AsyncStream<[ConversationPreviewRecord]> { AsyncStream { $0.finish() } }
+    func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?) async throws -> ConversationRecord {
+        ConversationRecord(title: title, defaultModelID: defaultModelID, defaultProviderID: defaultProviderID)
+    }
+    func updateConversationTitle(_ title: String, conversationID: UUID) async throws {}
+    func updateConversationModel(modelID: ModelID?, providerID: ProviderID?, conversationID: UUID) async throws {}
+    func setConversationArchived(_ archived: Bool, conversationID: UUID) async throws {}
+    func setConversationPinned(_ pinned: Bool, conversationID: UUID) async throws {}
+    func deleteConversation(id: UUID) async throws {}
+    func messages(in conversationID: UUID) async throws -> [ChatMessage] { [] }
+    func observeMessages(in conversationID: UUID) -> AsyncStream<[ChatMessage]> { AsyncStream { $0.finish() } }
+    func appendMessage(_ message: ChatMessage, status: MessageStatus, conversationID: UUID, modelID: ModelID?, providerID: ProviderID?) async throws {}
+    func updateMessage(
+        id: UUID,
+        content: String,
+        status: MessageStatus,
+        tokenCount: Int?,
+        providerMetadata: [String: String]?,
+        toolName: String?,
+        toolCalls: [ToolCallDelta]?
+    ) async throws {}
 }

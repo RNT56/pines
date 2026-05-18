@@ -222,6 +222,40 @@ extension PinesAppModel {
         }
     }
 
+    nonisolated static func modelPreviews(
+        installs: [ModelInstall],
+        downloads: [ModelDownloadProgress],
+        runtime: MLXRuntimeBridge,
+        enrichRuntime: Bool = true
+    ) -> [PinesModelPreview] {
+        let downloadByRepository = latestDownloadByRepository(downloads)
+        let installKeys = Set(installs.map { $0.repository.lowercased() })
+        var previews = installs.map { install in
+            modelPreview(
+                from: install,
+                runtime: runtime,
+                download: downloadByRepository[install.repository.lowercased()],
+                enrichRuntime: enrichRuntime
+            )
+        }
+
+        let orphanPreviews = downloadByRepository.values
+            .filter { download in
+                !installKeys.contains(download.repository.lowercased())
+                    && shouldRepresentDownloadWithoutInstall(download)
+            }
+            .map { download in
+                modelPreview(
+                    from: recoverableInstall(from: download),
+                    runtime: runtime,
+                    download: download,
+                    enrichRuntime: enrichRuntime
+                )
+            }
+        previews.append(contentsOf: orphanPreviews)
+        return downloadingFirst(previews)
+    }
+
     nonisolated static func downloadingFirst(_ previews: [PinesModelPreview]) -> [PinesModelPreview] {
         previews.enumerated()
             .sorted { lhs, rhs in
@@ -239,6 +273,33 @@ extension PinesAppModel {
                 return lhs.offset < rhs.offset
             }
             .map(\.element)
+    }
+
+    nonisolated static func shouldRepresentDownloadWithoutInstall(_ download: ModelDownloadProgress) -> Bool {
+        switch download.status {
+        case .queued, .downloading, .verifying, .installing, .installed, .failed:
+            true
+        case .cancelled:
+            false
+        }
+    }
+
+    nonisolated static func recoverableInstall(from download: ModelDownloadProgress) -> ModelInstall {
+        let curatedEntry = CuratedModelManifest.default.entries.first {
+            $0.repository.caseInsensitiveCompare(download.repository) == .orderedSame
+        }
+        let state: ModelInstallState = download.isPinesDownloadActive ? .downloading : .failed
+        return ModelInstall(
+            modelID: ModelID(rawValue: download.repository),
+            displayName: curatedEntry?.displayName ?? download.repository.components(separatedBy: "/").last ?? download.repository,
+            repository: download.repository,
+            revision: download.revision,
+            localURL: download.localURL,
+            modalities: curatedEntry?.modalities ?? [.text],
+            verification: curatedEntry == nil ? .installable : .verified,
+            state: state,
+            estimatedBytes: download.totalBytes
+        )
     }
 
     static func vaultPreview(from record: VaultDocumentRecord) -> PinesVaultItemPreview {

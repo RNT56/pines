@@ -677,6 +677,9 @@ struct ModelDetailView: View {
         if model.install.state == .installed {
             return isDefaultModel ? "Pines will use this model for new local chat sessions." : "Installed locally and ready to use."
         }
+        if model.status == .failed {
+            return "The last download or install failed. Delete it and try again."
+        }
         return "Available from Hugging Face and ready to download when compatible."
     }
 
@@ -712,7 +715,7 @@ struct ModelDetailView: View {
             items.append(PinesTimelineItem(
                 title: progress.status.title,
                 detail: [progress.progressLabel, progress.currentFile].compactMap(\.self).joined(separator: "\n"),
-                systemImage: progress.isActive ? "arrow.down.circle" : "checkmark.circle",
+                systemImage: progress.timelineSystemImage,
                 tint: progress.status.tint(in: theme),
                 isCurrent: progress.isActive
             ))
@@ -985,6 +988,19 @@ private extension ModelDownloadProgress {
             return "\(status.title): \(received) of \(total)"
         }
         return "\(status.title): \(received)"
+    }
+
+    var timelineSystemImage: String {
+        switch status {
+        case .failed:
+            "exclamationmark.triangle"
+        case .cancelled:
+            "xmark.circle"
+        case .installed:
+            "checkmark.circle"
+        case .queued, .downloading, .verifying, .installing:
+            "arrow.down.circle"
+        }
     }
 }
 

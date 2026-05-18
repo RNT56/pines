@@ -73,6 +73,7 @@
 		C05BF46FDF47D9D3C4831915 /* PinesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82DE8010D019802F630AAF0B /* PinesApp.swift */; };
 		C3A8E8F1D7ADC06A8E2EBA43 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 7CB37824DF7BF3CFC294142D /* GRDB */; };
 		C411EB6B042D0FE7426C58C8 /* WatchChatOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41ED12D2A8BE4F962735AC89 /* WatchChatOrchestrator.swift */; };
+		C7D06A852855C5632281E2CC /* AgentToolExecutionContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A85F05A80784C10515CC86 /* AgentToolExecutionContext.swift */; };
 		D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */; };
 		D1E10E7EF6C3E07FA3696372 /* MCPServerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5934CC4A82DA53648B598CD5 /* MCPServerService.swift */; };
 		E30D2CC16F579D56D14DA498 /* CoreSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 989263AE706043656C31B580 /* CoreSurfaceTests.swift */; };
@@ -133,6 +134,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		07A85F05A80784C10515CC86 /* AgentToolExecutionContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentToolExecutionContext.swift; sourceTree = "<group>"; };
 		0C4E64D9B871AFF6B0734926 /* PinesDesignComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesDesignComponents.swift; sourceTree = "<group>"; };
 		0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModelTypes.swift; sourceTree = "<group>"; };
 		103EAAA54824744E18DB139D /* PinesHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHaptics.swift; sourceTree = "<group>"; };
@@ -284,6 +286,7 @@
 			isa = PBXGroup;
 			children = (
 				D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */,
+				07A85F05A80784C10515CC86 /* AgentToolExecutionContext.swift */,
 			);
 			path = Agents;
 			sourceTree = "<group>";
@@ -685,6 +688,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1696C482B2BFEADAD7A1744D /* AgentRunner.swift in Sources */,
+				C7D06A852855C5632281E2CC /* AgentToolExecutionContext.swift in Sources */,
 				B11DDE4F6B5FAC4D4C811660 /* BYOKCloudInferenceProvider+Payloads.swift in Sources */,
 				5A73B2F9FA959A8D2A6173EF /* BYOKCloudInferenceProvider.swift in Sources */,
 				EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */,

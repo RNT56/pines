@@ -67,7 +67,14 @@ struct RegistryAgentToolCatalog: AgentToolCatalog {
             .filter { spec in
                 guard allowed.map({ $0.contains(spec.name) }) ?? true else { return false }
                 switch spec.name {
-                case CalculatorTool.name:
+                case CalculatorTool.name,
+                     TimeNowTool.name,
+                     DateCalculateTool.name,
+                     WebFetchTool.name,
+                     AttachmentReadTool.name,
+                     VaultSearchTool.name,
+                     VaultReadTool.name,
+                     ConversationSearchTool.name:
                     return true
                 case "web.search":
                     return hasBraveSearchKey
@@ -86,8 +93,22 @@ struct RegistryAgentToolCatalog: AgentToolCatalog {
         switch name {
         case CalculatorTool.name:
             "00-\(name)"
+        case TimeNowTool.name:
+            "01-\(name)"
+        case DateCalculateTool.name:
+            "02-\(name)"
+        case AttachmentReadTool.name:
+            "03-\(name)"
+        case VaultSearchTool.name:
+            "04-\(name)"
+        case VaultReadTool.name:
+            "05-\(name)"
+        case ConversationSearchTool.name:
+            "06-\(name)"
         case "web.search":
             "10-\(name)"
+        case WebFetchTool.name:
+            "11-\(name)"
         case "browser.observe":
             "20-\(name)"
         case "browser.action":
@@ -132,6 +153,7 @@ struct AgentRunner: AgentRuntime {
                     var toolCalls = 0
                     var repeatedToolCalls = [String: Int]()
                     let startedAt = Date()
+                    let toolRunContext = AgentToolRunContext(messages: request.messages)
 
                     func enforceWallTimeLimit() throws {
                         guard Date().timeIntervalSince(startedAt) <= TimeInterval(session.policy.maxWallTimeSeconds) else {
@@ -264,7 +286,9 @@ struct AgentRunner: AgentRuntime {
                             )
                             let rawOutputJSON: String
                             do {
-                                rawOutputJSON = try await toolRegistry.callRaw(toolCall.name, inputJSON: toolCall.argumentsFragment)
+                                rawOutputJSON = try await AgentToolExecutionContext.$current.withValue(toolRunContext) {
+                                    try await toolRegistry.callRaw(toolCall.name, inputJSON: toolCall.argumentsFragment)
+                                }
                             } catch {
                                 rawOutputJSON = Self.toolErrorJSON(error)
                             }

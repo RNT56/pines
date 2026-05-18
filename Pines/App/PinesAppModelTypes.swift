@@ -112,12 +112,14 @@ struct ChatQuickSettingsAvailability: Hashable {
     let supportsOpenAITextVerbosity: Bool
     let anthropicEfforts: [AnthropicEffort]
     let geminiThinkingLevels: [GeminiThinkingLevel]
+    let cloudWebSearchModes: [CloudWebSearchMode]
 
     var isEmpty: Bool {
         openAIReasoningEfforts.isEmpty
             && !supportsOpenAITextVerbosity
             && anthropicEfforts.isEmpty
             && geminiThinkingLevels.isEmpty
+            && cloudWebSearchModes.isEmpty
     }
 }
 

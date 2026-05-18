@@ -110,21 +110,43 @@ struct ModelLifecycleService: Sendable {
     func reconcileInterruptedDownloads() async throws {
         let downloads = try await downloadRepository.listDownloads()
         var interruptedRepositories: [String: String] = [:]
+        var interruptedDownloadByRepository: [String: ModelDownloadProgress] = [:]
+        var activeDownloadByRepository: [String: ModelDownloadProgress] = [:]
 
         for download in downloads where download.status.isActive {
             let key = download.repository.lowercased()
             let hasActiveTask = await Self.downloadTasks.hasActiveDownload(for: download.repository)
             guard !hasActiveTask else { continue }
-            interruptedRepositories[key] = download.repository
-
-            var cancelled = download
-            cancelled.status = .cancelled
-            cancelled.errorMessage = "Download was interrupted."
-            cancelled.updatedAt = Date()
-            try await upsertDownloadProgress(cancelled)
+            activeDownloadByRepository[key] = download
         }
 
         let installs = try await installRepository.listInstalledAndCuratedModels()
+        let installByRepository = Dictionary(uniqueKeysWithValues: installs.map { ($0.repository.lowercased(), $0) })
+
+        for (key, download) in activeDownloadByRepository {
+            if let install = installByRepository[key],
+               install.state == .installed,
+               let localURL = install.localURL,
+               let resolvedURL = Self.resolvedModelDirectory(from: localURL, modalities: install.modalities) {
+                var completed = download
+                completed.status = .installed
+                completed.bytesReceived = completed.totalBytes ?? completed.bytesReceived
+                completed.localURL = resolvedURL
+                completed.errorMessage = nil
+                completed.updatedAt = Date()
+                try await upsertDownloadProgress(completed)
+                continue
+            }
+
+            var failed = download
+            failed.status = .failed
+            failed.errorMessage = "Download was interrupted."
+            failed.updatedAt = Date()
+            interruptedDownloadByRepository[key] = failed
+            interruptedRepositories[key] = download.repository
+            try await upsertDownloadProgress(failed)
+        }
+
         for install in installs where install.state == .downloading {
             let key = install.repository.lowercased()
             let hasActiveTask = await Self.downloadTasks.hasActiveDownload(for: install.repository)
@@ -157,13 +179,18 @@ struct ModelLifecycleService: Sendable {
             }
         }
 
-        for repository in interruptedRepositories.values {
+        for (key, repository) in interruptedRepositories {
             do {
                 try Self.removeStagingDirectory(for: repository)
             } catch {
                 modelLifecycleLogger.warning("Failed to remove interrupted staging directory for \(repository, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
-            try await installRepository.deleteInstall(repository: repository)
+            let failed = Self.failedInstall(
+                repository: repository,
+                existing: installByRepository[key],
+                download: interruptedDownloadByRepository[key]
+            )
+            try await installRepository.upsertInstall(failed)
             try await auditRepository?.append(
                 AuditEvent(category: .modelDownload, summary: "Interrupted \(repository)", modelID: ModelID(rawValue: repository))
             )
@@ -607,6 +634,35 @@ struct ModelLifecycleService: Sendable {
                 "The Hugging Face repository \(repository) does not expose the files Pines needs for local MLX loading: \(required.joined(separator: ", "))."
             )
         }
+    }
+
+    private static func failedInstall(
+        repository: String,
+        existing: ModelInstall?,
+        download: ModelDownloadProgress?
+    ) -> ModelInstall {
+        if var existing {
+            existing.state = .failed
+            existing.revision = existing.revision ?? download?.revision
+            existing.localURL = existing.localURL ?? download?.localURL
+            existing.estimatedBytes = existing.estimatedBytes ?? download?.totalBytes
+            return existing
+        }
+
+        let curatedEntry = CuratedModelManifest.default.entries.first {
+            $0.repository.caseInsensitiveCompare(repository) == .orderedSame
+        }
+        return ModelInstall(
+            modelID: ModelID(rawValue: repository),
+            displayName: curatedEntry?.displayName ?? repository.components(separatedBy: "/").last ?? repository,
+            repository: repository,
+            revision: download?.revision,
+            localURL: download?.localURL,
+            modalities: curatedEntry?.modalities ?? [.text],
+            verification: curatedEntry == nil ? .installable : .verified,
+            state: .failed,
+            estimatedBytes: download?.totalBytes
+        )
     }
 
     private static func validateModelDirectory(

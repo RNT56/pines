@@ -1,6 +1,9 @@
 import Foundation
 import SwiftUI
 import PinesCore
+#if canImport(CoreLocation)
+import CoreLocation
+#endif
 
 typealias PinesLiveStore = any ConversationRepository
     & ModelInstallRepository
@@ -20,6 +23,7 @@ final class PinesAppServices: Sendable {
     let toolPolicyGate: ToolPolicyGate
     let agentRuntimeFactory: any AgentRuntimeFactory
     let agentToolCatalog: any AgentToolCatalog
+    let webSearchLocationProvider: DeviceWebSearchLocationProvider
     let redactor: Redactor
     let mlxRuntime: MLXRuntimeBridge
     let runtimeMetrics: PinesRuntimeMetrics
@@ -44,6 +48,7 @@ final class PinesAppServices: Sendable {
         toolPolicyGate: ToolPolicyGate = ToolPolicyGate(),
         agentRuntimeFactory: (any AgentRuntimeFactory)? = nil,
         agentToolCatalog: (any AgentToolCatalog)? = nil,
+        webSearchLocationProvider: DeviceWebSearchLocationProvider = DeviceWebSearchLocationProvider(),
         redactor: Redactor = Redactor(),
         mlxRuntime: MLXRuntimeBridge = MLXRuntimeBridge(),
         runtimeMetrics: PinesRuntimeMetrics = .shared,
@@ -78,6 +83,7 @@ final class PinesAppServices: Sendable {
             secretStore: secretStore,
             toolRegistry: toolRegistry
         )
+        self.webSearchLocationProvider = webSearchLocationProvider
         self.redactor = redactor
         self.mlxRuntime = mlxRuntime
         self.runtimeMetrics = runtimeMetrics
@@ -104,8 +110,57 @@ final class PinesAppServices: Sendable {
         await registerBuiltInTool(CalculatorTool.name) {
             try CalculatorTool.spec()
         }
+        await registerBuiltInTool(TimeNowTool.name) {
+            try TimeNowTool.spec()
+        }
+        await registerBuiltInTool(DateCalculateTool.name) {
+            try DateCalculateTool.spec()
+        }
         await registerBuiltInTool("web.search") {
             try BraveSearchTool.spec(secretStore: secretStore)
+        }
+        await registerBuiltInTool(WebFetchTool.name) {
+            try WebFetchTool.spec()
+        }
+        await registerBuiltInTool(AttachmentReadTool.name) {
+            try AttachmentReadTool.spec { attachmentID in
+                AgentToolExecutionContext.current.attachmentsByID[attachmentID]
+            }
+        }
+        if let vaultRepository {
+            let embeddingService = vaultEmbeddingService
+            await registerBuiltInTool(VaultSearchTool.name) {
+                try VaultSearchTool.spec { query, limit in
+                    var profile: VaultEmbeddingProfile?
+                    var queryEmbedding: [Float]?
+                    if let activeProfile = try? await vaultRepository.activeEmbeddingProfile(),
+                       activeProfile.kind == .localMLX,
+                       activeProfile.canUseWithoutPrompt {
+                        profile = activeProfile
+                        queryEmbedding = try? await embeddingService?.embedQuery(query, profile: activeProfile)
+                    }
+                    let results = try await vaultRepository.search(
+                        query: query,
+                        embedding: queryEmbedding,
+                        embeddingModelID: profile?.modelID,
+                        profileID: queryEmbedding == nil ? nil : profile?.id,
+                        limit: limit
+                    )
+                    return VaultSearchTool.output(
+                        query: query,
+                        searchMode: queryEmbedding == nil ? "lexical" : "semantic",
+                        results: results
+                    )
+                }
+            }
+            await registerBuiltInTool(VaultReadTool.name) {
+                try VaultReadTool.spec(repository: vaultRepository)
+            }
+        }
+        if let conversationRepository {
+            await registerBuiltInTool(ConversationSearchTool.name) {
+                try ConversationSearchTool.spec(repository: conversationRepository)
+            }
         }
         #if canImport(WebKit) && canImport(UIKit)
         let browserRuntime = await MainActor.run { WKWebViewBrowserRuntime() }
@@ -321,6 +376,106 @@ final class PinesAppServices: Sendable {
             runtimeMetrics.recordStartupFailure("tool_bootstrap_audit:\(component)", error: error)
         }
     }
+}
+
+struct DeviceWebSearchLocationProvider: Sendable {
+    func options() async -> CloudWebSearchOptions {
+        CloudWebSearchOptions(userLocation: await approximateUserLocation())
+    }
+
+    private func approximateUserLocation() async -> CloudWebSearchUserLocation? {
+        var fallback = localeTimeZoneLocation()
+        #if canImport(CoreLocation)
+        let locationServicesEnabled = await MainActor.run { CLLocationManager.locationServicesEnabled() }
+        guard locationServicesEnabled else {
+            return fallback.isEmpty ? nil : fallback
+        }
+        guard let placemark = await requestPlacemark() else {
+            return fallback.isEmpty ? nil : fallback
+        }
+        fallback.city = placemark.locality ?? placemark.subLocality ?? fallback.city
+        fallback.region = placemark.administrativeArea ?? fallback.region
+        fallback.country = placemark.isoCountryCode ?? fallback.country
+        return fallback.isEmpty ? nil : fallback
+        #else
+        return fallback.isEmpty ? nil : fallback
+        #endif
+    }
+
+    private func localeTimeZoneLocation() -> CloudWebSearchUserLocation {
+        CloudWebSearchUserLocation(
+            country: Locale.current.region?.identifier,
+            timezone: TimeZone.current.identifier
+        )
+    }
+
+    #if canImport(CoreLocation)
+    @MainActor
+    private func requestPlacemark() async -> CLPlacemark? {
+        let manager = CLLocationManager()
+        let delegate = OneShotLocationDelegate()
+        manager.delegate = delegate
+        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+
+        let status = manager.authorizationStatus
+        let authorizedStatus: CLAuthorizationStatus
+        if status == .notDetermined {
+            authorizedStatus = await delegate.requestAuthorization(with: manager)
+        } else {
+            authorizedStatus = status
+        }
+        guard authorizedStatus == .authorizedWhenInUse || authorizedStatus == .authorizedAlways else {
+            return nil
+        }
+        guard let location = await delegate.requestLocation(with: manager) else {
+            return nil
+        }
+        return try? await CLGeocoder().reverseGeocodeLocation(location).first
+    }
+
+    @MainActor
+    private final class OneShotLocationDelegate: NSObject, CLLocationManagerDelegate {
+        private var authorizationContinuation: CheckedContinuation<CLAuthorizationStatus, Never>?
+        private var locationContinuation: CheckedContinuation<CLLocation?, Never>?
+
+        func requestAuthorization(with manager: CLLocationManager) async -> CLAuthorizationStatus {
+            await withCheckedContinuation { continuation in
+                authorizationContinuation = continuation
+                manager.requestWhenInUseAuthorization()
+            }
+        }
+
+        func requestLocation(with manager: CLLocationManager) async -> CLLocation? {
+            await withCheckedContinuation { continuation in
+                locationContinuation = continuation
+                manager.requestLocation()
+            }
+        }
+
+        nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+            let status = manager.authorizationStatus
+            Task { @MainActor in
+                authorizationContinuation?.resume(returning: status)
+                authorizationContinuation = nil
+            }
+        }
+
+        nonisolated func locationManager(_: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+            let location = locations.first
+            Task { @MainActor in
+                locationContinuation?.resume(returning: location)
+                locationContinuation = nil
+            }
+        }
+
+        nonisolated func locationManager(_: CLLocationManager, didFailWithError _: any Error) {
+            Task { @MainActor in
+                locationContinuation?.resume(returning: nil)
+                locationContinuation = nil
+            }
+        }
+    }
+    #endif
 }
 
 private actor PinesAppServiceBootstrapState {

@@ -124,7 +124,7 @@ Tool definitions are typed, versioned, schema-backed, and include permission met
 - timeout
 - permissions such as network, browser, files, photos, clipboard, or cloud context
 
-`ToolPolicyGate` validates invocations before execution. Calculator is implemented locally with a safe arithmetic parser. `web.search` uses a Brave Search BYOK key from Keychain, and browser automation runs through an isolated non-persistent `WKWebView` runtime with observe and user-approved action tools. Normal chat keeps its advertised tool list empty; Agent mode gets the explicitly enabled tool catalog and can report tool progress through `AgentActivityEvent`.
+`ToolPolicyGate` validates invocations before execution. Built-in tools include a safe local calculator, local time/date helpers, current-turn attachment reads, vault search/read, conversation search, Brave Search BYOK lookup, HTTP(S) page fetch, and browser automation through an isolated non-persistent `WKWebView` runtime. Private local data tools carry the cloud-context permission so BYOK runs require the same per-turn private-context approval path, while local agent runs can use them without network disclosure. Normal chat keeps its advertised tool list empty; Agent mode gets the explicitly enabled tool catalog and can report tool progress through `AgentActivityEvent`.
 
 The agent replacement seam has three contracts:
 

@@ -290,6 +290,54 @@ actor GRDBPinesStore:
         }
     }
 
+    func searchConversations(query: String, limit: Int) async throws -> [ConversationSearchResult] {
+        try await database.read { db in
+            let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let ftsQuery = Self.safeFTSQuery(from: normalizedQuery) else {
+                return []
+            }
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                SELECT
+                    c.id AS conversation_id,
+                    c.title AS conversation_title,
+                    c.updated_at AS conversation_updated_at,
+                    m.id AS message_id,
+                    m.role AS role,
+                    m.content AS content,
+                    m.created_at AS created_at
+                FROM messages_fts f
+                JOIN messages m ON m.id = f.message_id
+                JOIN conversations c ON c.id = f.conversation_id
+                WHERE messages_fts MATCH ?
+                    AND c.deleted_at IS NULL
+                    AND m.deleted_at IS NULL
+                    AND m.role != ?
+                ORDER BY bm25(messages_fts)
+                LIMIT ?
+                """,
+                arguments: [ftsQuery, ChatRole.tool.rawValue, max(1, limit)]
+            )
+            return rows.map { row in
+                let content: String = row["content"]
+                return ConversationSearchResult(
+                    conversationID: row["conversation_id"],
+                    conversationTitle: row["conversation_title"],
+                    conversationUpdatedAtISO8601: ConversationSearchResult.iso8601(
+                        Date(timeIntervalSinceReferenceDate: row["conversation_updated_at"])
+                    ),
+                    messageID: row["message_id"],
+                    role: row["role"],
+                    createdAtISO8601: ConversationSearchResult.iso8601(
+                        Date(timeIntervalSinceReferenceDate: row["created_at"])
+                    ),
+                    snippet: ConversationSearchResult.snippet(from: content, query: normalizedQuery)
+                )
+            }
+        }
+    }
+
     // MARK: - Models
 
     func listInstalledAndCuratedModels() async throws -> [ModelInstall] {

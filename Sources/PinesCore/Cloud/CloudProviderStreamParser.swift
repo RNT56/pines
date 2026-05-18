@@ -8,6 +8,9 @@ public enum CloudProviderMetadataKeys {
     public static let openAIModel = "openai.model"
     public static let openAISystemFingerprint = "openai.system_fingerprint"
     public static let openAIOutputItemsJSON = "openai.output_items_json"
+    public static let webSearchCitationsJSON = "pines.web_search.citations_json"
+    public static let webSearchQueriesJSON = "pines.web_search.queries_json"
+    public static let webSearchSuggestionsHTML = "pines.web_search.suggestions_html"
     public static let anthropicMessageID = "anthropic.message_id"
     public static let anthropicRequestID = "anthropic.request_id"
     public static let anthropicThinkingContentJSON = "anthropic.thinking_content_json"
@@ -120,9 +123,12 @@ public struct CloudProviderStreamParser {
                 state.anthropicThinkingText = block["thinking"] as? String ?? ""
                 state.anthropicThinkingSignature = block["signature"] as? String
             case "text":
+                state.recordAnthropicSearchBlock(block)
                 if let text = block["text"] as? String, !text.isEmpty {
                     events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
                 }
+            case "web_search_tool_result":
+                state.recordAnthropicSearchBlock(block)
             default:
                 break
             }
@@ -886,6 +892,214 @@ public struct CloudProviderStreamState {
 
     public init() {}
 
+    private static func recordSearchCitations(_ citations: [WebSearchCitation], into metadata: inout [String: String]) {
+        guard !citations.isEmpty else { return }
+        var combined = existingCitations(from: metadata)
+        for citation in citations where !combined.contains(where: { $0.url == citation.url && $0.title == citation.title }) {
+            combined.append(citation)
+        }
+        guard let data = try? JSONEncoder().encode(combined.prefix(24).map { $0 }) else { return }
+        metadata[CloudProviderMetadataKeys.webSearchCitationsJSON] = String(decoding: data, as: UTF8.self)
+    }
+
+    private static func recordSearchQueries(_ queries: [String], into metadata: inout [String: String]) {
+        let cleanQueries = queries
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleanQueries.isEmpty else { return }
+        var combined = existingQueries(from: metadata)
+        for query in cleanQueries where !combined.contains(query) {
+            combined.append(query)
+        }
+        guard let data = try? JSONEncoder().encode(Array(combined.prefix(24))) else { return }
+        metadata[CloudProviderMetadataKeys.webSearchQueriesJSON] = String(decoding: data, as: UTF8.self)
+    }
+
+    private static func recordSearchSuggestionsHTML(_ html: String?, into metadata: inout [String: String]) {
+        guard let html = html?.trimmingCharacters(in: .whitespacesAndNewlines), !html.isEmpty else { return }
+        metadata[CloudProviderMetadataKeys.webSearchSuggestionsHTML] = html
+    }
+
+    private static func existingCitations(from metadata: [String: String]) -> [WebSearchCitation] {
+        guard let raw = metadata[CloudProviderMetadataKeys.webSearchCitationsJSON],
+              let data = raw.data(using: .utf8),
+              let citations = try? JSONDecoder().decode([WebSearchCitation].self, from: data)
+        else { return [] }
+        return citations
+    }
+
+    private static func existingQueries(from metadata: [String: String]) -> [String] {
+        guard let raw = metadata[CloudProviderMetadataKeys.webSearchQueriesJSON],
+              let data = raw.data(using: .utf8),
+              let queries = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return queries
+    }
+
+    private static func openAIWebSearchCitations(from response: [String: Any]) -> [WebSearchCitation] {
+        var citations = [WebSearchCitation]()
+        for item in response["output"] as? [[String: Any]] ?? [] {
+            if let content = item["content"] as? [[String: Any]] {
+                for part in content {
+                    citations.append(contentsOf: openAIAnnotationCitations(from: part["annotations"]))
+                }
+            }
+            citations.append(contentsOf: openAIAnnotationCitations(from: item["annotations"]))
+            if let sources = item["sources"] as? [[String: Any]] {
+                citations.append(contentsOf: sourceCitations(from: sources, provider: "OpenAI"))
+            }
+        }
+        if let sources = response["sources"] as? [[String: Any]] {
+            citations.append(contentsOf: sourceCitations(from: sources, provider: "OpenAI"))
+        }
+        return citations
+    }
+
+    private static func openAIAnnotationCitations(from value: Any?) -> [WebSearchCitation] {
+        (value as? [[String: Any]] ?? []).compactMap { annotation in
+            guard annotation["type"] as? String == "url_citation",
+                  let url = stringValue(annotation["url"]),
+                  !url.isEmpty
+            else { return nil }
+            return WebSearchCitation(
+                title: stringValue(annotation["title"]) ?? url,
+                url: url,
+                source: "OpenAI"
+            )
+        }
+    }
+
+    private static func openAIWebSearchQueries(from response: [String: Any]) -> [String] {
+        var queries = [String]()
+        for item in response["output"] as? [[String: Any]] ?? [] where item["type"] as? String == "web_search_call" {
+            if let action = item["action"] as? [String: Any] {
+                if let query = stringValue(action["query"]) {
+                    queries.append(query)
+                }
+                queries.append(contentsOf: (action["queries"] as? [Any] ?? []).compactMap(stringValue))
+            }
+        }
+        return queries
+    }
+
+    private static func anthropicWebSearchCitations(from value: [String: Any]) -> [WebSearchCitation] {
+        var citations = [WebSearchCitation]()
+        let contentArray = value["content"] as? [[String: Any]] ?? []
+        citations.append(contentsOf: sourceCitations(from: contentArray, provider: "Anthropic"))
+        citations.append(contentsOf: anthropicCitationLocations(from: value["citations"]))
+        for block in contentArray {
+            citations.append(contentsOf: anthropicCitationLocations(from: block["citations"]))
+            if let nested = block["content"] as? [[String: Any]] {
+                citations.append(contentsOf: sourceCitations(from: nested, provider: "Anthropic"))
+            }
+        }
+        return citations
+    }
+
+    private static func anthropicCitationLocations(from value: Any?) -> [WebSearchCitation] {
+        (value as? [[String: Any]] ?? []).compactMap { citation in
+            guard let url = stringValue(citation["url"]), !url.isEmpty else { return nil }
+            return WebSearchCitation(
+                title: stringValue(citation["title"]) ?? url,
+                url: url,
+                source: "Anthropic"
+            )
+        }
+    }
+
+    private static func geminiWebSearchCitations(from response: [String: Any]) -> [WebSearchCitation] {
+        (response["candidates"] as? [[String: Any]] ?? []).flatMap { candidate in
+            geminiGroundingCitations(from: candidate["groundingMetadata"] as? [String: Any])
+        }
+    }
+
+    private static func geminiWebSearchQueries(from response: [String: Any]) -> [String] {
+        (response["candidates"] as? [[String: Any]] ?? []).flatMap { candidate in
+            geminiGroundingQueries(from: candidate["groundingMetadata"] as? [String: Any])
+        }
+    }
+
+    private static func geminiInteractionWebSearchCitations(from interaction: [String: Any]) -> [WebSearchCitation] {
+        var citations = geminiGroundingCitations(from: interaction["groundingMetadata"] as? [String: Any])
+        for output in interaction["outputs"] as? [[String: Any]] ?? [] {
+            citations.append(contentsOf: geminiGroundingCitations(from: output["groundingMetadata"] as? [String: Any]))
+            citations.append(contentsOf: sourceCitations(from: output["groundingChunks"] as? [[String: Any]] ?? [], provider: "Gemini"))
+        }
+        return citations
+    }
+
+    private static func geminiInteractionWebSearchQueries(from interaction: [String: Any]) -> [String] {
+        var queries = geminiGroundingQueries(from: interaction["groundingMetadata"] as? [String: Any])
+        for output in interaction["outputs"] as? [[String: Any]] ?? [] {
+            queries.append(contentsOf: geminiGroundingQueries(from: output["groundingMetadata"] as? [String: Any]))
+            queries.append(contentsOf: (output["webSearchQueries"] as? [Any] ?? []).compactMap(stringValue))
+        }
+        return queries
+    }
+
+    private static func geminiGroundingCitations(from metadata: [String: Any]?) -> [WebSearchCitation] {
+        guard let metadata else { return [] }
+        return sourceCitations(from: metadata["groundingChunks"] as? [[String: Any]] ?? [], provider: "Gemini")
+    }
+
+    private static func geminiGroundingQueries(from metadata: [String: Any]?) -> [String] {
+        guard let metadata else { return [] }
+        return (metadata["webSearchQueries"] as? [Any] ?? []).compactMap(stringValue)
+    }
+
+    private static func geminiGroundingSearchSuggestionsHTML(from metadata: [String: Any]?) -> String? {
+        guard let metadata,
+              let searchEntryPoint = metadata["searchEntryPoint"] as? [String: Any]
+        else { return nil }
+        return stringValue(searchEntryPoint["renderedContent"])
+    }
+
+    private static func geminiSearchSuggestionsHTML(from response: [String: Any]) -> String? {
+        for candidate in response["candidates"] as? [[String: Any]] ?? [] {
+            if let html = geminiGroundingSearchSuggestionsHTML(from: candidate["groundingMetadata"] as? [String: Any]) {
+                return html
+            }
+        }
+        return nil
+    }
+
+    private static func geminiInteractionSearchSuggestionsHTML(from interaction: [String: Any]) -> String? {
+        if let html = geminiGroundingSearchSuggestionsHTML(from: interaction["groundingMetadata"] as? [String: Any]) {
+            return html
+        }
+        for output in interaction["outputs"] as? [[String: Any]] ?? [] {
+            if let html = geminiGroundingSearchSuggestionsHTML(from: output["groundingMetadata"] as? [String: Any]) {
+                return html
+            }
+        }
+        return nil
+    }
+
+    private static func sourceCitations(from sources: [[String: Any]], provider: String) -> [WebSearchCitation] {
+        sources.compactMap { source in
+            let web = source["web"] as? [String: Any]
+            let url = stringValue(source["url"])
+                ?? stringValue(source["uri"])
+                ?? stringValue(web?["url"])
+                ?? stringValue(web?["uri"])
+            guard let url, !url.isEmpty else { return nil }
+            let title = stringValue(source["title"])
+                ?? stringValue(web?["title"])
+                ?? url
+            return WebSearchCitation(title: title, url: url, source: provider)
+        }
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        if let value = value as? String {
+            return value
+        }
+        if let value = value as? NSNumber {
+            return value.stringValue
+        }
+        return nil
+    }
+
     public mutating func clearOpenAITools() {
         openAIToolIDs.removeAll(keepingCapacity: true)
         openAIToolNames.removeAll(keepingCapacity: true)
@@ -943,6 +1157,8 @@ public struct CloudProviderStreamState {
            !json.isEmpty {
             openAIProviderMetadata[CloudProviderMetadataKeys.openAIOutputItemsJSON] = json
         }
+        Self.recordSearchCitations(Self.openAIWebSearchCitations(from: response), into: &openAIProviderMetadata)
+        Self.recordSearchQueries(Self.openAIWebSearchQueries(from: response), into: &openAIProviderMetadata)
     }
 
     public mutating func markOpenAIToolCallCompleted(_ toolCall: ToolCallDelta) -> Bool {
@@ -960,6 +1176,11 @@ public struct CloudProviderStreamState {
         if let messageID = message["id"] as? String, !messageID.isEmpty {
             anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicMessageID] = messageID
         }
+        Self.recordSearchCitations(CloudProviderStreamState.anthropicWebSearchCitations(from: message), into: &anthropicProviderMetadata)
+    }
+
+    public mutating func recordAnthropicSearchBlock(_ block: [String: Any]) {
+        Self.recordSearchCitations(Self.anthropicWebSearchCitations(from: block), into: &anthropicProviderMetadata)
     }
 
     public mutating func recordAnthropicThinkingBlock() {
@@ -986,6 +1207,9 @@ public struct CloudProviderStreamState {
         if let modelVersion = response["modelVersion"] as? String, !modelVersion.isEmpty {
             geminiProviderMetadata[CloudProviderMetadataKeys.geminiModelVersion] = modelVersion
         }
+        Self.recordSearchCitations(Self.geminiWebSearchCitations(from: response), into: &geminiProviderMetadata)
+        Self.recordSearchQueries(Self.geminiWebSearchQueries(from: response), into: &geminiProviderMetadata)
+        Self.recordSearchSuggestionsHTML(Self.geminiSearchSuggestionsHTML(from: response), into: &geminiProviderMetadata)
     }
 
     public mutating func recordGeminiInteraction(_ interaction: [String: Any]) {
@@ -995,6 +1219,9 @@ public struct CloudProviderStreamState {
         if let model = interaction["model"] as? String, !model.isEmpty {
             geminiInteractionProviderMetadata[CloudProviderMetadataKeys.geminiModelVersion] = model
         }
+        Self.recordSearchCitations(Self.geminiInteractionWebSearchCitations(from: interaction), into: &geminiInteractionProviderMetadata)
+        Self.recordSearchQueries(Self.geminiInteractionWebSearchQueries(from: interaction), into: &geminiInteractionProviderMetadata)
+        Self.recordSearchSuggestionsHTML(Self.geminiInteractionSearchSuggestionsHTML(from: interaction), into: &geminiInteractionProviderMetadata)
     }
 
     public mutating func recordGeminiModelContent(_ content: [String: Any]) {

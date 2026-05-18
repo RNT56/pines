@@ -33,7 +33,7 @@ Tools are deny-by-default. Tool specs include:
 - timeout
 - explanation requirement
 
-Web and browser outputs should be treated as untrusted content. Browser automation must require visible user approval for login, checkout, posting, upload, credential-adjacent, or remote-state-changing actions. Normal chat does not advertise all registered tools by default; tool-enabled agent flows and MCP sampling keep their own policy checks.
+Web and browser outputs should be treated as untrusted content. Browser automation must require visible user approval for login, checkout, posting, upload, credential-adjacent, or remote-state-changing actions. Local private-data tools for vault, attachment, and conversation reads are scoped through repository and run context rather than arbitrary filesystem paths, and they carry the cloud-context permission so BYOK runs require explicit private-context approval. Normal chat does not advertise all registered tools by default; tool-enabled agent flows and MCP sampling keep their own policy checks.
 
 ## Sync Boundary
 

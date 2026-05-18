@@ -90,6 +90,9 @@ struct ChatComposerBar: View {
         .onChange(of: settingsState.geminiThinkingLevel) { _, _ in
             Task { await appModel.saveSettings(services: services) }
         }
+        .onChange(of: settingsState.cloudWebSearchMode) { _, _ in
+            Task { await appModel.saveSettings(services: services) }
+        }
         .onChange(of: isInputFocused) { _, focused in
             guard isFocused != focused else { return }
             isFocused = focused
@@ -373,8 +376,22 @@ struct ChatComposerBar: View {
         switch spec.name {
         case CalculatorTool.name:
             "Calculator"
+        case TimeNowTool.name:
+            "Current Time"
+        case DateCalculateTool.name:
+            "Date Math"
+        case AttachmentReadTool.name:
+            "Attachment Read"
+        case VaultSearchTool.name:
+            "Vault Search"
+        case VaultReadTool.name:
+            "Vault Read"
+        case ConversationSearchTool.name:
+            "Conversation Search"
         case "web.search":
             "Web Search"
+        case WebFetchTool.name:
+            "Web Fetch"
         case "browser.observe":
             "Browser Read"
         case "browser.action":

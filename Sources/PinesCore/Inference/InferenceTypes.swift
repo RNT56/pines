@@ -30,6 +30,9 @@ public enum LocalProviderMetadataKeys {
     public static let mtpAcceptanceRate = "local.mtp.acceptance_rate"
     public static let audioEnabled = "local.audio.enabled"
     public static let dflashEnabled = "local.dflash.enabled"
+    public static let generationCompletionTokens = "local.generation.completion_tokens"
+    public static let generationElapsedSeconds = "local.generation.elapsed_seconds"
+    public static let generationTokensPerSecond = "local.generation.tokens_per_second"
 }
 
 public struct ModelID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
@@ -363,6 +366,58 @@ public enum OpenAIResponseStorage: String, Hashable, Codable, Sendable {
     case statelessEncrypted
 }
 
+public enum CloudWebSearchMode: String, Hashable, Codable, Sendable, CaseIterable {
+    case off
+    case automatic
+    case required
+}
+
+public enum CloudWebSearchContextSize: String, Hashable, Codable, Sendable, CaseIterable {
+    case low
+    case medium
+    case high
+}
+
+public struct CloudWebSearchUserLocation: Hashable, Codable, Sendable {
+    public var city: String?
+    public var region: String?
+    public var country: String?
+    public var timezone: String?
+
+    public init(city: String? = nil, region: String? = nil, country: String? = nil, timezone: String? = nil) {
+        self.city = city
+        self.region = region
+        self.country = country
+        self.timezone = timezone
+    }
+
+    public var isEmpty: Bool {
+        [city, region, country, timezone].allSatisfy { ($0 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+}
+
+public struct CloudWebSearchOptions: Hashable, Codable, Sendable {
+    public var contextSize: CloudWebSearchContextSize
+    public var userLocation: CloudWebSearchUserLocation?
+    public var allowedDomains: [String]
+    public var blockedDomains: [String]
+    public var externalWebAccess: Bool
+
+    public init(
+        contextSize: CloudWebSearchContextSize = .medium,
+        userLocation: CloudWebSearchUserLocation? = nil,
+        allowedDomains: [String] = [],
+        blockedDomains: [String] = [],
+        externalWebAccess: Bool = true
+    ) {
+        self.contextSize = contextSize
+        self.userLocation = userLocation
+        self.allowedDomains = allowedDomains
+        self.blockedDomains = blockedDomains
+        self.externalWebAccess = externalWebAccess
+    }
+}
+
 public struct ChatSampling: Hashable, Codable, Sendable {
     public var maxTokens: Int?
     public var temperature: Float
@@ -375,6 +430,7 @@ public struct ChatSampling: Hashable, Codable, Sendable {
     public var anthropicEffort: AnthropicEffort
     public var geminiThinkingLevel: GeminiThinkingLevel
     public var openAIResponseStorage: OpenAIResponseStorage
+    public var cloudWebSearchMode: CloudWebSearchMode
 
     private enum CodingKeys: String, CodingKey {
         case maxTokens
@@ -388,6 +444,7 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         case anthropicEffort
         case geminiThinkingLevel
         case openAIResponseStorage
+        case cloudWebSearchMode
     }
 
     public init(
@@ -401,7 +458,8 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         openAITextVerbosity: OpenAITextVerbosity = .low,
         anthropicEffort: AnthropicEffort = .medium,
         geminiThinkingLevel: GeminiThinkingLevel = .medium,
-        openAIResponseStorage: OpenAIResponseStorage = .stateful
+        openAIResponseStorage: OpenAIResponseStorage = .stateful,
+        cloudWebSearchMode: CloudWebSearchMode = .off
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
@@ -414,6 +472,7 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         self.anthropicEffort = anthropicEffort
         self.geminiThinkingLevel = geminiThinkingLevel
         self.openAIResponseStorage = openAIResponseStorage
+        self.cloudWebSearchMode = cloudWebSearchMode
     }
 
     public init(from decoder: Decoder) throws {
@@ -431,6 +490,20 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         anthropicEffort = try container.decodeIfPresent(AnthropicEffort.self, forKey: .anthropicEffort) ?? .medium
         geminiThinkingLevel = try container.decodeIfPresent(GeminiThinkingLevel.self, forKey: .geminiThinkingLevel) ?? .medium
         openAIResponseStorage = try container.decodeIfPresent(OpenAIResponseStorage.self, forKey: .openAIResponseStorage) ?? .stateful
+        cloudWebSearchMode = try container.decodeIfPresent(CloudWebSearchMode.self, forKey: .cloudWebSearchMode) ?? .off
+    }
+}
+
+public struct WebSearchCitation: Identifiable, Hashable, Codable, Sendable {
+    public var id: String { "\(url)#\(title)" }
+    public var title: String
+    public var url: String
+    public var source: String
+
+    public init(title: String, url: String, source: String) {
+        self.title = title
+        self.url = url
+        self.source = source
     }
 }
 
@@ -439,6 +512,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
     public var modelID: ModelID
     public var messages: [ChatMessage]
     public var sampling: ChatSampling
+    public var webSearchOptions: CloudWebSearchOptions?
     public var allowsTools: Bool
     public var availableTools: [AnyToolSpec]
     public var vaultContextIDs: [UUID]
@@ -448,6 +522,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         modelID: ModelID,
         messages: [ChatMessage],
         sampling: ChatSampling = .init(),
+        webSearchOptions: CloudWebSearchOptions? = nil,
         allowsTools: Bool = false,
         availableTools: [AnyToolSpec] = [],
         vaultContextIDs: [UUID] = []
@@ -456,6 +531,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         self.modelID = modelID
         self.messages = messages
         self.sampling = sampling
+        self.webSearchOptions = webSearchOptions
         self.allowsTools = allowsTools
         self.availableTools = availableTools
         self.vaultContextIDs = vaultContextIDs
@@ -466,6 +542,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         case modelID
         case messages
         case sampling
+        case webSearchOptions
         case allowsTools
         case availableTools
         case vaultContextIDs
@@ -477,6 +554,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         modelID = try container.decode(ModelID.self, forKey: .modelID)
         messages = try container.decode([ChatMessage].self, forKey: .messages)
         sampling = try container.decodeIfPresent(ChatSampling.self, forKey: .sampling) ?? .init()
+        webSearchOptions = try container.decodeIfPresent(CloudWebSearchOptions.self, forKey: .webSearchOptions)
         allowsTools = try container.decodeIfPresent(Bool.self, forKey: .allowsTools) ?? false
         availableTools = try container.decodeIfPresent([AnyToolSpec].self, forKey: .availableTools) ?? []
         vaultContextIDs = try container.decodeIfPresent([UUID].self, forKey: .vaultContextIDs) ?? []

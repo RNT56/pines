@@ -2,6 +2,9 @@ import ImageIO
 import SwiftUI
 import PinesCore
 import UniformTypeIdentifiers
+#if canImport(WebKit) && canImport(UIKit)
+import WebKit
+#endif
 
 struct ChatsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -361,6 +364,10 @@ private struct ChatTranscriptView: View {
     @State private var isComposerFocused = false
     let thread: PinesThreadPreview
 
+    private var latestAssistantMessageID: UUID? {
+        thread.messages.last(where: { $0.role == .assistant })?.id
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -373,6 +380,7 @@ private struct ChatTranscriptView: View {
                                 threadID: thread.id,
                                 message: message,
                                 isStreaming: chatState.activeRunID == message.id,
+                                showsLocalTokenRate: message.id == latestAssistantMessageID,
                                 canEdit: chatState.activeRunID == nil,
                                 editingMessage: $editingMessage
                             )
@@ -546,25 +554,36 @@ private struct ChatTranscriptView: View {
 }
 
 private struct ChatMessageRow: View {
+    @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var haptics: PinesHaptics
     let threadID: UUID
     let message: ChatMessage
     let isStreaming: Bool
+    let showsLocalTokenRate: Bool
     let canEdit: Bool
     @Binding var editingMessage: ChatMessage?
 
     var body: some View {
-        ChatBubble(
-            message: message,
-            isStreaming: isStreaming,
-            canEdit: canEdit && message.role == .user,
-            canAddAttachmentsToVault: !message.attachments.isEmpty,
-            copyMessage: copyMessage,
-            editMessage: editMessage,
-            addAttachmentsToVault: addAttachmentsToVault
-        )
+        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+            ChatBubble(
+                message: message,
+                isStreaming: isStreaming,
+                canEdit: canEdit && message.role == .user,
+                canAddAttachmentsToVault: !message.attachments.isEmpty,
+                copyMessage: copyMessage,
+                editMessage: editMessage,
+                addAttachmentsToVault: addAttachmentsToVault
+            )
+
+            if showsLocalTokenRate,
+               let performance = ChatLocalTokenRateSummary(metadata: message.providerMetadata) {
+                ChatLocalTokenRateView(performance: performance)
+                    .padding(.leading, theme.spacing.small)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 
     private func copyMessage() {
@@ -692,6 +711,14 @@ private struct ChatBubble: View {
                     ChatAttachmentList(attachments: message.attachments)
                 }
 
+                let webSearchCitations = ChatWebSearchCitationList.citations(from: message.providerMetadata)
+                if !webSearchCitations.isEmpty {
+                    ChatWebSearchCitationList(citations: webSearchCitations)
+                }
+                if let searchSuggestionsHTML = ChatWebSearchSuggestionsView.html(from: message.providerMetadata) {
+                    ChatWebSearchSuggestionsView(html: searchSuggestionsHTML)
+                }
+
                 let agentActivities = PinesAppModel.agentActivities(from: message.providerMetadata)
                 if !agentActivities.isEmpty {
                     ChatAgentActivityList(activities: agentActivities)
@@ -761,6 +788,159 @@ private struct ChatBubble: View {
             )
         }
         return actions
+    }
+}
+
+private struct ChatLocalTokenRateSummary: Hashable {
+    let tokensPerSecond: Double
+
+    init?(metadata: [String: String]) {
+        guard let rawValue = metadata[LocalProviderMetadataKeys.generationTokensPerSecond],
+              let tokensPerSecond = Double(rawValue),
+              tokensPerSecond.isFinite,
+              tokensPerSecond > 0
+        else { return nil }
+        self.tokensPerSecond = tokensPerSecond
+    }
+
+    var displayValue: String {
+        let format = tokensPerSecond >= 100 ? "%.0f" : "%.1f"
+        return String(format: format, tokensPerSecond)
+    }
+}
+
+private struct ChatLocalTokenRateView: View {
+    @Environment(\.pinesTheme) private var theme
+    let performance: ChatLocalTokenRateSummary
+
+    var body: some View {
+        HStack(spacing: theme.spacing.xxsmall) {
+            Image(systemName: "speedometer")
+                .font(theme.typography.caption.weight(.semibold))
+                .frame(width: 14, height: 14)
+
+            Text("\(performance.displayValue) Token/s")
+                .font(theme.typography.caption.weight(.medium))
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .foregroundStyle(theme.colors.secondaryText)
+        .accessibilityLabel("\(performance.displayValue) tokens per second")
+    }
+}
+
+#if canImport(WebKit) && canImport(UIKit)
+private struct ChatWebSearchSuggestionsView: View {
+    @Environment(\.pinesTheme) private var theme
+    let html: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            Text("Google Search suggestions")
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.primaryText)
+            SearchSuggestionsWebView(html: html)
+                .frame(height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        }
+        .padding(.vertical, theme.spacing.xsmall)
+        .padding(.horizontal, theme.spacing.small)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
+        }
+    }
+
+    static func html(from metadata: [String: String]) -> String? {
+        let html = metadata[CloudProviderMetadataKeys.webSearchSuggestionsHTML]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (html ?? "").isEmpty ? nil : html
+    }
+}
+
+private struct SearchSuggestionsWebView: UIViewRepresentable {
+    let html: String
+
+    func makeUIView(context _: Context) -> WKWebView {
+        let webView = WKWebView(frame: .zero)
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+        webView.scrollView.isScrollEnabled = false
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context _: Context) {
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+}
+#else
+private struct ChatWebSearchSuggestionsView: View {
+    let html: String
+
+    var body: some View {
+        EmptyView()
+    }
+
+    static func html(from metadata: [String: String]) -> String? {
+        let html = metadata[CloudProviderMetadataKeys.webSearchSuggestionsHTML]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (html ?? "").isEmpty ? nil : html
+    }
+}
+#endif
+
+private struct ChatWebSearchCitationList: View {
+    @Environment(\.pinesTheme) private var theme
+    let citations: [WebSearchCitation]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            HStack(spacing: theme.spacing.xsmall) {
+                Image(systemName: "globe")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 16, height: 16)
+                Text("Web sources")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+            }
+
+            ForEach(citations.prefix(6)) { citation in
+                if let url = URL(string: citation.url) {
+                    Link(destination: url) {
+                        HStack(spacing: theme.spacing.xxsmall) {
+                            Text(citation.source)
+                                .font(theme.typography.caption.weight(.semibold))
+                                .foregroundStyle(theme.colors.secondaryText)
+                                .lineLimit(1)
+
+                            Text(citation.title)
+                                .font(theme.typography.caption.weight(.medium))
+                                .foregroundStyle(theme.colors.accent)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, theme.spacing.xsmall)
+        .padding(.horizontal, theme.spacing.small)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
+        }
+        .accessibilityLabel("\(citations.count) web search sources")
+    }
+
+    static func citations(from metadata: [String: String]) -> [WebSearchCitation] {
+        guard let raw = metadata[CloudProviderMetadataKeys.webSearchCitationsJSON],
+              let data = raw.data(using: .utf8),
+              let citations = try? JSONDecoder().decode([WebSearchCitation].self, from: data)
+        else { return [] }
+        return citations
     }
 }
 
@@ -1313,6 +1493,18 @@ struct ChatQuickSettingsButton: View {
                     }
                 }
             }
+
+            if !availability.cloudWebSearchModes.isEmpty {
+                Section("Provider Web Search") {
+                    ForEach(availability.cloudWebSearchModes, id: \.self) { mode in
+                        Button {
+                            cloudWebSearchSelection.wrappedValue = mode
+                        } label: {
+                            quickSettingLabel(mode.shortTitle, isSelected: cloudWebSearchSelection.wrappedValue == mode)
+                        }
+                    }
+                }
+            }
         } label: {
             Image(systemName: "slider.horizontal.3")
                 .font(.system(size: 15, weight: .semibold))
@@ -1417,6 +1609,21 @@ struct ChatQuickSettingsButton: View {
         }
     }
 
+    private var cloudWebSearchSelection: Binding<CloudWebSearchMode> {
+        Binding {
+            if availability.cloudWebSearchModes.contains(settingsState.cloudWebSearchMode) {
+                return settingsState.cloudWebSearchMode
+            }
+            if settingsState.cloudWebSearchMode == .required, availability.cloudWebSearchModes.contains(.automatic) {
+                return .automatic
+            }
+            return .off
+        } set: { mode in
+            settingsState.cloudWebSearchMode = availability.cloudWebSearchModes.contains(mode) ? mode : .off
+            haptics.play(.primaryAction)
+        }
+    }
+
     private var defaultReasoningEffort: OpenAIReasoningEffort {
         if availability.openAIReasoningEfforts.contains(.low) {
             return .low
@@ -1458,7 +1665,23 @@ struct ChatQuickSettingsButton: View {
         if !availability.geminiThinkingLevels.isEmpty {
             parts.append("Gemini thinking level \(geminiThinkingSelection.wrappedValue.shortTitle)")
         }
+        if !availability.cloudWebSearchModes.isEmpty {
+            parts.append("provider web search \(cloudWebSearchSelection.wrappedValue.shortTitle)")
+        }
         return parts.joined(separator: ", ")
+    }
+}
+
+private extension CloudWebSearchMode {
+    var shortTitle: String {
+        switch self {
+        case .off:
+            "Off"
+        case .automatic:
+            "Auto"
+        case .required:
+            "Required"
+        }
     }
 }
 

@@ -417,9 +417,12 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if chatRequest.sampling.openAIResponseStorage == .stateful, let previousResponseID = payload.previousResponseID {
             body["previous_response_id"] = previousResponseID
         }
-        if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
-            body["tools"] = chatRequest.availableTools.map(Self.openAIResponsesFunctionToolObject)
-            body["tool_choice"] = "auto"
+        let functionTools = chatRequest.allowsTools ? chatRequest.availableTools.map(Self.openAIResponsesFunctionToolObject) : []
+        let nativeSearchTools = openAINativeWebSearchEnabled(for: chatRequest) ? [Self.openAIWebSearchToolObject(options: chatRequest.webSearchOptions)] : []
+        let responseTools = functionTools + nativeSearchTools
+        if !responseTools.isEmpty {
+            body["tools"] = responseTools
+            body["tool_choice"] = openAIToolChoice(for: chatRequest, hasFunctionTools: !functionTools.isEmpty, hasNativeSearch: !nativeSearchTools.isEmpty)
             body["parallel_tool_calls"] = false
         }
         let instructions = payload.instructions
@@ -509,13 +512,145 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 ).rawValue,
             ]
         }
-        if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
-            body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.anthropicToolObject()) }
-            body["tool_choice"] = ["type": "auto"]
+        let anthropicFunctionTools = chatRequest.allowsTools
+            ? chatRequest.availableTools.map { Self.jsonSerializable($0.anthropicToolObject()) }
+            : []
+        let anthropicNativeTools = anthropicNativeWebSearchEnabled(for: chatRequest) ? [Self.anthropicWebSearchToolObject(options: chatRequest.webSearchOptions)] : []
+        let anthropicTools = anthropicFunctionTools + anthropicNativeTools
+        if !anthropicTools.isEmpty {
+            body["tools"] = anthropicTools
+            body["tool_choice"] = anthropicToolChoice(for: chatRequest, hasNativeSearch: !anthropicNativeTools.isEmpty)
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try applyExtraHeaders(to: &request)
         return request
+    }
+
+    private func openAINativeWebSearchEnabled(for chatRequest: ChatRequest) -> Bool {
+        guard usesOfficialOpenAIAPI else { return false }
+        return chatRequest.sampling.cloudWebSearchMode != .off
+    }
+
+    private func anthropicNativeWebSearchEnabled(for chatRequest: ChatRequest) -> Bool {
+        guard configuration.kind == .anthropic else { return false }
+        return chatRequest.sampling.cloudWebSearchMode != .off
+    }
+
+    private func geminiNativeWebSearchEnabled(for chatRequest: ChatRequest, hasFunctionTools: Bool) -> Bool {
+        guard configuration.kind == .gemini, chatRequest.sampling.cloudWebSearchMode != .off else { return false }
+        return !hasFunctionTools || Self.supportsGeminiBuiltInAndFunctionToolCombination(chatRequest.modelID)
+    }
+
+    private func openAIToolChoice(for chatRequest: ChatRequest, hasFunctionTools: Bool, hasNativeSearch: Bool) -> Any {
+        guard hasNativeSearch else { return "auto" }
+        guard chatRequest.sampling.cloudWebSearchMode == .required else { return "auto" }
+        return ["type": "web_search"]
+    }
+
+    private func anthropicToolChoice(for chatRequest: ChatRequest, hasNativeSearch: Bool) -> [String: Any] {
+        guard hasNativeSearch, chatRequest.sampling.cloudWebSearchMode == .required else {
+            return ["type": "auto"]
+        }
+        return [
+            "type": "tool",
+            "name": "web_search",
+        ]
+    }
+
+    private static func openAIWebSearchToolObject(options: CloudWebSearchOptions?) -> [String: Any] {
+        let resolvedOptions = options ?? CloudWebSearchOptions()
+        var tool: [String: Any] = [
+            "type": "web_search",
+            "search_context_size": resolvedOptions.contextSize.rawValue,
+            "external_web_access": resolvedOptions.externalWebAccess,
+        ]
+        if let filters = openAIWebSearchFilters(from: resolvedOptions) {
+            tool["filters"] = filters
+        }
+        if let userLocation = webSearchUserLocationObject(from: resolvedOptions.userLocation) {
+            tool["user_location"] = userLocation
+        }
+        return tool
+    }
+
+    private static func anthropicWebSearchToolObject(options: CloudWebSearchOptions?) -> [String: Any] {
+        let resolvedOptions = options ?? CloudWebSearchOptions()
+        var tool: [String: Any] = [
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 5,
+        ]
+        let allowedDomains = normalizedWebSearchDomains(resolvedOptions.allowedDomains)
+        if !allowedDomains.isEmpty {
+            tool["allowed_domains"] = allowedDomains
+        }
+        let blockedDomains = normalizedWebSearchDomains(resolvedOptions.blockedDomains)
+        if !blockedDomains.isEmpty {
+            tool["blocked_domains"] = blockedDomains
+        }
+        if let userLocation = webSearchUserLocationObject(from: resolvedOptions.userLocation) {
+            tool["user_location"] = userLocation
+        }
+        return tool
+    }
+
+    private static func openAIWebSearchFilters(from options: CloudWebSearchOptions) -> [String: Any]? {
+        let allowedDomains = normalizedWebSearchDomains(options.allowedDomains)
+        let blockedDomains = normalizedWebSearchDomains(options.blockedDomains)
+        guard !allowedDomains.isEmpty || !blockedDomains.isEmpty else { return nil }
+        var filters = [String: Any]()
+        if !allowedDomains.isEmpty {
+            filters["allowed_domains"] = allowedDomains
+        }
+        if !blockedDomains.isEmpty {
+            filters["blocked_domains"] = blockedDomains
+        }
+        return filters
+    }
+
+    private static func webSearchUserLocationObject(from location: CloudWebSearchUserLocation?) -> [String: Any]? {
+        guard let location, !location.isEmpty else { return nil }
+        var object: [String: Any] = ["type": "approximate"]
+        if let city = normalizedWebSearchString(location.city) {
+            object["city"] = city
+        }
+        if let region = normalizedWebSearchString(location.region) {
+            object["region"] = region
+        }
+        if let country = normalizedWebSearchString(location.country) {
+            object["country"] = country
+        }
+        if let timezone = normalizedWebSearchString(location.timezone) {
+            object["timezone"] = timezone
+        }
+        return object.count > 1 ? object : nil
+    }
+
+    private static func normalizedWebSearchString(_ value: String?) -> String? {
+        let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalizedWebSearchDomains(_ domains: [String]) -> [String] {
+        var seen = Set<String>()
+        return domains.compactMap { domain in
+            var cleaned = domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if let url = URL(string: cleaned), let host = url.host(percentEncoded: false) {
+                cleaned = host
+            }
+            if cleaned.hasPrefix("https://") {
+                cleaned.removeFirst("https://".count)
+            } else if cleaned.hasPrefix("http://") {
+                cleaned.removeFirst("http://".count)
+            }
+            cleaned = cleaned.split(separator: "/").first.map(String.init) ?? cleaned
+            guard !cleaned.isEmpty, seen.insert(cleaned).inserted else { return nil }
+            return cleaned
+        }
+    }
+
+    private static func supportsGeminiBuiltInAndFunctionToolCombination(_ modelID: ModelID) -> Bool {
+        modelID.rawValue.lowercased().contains("gemini-3")
     }
 
     private func usesOpenAIReasoningChatParameters(modelID: ModelID) -> Bool {
@@ -525,7 +660,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
     private func usesOpenAIResponsesAPI(chatRequest: ChatRequest) -> Bool {
         guard usesOfficialOpenAIAPI else { return false }
-        if Self.isOpenAIReasoningModelID(chatRequest.modelID) {
+        if Self.isOpenAIReasoningModelID(chatRequest.modelID) || openAINativeWebSearchEnabled(for: chatRequest) {
             return true
         }
         return chatRequest.messages.contains { message in
@@ -661,17 +796,24 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 "parts": [["text": systemInstruction]],
             ]
         }
+        var geminiTools = [[String: Any]]()
         if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
-            body["tools"] = [[
+            geminiTools.append([
                 "functionDeclarations": chatRequest.availableTools.map {
                     Self.jsonSerializable($0.geminiFunctionDeclarationObject())
                 },
-            ]]
+            ])
             body["toolConfig"] = [
                 "functionCallingConfig": [
                     "mode": "AUTO",
                 ],
             ]
+        }
+        if geminiNativeWebSearchEnabled(for: chatRequest, hasFunctionTools: chatRequest.allowsTools && !chatRequest.availableTools.isEmpty) {
+            geminiTools.append(["google_search": [:] as [String: Any]])
+        }
+        if !geminiTools.isEmpty {
+            body["tools"] = geminiTools
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try applyExtraHeaders(to: &request)
@@ -734,8 +876,12 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if let previousInteractionID = Self.latestGeminiInteractionID(from: chatRequest.messages) {
             body["previous_interaction_id"] = previousInteractionID
         }
-        if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
-            body["tools"] = chatRequest.availableTools.map(Self.geminiInteractionFunctionToolObject)
+        var geminiInteractionTools = chatRequest.allowsTools ? chatRequest.availableTools.map(Self.geminiInteractionFunctionToolObject) : []
+        if geminiNativeWebSearchEnabled(for: chatRequest, hasFunctionTools: chatRequest.allowsTools && !chatRequest.availableTools.isEmpty) {
+            geminiInteractionTools.append(["type": "google_search"])
+        }
+        if !geminiInteractionTools.isEmpty {
+            body["tools"] = geminiInteractionTools
             body["tool_choice"] = "auto"
         }
 

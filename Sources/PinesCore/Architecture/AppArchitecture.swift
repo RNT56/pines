@@ -119,6 +119,7 @@ public protocol ConversationRepository: Sendable {
         toolName: String?,
         toolCalls: [ToolCallDelta]?
     ) async throws
+    func searchConversations(query: String, limit: Int) async throws -> [ConversationSearchResult]
 }
 
 public extension ConversationRepository {
@@ -136,6 +137,41 @@ public extension ConversationRepository {
 
     func updateMessage(id: UUID, content: String, status: MessageStatus, tokenCount: Int?) async throws {
         try await updateMessage(id: id, content: content, status: status, tokenCount: tokenCount, providerMetadata: nil)
+    }
+
+    func searchConversations(query: String, limit: Int) async throws -> [ConversationSearchResult] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else { return [] }
+        let tokens = normalizedQuery
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return [] }
+
+        let conversations = try await listConversations()
+        var results = [ConversationSearchResult]()
+        for conversation in conversations {
+            let messages = try await messages(in: conversation.id)
+            for message in messages where message.role != .tool {
+                let searchable = message.content.lowercased()
+                guard tokens.allSatisfy({ searchable.contains($0) }) else { continue }
+                results.append(
+                    ConversationSearchResult(
+                        conversationID: conversation.id.uuidString,
+                        conversationTitle: conversation.title,
+                        conversationUpdatedAtISO8601: ConversationSearchResult.iso8601(conversation.updatedAt),
+                        messageID: message.id.uuidString,
+                        role: message.role.rawValue,
+                        createdAtISO8601: ConversationSearchResult.iso8601(message.createdAt),
+                        snippet: ConversationSearchResult.snippet(from: message.content, query: normalizedQuery)
+                    )
+                )
+                if results.count >= max(1, limit) {
+                    return results
+                }
+            }
+        }
+        return results
     }
 }
 
@@ -201,6 +237,64 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
         self.lastMessage = lastMessage
         self.lastMessageStatus = lastMessageStatus
         self.tokenCount = tokenCount
+    }
+}
+
+public struct ConversationSearchResult: Identifiable, Hashable, Codable, Sendable {
+    public var id: String { messageID }
+    public var conversationID: String
+    public var conversationTitle: String
+    public var conversationUpdatedAtISO8601: String
+    public var messageID: String
+    public var role: String
+    public var createdAtISO8601: String
+    public var snippet: String
+
+    public init(
+        conversationID: String,
+        conversationTitle: String,
+        conversationUpdatedAtISO8601: String,
+        messageID: String,
+        role: String,
+        createdAtISO8601: String,
+        snippet: String
+    ) {
+        self.conversationID = conversationID
+        self.conversationTitle = conversationTitle
+        self.conversationUpdatedAtISO8601 = conversationUpdatedAtISO8601
+        self.messageID = messageID
+        self.role = role
+        self.createdAtISO8601 = createdAtISO8601
+        self.snippet = snippet
+    }
+
+    public static func iso8601(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+
+    public static func snippet(from content: String, query: String, radius: Int = 180) -> String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let lower = trimmed.lowercased()
+        let tokens = query
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        let matchRange = tokens
+            .compactMap { lower.range(of: $0.lowercased()) }
+            .first
+
+        guard let matchRange else {
+            return String(trimmed.prefix(radius * 2))
+        }
+
+        let lowerBoundDistance = trimmed.distance(from: trimmed.startIndex, to: matchRange.lowerBound)
+        let startOffset = max(0, lowerBoundDistance - radius)
+        let start = trimmed.index(trimmed.startIndex, offsetBy: startOffset)
+        let remaining = trimmed.distance(from: start, to: trimmed.endIndex)
+        let end = trimmed.index(start, offsetBy: min(radius * 2, remaining))
+        let prefix = start == trimmed.startIndex ? "" : "..."
+        let suffix = end == trimmed.endIndex ? "" : "..."
+        return prefix + String(trimmed[start..<end]) + suffix
     }
 }
 

@@ -198,6 +198,7 @@ extension PinesAppModel {
             modelID: cloudModelID,
             messages: messages,
             sampling: sampling,
+            webSearchOptions: await webSearchOptions(for: cloudProvider.id, settings: settings, services: services),
             allowsTools: !tools.isEmpty,
             availableTools: tools
         )

@@ -15,7 +15,7 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Hugging Face model catalog search and model preflight classification.
 - Curated model manifest.
 - Persistence schema for conversations, messages, model installs/downloads, vault documents, chunks, FTS, settings, cloud providers, sync records, agent/tool runs, and audit events.
-- Tool registry, typed tool specs, calculator tool, and policy gate.
+- Tool registry, typed tool specs, expanded built-in tools, and policy gate.
 - Agent policy and tool invocation models.
 - Vault chunking and exact cosine vector index.
 - Keychain-backed secret store for iOS.
@@ -28,7 +28,7 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Split MLX compatibility implementations for Llama 4 and DeepSeek V4 model families.
 - Hugging Face preflight and resumable model install/delete service.
 - BYOK cloud streaming adapters for OpenAI-compatible, OpenRouter, Anthropic, and Gemini, including provider-specific stream metadata parsing.
-- Brave Search BYOK tool and WKWebView browser observe/action runtime.
+- Built-in calculator, time/date, attachment read, vault search/read, conversation search, Brave Search BYOK, web fetch, and WKWebView browser observe/action tools.
 - Vault file/PDF/image import pipeline with chunking, OCR, and embedding invocation.
 - TurboQuant runtime profile defaults, requested/active backend diagnostics, Metal codec and compressed-attention availability diagnostics, compressed vault embedding storage, approximate vector search, and FP16 rerank path.
 - iOS runtime guardrails: memory/thermal adaptive profiles, compact 6 GB device defaults, memory-warning unload, bounded vector scans, and batched vault embedding ingestion.

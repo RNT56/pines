@@ -5,7 +5,7 @@
 <h1 align="center">Pines</h1>
 
 <p align="center">
-  <strong>Your local-first AI workbench for iOS. Quiet when it should be. Powerful when you ask it to be.</strong>
+  <strong>The AI workbench you own: local models, cloud specialists, private context, and tools in one iOS home.</strong>
 </p>
 
 <p align="center">
@@ -13,58 +13,80 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-informational" alt="License: PolyForm Noncommercial 1.0.0"></a>
 </p>
 
-Most AI apps feel like a room you visit.
+AI is becoming too important to live inside one company's box.
 
-You bring a file. You bring a question. You bring a piece of work that already had a life before the app arrived. Then the app asks you to trust a route you cannot see, a memory you cannot inspect, and a cloud you did not exactly choose.
+The best model for a job might be local. The next one might be Anthropic, Gemini, OpenRouter, or an OpenAI-compatible endpoint you run yourself. Your notes might belong in a private vault. Your tools might come from MCP servers. Your phone might be powerful enough to do more than forward every thought to somebody else's cloud.
 
-Pines is built from a different instinct.
+Pines is built for that future.
 
-It treats your phone like a real computer. It keeps the model close when local is enough. It lets cloud models help when you deliberately invite them. It gives your documents a private vault instead of turning every note into a remote dependency. It connects to tools and MCP servers, but with gates you can understand.
+Not a chatbot. Not a single-vendor wrapper. Not a toy demo of "AI on mobile." Pines is a workbench for choosing the right intelligence for the moment, keeping sensitive context close, and letting local and cloud models cooperate without making you surrender the whole room.
 
-Pines is not trying to be the loudest AI product in the room. It is trying to be the one you keep reaching for because it respects the shape of your work.
+It is for new AI users who want one clear place to start. It is for power users who already know no single model wins every task. It is for people watching local mobile AI become real and thinking: good, now give me an app that treats it seriously.
 
-## The Feel
+## One Home For Many Minds
 
-Open Pines and the first promise is simple: your workspace belongs to you.
+Pines gives you a center of gravity.
 
-Chats are where the thinking starts. Attach an image, a PDF, a Markdown note, a JSON file, a CSV, or plain text, and ask the question the work actually needs. Pines is built for those normal, messy moments where useful context lives across files, notes, models, and memory.
+Local MLX models can live on device. BYOK cloud providers can be added when you want outside reach. OpenAI-compatible services, OpenRouter, Anthropic, and Gemini can sit beside local inference instead of replacing it. The point is not to pick a religion. The point is to pick the right route.
 
-The vault is where your material becomes reachable without becoming public. It is not a mystical memory layer. It is a place for your documents, chunks, and retrieval to stay grounded.
+Ask a small local model to work through private notes. Bring in a stronger remote model when the job needs more reach. Keep vendor choice open. Keep the boundary visible.
 
-Models are treated like tools, not subscriptions. You can discover MLX-ready models, install them, and see the route Pines is taking. When cloud makes sense, bring your own key and choose that path on purpose.
+That is the promise: multi-vendor AI without turning your workflow into a pile of tabs, keys, pasted files, and half-remembered settings.
 
-Tools are not hidden trapdoors. Search, browser actions, agent flows, and MCP servers live behind visible policy. If something wants context, network access, or a meaningful action, Pines is designed to make that boundary legible before it crosses it.
+## Local Mobile AI, Treated Like It Matters
 
-## Local First, Not Local Only
+Phones are becoming AI machines in their own right. Pines takes that seriously.
 
-Local-first does not mean pretending the cloud is useless.
+A local model is not just a privacy checkbox. It is instant access. It is work that can happen close to your files. It is a way to ask ordinary questions without making every thought a network request. It is the beginning of a personal AI stack that lives where you already work.
 
-It means the default center of gravity is yours. Your chats, vault, attachments, model state, and private context start on device. Cloud providers are optional, BYOK, and explicit. Private vault or MCP context does not quietly ride along just because a remote model might be convenient.
+Pines is built around MLX Swift, model discovery, install flows, runtime guardrails, and a vault that can make your own material useful to the model. The goal is simple: make local mobile AI feel less like a benchmark and more like a daily instrument.
 
-That distinction matters. A good assistant should know when to help, and it should also know when to ask.
+## Your Context Should Not Be Homeless
 
-## A Workbench With Trails
+Most AI workflows treat context like disposable paste.
 
-Pines brings together the pieces that usually live in separate apps:
+Copy this note. Upload that PDF. Drag the same screenshot again. Re-explain the project. Hope the app remembers enough and forgets the right things.
 
-- local MLX inference for on-device model work
-- BYOK cloud routing for OpenAI-compatible providers, OpenRouter, Anthropic, and Gemini
-- a private vault for document context and retrieval
-- attachments for images, PDFs, and common text-like files
-- MCP Streamable HTTP for tools, resources, prompts, and user-approved sampling
-- policy-gated tools for search, browser work, calculator use, and agent flows
-- optional private iCloud sync when you choose to widen the boundary
-- a theme system that lets the app feel personal without becoming noisy
+Pines gives context a place to live.
 
-The result is not a chatbot with a few extras taped on. It is a place to explore, compare, ask, revise, inspect, and keep moving.
+The vault is for the files, notes, chunks, and retrieval that make an assistant actually useful. Attach images, PDFs, Markdown, JSON, CSV, or plain text. Pull private material into a conversation when it belongs there. Keep it local by default. Decide when cloud models are allowed to see it.
 
-## The Personality
+This is where Pines starts to feel less like "chat" and more like a personal working environment.
 
-Pines is deliberately calm.
+## Tools Without The Sleight Of Hand
 
-It does not need to turn every feature into a spectacle. The best version of this app feels like a clear desk, a sharp pencil, and a window cracked open just enough for air. You should know where your keys are. You should know when a model is local. You should know when a tool is about to act. You should be able to bring in more power without giving up the room.
+The next wave of AI will not just answer. It will search, inspect, browse, call tools, use prompts, read resources, and cooperate with external systems.
 
-That is the line Pines keeps walking: capable without being slippery, private without being isolated, technical without making the user feel like a sysadmin just to ask a good question.
+That power needs a handle.
+
+Pines is built with policy-gated tools, agent flows, browser actions, Brave Search BYOK support, and MCP Streamable HTTP. MCP servers can bring tools, resources, prompts, subscriptions, and sampling into the workspace. But the important part is not the acronym. The important part is consent you can see.
+
+If something wants private context, network access, or an action with consequences, Pines is designed around making that moment legible.
+
+## For People New To AI
+
+You should not need a vendor map, a model leaderboard, and a pile of API dashboards just to start thinking with AI.
+
+Pines aims to make the first step simple: open a conversation, bring in the material, choose the level of power you need, and keep moving. Local when local is enough. Cloud when cloud earns the trip. Tools when they add leverage.
+
+The app should feel calm because the decisions are clear.
+
+## For People Who Already Care
+
+If you are already comparing models, providers, context windows, local runtimes, retrieval quality, tool protocols, and privacy boundaries, Pines is meant to meet you there.
+
+It gives those choices a single surface. It keeps local and remote routes in conversation. It treats BYOK as normal, not exotic. It makes MCP a first-class direction instead of an afterthought. It gives the iOS device a real role in the AI stack.
+
+This is the future Pines is pushing toward: a pocket-sized control room for personal intelligence, where no single vendor owns the workflow and no invisible fallback decides what leaves your device.
+
+## The Line Pines Holds
+
+- Your AI stack should be portable across models and providers.
+- Local inference should be a first-class path, not a novelty.
+- Cloud should be powerful, optional, and explicit.
+- Private context should have a home before it has a destination.
+- Tools should be useful without becoming hidden side doors.
+- A mobile AI app should feel like an instrument, not a remote control.
 
 ## For Builders
 
