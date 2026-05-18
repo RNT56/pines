@@ -503,8 +503,8 @@ private struct ChatTranscriptView: View {
         }
         .toolbar(tabBarVisibility, for: .tabBar)
         .pinesAppBackground()
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: theme.spacing.small) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: composerInsetSpacing) {
                 if let chatError = chatState.chatError {
                     ChatErrorBanner(
                         message: chatError,
@@ -517,8 +517,8 @@ private struct ChatTranscriptView: View {
                 ChatComposerBar(threadID: thread.id, isFocused: $isComposerFocused)
                     .padding(.horizontal, contentPadding)
             }
-            .padding(.top, theme.spacing.xsmall)
-            .padding(.bottom, theme.spacing.small)
+            .padding(.top, composerInsetTopPadding)
+            .padding(.bottom, composerInsetBottomPadding)
             .animation(theme.motion.standard, value: chatState.chatError)
         }
     }
@@ -529,6 +529,18 @@ private struct ChatTranscriptView: View {
 
     private var tabBarVisibility: Visibility {
         horizontalSizeClass == .compact ? .hidden : .automatic
+    }
+
+    private var composerInsetSpacing: CGFloat {
+        horizontalSizeClass == .compact ? theme.spacing.xsmall : theme.spacing.small
+    }
+
+    private var composerInsetTopPadding: CGFloat {
+        horizontalSizeClass == .compact ? theme.spacing.xxsmall : theme.spacing.xsmall
+    }
+
+    private var composerInsetBottomPadding: CGFloat {
+        horizontalSizeClass == .compact ? 0 : theme.spacing.small
     }
 
     @ViewBuilder

@@ -33,7 +33,7 @@ struct ChatComposerBar: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
+        VStack(alignment: .leading, spacing: layoutSpacing) {
             if !attachments.isEmpty || attachmentError != nil || isImportingAttachments {
                 attachmentTray
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -63,7 +63,7 @@ struct ChatComposerBar: View {
             .environmentObject(haptics)
             .pinesTheme(theme)
         }
-        .pinesSurface(.chrome, padding: theme.spacing.small)
+        .pinesSurface(.chrome, padding: chromePadding)
         .contentShape(RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
         .onTapGesture {
             setFocus(true)
@@ -137,7 +137,7 @@ struct ChatComposerBar: View {
     }
 
     private var compactLayout: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
             inputField
 
             HStack(spacing: theme.spacing.small) {
@@ -159,6 +159,14 @@ struct ChatComposerBar: View {
                 sendButton
             }
         }
+    }
+
+    private var layoutSpacing: CGFloat {
+        horizontalSizeClass == .compact ? theme.spacing.xsmall : theme.spacing.small
+    }
+
+    private var chromePadding: CGFloat {
+        horizontalSizeClass == .compact ? theme.spacing.xsmall : theme.spacing.small
     }
 
     private var attachmentTray: some View {
