@@ -13,6 +13,7 @@ struct SettingsDetailView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var haptics: PinesHaptics
     let section: PinesSettingsSection
     let executionMode: AgentExecutionMode
@@ -178,12 +179,12 @@ struct SettingsDetailView: View {
     @ViewBuilder
     private var inferenceDashboard: some View {
         PinesCardSection("Execution", subtitle: "Routing policy for local inference and configured providers.", systemImage: "point.3.connected.trianglepath.dotted") {
-            Picker("Execution mode", selection: $appModel.executionMode) {
+            Picker("Execution mode", selection: $settingsState.executionMode) {
                 ForEach(AgentExecutionMode.allCases, id: \.self) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
-            .onChange(of: appModel.executionMode) { _, _ in
+            .onChange(of: settingsState.executionMode) { _, _ in
                 Task { await appModel.saveSettings(services: services) }
             }
         }
@@ -197,39 +198,39 @@ struct SettingsDetailView: View {
     private var generationLimitsCard: some View {
         PinesCardSection("Generation Limits", subtitle: "Completion and local context budgets used for chat and sampling.", systemImage: "slider.horizontal.3") {
             Stepper(
-                "Cloud completion tokens: \(appModel.cloudMaxCompletionTokens.formatted())",
-                value: $appModel.cloudMaxCompletionTokens,
+                "Cloud completion tokens: \(settingsState.cloudMaxCompletionTokens.formatted())",
+                value: $settingsState.cloudMaxCompletionTokens,
                 in: AppSettingsSnapshot.minCompletionTokens...AppSettingsSnapshot.maxCompletionTokens,
                 step: 1024
             )
-            .onChange(of: appModel.cloudMaxCompletionTokens) { _, _ in
+            .onChange(of: settingsState.cloudMaxCompletionTokens) { _, _ in
                 Task { await appModel.saveSettings(services: services) }
             }
 
             Stepper(
-                "Local completion tokens: \(appModel.localMaxCompletionTokens.formatted())",
-                value: $appModel.localMaxCompletionTokens,
+                "Local completion tokens: \(settingsState.localMaxCompletionTokens.formatted())",
+                value: $settingsState.localMaxCompletionTokens,
                 in: AppSettingsSnapshot.minCompletionTokens...AppSettingsSnapshot.maxCompletionTokens,
                 step: 256
             )
-            .onChange(of: appModel.localMaxCompletionTokens) { _, _ in
+            .onChange(of: settingsState.localMaxCompletionTokens) { _, _ in
                 Task { await appModel.saveSettings(services: services) }
             }
 
             Stepper(
-                "Local context tokens: \(appModel.localMaxContextTokens.formatted())",
-                value: $appModel.localMaxContextTokens,
+                "Local context tokens: \(settingsState.localMaxContextTokens.formatted())",
+                value: $settingsState.localMaxContextTokens,
                 in: AppSettingsSnapshot.minLocalContextTokens...AppSettingsSnapshot.maxLocalContextTokens,
                 step: 1024
             )
-            .onChange(of: appModel.localMaxContextTokens) { _, _ in
+            .onChange(of: settingsState.localMaxContextTokens) { _, _ in
                 Task { await appModel.saveSettings(services: services) }
             }
 
             PinesKeyValueGrid(items: [
-                .init("Cloud completion", "\(appModel.cloudMaxCompletionTokens.formatted()) tokens", systemImage: "cloud"),
-                .init("Local completion", "\(appModel.localMaxCompletionTokens.formatted()) tokens", systemImage: "cpu"),
-                .init("Local context", "\(appModel.localMaxContextTokens.formatted()) tokens", systemImage: "text.word.spacing")
+                .init("Cloud completion", "\(settingsState.cloudMaxCompletionTokens.formatted()) tokens", systemImage: "cloud"),
+                .init("Local completion", "\(settingsState.localMaxCompletionTokens.formatted()) tokens", systemImage: "cpu"),
+                .init("Local context", "\(settingsState.localMaxContextTokens.formatted()) tokens", systemImage: "text.word.spacing")
             ])
         }
         .id(SettingsDetailAnchor.generationLimits)
@@ -273,7 +274,7 @@ struct SettingsDetailView: View {
 
     private var huggingFaceCard: some View {
         PinesCardSection("Hugging Face", subtitle: "Hub token used for gated model downloads.", systemImage: "key") {
-            PinesKeyValueGrid(items: [.init("Hub token", appModel.huggingFaceCredentialStatus, systemImage: "checkmark.seal")])
+            PinesKeyValueGrid(items: [.init("Hub token", settingsState.huggingFaceCredentialStatus, systemImage: "checkmark.seal")])
             SecureField("Access token", text: $huggingFaceToken)
                 .textContentType(.password)
                 .pinesFieldChrome()
@@ -317,37 +318,37 @@ struct SettingsDetailView: View {
     private var privacyDashboard: some View {
         PinesCardSection("Storage and Sync", subtitle: "Local database protection and private iCloud sync controls.", systemImage: "externaldrive.badge.icloud") {
             PinesKeyValueGrid(items: [
-                .init("Store", appModel.storeConfiguration.databaseFileName, systemImage: "internaldrive", copyable: true),
-                .init("Protection", appModel.storeConfiguration.dataProtection.title, systemImage: "lock.shield"),
+                .init("Store", settingsState.storeConfiguration.databaseFileName, systemImage: "internaldrive", copyable: true),
+                .init("Protection", settingsState.storeConfiguration.dataProtection.title, systemImage: "lock.shield"),
                 .init("iCloud", iCloudSyncAvailable ? "Available" : "Unavailable", systemImage: "icloud")
             ])
 
             Toggle("Private iCloud sync", isOn: Binding(
-                get: { iCloudSyncAvailable && appModel.storeConfiguration.iCloudSyncEnabled },
+                get: { iCloudSyncAvailable && settingsState.storeConfiguration.iCloudSyncEnabled },
                 set: { value in
-                    appModel.storeConfiguration.iCloudSyncEnabled = iCloudSyncAvailable && value
+                    settingsState.storeConfiguration.iCloudSyncEnabled = iCloudSyncAvailable && value
                     Task { await appModel.saveSettings(services: services) }
                 }
             ))
             .disabled(!iCloudSyncAvailable)
 
             Toggle("Sync source documents", isOn: Binding(
-                get: { appModel.storeConfiguration.syncsSourceDocuments },
+                get: { settingsState.storeConfiguration.syncsSourceDocuments },
                 set: { value in
-                    appModel.storeConfiguration.syncsSourceDocuments = value
+                    settingsState.storeConfiguration.syncsSourceDocuments = value
                     Task { await appModel.saveSettings(services: services) }
                 }
             ))
-            .disabled(!iCloudSyncAvailable || !appModel.storeConfiguration.iCloudSyncEnabled)
+            .disabled(!iCloudSyncAvailable || !settingsState.storeConfiguration.iCloudSyncEnabled)
 
             Toggle("Sync embeddings", isOn: Binding(
-                get: { appModel.storeConfiguration.syncsEmbeddings },
+                get: { settingsState.storeConfiguration.syncsEmbeddings },
                 set: { value in
-                    appModel.storeConfiguration.syncsEmbeddings = value
+                    settingsState.storeConfiguration.syncsEmbeddings = value
                     Task { await appModel.saveSettings(services: services) }
                 }
             ))
-            .disabled(!iCloudSyncAvailable || !appModel.storeConfiguration.iCloudSyncEnabled)
+            .disabled(!iCloudSyncAvailable || !settingsState.storeConfiguration.iCloudSyncEnabled)
         }
         .id(SettingsDetailAnchor.storageAndSync)
 
@@ -388,26 +389,26 @@ struct SettingsDetailView: View {
                     providerAPIKey = ""
                 }
             } label: {
-                if appModel.isSavingCloudProvider {
+                if settingsState.isSavingCloudProvider {
                     Label("Saving", systemImage: "hourglass")
                 } else {
                     Label("Save provider", systemImage: "key")
                 }
             }
             .disabled(
-                appModel.isSavingCloudProvider
+                settingsState.isSavingCloudProvider
                     || providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             )
             .pinesButtonStyle(.primary, fillWidth: true)
 
-            if appModel.isRefreshingCloudModels {
+            if settingsState.isRefreshingCloudModels {
                 Label("Refreshing cloud models", systemImage: "arrow.triangle.2.circlepath")
                     .font(theme.typography.caption)
                     .foregroundStyle(theme.colors.secondaryText)
             }
 
-            ForEach(appModel.cloudProviders) { provider in
+            ForEach(settingsState.cloudProviders) { provider in
                 providerRow(provider)
             }
         }
@@ -415,7 +416,7 @@ struct SettingsDetailView: View {
     }
 
     private func providerRow(_ provider: CloudProviderConfiguration) -> some View {
-        let isValidating = appModel.validatingCloudProviderIDs.contains(provider.id)
+        let isValidating = settingsState.validatingCloudProviderIDs.contains(provider.id)
         return HStack(spacing: theme.spacing.medium) {
             VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
                 Text(provider.displayName)
@@ -468,7 +469,7 @@ struct SettingsDetailView: View {
 
     private var toolKeysCard: some View {
         PinesCardSection("Agent Tool Keys", subtitle: "Credentials for built-in external tools.", systemImage: "wrench.and.screwdriver") {
-            PinesKeyValueGrid(items: [.init("Brave Search", appModel.braveSearchCredentialStatus, systemImage: "magnifyingglass")])
+            PinesKeyValueGrid(items: [.init("Brave Search", settingsState.braveSearchCredentialStatus, systemImage: "magnifyingglass")])
             SecureField("Brave Search API key", text: $braveSearchKey)
                 .textContentType(.password)
                 .pinesFieldChrome()
@@ -597,10 +598,10 @@ struct SettingsDetailView: View {
 
     private var mcpServersCard: some View {
         PinesCardSection("MCP Servers", subtitle: "Configured servers, grouped capabilities, and runtime state.", systemImage: "rectangle.connected.to.line.below") {
-            if appModel.mcpServers.isEmpty {
+            if settingsState.mcpServers.isEmpty {
                 PinesEmptyState(title: "No MCP servers", detail: "Add a streamable HTTP endpoint to expose tools to agents.", systemImage: "server.rack")
             } else {
-                ForEach(appModel.mcpServers) { server in
+                ForEach(settingsState.mcpServers) { server in
                     mcpServerCard(server)
                 }
             }
@@ -985,7 +986,7 @@ struct SettingsDetailView: View {
 
     private func filteredMCPTools(for server: MCPServerConfiguration) -> [MCPToolRecord] {
         let query = mcpToolSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return appModel.mcpTools.filter { tool in
+        return settingsState.mcpTools.filter { tool in
             guard tool.serverID == server.id else { return false }
             guard !query.isEmpty else { return true }
             return [tool.displayName, tool.namespacedName, tool.description, tool.originalName]
@@ -997,7 +998,7 @@ struct SettingsDetailView: View {
 
     private func filteredMCPResources(for server: MCPServerConfiguration) -> [MCPResourceRecord] {
         let query = mcpResourceSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return appModel.mcpResources.filter { resource in
+        return settingsState.mcpResources.filter { resource in
             guard resource.serverID == server.id else { return false }
             guard !query.isEmpty else { return true }
             return [
@@ -1012,7 +1013,7 @@ struct SettingsDetailView: View {
 
     private func filteredMCPResourceTemplates(for server: MCPServerConfiguration) -> [MCPResourceTemplateRecord] {
         let query = mcpResourceSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return appModel.mcpResourceTemplates.filter { template in
+        return settingsState.mcpResourceTemplates.filter { template in
             guard template.serverID == server.id else { return false }
             guard !query.isEmpty else { return true }
             return [
@@ -1027,7 +1028,7 @@ struct SettingsDetailView: View {
 
     private func filteredMCPPrompts(for server: MCPServerConfiguration) -> [MCPPromptRecord] {
         let query = mcpPromptSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return appModel.mcpPrompts.filter { prompt in
+        return settingsState.mcpPrompts.filter { prompt in
             guard prompt.serverID == server.id else { return false }
             guard !query.isEmpty else { return true }
             return [
@@ -1069,10 +1070,10 @@ struct SettingsDetailView: View {
         .id(SettingsDetailAnchor.architectureHealth)
 
         PinesCardSection("Audit Timeline", subtitle: "Recent privacy-preserving system events.", systemImage: "clock.arrow.circlepath") {
-            if appModel.auditEvents.isEmpty {
+            if settingsState.auditEvents.isEmpty {
                 PinesEmptyState(title: "No audit events", detail: "Audit entries appear here when the system records notable actions.", systemImage: "checkmark.shield")
             } else {
-                PinesTimeline(items: Array(appModel.auditEvents.prefix(8)).enumerated().map { index, event in
+                PinesTimeline(items: Array(settingsState.auditEvents.prefix(8)).enumerated().map { index, event in
                     PinesTimelineItem(
                         title: event.category.rawValue,
                         detail: [event.summary, event.redactedPayload].compactMap(\.self).joined(separator: "\n"),

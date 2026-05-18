@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedSectionID: PinesSettingsSection.ID?
 
@@ -13,11 +14,11 @@ struct SettingsView: View {
             return nil
         }
 
-        return appModel.settingsSections.first { $0.id == selectedSectionID }
+        return settingsState.settingsSections.first { $0.id == selectedSectionID }
     }
 
     private var defaultSectionID: PinesSettingsSection.ID? {
-        shouldAutoSelectSidebarItem ? appModel.settingsSections.first?.id : nil
+        shouldAutoSelectSidebarItem ? settingsState.settingsSections.first?.id : nil
     }
 
     private var shouldAutoSelectSidebarItem: Bool {
@@ -28,7 +29,7 @@ struct SettingsView: View {
         NavigationSplitView {
             List(selection: $selectedSectionID) {
                 Section("Settings") {
-                    ForEach(appModel.settingsSections) { section in
+                    ForEach(settingsState.settingsSections) { section in
                         NavigationLink(value: section.id) {
                             SettingsSectionRow(section: section, isSelected: selectedSectionID == section.id)
                         }
@@ -42,7 +43,7 @@ struct SettingsView: View {
             .onChange(of: horizontalSizeClass) { _, _ in
                 selectDefaultSectionIfNeeded()
             }
-            .onChange(of: appModel.settingsSections) { _, sections in
+            .onChange(of: settingsState.settingsSections) { _, sections in
                 if let selectedSectionID, !sections.contains(where: { $0.id == selectedSectionID }) {
                     self.selectedSectionID = nil
                 }
@@ -56,10 +57,10 @@ struct SettingsView: View {
             if let selectedSection {
                 SettingsDetailView(
                     section: selectedSection,
-                    executionMode: appModel.executionMode,
-                    storeConfiguration: appModel.storeConfiguration,
-                    selectedThemeTemplate: $appModel.selectedThemeTemplate,
-                    interfaceMode: $appModel.interfaceMode
+                    executionMode: settingsState.executionMode,
+                    storeConfiguration: settingsState.storeConfiguration,
+                    selectedThemeTemplate: $settingsState.selectedThemeTemplate,
+                    interfaceMode: $settingsState.interfaceMode
                 )
             } else {
                 PinesEmptyState(
@@ -73,7 +74,7 @@ struct SettingsView: View {
 
     private func selectDefaultSectionIfNeeded() {
         guard shouldAutoSelectSidebarItem else { return }
-        selectedSectionID = selectedSectionID ?? appModel.settingsSections.first?.id
+        selectedSectionID = selectedSectionID ?? settingsState.settingsSections.first?.id
     }
 }
 

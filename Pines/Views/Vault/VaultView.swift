@@ -8,6 +8,7 @@ struct VaultView: View {
     @Environment(\.pinesServices) private var services
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var vaultState: PinesVaultState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedItemID: PinesVaultItemPreview.ID?
     @State private var showingImporter = false
@@ -18,15 +19,15 @@ struct VaultView: View {
             return nil
         }
 
-        return appModel.vaultItems.first { $0.id == selectedItemID }
+        return vaultState.vaultItems.first { $0.id == selectedItemID }
     }
 
     private var defaultItemID: PinesVaultItemPreview.ID? {
-        shouldAutoSelectSidebarItem ? appModel.vaultItems.first?.id : nil
+        shouldAutoSelectSidebarItem ? vaultState.vaultItems.first?.id : nil
     }
 
     private var vaultItemIDs: [PinesVaultItemPreview.ID] {
-        appModel.vaultItems.map(\.id)
+        vaultState.vaultItems.map(\.id)
     }
 
     private var shouldAutoSelectSidebarItem: Bool {
@@ -40,7 +41,7 @@ struct VaultView: View {
 
                 if !searchInput.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Section("Search results") {
-                        ForEach(appModel.vaultSearchResults) { result in
+                        ForEach(vaultState.vaultSearchResults) { result in
                             NavigationLink(value: result.document.id) {
                                 VaultSearchResultRow(result: result)
                             }
@@ -50,7 +51,7 @@ struct VaultView: View {
                 }
 
                 Section("Vault") {
-                    ForEach(appModel.vaultItems) { item in
+                    ForEach(vaultState.vaultItems) { item in
                         NavigationLink(value: item.id) {
                             VaultItemRow(item: item, isSelected: selectedItemID == item.id)
                         }
@@ -72,14 +73,14 @@ struct VaultView: View {
 
                     Button {
                         haptics.play(.primaryAction)
-                        appModel.isVaultSearchPresented = true
+                        vaultState.isVaultSearchPresented = true
                     } label: {
                         Image(systemName: "magnifyingglass")
                     }
                     .accessibilityLabel("Search vault")
                 }
             }
-            .searchable(text: vaultSearchBinding, isPresented: $appModel.isVaultSearchPresented, prompt: "Search vault")
+            .searchable(text: vaultSearchBinding, isPresented: $vaultState.isVaultSearchPresented, prompt: "Search vault")
             .onSubmit(of: .search) {
                 Task { await appModel.searchVault(searchInput.text, services: services) }
             }
@@ -123,7 +124,7 @@ struct VaultView: View {
 
     private func selectDefaultItemIfNeeded() {
         guard shouldAutoSelectSidebarItem else { return }
-        selectedItemID = selectedItemID ?? appModel.vaultItems.first?.id
+        selectedItemID = selectedItemID ?? vaultState.vaultItems.first?.id
     }
 
     private var vaultSearchBinding: Binding<String> {
@@ -132,7 +133,7 @@ struct VaultView: View {
             set: { newValue in
                 searchInput.text = newValue
                 if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    appModel.vaultSearchResults = []
+                    vaultState.vaultSearchResults = []
                 }
             }
         )
@@ -148,13 +149,14 @@ private struct VaultEmbeddingSetupSection: View {
     @Environment(\.pinesServices) private var services
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var vaultState: PinesVaultState
 
     private var activeProfile: VaultEmbeddingProfile? {
-        appModel.vaultEmbeddingProfiles.first(where: \.isActive)
+        vaultState.vaultEmbeddingProfiles.first(where: \.isActive)
     }
 
     private var selectableProfiles: [VaultEmbeddingProfile] {
-        appModel.vaultEmbeddingProfiles.filter { $0.status != .failed }
+        vaultState.vaultEmbeddingProfiles.filter { $0.status != .failed }
     }
 
     var body: some View {
@@ -186,19 +188,19 @@ private struct VaultEmbeddingSetupSection: View {
                 }
 
                 Button {
-                    if appModel.isVaultReindexing {
+                    if vaultState.isVaultReindexing {
                         appModel.cancelVaultReindex()
                     } else {
                         Task { await appModel.reindexVault(services: services) }
                     }
                 } label: {
                     Label(
-                        appModel.isVaultReindexing ? "Cancel reindex" : "Reindex vault",
-                        systemImage: appModel.isVaultReindexing ? "xmark.circle" : "arrow.triangle.2.circlepath"
+                        vaultState.isVaultReindexing ? "Cancel reindex" : "Reindex vault",
+                        systemImage: vaultState.isVaultReindexing ? "xmark.circle" : "arrow.triangle.2.circlepath"
                     )
                 }
 
-                if let activeJob = appModel.vaultEmbeddingJobs.first(where: { $0.profileID == activeProfile.id && $0.status == .running }) {
+                if let activeJob = vaultState.vaultEmbeddingJobs.first(where: { $0.profileID == activeProfile.id && $0.status == .running }) {
                     Text("\(activeJob.processedChunks)/\(activeJob.totalChunks) chunks embedded")
                         .font(theme.typography.caption)
                         .foregroundStyle(theme.colors.secondaryText)
@@ -295,6 +297,7 @@ private struct VaultDetailView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var vaultState: PinesVaultState
     let item: PinesVaultItemPreview
 
     var body: some View {
@@ -367,19 +370,19 @@ private struct VaultDetailView: View {
     }
 
     private var indexSummary: String {
-        if let active = appModel.vaultEmbeddingProfiles.first(where: \.isActive) {
+        if let active = vaultState.vaultEmbeddingProfiles.first(where: \.isActive) {
             return "\(item.activeProfileEmbeddedChunks)/\(item.activeProfileTotalChunks) chunks are embedded with \(active.displayName). Text search covers all chunks."
         }
         return "\(item.chunks.count) chunks are available for text search. Add an embedding provider for semantic retrieval."
     }
 
     private var activityRows: [(title: String, image: String)] {
-        let activeJob = appModel.vaultEmbeddingJobs.first { $0.documentID == item.id }
+        let activeJob = vaultState.vaultEmbeddingJobs.first { $0.documentID == item.id }
         var rows = [(String, String)]()
         if let activeJob {
             rows.append(("\(activeJob.status.rawValue.capitalized): \(activeJob.processedChunks)/\(activeJob.totalChunks) chunks", "waveform.path.ecg"))
         }
-        rows.append(("\(appModel.vaultRetrievalEvents.count) recent retrieval events", "magnifyingglass"))
+        rows.append(("\(vaultState.vaultRetrievalEvents.count) recent retrieval events", "magnifyingglass"))
         return rows.map { (title: $0.0, image: $0.1) }
     }
 }

@@ -23,55 +23,256 @@ private struct RemoteModelFileMetadata: Sendable {
 
 @MainActor
 final class PinesAppModel: ObservableObject {
-    @Published var threads: [PinesThreadPreview]
-    @Published var models: [PinesModelPreview]
-    @Published var vaultItems: [PinesVaultItemPreview]
-    @Published var settingsSections: [PinesSettingsSection]
-    @Published var executionMode: AgentExecutionMode
-    @Published var storeConfiguration: LocalStoreConfiguration
-    @Published var selectedThemeTemplate: PinesThemeTemplate
-    @Published var interfaceMode: PinesInterfaceMode
-    @Published var serviceError: String?
-    @Published var chatError: String?
-    @Published var activeRunID: UUID?
-    @Published var auditEvents: [AuditEvent]
-    @Published var cloudProviders: [CloudProviderConfiguration]
-    @Published var mcpServers: [MCPServerConfiguration] = []
-    @Published var mcpTools: [MCPToolRecord] = []
-    @Published var mcpResources: [MCPResourceRecord] = []
-    @Published var mcpResourceTemplates: [MCPResourceTemplateRecord] = []
-    @Published var mcpPrompts: [MCPPromptRecord] = []
-    @Published var pendingToolApproval: ToolApprovalRequest?
-    @Published var pendingCloudContextApproval: CloudContextApprovalRequest?
-    @Published var pendingCloudVaultEmbeddingApproval: CloudVaultEmbeddingApprovalRequest?
-    @Published var pendingMCPSamplingRequest: MCPSamplingRequest?
-    @Published var pendingMCPSamplingResultReview: MCPSamplingResultReview?
-    @Published var mcpSamplingPromptDraft = ""
-    @Published var hapticSignal: PinesHapticSignal?
-    @Published var modelDownloads: [ModelDownloadProgress] = []
-    @Published var isSearchingModels = false
-    @Published var modelSearchError: String?
-    @Published var defaultProviderID: ProviderID?
-    @Published var defaultModelID: ModelID?
-    @Published var cloudMaxCompletionTokens = AppSettingsSnapshot.defaultCloudMaxCompletionTokens
-    @Published var localMaxCompletionTokens = AppSettingsSnapshot.defaultLocalMaxCompletionTokens
-    @Published var localMaxContextTokens = AppSettingsSnapshot.defaultLocalMaxContextTokens
-    @Published var openAIReasoningEffort = AppSettingsSnapshot.defaultOpenAIReasoningEffort
-    @Published var openAITextVerbosity = AppSettingsSnapshot.defaultOpenAITextVerbosity
-    @Published var anthropicEffort = AppSettingsSnapshot.defaultAnthropicEffort
-    @Published var geminiThinkingLevel = AppSettingsSnapshot.defaultGeminiThinkingLevel
-    @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:]
-    @Published var isRefreshingCloudModels = false
-    @Published var isSavingCloudProvider = false
-    @Published var validatingCloudProviderIDs: Set<ProviderID> = []
-    @Published var vaultEmbeddingProfiles: [VaultEmbeddingProfile] = []
-    @Published var vaultEmbeddingJobs: [VaultEmbeddingJob] = []
-    @Published var vaultRetrievalEvents: [VaultRetrievalEvent] = []
-    @Published var vaultSearchResults: [VaultSearchResult] = []
-    @Published var isVaultSearchPresented = false
-    @Published var isVaultReindexing = false
-    @Published var huggingFaceCredentialStatus = "Not configured"
-    @Published var braveSearchCredentialStatus = "Not configured"
+    let chatState: PinesChatState
+    let modelState: PinesModelState
+    let vaultState: PinesVaultState
+    let settingsState: PinesSettingsState
+    let workflowState: PinesWorkflowState
+
+    var threads: [PinesThreadPreview] {
+        get { chatState.threads }
+        set { chatState.threads = newValue }
+    }
+
+    var chatError: String? {
+        get { chatState.chatError }
+        set { chatState.chatError = newValue }
+    }
+
+    var activeRunID: UUID? {
+        get { chatState.activeRunID }
+        set { chatState.activeRunID = newValue }
+    }
+
+    var models: [PinesModelPreview] {
+        get { modelState.models }
+        set { modelState.models = newValue }
+    }
+
+    var modelDownloads: [ModelDownloadProgress] {
+        get { modelState.modelDownloads }
+        set { modelState.modelDownloads = newValue }
+    }
+
+    var isSearchingModels: Bool {
+        get { modelState.isSearchingModels }
+        set { modelState.isSearchingModels = newValue }
+    }
+
+    var modelSearchError: String? {
+        get { modelState.modelSearchError }
+        set { modelState.modelSearchError = newValue }
+    }
+
+    var defaultProviderID: ProviderID? {
+        get { modelState.defaultProviderID }
+        set { modelState.defaultProviderID = newValue }
+    }
+
+    var defaultModelID: ModelID? {
+        get { modelState.defaultModelID }
+        set { modelState.defaultModelID = newValue }
+    }
+
+    var vaultItems: [PinesVaultItemPreview] {
+        get { vaultState.vaultItems }
+        set { vaultState.vaultItems = newValue }
+    }
+
+    var vaultEmbeddingProfiles: [VaultEmbeddingProfile] {
+        get { vaultState.vaultEmbeddingProfiles }
+        set { vaultState.vaultEmbeddingProfiles = newValue }
+    }
+
+    var vaultEmbeddingJobs: [VaultEmbeddingJob] {
+        get { vaultState.vaultEmbeddingJobs }
+        set { vaultState.vaultEmbeddingJobs = newValue }
+    }
+
+    var vaultRetrievalEvents: [VaultRetrievalEvent] {
+        get { vaultState.vaultRetrievalEvents }
+        set { vaultState.vaultRetrievalEvents = newValue }
+    }
+
+    var vaultSearchResults: [VaultSearchResult] {
+        get { vaultState.vaultSearchResults }
+        set { vaultState.vaultSearchResults = newValue }
+    }
+
+    var isVaultSearchPresented: Bool {
+        get { vaultState.isVaultSearchPresented }
+        set { vaultState.isVaultSearchPresented = newValue }
+    }
+
+    var isVaultReindexing: Bool {
+        get { vaultState.isVaultReindexing }
+        set { vaultState.isVaultReindexing = newValue }
+    }
+
+    var settingsSections: [PinesSettingsSection] {
+        get { settingsState.settingsSections }
+        set { settingsState.settingsSections = newValue }
+    }
+
+    var executionMode: AgentExecutionMode {
+        get { settingsState.executionMode }
+        set { settingsState.executionMode = newValue }
+    }
+
+    var storeConfiguration: LocalStoreConfiguration {
+        get { settingsState.storeConfiguration }
+        set { settingsState.storeConfiguration = newValue }
+    }
+
+    var selectedThemeTemplate: PinesThemeTemplate {
+        get { settingsState.selectedThemeTemplate }
+        set { settingsState.selectedThemeTemplate = newValue }
+    }
+
+    var interfaceMode: PinesInterfaceMode {
+        get { settingsState.interfaceMode }
+        set { settingsState.interfaceMode = newValue }
+    }
+
+    var auditEvents: [AuditEvent] {
+        get { settingsState.auditEvents }
+        set { settingsState.auditEvents = newValue }
+    }
+
+    var cloudProviders: [CloudProviderConfiguration] {
+        get { settingsState.cloudProviders }
+        set { settingsState.cloudProviders = newValue }
+    }
+
+    var mcpServers: [MCPServerConfiguration] {
+        get { settingsState.mcpServers }
+        set { settingsState.mcpServers = newValue }
+    }
+
+    var mcpTools: [MCPToolRecord] {
+        get { settingsState.mcpTools }
+        set { settingsState.mcpTools = newValue }
+    }
+
+    var mcpResources: [MCPResourceRecord] {
+        get { settingsState.mcpResources }
+        set { settingsState.mcpResources = newValue }
+    }
+
+    var mcpResourceTemplates: [MCPResourceTemplateRecord] {
+        get { settingsState.mcpResourceTemplates }
+        set { settingsState.mcpResourceTemplates = newValue }
+    }
+
+    var mcpPrompts: [MCPPromptRecord] {
+        get { settingsState.mcpPrompts }
+        set { settingsState.mcpPrompts = newValue }
+    }
+
+    var cloudMaxCompletionTokens: Int {
+        get { settingsState.cloudMaxCompletionTokens }
+        set { settingsState.cloudMaxCompletionTokens = newValue }
+    }
+
+    var localMaxCompletionTokens: Int {
+        get { settingsState.localMaxCompletionTokens }
+        set { settingsState.localMaxCompletionTokens = newValue }
+    }
+
+    var localMaxContextTokens: Int {
+        get { settingsState.localMaxContextTokens }
+        set { settingsState.localMaxContextTokens = newValue }
+    }
+
+    var openAIReasoningEffort: OpenAIReasoningEffort {
+        get { settingsState.openAIReasoningEffort }
+        set { settingsState.openAIReasoningEffort = newValue }
+    }
+
+    var openAITextVerbosity: OpenAITextVerbosity {
+        get { settingsState.openAITextVerbosity }
+        set { settingsState.openAITextVerbosity = newValue }
+    }
+
+    var anthropicEffort: AnthropicEffort {
+        get { settingsState.anthropicEffort }
+        set { settingsState.anthropicEffort = newValue }
+    }
+
+    var geminiThinkingLevel: GeminiThinkingLevel {
+        get { settingsState.geminiThinkingLevel }
+        set { settingsState.geminiThinkingLevel = newValue }
+    }
+
+    var cloudModelCatalog: [ProviderID: [CloudProviderModel]] {
+        get { settingsState.cloudModelCatalog }
+        set { settingsState.cloudModelCatalog = newValue }
+    }
+
+    var isRefreshingCloudModels: Bool {
+        get { settingsState.isRefreshingCloudModels }
+        set { settingsState.isRefreshingCloudModels = newValue }
+    }
+
+    var isSavingCloudProvider: Bool {
+        get { settingsState.isSavingCloudProvider }
+        set { settingsState.isSavingCloudProvider = newValue }
+    }
+
+    var validatingCloudProviderIDs: Set<ProviderID> {
+        get { settingsState.validatingCloudProviderIDs }
+        set { settingsState.validatingCloudProviderIDs = newValue }
+    }
+
+    var huggingFaceCredentialStatus: String {
+        get { settingsState.huggingFaceCredentialStatus }
+        set { settingsState.huggingFaceCredentialStatus = newValue }
+    }
+
+    var braveSearchCredentialStatus: String {
+        get { settingsState.braveSearchCredentialStatus }
+        set { settingsState.braveSearchCredentialStatus = newValue }
+    }
+
+    var serviceError: String? {
+        get { workflowState.serviceError }
+        set { workflowState.serviceError = newValue }
+    }
+
+    var pendingToolApproval: ToolApprovalRequest? {
+        get { workflowState.pendingToolApproval }
+        set { workflowState.pendingToolApproval = newValue }
+    }
+
+    var pendingCloudContextApproval: CloudContextApprovalRequest? {
+        get { workflowState.pendingCloudContextApproval }
+        set { workflowState.pendingCloudContextApproval = newValue }
+    }
+
+    var pendingCloudVaultEmbeddingApproval: CloudVaultEmbeddingApprovalRequest? {
+        get { workflowState.pendingCloudVaultEmbeddingApproval }
+        set { workflowState.pendingCloudVaultEmbeddingApproval = newValue }
+    }
+
+    var pendingMCPSamplingRequest: MCPSamplingRequest? {
+        get { workflowState.pendingMCPSamplingRequest }
+        set { workflowState.pendingMCPSamplingRequest = newValue }
+    }
+
+    var pendingMCPSamplingResultReview: MCPSamplingResultReview? {
+        get { workflowState.pendingMCPSamplingResultReview }
+        set { workflowState.pendingMCPSamplingResultReview = newValue }
+    }
+
+    var mcpSamplingPromptDraft: String {
+        get { workflowState.mcpSamplingPromptDraft }
+        set { workflowState.mcpSamplingPromptDraft = newValue }
+    }
+
+    var hapticSignal: PinesHapticSignal? {
+        get { workflowState.hapticSignal }
+        set { workflowState.hapticSignal = newValue }
+    }
     private var didBootstrap = false
     private var didLoadStartupState = false
     private var isBootstrapping = false
@@ -294,6 +495,11 @@ final class PinesAppModel: ObservableObject {
     }
 
     init(
+        chatState: PinesChatState = PinesChatState(),
+        modelState: PinesModelState = PinesModelState(),
+        vaultState: PinesVaultState = PinesVaultState(),
+        settingsState: PinesSettingsState = PinesSettingsState(),
+        workflowState: PinesWorkflowState = PinesWorkflowState(),
         threads: [PinesThreadPreview] = [],
         models: [PinesModelPreview] = [],
         vaultItems: [PinesVaultItemPreview] = [],
@@ -307,6 +513,11 @@ final class PinesAppModel: ObservableObject {
         auditEvents: [AuditEvent] = [],
         cloudProviders: [CloudProviderConfiguration] = []
     ) {
+        self.chatState = chatState
+        self.modelState = modelState
+        self.vaultState = vaultState
+        self.settingsState = settingsState
+        self.workflowState = workflowState
         self.threads = threads
         self.models = models
         self.vaultItems = vaultItems

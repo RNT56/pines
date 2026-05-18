@@ -79,6 +79,7 @@
 		E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */; };
 		E64DF5CED9F4BECBE5446731 /* ModelDownloadLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EB6A8EFD9FE940BEFE80119 /* ModelDownloadLiveActivityController.swift */; };
 		E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */; };
+		BEE51A1E0000000000000001 /* PinesAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEE51A1E0000000000000002 /* PinesAppState.swift */; };
 		E96F244C6E13B6BBAD411CE0 /* WKWebViewBrowserRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */; };
 		EF023CED82C75823EC051432 /* VaultEmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46107CC67D229C2D05C33A59 /* VaultEmbeddingService.swift */; };
 		EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */; };
@@ -182,6 +183,7 @@
 		948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchTool.swift; sourceTree = "<group>"; };
 		989263AE706043656C31B580 /* CoreSurfaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSurfaceTests.swift; sourceTree = "<group>"; };
 		9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
+		BEE51A1E0000000000000002 /* PinesAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppState.swift; sourceTree = "<group>"; };
 		9CB6251B36A1F706D8884A9E /* ModelDownloadSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadSupport.swift; sourceTree = "<group>"; };
 		A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHaptics.swift; sourceTree = "<group>"; };
 		A790E0D7CCFB1AF34B214B13 /* PinesHuggingFaceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHuggingFaceBridge.swift; sourceTree = "<group>"; };
@@ -471,6 +473,7 @@
 			children = (
 				82DE8010D019802F630AAF0B /* PinesApp.swift */,
 				9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */,
+				BEE51A1E0000000000000002 /* PinesAppState.swift */,
 				2CE279F766D8B0CC93D1D150 /* PinesAppModel+MCP.swift */,
 				27F8A15281AD531830EEBB98 /* PinesAppModel+Presentation.swift */,
 				0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */,
@@ -716,6 +719,7 @@
 				52B797063FB95D83A2D63E7A /* PinesAppModel+MCP.swift in Sources */,
 				F3D59B7E54F622FED196570C /* PinesAppModel+Presentation.swift in Sources */,
 				E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */,
+				BEE51A1E0000000000000001 /* PinesAppState.swift in Sources */,
 				2DC7F4355DC8D047D2D5460C /* PinesAppModelTypes.swift in Sources */,
 				D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */,
 				036707C7BBCC21868B91CAA4 /* PinesDesignComponents.swift in Sources */,

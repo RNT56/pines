@@ -8,6 +8,7 @@ struct ChatsView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var chatState: PinesChatState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedThreadID: PinesThreadPreview.ID?
 
@@ -16,15 +17,15 @@ struct ChatsView: View {
             return nil
         }
 
-        return appModel.threads.first { $0.id == selectedThreadID }
+        return chatState.threads.first { $0.id == selectedThreadID }
     }
 
     private var defaultThreadID: PinesThreadPreview.ID? {
-        shouldAutoSelectSidebarItem ? appModel.threads.first?.id : nil
+        shouldAutoSelectSidebarItem ? chatState.threads.first?.id : nil
     }
 
     private var threadIDs: [PinesThreadPreview.ID] {
-        appModel.threads.map(\.id)
+        chatState.threads.map(\.id)
     }
 
     private var shouldAutoSelectSidebarItem: Bool {
@@ -35,7 +36,7 @@ struct ChatsView: View {
         NavigationSplitView {
             List(selection: $selectedThreadID) {
                 Section {
-                    ForEach(appModel.threads) { thread in
+                    ForEach(chatState.threads) { thread in
                         NavigationLink(value: thread.id) {
                             ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
                         }
@@ -121,7 +122,7 @@ struct ChatsView: View {
 
     private func selectDefaultThreadIfNeeded() {
         guard shouldAutoSelectSidebarItem else { return }
-        selectedThreadID = selectedThreadID ?? appModel.threads.first?.id
+        selectedThreadID = selectedThreadID ?? chatState.threads.first?.id
     }
 }
 private struct ChatModelPickerButton: View {
@@ -129,6 +130,7 @@ private struct ChatModelPickerButton: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var modelState: PinesModelState
     @EnvironmentObject private var haptics: PinesHaptics
     let currentProviderID: ProviderID?
     let currentModelID: ModelID?
@@ -276,7 +278,7 @@ private struct ChatModelPickerButton: View {
            let match = options.first(where: { $0.modelID == currentModelID }) {
             return match.displayName
         }
-        if let match = options.first(where: { $0.providerID == appModel.defaultProviderID && $0.modelID == appModel.defaultModelID }) {
+        if let match = options.first(where: { $0.providerID == modelState.defaultProviderID && $0.modelID == modelState.defaultModelID }) {
             return match.displayName
         }
         return fallbackLabel == "No model selected" ? "Select model" : (fallbackLabel ?? "Select model")
@@ -350,6 +352,7 @@ private struct ChatTranscriptView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var chatState: PinesChatState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var retrySpin = false
     @State private var editingMessage: ChatMessage?
@@ -367,8 +370,8 @@ private struct ChatTranscriptView: View {
                             ChatMessageRow(
                                 threadID: thread.id,
                                 message: message,
-                                isStreaming: appModel.activeRunID == message.id,
-                                canEdit: appModel.activeRunID == nil,
+                                isStreaming: chatState.activeRunID == message.id,
+                                canEdit: chatState.activeRunID == nil,
                                 editingMessage: $editingMessage
                             )
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -401,7 +404,7 @@ private struct ChatTranscriptView: View {
                     scrollToBottom(proxy, animated: true)
                 }
             }
-            .onChange(of: appModel.activeRunID) { _, _ in
+            .onChange(of: chatState.activeRunID) { _, _ in
                 if isNearTranscriptBottom {
                     scrollToBottom(proxy, animated: true)
                 }
@@ -442,7 +445,7 @@ private struct ChatTranscriptView: View {
                     Image(systemName: "stop.circle")
                 }
                 .accessibilityLabel("Stop")
-                .disabled(appModel.activeRunID == nil)
+                .disabled(chatState.activeRunID == nil)
 
                 Button {
                     haptics.play(.primaryAction)
@@ -455,13 +458,13 @@ private struct ChatTranscriptView: View {
                         .symbolEffect(.rotate, options: .nonRepeating, value: retrySpin)
                 }
                 .accessibilityLabel("Retry")
-                .disabled(appModel.activeRunID != nil || !thread.messages.contains { $0.role == .user })
+                .disabled(chatState.activeRunID != nil || !thread.messages.contains { $0.role == .user })
             }
         }
         .pinesAppBackground()
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: theme.spacing.small) {
-                if let chatError = appModel.chatError {
+                if let chatError = chatState.chatError {
                     ChatErrorBanner(
                         message: chatError,
                         dismiss: { appModel.dismissChatError() }
@@ -475,7 +478,7 @@ private struct ChatTranscriptView: View {
             }
             .padding(.top, theme.spacing.xsmall)
             .padding(.bottom, theme.spacing.small)
-            .animation(theme.motion.standard, value: appModel.chatError)
+            .animation(theme.motion.standard, value: chatState.chatError)
         }
     }
 
@@ -1245,7 +1248,7 @@ private extension ChatRole {
 
 struct ChatQuickSettingsButton: View {
     @Environment(\.pinesTheme) private var theme
-    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var haptics: PinesHaptics
     let availability: ChatQuickSettingsAvailability
 
@@ -1362,42 +1365,42 @@ struct ChatQuickSettingsButton: View {
 
     private var reasoningSelection: Binding<OpenAIReasoningEffort> {
         Binding {
-            availability.openAIReasoningEfforts.contains(appModel.openAIReasoningEffort)
-                ? appModel.openAIReasoningEffort
+            availability.openAIReasoningEfforts.contains(settingsState.openAIReasoningEffort)
+                ? settingsState.openAIReasoningEffort
                 : defaultReasoningEffort
         } set: { effort in
-            appModel.openAIReasoningEffort = effort
+            settingsState.openAIReasoningEffort = effort
             haptics.play(.primaryAction)
         }
     }
 
     private var verbositySelection: Binding<OpenAITextVerbosity> {
         Binding {
-            appModel.openAITextVerbosity
+            settingsState.openAITextVerbosity
         } set: { verbosity in
-            appModel.openAITextVerbosity = verbosity
+            settingsState.openAITextVerbosity = verbosity
             haptics.play(.primaryAction)
         }
     }
 
     private var anthropicEffortSelection: Binding<AnthropicEffort> {
         Binding {
-            availability.anthropicEfforts.contains(appModel.anthropicEffort)
-                ? appModel.anthropicEffort
+            availability.anthropicEfforts.contains(settingsState.anthropicEffort)
+                ? settingsState.anthropicEffort
                 : defaultAnthropicEffort
         } set: { effort in
-            appModel.anthropicEffort = effort
+            settingsState.anthropicEffort = effort
             haptics.play(.primaryAction)
         }
     }
 
     private var geminiThinkingSelection: Binding<GeminiThinkingLevel> {
         Binding {
-            availability.geminiThinkingLevels.contains(appModel.geminiThinkingLevel)
-                ? appModel.geminiThinkingLevel
+            availability.geminiThinkingLevels.contains(settingsState.geminiThinkingLevel)
+                ? settingsState.geminiThinkingLevel
                 : defaultGeminiThinkingLevel
         } set: { level in
-            appModel.geminiThinkingLevel = level
+            settingsState.geminiThinkingLevel = level
             haptics.play(.primaryAction)
         }
     }
@@ -1435,7 +1438,7 @@ struct ChatQuickSettingsButton: View {
             parts.append("OpenAI reasoning effort \(reasoningSelection.wrappedValue.shortTitle)")
         }
         if availability.supportsOpenAITextVerbosity {
-            parts.append("OpenAI text verbosity \(appModel.openAITextVerbosity.shortTitle)")
+            parts.append("OpenAI text verbosity \(settingsState.openAITextVerbosity.shortTitle)")
         }
         if !availability.anthropicEfforts.isEmpty {
             parts.append("Anthropic thinking effort \(anthropicEffortSelection.wrappedValue.shortTitle)")

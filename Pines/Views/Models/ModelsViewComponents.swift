@@ -426,6 +426,7 @@ struct ModelDetailView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var modelState: PinesModelState
     @EnvironmentObject private var haptics: PinesHaptics
     let model: PinesModelPreview
     @State private var pendingAction: ModelDetailAction?
@@ -482,7 +483,7 @@ struct ModelDetailView: View {
                     PinesInfoTile(title: "Status", value: model.status.title, systemImage: model.status.systemImage, tint: model.status.tint(in: theme))
                     PinesInfoTile(title: "Footprint", value: model.footprint, systemImage: "externaldrive")
                     PinesInfoTile(title: "Context", value: model.contextWindow, systemImage: "text.word.spacing")
-                    if appModel.defaultModelID == model.install.modelID {
+                    if modelState.defaultModelID == model.install.modelID {
                         PinesInfoTile(title: "Default", value: "Selected", systemImage: "checkmark.circle", tint: theme.colors.success)
                     }
                 }
@@ -653,7 +654,7 @@ struct ModelDetailView: View {
     }
 
     private var isDefaultModel: Bool {
-        appModel.defaultModelID == model.install.modelID
+        modelState.defaultModelID == model.install.modelID
     }
 
     private var actionStatusTitle: String {

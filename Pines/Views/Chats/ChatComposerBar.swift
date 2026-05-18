@@ -8,6 +8,8 @@ struct ChatComposerBar: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var chatState: PinesChatState
+    @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var draft = ""
     @State private var attachments: [ChatAttachment] = []
@@ -70,16 +72,16 @@ struct ChatComposerBar: View {
         .animation(theme.motion.fast, value: attachments)
         .animation(theme.motion.fast, value: attachmentError)
         .animation(theme.motion.fast, value: quickSettingsAvailability)
-        .onChange(of: appModel.openAIReasoningEffort) { _, _ in
+        .onChange(of: settingsState.openAIReasoningEffort) { _, _ in
             Task { await appModel.saveSettings(services: services) }
         }
-        .onChange(of: appModel.openAITextVerbosity) { _, _ in
+        .onChange(of: settingsState.openAITextVerbosity) { _, _ in
             Task { await appModel.saveSettings(services: services) }
         }
-        .onChange(of: appModel.anthropicEffort) { _, _ in
+        .onChange(of: settingsState.anthropicEffort) { _, _ in
             Task { await appModel.saveSettings(services: services) }
         }
-        .onChange(of: appModel.geminiThinkingLevel) { _, _ in
+        .onChange(of: settingsState.geminiThinkingLevel) { _, _ in
             Task { await appModel.saveSettings(services: services) }
         }
         .onAppear {
@@ -88,10 +90,10 @@ struct ChatComposerBar: View {
         .onChange(of: runMode) { _, _ in
             refreshAgentToolsIfNeeded()
         }
-        .onChange(of: appModel.mcpTools) { _, _ in
+        .onChange(of: settingsState.mcpTools) { _, _ in
             refreshAgentToolsIfNeeded(force: true)
         }
-        .onChange(of: appModel.braveSearchCredentialStatus) { _, _ in
+        .onChange(of: settingsState.braveSearchCredentialStatus) { _, _ in
             refreshAgentToolsIfNeeded(force: true)
         }
     }
@@ -187,7 +189,7 @@ struct ChatComposerBar: View {
             .padding(.vertical, theme.spacing.xsmall)
             .submitLabel(.send)
             .onSubmit {
-                guard appModel.activeRunID == nil else { return }
+                guard chatState.activeRunID == nil else { return }
                 sendDraft()
             }
     }
@@ -199,7 +201,7 @@ struct ChatComposerBar: View {
         }
         .pickerStyle(.segmented)
         .frame(width: horizontalSizeClass == .compact ? 132 : 150)
-        .disabled(appModel.activeRunID != nil)
+        .disabled(chatState.activeRunID != nil)
         .accessibilityLabel("Run mode")
     }
 
@@ -212,7 +214,7 @@ struct ChatComposerBar: View {
             Image(systemName: "paperclip")
         }
         .accessibilityLabel("Attach")
-        .disabled(appModel.activeRunID != nil || isImportingAttachments || attachments.count >= Self.maxAttachmentCount)
+        .disabled(chatState.activeRunID != nil || isImportingAttachments || attachments.count >= Self.maxAttachmentCount)
         .pinesButtonStyle(.icon)
     }
 
@@ -264,17 +266,17 @@ struct ChatComposerBar: View {
 
     private var sendButton: some View {
         Button {
-            if appModel.activeRunID == nil {
+            if chatState.activeRunID == nil {
                 sendDraft()
             } else {
                 appModel.stopCurrentRun()
             }
         } label: {
-            Image(systemName: appModel.activeRunID == nil ? "arrow.up" : "stop.fill")
+            Image(systemName: chatState.activeRunID == nil ? "arrow.up" : "stop.fill")
                 .symbolEffect(.bounce, options: .nonRepeating, value: didCommitSend)
         }
-        .accessibilityLabel(appModel.activeRunID == nil ? "Send" : "Stop")
-        .disabled(appModel.activeRunID == nil && !canSend)
+        .accessibilityLabel(chatState.activeRunID == nil ? "Send" : "Stop")
+        .disabled(chatState.activeRunID == nil && !canSend)
         .pinesButtonStyle(sendButtonStyle)
     }
 
@@ -283,7 +285,7 @@ struct ChatComposerBar: View {
     }
 
     private var sendButtonStyle: PinesButtonKind {
-        if appModel.activeRunID != nil {
+        if chatState.activeRunID != nil {
             return .destructive
         }
         return canSend ? .primary : .secondary
@@ -291,12 +293,12 @@ struct ChatComposerBar: View {
 
     private var activeMCPPrompts: [MCPPromptRecord] {
         let activeServerIDs = Set(
-            appModel.mcpServers
+            settingsState.mcpServers
                 .filter { $0.enabled && $0.promptsEnabled && $0.status == .ready }
                 .map(\.id)
         )
         guard !activeServerIDs.isEmpty else { return [] }
-        return appModel.mcpPrompts.filter { activeServerIDs.contains($0.serverID) }
+        return settingsState.mcpPrompts.filter { activeServerIDs.contains($0.serverID) }
     }
 
     private var quickSettingsAvailability: ChatQuickSettingsAvailability? {

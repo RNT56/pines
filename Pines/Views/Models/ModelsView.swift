@@ -5,6 +5,7 @@ struct ModelsView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var modelState: PinesModelState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedModelKey: String?
     @State private var selectedTaskFilter: HubTask?
@@ -19,8 +20,8 @@ struct ModelsView: View {
     }
 
     private var displayedModels: [PinesModelPreview] {
-        guard !appliedSearchCriteria.hasDiscoveryCriteria else { return appModel.models }
-        return appModel.models.filter { model in
+        guard !appliedSearchCriteria.hasDiscoveryCriteria else { return modelState.models }
+        return modelState.models.filter { model in
             model.install.state == .installed || model.install.state == .failed || model.hasActiveDownload
         }
     }
@@ -39,7 +40,7 @@ struct ModelsView: View {
     }
 
     private var modelSectionTitle: String {
-        if appModel.isSearchingModels {
+        if modelState.isSearchingModels {
             return "Searching Hugging Face"
         }
         return isDiscovering ? "MLX Hub results" : "Installed models"
@@ -53,9 +54,9 @@ struct ModelsView: View {
                 selectedVerificationFilter: $selectedVerificationFilter,
                 selectedInstallStateFilter: $selectedInstallStateFilter,
                 models: displayedModels,
-                defaultModelID: appModel.defaultModelID,
-                isSearching: appModel.isSearchingModels,
-                searchError: appModel.modelSearchError,
+                defaultModelID: modelState.defaultModelID,
+                isSearching: modelState.isSearchingModels,
+                searchError: modelState.modelSearchError,
                 sectionTitle: modelSectionTitle,
                 isDiscovering: isDiscovering
             )
@@ -132,7 +133,7 @@ struct ModelsView: View {
             .onChange(of: selectedModelKey) { _, _ in
                 haptics.play(.navigationSelected)
             }
-            .onChange(of: appModel.models) { _, models in
+            .onChange(of: modelState.models) { _, models in
                 guard let currentSelection = selectedModelKey else { return }
                 if !models.contains(where: { $0.selectionKey == currentSelection }) || !displayedModels.contains(where: { $0.selectionKey == currentSelection }) {
                     self.selectedModelKey = nil

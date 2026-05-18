@@ -7,7 +7,12 @@ import WatchConnectivity
 
 struct PinesRootView: View {
     @Environment(\.colorScheme) private var systemScheme
-    @StateObject private var appModel = PinesAppModel()
+    @StateObject private var appModel: PinesAppModel
+    @StateObject private var chatState: PinesChatState
+    @StateObject private var modelState: PinesModelState
+    @StateObject private var vaultState: PinesVaultState
+    @StateObject private var settingsState: PinesSettingsState
+    @StateObject private var workflowState: PinesWorkflowState
     @StateObject private var haptics = PinesHaptics()
     @State private var services: PinesAppServices?
     @State private var watchSessionService: PhoneWatchSessionService?
@@ -19,10 +24,32 @@ struct PinesRootView: View {
     @State private var isBootstrapping = false
     @State private var rootCreatedAt = Date()
 
+    init() {
+        let chatState = PinesChatState()
+        let modelState = PinesModelState()
+        let vaultState = PinesVaultState()
+        let settingsState = PinesSettingsState()
+        let workflowState = PinesWorkflowState()
+        _chatState = StateObject(wrappedValue: chatState)
+        _modelState = StateObject(wrappedValue: modelState)
+        _vaultState = StateObject(wrappedValue: vaultState)
+        _settingsState = StateObject(wrappedValue: settingsState)
+        _workflowState = StateObject(wrappedValue: workflowState)
+        _appModel = StateObject(
+            wrappedValue: PinesAppModel(
+                chatState: chatState,
+                modelState: modelState,
+                vaultState: vaultState,
+                settingsState: settingsState,
+                workflowState: workflowState
+            )
+        )
+    }
+
     private var theme: PinesTheme {
         PinesTheme.resolve(
-            template: appModel.selectedThemeTemplate,
-            mode: appModel.interfaceMode,
+            template: settingsState.selectedThemeTemplate,
+            mode: settingsState.interfaceMode,
             systemScheme: systemScheme
         )
     }
@@ -32,6 +59,11 @@ struct PinesRootView: View {
             if isMainUIReady, let services {
                 tabShell(services: services)
                     .environmentObject(appModel)
+                    .environmentObject(chatState)
+                    .environmentObject(modelState)
+                    .environmentObject(vaultState)
+                    .environmentObject(settingsState)
+                    .environmentObject(workflowState)
                     .environmentObject(haptics)
                     .environment(\.pinesServices, services)
                     .environment(\.openPinesModelsPage, PinesOpenModelsPageAction {
@@ -49,7 +81,7 @@ struct PinesRootView: View {
                     .zIndex(1)
             }
         }
-        .preferredColorScheme(appModel.interfaceMode.colorScheme)
+        .preferredColorScheme(settingsState.interfaceMode.colorScheme)
         .task {
             guard !didStartBootstrap, !isBootstrapping else { return }
             isBootstrapping = true
@@ -82,7 +114,7 @@ struct PinesRootView: View {
             didStartBootstrap = true
             services.runtimeMetrics.recordStartupPhase("root_boot_to_main", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
         }
-        .onChange(of: appModel.hapticSignal) { _, signal in
+        .onChange(of: workflowState.hapticSignal) { _, signal in
             guard let signal else { return }
             haptics.play(signal.event)
         }
@@ -95,7 +127,7 @@ struct PinesRootView: View {
             }
         }
         .sheet(item: Binding(
-            get: { appModel.pendingToolApproval },
+            get: { workflowState.pendingToolApproval },
             set: { request in
                 if request == nil {
                     appModel.resolvePendingToolApproval(.denied)
@@ -111,7 +143,7 @@ struct PinesRootView: View {
             .pinesTheme(theme)
         }
         .sheet(item: Binding(
-            get: { appModel.pendingCloudContextApproval },
+            get: { workflowState.pendingCloudContextApproval },
             set: { request in
                 if request == nil {
                     appModel.resolvePendingCloudContextApproval(.cancel)
@@ -128,7 +160,7 @@ struct PinesRootView: View {
             .pinesTheme(theme)
         }
         .sheet(item: Binding(
-            get: { appModel.pendingCloudVaultEmbeddingApproval },
+            get: { workflowState.pendingCloudVaultEmbeddingApproval },
             set: { request in
                 if request == nil {
                     appModel.resolvePendingCloudVaultEmbeddingApproval(false)
@@ -144,7 +176,7 @@ struct PinesRootView: View {
             .pinesTheme(theme)
         }
         .sheet(item: Binding(
-            get: { appModel.pendingMCPSamplingRequest },
+            get: { workflowState.pendingMCPSamplingRequest },
             set: { request in
                 if request == nil {
                     appModel.resolvePendingMCPSampling(false)
@@ -153,7 +185,7 @@ struct PinesRootView: View {
         )) { request in
             MCPSamplingApprovalSheet(
                 request: request,
-                promptDraft: $appModel.mcpSamplingPromptDraft,
+                promptDraft: $workflowState.mcpSamplingPromptDraft,
                 deny: { appModel.resolvePendingMCPSampling(false) },
                 approve: { appModel.resolvePendingMCPSampling(true) }
             )
@@ -161,7 +193,7 @@ struct PinesRootView: View {
             .pinesTheme(theme)
         }
         .sheet(item: Binding(
-            get: { appModel.pendingMCPSamplingResultReview },
+            get: { workflowState.pendingMCPSamplingResultReview },
             set: { review in
                 if review == nil {
                     appModel.resolvePendingMCPSamplingResultReview(false)
