@@ -4,6 +4,8 @@ set -euo pipefail
 project="${PINES_XCODE_PROJECT:-Pines.xcodeproj}"
 scheme="${PINES_XCODE_SCHEME:-Pines}"
 derived_data="${PINES_DERIVED_DATA_PATH:-build/DerivedData}"
+root="$(git rev-parse --show-toplevel)"
+xcodegen=(bash "$root/scripts/ci/xcodegen.sh")
 swiftpm_resolved_file="${PINES_SWIFTPM_PACKAGE_RESOLVED_FILE:-Package.resolved}"
 xcode_resolved_file="${PINES_XCODE_PACKAGE_RESOLVED_FILE:-$project/project.xcworkspace/xcshareddata/swiftpm/Package.resolved}"
 xcode_package_flags=(
@@ -57,7 +59,7 @@ check_generated_project_drift() {
   fi
 
   if ! diff -qr -x xcuserdata -x '*.xcuserstate' "$generated_project_snapshot/project" "$project" >/dev/null; then
-    echo "::error::$project changed after xcodegen generate. Commit the generated project updates."
+    echo "::error::$project changed after pinned XcodeGen generation. Commit the generated project updates."
     diff -ru -x xcuserdata -x '*.xcuserstate' "$generated_project_snapshot/project" "$project" || true
     exit 1
   fi
@@ -79,7 +81,7 @@ check_package_resolution_drift() {
 
 restore_generated_project() {
   echo "Restoring generated Xcode project..."
-  xcodegen generate
+  "${xcodegen[@]}" generate
   check_generated_project_drift
 }
 
@@ -87,7 +89,7 @@ snapshot_generated_project
 snapshot_package_resolution_files
 
 echo "Generating Xcode project..."
-xcodegen generate
+"${xcodegen[@]}" generate
 check_generated_project_drift
 
 echo "Resolving Xcode package dependencies..."

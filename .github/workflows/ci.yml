@@ -73,12 +73,8 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
 
-      - name: Install XcodeGen
-        run: |
-          if ! command -v xcodegen >/dev/null 2>&1; then
-            brew install xcodegen
-          fi
-          xcodegen --version
+      - name: Prepare pinned XcodeGen
+        run: bash scripts/ci/xcodegen.sh --version
 
       - name: Ensure Apple platforms are installed
         run: bash scripts/ci/ensure-xcode-platforms.sh

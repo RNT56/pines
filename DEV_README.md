@@ -40,10 +40,10 @@ For the full ledger, see [docs/STATUS.md](docs/STATUS.md).
 Generate the Xcode project:
 
 ```sh
-xcodegen generate
+bash scripts/ci/xcodegen.sh generate
 ```
 
-Use XcodeGen `2.45.4` or newer so generated project and scheme files match CI.
+Project generation is pinned to XcodeGen `2.45.4` through `scripts/ci/xcodegen.sh`. The wrapper verifies the upstream release checksum and uses the same generator as CI and release packaging.
 
 Run the local core checks:
 

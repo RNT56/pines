@@ -62,7 +62,7 @@ Available in this environment:
 swift build --disable-automatic-resolution
 swift test --disable-automatic-resolution
 swift run --disable-automatic-resolution PinesCoreTestRunner
-xcodegen generate
+bash scripts/ci/xcodegen.sh generate
 bash scripts/ci/run-xcode-validation.sh
 ```
 

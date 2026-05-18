@@ -26,7 +26,7 @@ Third-party dependency notices are documented in THIRD_PARTY_NOTICES.md.
 Build locally with:
 
 \`\`\`sh
-xcodegen generate
+bash scripts/ci/xcodegen.sh generate
 swift build --disable-automatic-resolution
 swift test --disable-automatic-resolution
 swift run --disable-automatic-resolution PinesCoreTestRunner
