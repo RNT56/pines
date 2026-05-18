@@ -273,13 +273,13 @@ public enum CloudProviderModelEligibility: Sendable {
 
         switch providerKind {
         case .openAI:
-            return modelName.hasPrefix("gpt-")
+            return isAllowedOpenAITextModel(modelName)
         case .anthropic:
-            return modelName.hasPrefix("claude-")
+            return isAllowedAnthropicTextModel(modelName)
         case .gemini:
-            return modelName.hasPrefix("gemini-")
+            return isAllowedGeminiTextModel(modelName)
         case .openAICompatible, .openRouter, .custom:
-            return true
+            return isAllowedKnownProviderTextModel(modelName) ?? true
         case .voyageAI:
             return false
         }
@@ -305,13 +305,13 @@ public enum CloudProviderModelEligibility: Sendable {
             .split(separator: "/")
             .last
             .map(String.init) ?? id
-        guard modelName.hasPrefix("gpt-5") || isOpenAIOSeries(modelName) else {
+        guard isOpenAIReasoningFamily(modelName) || isOpenAIOSeries(modelName) else {
             return []
         }
         if modelName.contains("-pro") {
             return [.high]
         }
-        if gpt5MinorVersion(modelName) >= 2 {
+        if isFutureGPTFamily(modelName) || gpt5MinorVersion(modelName) >= 2 {
             return [.none, .minimal, .low, .medium, .high, .xhigh]
         }
         if modelName.hasPrefix("gpt-5.1") {
@@ -367,7 +367,7 @@ public enum CloudProviderModelEligibility: Sendable {
 
     public static func geminiThinkingLevelOptions(for modelID: ModelID) -> [GeminiThinkingLevel] {
         let modelName = normalizedModelName(modelID)
-        guard modelName.contains("gemini-3") else { return [] }
+        guard isAllowedGeminiTextModel(modelName) else { return [] }
         if modelName.contains("flash") {
             return [.minimal, .low, .medium, .high]
         }
@@ -383,6 +383,85 @@ public enum CloudProviderModelEligibility: Sendable {
             .split(separator: "/")
             .last
             .map(String.init) ?? id
+    }
+
+    private static func isAllowedOpenAITextModel(_ modelName: String) -> Bool {
+        guard modelName.hasPrefix("gpt-") else { return false }
+        guard let version = modelVersion(after: "gpt-", in: modelName) else { return false }
+        if version.major > 5 { return true }
+        guard version.major == 5 else { return false }
+        if version.minor >= 5 { return true }
+        if version.minor == 4 {
+            return modelName.hasPrefix("gpt-5.4-mini")
+                || modelName.hasPrefix("gpt-5.4-nano")
+        }
+        return false
+    }
+
+    private static func isAllowedAnthropicTextModel(_ modelName: String) -> Bool {
+        let parts = modelName.split(separator: "-").map(String.init)
+        guard parts.count >= 3, parts[0] == "claude" else { return false }
+        let family = parts[1]
+        guard let major = Int(parts[2]) else { return false }
+        let minor = parts.dropFirst(3).first.flatMap { Int($0) } ?? 0
+        if major > 4 { return ["opus", "sonnet", "haiku"].contains(family) }
+        guard major == 4 else { return false }
+        switch family {
+        case "opus":
+            return minor >= 7
+        case "sonnet":
+            return minor >= 6
+        case "haiku":
+            return minor >= 5
+        default:
+            return false
+        }
+    }
+
+    private static func isAllowedGeminiTextModel(_ modelName: String) -> Bool {
+        guard modelName.hasPrefix("gemini-") else { return false }
+        if modelName.hasPrefix("gemini-3-flash-preview") {
+            return true
+        }
+        guard let version = modelVersion(after: "gemini-", in: modelName) else { return false }
+        if version.major > 3 { return true }
+        return version.major == 3 && version.minor >= 1
+    }
+
+    private static func isAllowedKnownProviderTextModel(_ modelName: String) -> Bool? {
+        if modelName.hasPrefix("gpt-") {
+            return isAllowedOpenAITextModel(modelName)
+        }
+        if modelName.hasPrefix("claude-") {
+            return isAllowedAnthropicTextModel(modelName)
+        }
+        if modelName.hasPrefix("gemini-") {
+            return isAllowedGeminiTextModel(modelName)
+        }
+        return nil
+    }
+
+    private static func isOpenAIReasoningFamily(_ modelName: String) -> Bool {
+        guard let version = modelVersion(after: "gpt-", in: modelName) else { return false }
+        return version.major >= 5
+    }
+
+    private static func isFutureGPTFamily(_ modelName: String) -> Bool {
+        guard let version = modelVersion(after: "gpt-", in: modelName) else { return false }
+        return version.major > 5
+    }
+
+    private static func modelVersion(after prefix: String, in modelName: String) -> (major: Int, minor: Int)? {
+        guard modelName.hasPrefix(prefix) else { return nil }
+        let suffix = modelName.dropFirst(prefix.count)
+        let components = suffix.split { character in
+            character == "." || character == "-"
+        }
+        guard let majorString = components.first, let major = Int(majorString) else {
+            return nil
+        }
+        let minor = components.dropFirst().first.flatMap { Int($0) } ?? 0
+        return (major, minor)
     }
 
     private static func gpt5MinorVersion(_ modelName: String) -> Int {

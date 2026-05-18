@@ -650,7 +650,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     }
 
     private static func supportsGeminiBuiltInAndFunctionToolCombination(_ modelID: ModelID) -> Bool {
-        modelID.rawValue.lowercased().contains("gemini-3")
+        !CloudProviderModelEligibility.geminiThinkingLevelOptions(for: modelID).isEmpty
     }
 
     private func usesOpenAIReasoningChatParameters(modelID: ModelID) -> Bool {
@@ -691,7 +691,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     private func usesGeminiInteractionsAPI(chatRequest: ChatRequest) -> Bool {
         guard configuration.kind == .gemini else { return false }
         let id = chatRequest.modelID.rawValue.lowercased()
-        return id.contains("gemini-3") || id.contains("deep-research")
+        return !CloudProviderModelEligibility.geminiThinkingLevelOptions(for: chatRequest.modelID).isEmpty
+            || id.contains("deep-research")
     }
 
     private var apiBaseURL: URL {
@@ -721,7 +722,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
     private static func geminiAPIVersion(for modelID: ModelID) -> String {
         let id = modelID.rawValue.lowercased()
-        if id.contains("preview") || id.contains("gemini-3") {
+        if id.contains("preview") || !CloudProviderModelEligibility.geminiThinkingLevelOptions(for: modelID).isEmpty {
             return "v1beta"
         }
         return "v1"
@@ -748,7 +749,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             .split(separator: "/")
             .last
             .map(String.init) ?? id
-        return modelName.hasPrefix("gpt-5") || CloudProviderModelEligibility.isOpenAIOSeries(modelName)
+        return !CloudProviderModelEligibility.openAIReasoningEffortOptions(for: ModelID(rawValue: modelName)).isEmpty
+            || CloudProviderModelEligibility.isOpenAIOSeries(modelName)
     }
 
     private func geminiRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {

@@ -431,17 +431,69 @@ struct CoreContractTests {
     }
 
     @Test
-    func openAICloudModelEligibilityKeepsGPT5MiniNanoAndFiltersOSeries() {
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-mini", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-nano", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.1-mini", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.1-nano", providerKind: .openAI))
+    func cloudModelEligibilityKeepsCurrentProviderModelsAndFutureFamilies() {
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5-pro", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5-2026-04-23", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-mini", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-nano-2026-03-17", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.6-mini", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-6", providerKind: .openAI))
+
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-mini", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-pro", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4.1-mini", providerKind: .openAI))
 
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o1", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o3", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o4-mini", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "openai/o3-mini", providerKind: .openRouter))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-4.1", providerKind: .openRouter))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-6", providerKind: .openRouter))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "meta/llama-4-maverick", providerKind: .openRouter))
+
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-4-7", providerKind: .anthropic))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-sonnet-4-6", providerKind: .anthropic))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-haiku-4-5-20251001", providerKind: .anthropic))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-5", providerKind: .anthropic))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-4-6", providerKind: .anthropic))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "claude-sonnet-4-5", providerKind: .anthropic))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "claude-3-7-sonnet-20250219", providerKind: .anthropic))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "anthropic/claude-sonnet-4-5", providerKind: .openRouter))
+
+        #expect(CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/gemini-3.1-pro-preview",
+            providerKind: .gemini,
+            supportedGenerationMethods: ["createInteraction"]
+        ))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/gemini-3-flash-preview",
+            providerKind: .gemini,
+            supportedGenerationMethods: ["createInteraction"]
+        ))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/gemini-3.1-flash-lite",
+            providerKind: .gemini,
+            supportedGenerationMethods: ["generateContent"]
+        ))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/gemini-4-pro",
+            providerKind: .gemini,
+            supportedGenerationMethods: ["generateContent"]
+        ))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/gemini-3-pro-preview",
+            providerKind: .gemini,
+            supportedGenerationMethods: ["generateContent"]
+        ))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/gemini-2.5-pro",
+            providerKind: .gemini,
+            supportedGenerationMethods: ["generateContent"]
+        ))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "google/gemini-2.5-pro", providerKind: .openRouter))
     }
 
     @Test
@@ -1256,6 +1308,38 @@ struct CoreContractTests {
             #expect(name == "calculator.slow")
             #expect(timeoutSeconds == 1)
         }
+    }
+
+    @Test
+    func downloadStagingManifestPreservesReusableFileProgressAcrossPlanRefresh() {
+        var manifest = ModelDownloadStagingManifest(
+            repository: "example/model",
+            revision: "main",
+            totalBytes: 128
+        )
+        manifest.updateFile(
+            path: "model.safetensors",
+            expectedBytes: 128,
+            checksum: "abc",
+            receivedBytes: 64,
+            status: .downloading
+        )
+
+        manifest.mergeDownloadPlan(
+            repository: "example/model",
+            revision: "main",
+            totalBytes: 160,
+            files: [
+                ModelFileInfo(path: "config.json", size: 32),
+                ModelFileInfo(path: "model.safetensors", size: 128, oid: "def"),
+            ]
+        )
+
+        #expect(manifest.totalBytes == 160)
+        #expect(manifest.reusableBytes == 64)
+        #expect(manifest.file(path: "model.safetensors")?.receivedBytes == 64)
+        #expect(manifest.file(path: "model.safetensors")?.checksum == "def")
+        #expect(manifest.file(path: "config.json")?.status == .pending)
     }
 
     private func cloudConfiguration(kind: CloudProviderKind, baseURL: String) -> CloudProviderConfiguration {
