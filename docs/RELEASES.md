@@ -52,6 +52,21 @@ Do not publish an unsigned `.ipa`.
 
 Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed.
 
+## v0.1.0 Preview Readiness
+
+`v0.1.0` is ready to cut as a source/developer-preview release once CI for the target commit is complete. The app and extension marketing versions are already `0.1.0`, release packaging emits only source artifacts plus SHA-256 checksums, and the release workflow keeps unsigned archive validation separate from production distribution.
+
+Before pushing the tag, verify:
+
+- `git status --short` is clean.
+- `git tag --list v0.1.0` is empty.
+- CI is complete and green for the commit to be tagged.
+- `bash scripts/ci/check-public-hygiene.sh`
+- `swift test --disable-automatic-resolution`
+- `swift run --disable-automatic-resolution PinesCoreTestRunner`
+- `bash scripts/ci/run-xcode-validation.sh`
+- `bash scripts/ci/package-release.sh v0.1.0`
+
 ## Future TestFlight Pipeline
 
 When Apple signing is ready, add repository or environment secrets:
