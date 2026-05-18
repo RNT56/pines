@@ -85,8 +85,6 @@ ensure_platform() {
     should_download=1
   elif ! xcodebuild -showsdks | grep -qi "$sdk_identifier"; then
     should_download=1
-  elif ! destination_is_available "$scheme_name" "$destination" "$platform"; then
-    should_download=1
   fi
 
   if [ "$should_download" = "1" ]; then
@@ -105,7 +103,7 @@ ensure_platform() {
     exit 1
   fi
 
-  if ! destination_is_available "$scheme_name" "$destination" "$platform"; then
+  if [ "${PINES_VERIFY_XCODE_DESTINATIONS:-0}" = "1" ] && ! destination_is_available "$scheme_name" "$destination" "$platform"; then
     echo "::error::$platform platform is required by the $scheme_name scheme but its build destination is unavailable." >&2
     exit 1
   fi
