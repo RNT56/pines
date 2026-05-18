@@ -242,6 +242,44 @@ actor GRDBPinesStore:
         }
     }
 
+    func deleteMessages(after messageID: UUID, in conversationID: UUID) async throws {
+        try await database.write { db in
+            guard let anchorRow = try Row.fetchOne(
+                db,
+                sql: """
+                SELECT rowid
+                FROM messages
+                WHERE id = ? AND conversation_id = ? AND deleted_at IS NULL
+                """,
+                arguments: [messageID.uuidString, conversationID.uuidString]
+            ) else {
+                return
+            }
+
+            let updatedAt = Date().timeIntervalSinceReferenceDate
+            try db.execute(
+                sql: """
+                UPDATE messages
+                SET deleted_at = ?, updated_at = ?, sync_state = ?
+                WHERE conversation_id = ?
+                    AND deleted_at IS NULL
+                    AND rowid > ?
+                """,
+                arguments: [
+                    updatedAt,
+                    updatedAt,
+                    SyncState.local.rawValue,
+                    conversationID.uuidString,
+                    anchorRow["rowid"] as Int64,
+                ]
+            )
+            try db.execute(
+                sql: "UPDATE conversations SET updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [updatedAt, SyncState.local.rawValue, conversationID.uuidString]
+            )
+        }
+    }
+
     func updateMessage(
         id: UUID,
         content: String,
@@ -1569,7 +1607,7 @@ actor GRDBPinesStore:
             SELECT id, role, content, created_at, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
             FROM messages
             WHERE conversation_id = ? AND deleted_at IS NULL
-            ORDER BY created_at ASC
+            ORDER BY created_at ASC, rowid ASC
             """,
             arguments: [conversationID.uuidString]
         ).map(message(from:))

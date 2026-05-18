@@ -362,10 +362,17 @@ private struct ChatTranscriptView: View {
     @State private var isNearTranscriptBottom = true
     @State private var isAutoScrollPinned = true
     @State private var isComposerFocused = false
+    @State private var openSwipeMessageID: UUID?
+    @State private var lastTranscriptInteractionAt = Date.distantPast
     let thread: PinesThreadPreview
 
     private var latestAssistantMessageID: UUID? {
         thread.messages.last(where: { $0.role == .assistant })?.id
+    }
+
+    private var activeLiveMessage: PinesLiveChatMessage? {
+        guard let activeRunID = chatState.activeRunID else { return nil }
+        return chatState.liveMessage(for: activeRunID)
     }
 
     var body: some View {
@@ -377,11 +384,12 @@ private struct ChatTranscriptView: View {
                     LazyVStack(spacing: theme.spacing.medium) {
                         ForEach(thread.messages) { message in
                             ChatMessageRow(
-                                threadID: thread.id,
                                 message: message,
+                                liveMessage: chatState.liveMessage(for: message.id),
                                 isStreaming: chatState.activeRunID == message.id,
                                 showsLocalTokenRate: message.id == latestAssistantMessageID,
                                 canEdit: chatState.activeRunID == nil,
+                                openSwipeMessageID: $openSwipeMessageID,
                                 editingMessage: $editingMessage
                             )
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -419,16 +427,26 @@ private struct ChatTranscriptView: View {
                 scrollToBottom(proxy, animated: false)
             }
             .onChange(of: thread.messages.count) { _, _ in
+                guard shouldAutoScrollAfterTranscriptChange else { return }
                 if thread.messages.last?.role == .user {
                     isAutoScrollPinned = true
-                    scrollToBottom(proxy, animated: true)
+                    scrollToBottom(proxy, animated: chatState.activeRunID == nil)
                 } else if isAutoScrollPinned || isNearTranscriptBottom {
-                    scrollToBottom(proxy, animated: true)
+                    scrollToBottom(proxy, animated: chatState.activeRunID == nil)
                 }
             }
             .onChange(of: chatState.activeRunID) { _, _ in
-                if isAutoScrollPinned || isNearTranscriptBottom {
-                    scrollToBottom(proxy, animated: true)
+                if shouldAutoScrollAfterTranscriptChange, isAutoScrollPinned || isNearTranscriptBottom {
+                    scrollToBottom(proxy, animated: chatState.activeRunID == nil)
+                }
+            }
+            .background {
+                if let activeLiveMessage {
+                    LiveChatAutoScrollObserver(liveMessage: activeLiveMessage) {
+                        shouldAutoScrollLiveMessage
+                    } scroll: {
+                        scrollToBottom(proxy, animated: false)
+                    }
                 }
             }
         }
@@ -527,13 +545,26 @@ private struct ChatTranscriptView: View {
     private var transcriptDragGesture: some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .local)
             .onChanged { _ in
+                lastTranscriptInteractionAt = Date()
+                if chatState.activeRunID != nil && !isNearTranscriptBottom {
+                    isAutoScrollPinned = false
+                }
                 guard isComposerFocused else { return }
                 isComposerFocused = false
             }
     }
 
+    private var shouldAutoScrollAfterTranscriptChange: Bool {
+        Date().timeIntervalSince(lastTranscriptInteractionAt) > 0.35
+    }
+
+    private var shouldAutoScrollLiveMessage: Bool {
+        shouldAutoScrollAfterTranscriptChange && (isAutoScrollPinned || isNearTranscriptBottom)
+    }
+
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        if animated {
+        let shouldAnimate = animated && shouldAutoScrollAfterTranscriptChange
+        if shouldAnimate {
             withAnimation(theme.motion.standard) {
                 proxy.scrollTo("chat-bottom", anchor: .bottom)
             }
@@ -553,40 +584,66 @@ private struct ChatTranscriptView: View {
     }
 }
 
+private struct LiveChatAutoScrollObserver: View {
+    @ObservedObject var liveMessage: PinesLiveChatMessage
+    let shouldScroll: () -> Bool
+    let scroll: () -> Void
+    @State private var lastScrollAt = Date.distantPast
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: liveMessage.snapshot) { _, _ in
+                guard shouldScroll() else { return }
+                let now = Date()
+                guard now.timeIntervalSince(lastScrollAt) >= 0.12 else { return }
+                lastScrollAt = now
+                scroll()
+            }
+    }
+}
+
 private struct ChatMessageRow: View {
-    @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var haptics: PinesHaptics
-    let threadID: UUID
     let message: ChatMessage
+    let liveMessage: PinesLiveChatMessage?
     let isStreaming: Bool
     let showsLocalTokenRate: Bool
     let canEdit: Bool
+    @Binding var openSwipeMessageID: UUID?
     @Binding var editingMessage: ChatMessage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-            ChatBubble(
-                message: message,
+        if let liveMessage {
+            LiveChatMessageRowContent(
+                baseMessage: message,
+                liveMessage: liveMessage,
                 isStreaming: isStreaming,
-                canEdit: canEdit && message.role == .user,
-                canAddAttachmentsToVault: !message.attachments.isEmpty,
+                showsLocalTokenRate: showsLocalTokenRate,
+                canEdit: canEdit,
+                openSwipeMessageID: $openSwipeMessageID,
                 copyMessage: copyMessage,
                 editMessage: editMessage,
                 addAttachmentsToVault: addAttachmentsToVault
             )
-
-            if showsLocalTokenRate,
-               let performance = ChatLocalTokenRateSummary(metadata: message.providerMetadata) {
-                ChatLocalTokenRateView(performance: performance)
-                    .padding(.leading, theme.spacing.small)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+        } else {
+            ChatMessageRowContent(
+                message: message,
+                isStreaming: isStreaming,
+                showsLocalTokenRate: showsLocalTokenRate,
+                canEdit: canEdit && message.role == .user,
+                canAddAttachmentsToVault: !message.attachments.isEmpty,
+                openSwipeMessageID: $openSwipeMessageID,
+                copyMessage: { copyMessage(message) },
+                editMessage: editMessage,
+                addAttachmentsToVault: addAttachmentsToVault
+            )
         }
     }
 
-    private func copyMessage() {
+    private func copyMessage(_ message: ChatMessage) {
         let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
         if !content.isEmpty {
             let text = message.role == .assistant
@@ -607,6 +664,90 @@ private struct ChatMessageRow: View {
 
     private func editMessage() {
         editingMessage = message
+    }
+}
+
+private struct LiveChatMessageRowContent: View {
+    @ObservedObject var liveMessage: PinesLiveChatMessage
+    let baseMessage: ChatMessage
+    let isStreaming: Bool
+    let showsLocalTokenRate: Bool
+    let canEdit: Bool
+    @Binding var openSwipeMessageID: UUID?
+    let copyMessage: (ChatMessage) -> Void
+    let editMessage: () -> Void
+    let addAttachmentsToVault: () -> Void
+
+    init(
+        baseMessage: ChatMessage,
+        liveMessage: PinesLiveChatMessage,
+        isStreaming: Bool,
+        showsLocalTokenRate: Bool,
+        canEdit: Bool,
+        openSwipeMessageID: Binding<UUID?>,
+        copyMessage: @escaping (ChatMessage) -> Void,
+        editMessage: @escaping () -> Void,
+        addAttachmentsToVault: @escaping () -> Void
+    ) {
+        self.liveMessage = liveMessage
+        self.baseMessage = baseMessage
+        self.isStreaming = isStreaming
+        self.showsLocalTokenRate = showsLocalTokenRate
+        self.canEdit = canEdit
+        _openSwipeMessageID = openSwipeMessageID
+        self.copyMessage = copyMessage
+        self.editMessage = editMessage
+        self.addAttachmentsToVault = addAttachmentsToVault
+    }
+
+    var body: some View {
+        let message = liveMessage.snapshot.merged(into: baseMessage)
+        ChatMessageRowContent(
+            message: message,
+            isStreaming: isStreaming,
+            showsLocalTokenRate: showsLocalTokenRate,
+            canEdit: canEdit && message.role == .user,
+            canAddAttachmentsToVault: !message.attachments.isEmpty,
+            openSwipeMessageID: $openSwipeMessageID,
+            copyMessage: { copyMessage(message) },
+            editMessage: editMessage,
+            addAttachmentsToVault: addAttachmentsToVault
+        )
+    }
+}
+
+private struct ChatMessageRowContent: View {
+    @Environment(\.pinesTheme) private var theme
+    let message: ChatMessage
+    let isStreaming: Bool
+    let showsLocalTokenRate: Bool
+    let canEdit: Bool
+    let canAddAttachmentsToVault: Bool
+    @Binding var openSwipeMessageID: UUID?
+    let copyMessage: () -> Void
+    let editMessage: () -> Void
+    let addAttachmentsToVault: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+            ChatBubble(
+                message: message,
+                isStreaming: isStreaming,
+                canEdit: canEdit,
+                canAddAttachmentsToVault: canAddAttachmentsToVault,
+                openSwipeMessageID: $openSwipeMessageID,
+                copyMessage: copyMessage,
+                editMessage: editMessage,
+                addAttachmentsToVault: addAttachmentsToVault
+            )
+
+            if showsLocalTokenRate,
+               let performance = ChatLocalTokenRateSummary(metadata: message.providerMetadata) {
+                ChatLocalTokenRateView(performance: performance)
+                    .padding(.leading, theme.spacing.small)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 }
 
@@ -660,14 +801,17 @@ private struct ChatBubble: View {
     let isStreaming: Bool
     let canEdit: Bool
     let canAddAttachmentsToVault: Bool
+    @Binding var openSwipeMessageID: UUID?
     let copyMessage: () -> Void
     let editMessage: () -> Void
     let addAttachmentsToVault: () -> Void
 
     var body: some View {
         SwipeableChatBubble(
+            id: message.id,
             leadingActions: leadingSwipeActions,
-            trailingActions: trailingSwipeActions
+            trailingActions: trailingSwipeActions,
+            openBubbleID: $openSwipeMessageID
         ) {
             bubbleContent
         }
@@ -1140,13 +1284,17 @@ private extension AgentActivityStatus {
 private struct SwipeableChatBubble<Content: View>: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let id: UUID
     let leadingActions: [ChatBubbleSwipeAction]
     let trailingActions: [ChatBubbleSwipeAction]
+    @Binding var openBubbleID: UUID?
     @ViewBuilder let content: () -> Content
     @GestureState private var dragOffset: CGFloat = 0
     @State private var settledOffset: CGFloat = 0
 
-    private let actionWidth: CGFloat = 74
+    private let actionButtonWidth: CGFloat = 72
+    private let actionButtonSpacing: CGFloat = 10
+    private let actionRevealGap: CGFloat = 18
 
     var body: some View {
         ZStack {
@@ -1160,21 +1308,38 @@ private struct SwipeableChatBubble<Content: View>: View {
         }
         .onChange(of: leadingActions.count) { _, _ in closeActions() }
         .onChange(of: trailingActions.count) { _, _ in closeActions() }
+        .onChange(of: openBubbleID) { _, newValue in
+            guard newValue != id, settledOffset != 0 else { return }
+            closeActions(clearOpenBubble: false)
+        }
+        .onDisappear {
+            if openBubbleID == id {
+                openBubbleID = nil
+            }
+        }
     }
 
     private var actionRail: some View {
-        HStack(spacing: theme.spacing.xsmall) {
-            ForEach(leadingActions) { action in
-                ChatBubbleSwipeActionButton(action: action, closeActions: closeActions)
+        HStack(spacing: 0) {
+            HStack(spacing: actionButtonSpacing) {
+                ForEach(leadingActions) { action in
+                    ChatBubbleSwipeActionButton(action: action, width: actionButtonWidth) {
+                        closeActions()
+                    }
+                }
             }
 
             Spacer(minLength: theme.spacing.small)
 
-            ForEach(trailingActions) { action in
-                ChatBubbleSwipeActionButton(action: action, closeActions: closeActions)
+            HStack(spacing: actionButtonSpacing) {
+                ForEach(trailingActions) { action in
+                    ChatBubbleSwipeActionButton(action: action, width: actionButtonWidth) {
+                        closeActions()
+                    }
+                }
             }
         }
-        .padding(.horizontal, theme.spacing.xsmall)
+        .padding(.horizontal, actionRevealGap / 2)
         .frame(maxWidth: .infinity)
     }
 
@@ -1195,11 +1360,11 @@ private struct SwipeableChatBubble<Content: View>: View {
     }
 
     private var leadingRevealWidth: CGFloat {
-        CGFloat(leadingActions.count) * actionWidth
+        actionRevealWidth(for: leadingActions.count)
     }
 
     private var trailingRevealWidth: CGFloat {
-        CGFloat(trailingActions.count) * actionWidth
+        actionRevealWidth(for: trailingActions.count)
     }
 
     private func settle(after value: DragGesture.Value) {
@@ -1211,28 +1376,44 @@ private struct SwipeableChatBubble<Content: View>: View {
         withAnimation(reduceMotion ? nil : theme.motion.fast) {
             if target > threshold, leadingRevealWidth > 0 {
                 settledOffset = leadingRevealWidth
+                openBubbleID = id
             } else if target < -threshold, trailingRevealWidth > 0 {
                 settledOffset = -trailingRevealWidth
+                openBubbleID = id
             } else {
                 settledOffset = 0
+                if openBubbleID == id {
+                    openBubbleID = nil
+                }
             }
         }
     }
 
-    private func closeActions() {
+    private func closeActions(clearOpenBubble: Bool = true) {
         withAnimation(reduceMotion ? nil : theme.motion.fast) {
             settledOffset = 0
+            if clearOpenBubble, openBubbleID == id {
+                openBubbleID = nil
+            }
         }
     }
 
     private func clamp(_ value: CGFloat) -> CGFloat {
         min(max(value, -trailingRevealWidth), leadingRevealWidth)
     }
+
+    private func actionRevealWidth(for count: Int) -> CGFloat {
+        guard count > 0 else { return 0 }
+        return CGFloat(count) * actionButtonWidth
+            + CGFloat(count - 1) * actionButtonSpacing
+            + actionRevealGap
+    }
 }
 
 private struct ChatBubbleSwipeActionButton: View {
     @Environment(\.pinesTheme) private var theme
     let action: ChatBubbleSwipeAction
+    let width: CGFloat
     let closeActions: () -> Void
 
     var body: some View {
@@ -1251,7 +1432,7 @@ private struct ChatBubbleSwipeActionButton: View {
                     .minimumScaleFactor(0.78)
             }
             .foregroundStyle(action.tint)
-            .frame(width: 68)
+            .frame(width: width)
             .frame(minHeight: 58)
             .background(action.tint.opacity(0.14), in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
             .overlay {

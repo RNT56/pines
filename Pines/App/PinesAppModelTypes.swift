@@ -15,6 +15,7 @@ extension ModelInstall {
         if preflight.estimatedBytes > 0 {
             copy.estimatedBytes = preflight.estimatedBytes
         }
+        copy.parameterCount = preflight.parameterCount ?? copy.parameterCount
         copy.license = preflight.license ?? copy.license
         copy.modelType = preflight.modelType ?? copy.modelType
         copy.processorClass = preflight.processorClass ?? copy.processorClass

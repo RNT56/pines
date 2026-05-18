@@ -31,7 +31,9 @@ struct MarkdownMessageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.small) {
-            if let parsedMessage, !parsedMessage.blocks.isEmpty {
+            if isStreaming {
+                StreamingMarkdownText(content: content)
+            } else if let parsedMessage, !parsedMessage.blocks.isEmpty {
                 ForEach(Array(parsedMessage.blocks.enumerated()), id: \.offset) { _, block in
                     MarkdownBlockView(block: block, depth: 0)
                 }
@@ -51,15 +53,9 @@ struct MarkdownMessageView: View {
             return .systemAction
         })
         .task(id: renderTaskID) {
-            if isStreaming {
-                do {
-                    try await Task.sleep(nanoseconds: 125_000_000)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else {
-                    return
-                }
+            guard !isStreaming else {
+                parsedMessage = nil
+                return
             }
             let parsed = await MarkdownRenderCache.shared.parsedMessage(
                 messageID: messageID,
@@ -80,6 +76,21 @@ struct MarkdownMessageView: View {
             return false
         }
         return scheme == "http" || scheme == "https"
+    }
+}
+
+private struct StreamingMarkdownText: View {
+    @Environment(\.pinesTheme) private var theme
+    let content: String
+
+    var body: some View {
+        Text(content)
+            .font(theme.typography.body)
+            .foregroundStyle(theme.colors.primaryText)
+            .fixedSize(horizontal: false, vertical: true)
+            .transaction { transaction in
+                transaction.animation = nil
+            }
     }
 }
 

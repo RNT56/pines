@@ -6,7 +6,7 @@ private enum ChatStreamPerformance {
     static let eventCoalescingInterval: TimeInterval = 0.08
     static let maxCoalescedCharacters = 512
     static let renderInterval: TimeInterval = 0.10
-    static let persistenceInterval: TimeInterval = 0.25
+    static let persistenceInterval: TimeInterval = 0.75
 
     static func coalesced(
         _ source: AsyncThrowingStream<InferenceStreamEvent, Error>
@@ -111,7 +111,8 @@ private struct PreparedRemoteModelInstall: Sendable {
 
 private struct RemoteModelFileMetadata: Sendable {
     var repository: String
-    var estimatedBytes: Int64
+    var estimatedBytes: Int64?
+    var isResourceRejected: Bool
 }
 
 @MainActor
@@ -553,6 +554,30 @@ final class PinesAppModel: ObservableObject {
         applyThreadMessages(messages, conversationID: conversationID, status: status)
     }
 
+    private func beginLiveThreadMessage(_ message: ChatMessage) {
+        chatState.beginLiveMessage(message)
+    }
+
+    private func updateLiveThreadMessage(
+        messageID: UUID,
+        content: String,
+        tokenCount: Int,
+        providerMetadata: [String: String]?,
+        toolCalls: [ToolCallDelta]?
+    ) {
+        chatState.updateLiveMessage(
+            id: messageID,
+            content: content,
+            tokenCount: tokenCount,
+            providerMetadata: providerMetadata,
+            toolCalls: toolCalls
+        )
+    }
+
+    private func removeLiveThreadMessage(_ messageID: UUID) {
+        chatState.removeLiveMessage(id: messageID)
+    }
+
     private func refreshThread(
         conversationID: UUID,
         repository: any ConversationRepository,
@@ -932,7 +957,8 @@ final class PinesAppModel: ObservableObject {
                 mode: mode,
                 enabledAgentToolNames: enabledAgentToolNames,
                 services: services,
-                runToken: runToken
+                runToken: runToken,
+                regeneratingUserMessage: nil
             )
         }
     }
@@ -953,7 +979,14 @@ final class PinesAppModel: ObservableObject {
 
     func retryLastUserMessage(in thread: PinesThreadPreview, services: PinesAppServices) {
         guard let lastUser = thread.messages.last(where: { $0.role == .user }) else { return }
-        startSending(lastUser.content, attachments: lastUser.attachments, in: thread.id, services: services)
+        Task {
+            await regenerateResponse(
+                to: lastUser,
+                in: thread.id,
+                trimStaleMessages: true,
+                services: services
+            )
+        }
     }
 
     func editUserMessage(_ message: ChatMessage, content: String, in threadID: UUID, services: PinesAppServices) async {
@@ -983,6 +1016,8 @@ final class PinesAppModel: ObservableObject {
         guard normalizedContent != message.content else { return }
 
         do {
+            var editedMessage = message
+            editedMessage.content = normalizedContent
             try await repository.updateMessage(
                 id: message.id,
                 content: normalizedContent,
@@ -990,18 +1025,72 @@ final class PinesAppModel: ObservableObject {
                 tokenCount: nil,
                 providerMetadata: nil
             )
-            updateThreadMessage(
-                conversationID: threadID,
-                messageID: message.id,
-                content: normalizedContent,
-                status: .local
+            await regenerateResponse(
+                to: editedMessage,
+                in: threadID,
+                trimStaleMessages: true,
+                services: services
             )
-            await refreshThread(conversationID: threadID, repository: repository, status: .local)
-            clearChatError()
-            emitHaptic(.primaryAction)
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
+        }
+    }
+
+    private func regenerateResponse(
+        to userMessage: ChatMessage,
+        in threadID: UUID,
+        trimStaleMessages: Bool,
+        services: PinesAppServices
+    ) async {
+        guard userMessage.role == .user else {
+            setChatError("Only user messages can be resent.")
+            emitHaptic(.runFailed)
+            return
+        }
+        guard activeRunID == nil else {
+            setChatError("Stop the current run before resending a message.")
+            emitHaptic(.runFailed)
+            return
+        }
+        guard let repository = services.conversationRepository else {
+            setChatError("Conversation repository is unavailable.")
+            emitHaptic(.runFailed)
+            return
+        }
+
+        do {
+            if trimStaleMessages {
+                try await repository.deleteMessages(after: userMessage.id, in: threadID)
+            }
+            let messages = try await repository.messages(in: threadID)
+            let refreshedUserMessage = messages.first(where: { $0.id == userMessage.id }) ?? userMessage
+            applyThreadMessages(messages, conversationID: threadID, status: .local, moveToFront: true)
+            startRegeneratingResponse(to: refreshedUserMessage, in: threadID, services: services)
+        } catch {
+            setChatError(error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    private func startRegeneratingResponse(to userMessage: ChatMessage, in threadID: UUID, services: PinesAppServices) {
+        guard !userMessage.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !userMessage.attachments.isEmpty else { return }
+        clearChatError()
+        emitHaptic(.sendCommitted)
+        currentRunTask?.cancel()
+        let runToken = UUID()
+        currentRunToken = runToken
+        currentRunTask = Task { [weak self] in
+            await self?.sendMessage(
+                userMessage.content,
+                attachments: userMessage.attachments,
+                in: threadID,
+                mode: .chat,
+                enabledAgentToolNames: nil,
+                services: services,
+                runToken: runToken,
+                regeneratingUserMessage: userMessage
+            )
         }
     }
 
@@ -1151,24 +1240,39 @@ final class PinesAppModel: ObservableObject {
         liveAgentActivitiesByMessageID[assistantMessageID] = activities
 
         let currentMessage = threads.first(where: { $0.id == conversationID })?.messages.first(where: { $0.id == assistantMessageID })
-        let metadata = Self.agentActivityProviderMetadata(activities)
-        updateThreadMessage(
-            conversationID: conversationID,
-            messageID: assistantMessageID,
-            content: currentMessage?.content ?? "",
-            status: .streaming,
-            providerMetadata: metadata,
-            toolCalls: currentMessage?.toolCalls
-        )
+        let liveMessage = chatState.liveMessage(for: assistantMessageID)?.snapshot
+        let metadata = agentActivityProviderMetadata(
+            for: assistantMessageID,
+            merging: liveMessage?.providerMetadata ?? currentMessage?.providerMetadata
+        ) ?? Self.agentActivityProviderMetadata(activities)
+        let currentContent = liveMessage?.content ?? currentMessage?.content ?? ""
+        let currentToolCalls = liveMessage?.toolCalls ?? currentMessage?.toolCalls
+        if liveMessage != nil {
+            chatState.updateLiveMessage(
+                id: assistantMessageID,
+                content: currentContent,
+                providerMetadata: metadata,
+                toolCalls: currentToolCalls
+            )
+        } else {
+            updateThreadMessage(
+                conversationID: conversationID,
+                messageID: assistantMessageID,
+                content: currentContent,
+                status: .streaming,
+                providerMetadata: metadata,
+                toolCalls: currentToolCalls
+            )
+        }
         do {
             try await repository.updateMessage(
                 id: assistantMessageID,
-                content: currentMessage?.content ?? "",
+                content: currentContent,
                 status: .streaming,
                 tokenCount: nil,
                 providerMetadata: metadata,
                 toolName: currentMessage?.toolName,
-                toolCalls: currentMessage?.toolCalls
+                toolCalls: currentToolCalls
             )
         } catch {
             recordRecoverableIssue("chat.persist_agent_activity", error: error, services: services)
@@ -1299,11 +1403,13 @@ final class PinesAppModel: ObservableObject {
         mode: PinesRunMode,
         enabledAgentToolNames: Set<String>?,
         services: PinesAppServices,
-        runToken: UUID
+        runToken: UUID,
+        regeneratingUserMessage: ChatMessage?
     ) async {
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let userContent = Self.normalizedUserContent(trimmed, attachments: attachments)
-        guard !userContent.isEmpty || !attachments.isEmpty else { return }
+        let userAttachments = regeneratingUserMessage?.attachments ?? attachments
+        let trimmed = (regeneratingUserMessage?.content ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
+        let userContent = Self.normalizedUserContent(trimmed, attachments: userAttachments)
+        guard !userContent.isEmpty || !userAttachments.isEmpty else { return }
         var runRepository: (any ConversationRepository)?
         var runConversationID: UUID?
         var assistantMessageID: UUID?
@@ -1317,6 +1423,7 @@ final class PinesAppModel: ObservableObject {
         var lastPersistedContent = ""
         var completedToolCalls = [ToolCallDelta]()
         var lastPersistedToolCalls = [ToolCallDelta]()
+        var lastRenderedToolCalls = [ToolCallDelta]()
         var lastRenderedAt = Date.distantPast
         var lastPersistedAt = Date.distantPast
         let isAgentMode = mode == .agent
@@ -1363,9 +1470,17 @@ final class PinesAppModel: ObservableObject {
                 recordRecoverableIssue("chat.settings_load", error: error, services: services)
             }
 
-            let userMessage = ChatMessage(role: .user, content: userContent, attachments: attachments)
-            try await repository.appendMessage(userMessage, status: .complete, conversationID: conversationID, modelID: nil, providerID: nil)
-            appendThreadMessage(userMessage, conversationID: conversationID, status: .local, moveToFront: true)
+            let userMessage: ChatMessage
+            if var regeneratingUserMessage {
+                regeneratingUserMessage.content = userContent
+                regeneratingUserMessage.attachments = userAttachments
+                userMessage = regeneratingUserMessage
+            } else {
+                let newUserMessage = ChatMessage(role: .user, content: userContent, attachments: userAttachments)
+                try await repository.appendMessage(newUserMessage, status: .complete, conversationID: conversationID, modelID: nil, providerID: nil)
+                appendThreadMessage(newUserMessage, conversationID: conversationID, status: .local, moveToFront: true)
+                userMessage = newUserMessage
+            }
 
             let availableTools = isAgentMode
                 ? await agentToolSpecs(services: services, enabledToolNames: enabledAgentToolNames)
@@ -1478,9 +1593,10 @@ final class PinesAppModel: ObservableObject {
             let assistantMessage = ChatMessage(role: .assistant, content: "")
             try await repository.appendMessage(assistantMessage, status: .streaming, conversationID: conversationID, modelID: selectedModelID, providerID: selectedProviderID)
 
-            activeRunID = assistantMessage.id
             assistantMessageID = assistantMessage.id
             liveAgentActivitiesByMessageID[assistantMessage.id] = []
+            beginLiveThreadMessage(assistantMessage)
+            activeRunID = assistantMessage.id
             emitHaptic(.runAccepted)
             appendThreadMessage(assistantMessage, conversationID: conversationID, status: .streaming, moveToFront: true)
 
@@ -1498,17 +1614,40 @@ final class PinesAppModel: ObservableObject {
             ) async throws {
                 let now = Date()
                 let effectiveProviderMetadata = providerMetadataWithRunState(providerMetadata)
-                if force || (content != lastRenderedContent && now.timeIntervalSince(lastRenderedAt) >= ChatStreamPerformance.renderInterval) {
-                    updateThreadMessage(
-                        conversationID: conversationID,
+                let renderedToolCallsChanged = toolCalls.map { $0 != lastRenderedToolCalls } ?? false
+                let shouldRender = force
+                    || renderedToolCallsChanged
+                    || (content != lastRenderedContent && now.timeIntervalSince(lastRenderedAt) >= ChatStreamPerformance.renderInterval)
+                if shouldRender {
+                    if force {
+                        updateThreadMessage(
+                            conversationID: conversationID,
+                            messageID: assistantMessage.id,
+                            content: content,
+                            status: threadStatus,
+                            fallbackMessage: assistantMessage,
+                            providerMetadata: effectiveProviderMetadata,
+                            toolCalls: toolCalls
+                        )
+                    } else {
+                        updateLiveThreadMessage(
+                            messageID: assistantMessage.id,
+                            content: content,
+                            tokenCount: tokenCount,
+                            providerMetadata: effectiveProviderMetadata,
+                            toolCalls: toolCalls
+                        )
+                    }
+                    services.runtimeMetrics.recordChatStreamUIUpdate(
                         messageID: assistantMessage.id,
-                        content: content,
-                        status: threadStatus,
-                        fallbackMessage: assistantMessage,
-                        providerMetadata: effectiveProviderMetadata,
-                        toolCalls: toolCalls
+                        characters: content.count,
+                        tokenCount: tokenCount,
+                        live: !force
                     )
                     lastRenderedContent = content
+                    if let toolCalls {
+                        lastRenderedToolCalls = toolCalls
+                    }
                     lastRenderedAt = now
                 }
                 let shouldPersistToolCalls = toolCalls.map { $0 != lastPersistedToolCalls } ?? false
@@ -1521,6 +1660,11 @@ final class PinesAppModel: ObservableObject {
                         providerMetadata: effectiveProviderMetadata,
                         toolName: nil,
                         toolCalls: toolCalls
+                    )
+                    services.runtimeMetrics.recordChatStreamPersistenceUpdate(
+                        messageID: assistantMessage.id,
+                        characters: content.count,
+                        tokenCount: tokenCount
                     )
                     lastPersistedContent = content
                     if let toolCalls {
@@ -1693,6 +1837,7 @@ final class PinesAppModel: ObservableObject {
                 outputTokens: tokenCount,
                 elapsedSeconds: Date().timeIntervalSince(generationStartedAt)
             )
+            removeLiveThreadMessage(assistantMessage.id)
             clearRunStateIfCurrent(runToken)
             await refreshThread(conversationID: conversationID, repository: repository, status: .local)
         } catch InferenceError.cancelled {
@@ -1720,6 +1865,7 @@ final class PinesAppModel: ObservableObject {
                     providerMetadata: providerMetadataForRun(assistantMessageID: assistantMessageID),
                     toolCalls: completedToolCalls
                 )
+                removeLiveThreadMessage(assistantMessageID)
             }
             if currentRunToken == runToken {
                 clearRunStateIfCurrent(runToken)
@@ -1754,6 +1900,7 @@ final class PinesAppModel: ObservableObject {
                     providerMetadata: providerMetadataForRun(assistantMessageID: assistantMessageID),
                     toolCalls: completedToolCalls
                 )
+                removeLiveThreadMessage(assistantMessageID)
             }
             if currentRunToken == runToken {
                 clearRunStateIfCurrent(runToken)
@@ -2270,6 +2417,7 @@ final class PinesAppModel: ObservableObject {
                 let downloads = modelDownloads
                 let classifier = services.preflightClassifier
                 let runtime = services.mlxRuntime
+                let resourcePolicy = runtime.modelDiscoveryResourcePolicy
                 let preparationTask = Task.detached(priority: .utility) {
                     let preparedModels = try Self.prepareRemoteModelInstalls(
                         remoteModels: remoteModels,
@@ -2277,7 +2425,8 @@ final class PinesAppModel: ObservableObject {
                         downloads: downloads,
                         verification: verification,
                         installState: installState,
-                        classifier: classifier
+                        classifier: classifier,
+                        resourcePolicy: resourcePolicy
                     )
                     let previews = preparedModels.map { prepared in
                         Self.modelPreview(
@@ -2308,6 +2457,7 @@ final class PinesAppModel: ObservableObject {
                     catalog: services.modelCatalog,
                     accessToken: token,
                     runtime: runtime,
+                    resourcePolicy: resourcePolicy,
                     services: services
                 )
             }
@@ -2341,6 +2491,7 @@ final class PinesAppModel: ObservableObject {
         catalog: HuggingFaceModelCatalogService,
         accessToken: String?,
         runtime: MLXRuntimeBridge,
+        resourcePolicy: ModelDiscoveryResourcePolicy,
         services: PinesAppServices
     ) {
         let repositories = previews.compactMap { preview -> String? in
@@ -2356,6 +2507,7 @@ final class PinesAppModel: ObservableObject {
         guard !repositories.isEmpty else { return }
 
         let enrichmentID = UUID()
+        let classifier = services.preflightClassifier
         modelSearchMetadataEnrichmentID = enrichmentID
         modelSearchMetadataTask = Task(priority: .utility) { [weak self] in
             let batchSize = 6
@@ -2373,15 +2525,20 @@ final class PinesAppModel: ObservableObject {
                         do {
                             let metadata = try await catalog.modelMetadata(repository: repository, accessToken: accessToken)
                             try Task.checkCancellation()
-                            guard let estimatedBytes = Self.estimatedDownloadBytes(from: metadata) else { return nil }
+                            let preflightInput = metadata.preflightInput
+                            let preflight = classifier.classify(preflightInput)
+                            let resourceDecision = resourcePolicy.evaluate(preflightInput, modalities: preflight.modalities)
+                            let estimatedBytes = resourceDecision.knownDownloadBytes
+                                ?? Self.estimatedDownloadBytes(from: metadata)
                             return RemoteModelFileMetadata(
                                 repository: metadata.repository,
-                                estimatedBytes: estimatedBytes
+                                estimatedBytes: estimatedBytes,
+                                isResourceRejected: resourceDecision.isRejected
                             )
                         } catch is CancellationError {
                             return nil
                         } catch {
-                            return RemoteModelFileMetadata(repository: repository, estimatedBytes: -1)
+                            return RemoteModelFileMetadata(repository: repository, estimatedBytes: nil, isResourceRejected: false)
                         }
                     }
                 }
@@ -2398,7 +2555,7 @@ final class PinesAppModel: ObservableObject {
                     }
 
                     if let result {
-                        if result.estimatedBytes > 0 {
+                        if result.estimatedBytes != nil || result.isResourceRejected {
                             batch.append(result)
                         } else {
                             failureCount += 1
@@ -2439,13 +2596,25 @@ final class PinesAppModel: ObservableObject {
     ) {
         guard modelSearchMetadataEnrichmentID == enrichmentID, isShowingModelDiscoveryResults else { return }
         let estimatedBytesByRepository = Dictionary(
-            metadata.map { ($0.repository.lowercased(), $0.estimatedBytes) },
+            metadata.compactMap { item -> (String, Int64)? in
+                guard let estimatedBytes = item.estimatedBytes else { return nil }
+                return (item.repository.lowercased(), estimatedBytes)
+            },
             uniquingKeysWith: { current, _ in current }
+        )
+        let rejectedRepositories = Set(
+            metadata
+                .filter(\.isResourceRejected)
+                .map { $0.repository.lowercased() }
         )
         let downloadByRepository = Self.latestDownloadByRepository(modelDownloads)
         var didUpdate = false
-        let previews = models.map { preview in
+        let previews = models.compactMap { preview -> PinesModelPreview? in
             let key = preview.install.repository.lowercased()
+            if rejectedRepositories.contains(key) {
+                didUpdate = true
+                return nil
+            }
             guard let estimatedBytes = estimatedBytesByRepository[key],
                   preview.install.estimatedBytes != estimatedBytes
             else {
@@ -2466,7 +2635,10 @@ final class PinesAppModel: ObservableObject {
     }
 
     private nonisolated static func estimatedDownloadBytes(from summary: RemoteModelSummary) -> Int64? {
-        let totalBytes = summary.files.compactMap(\.size).reduce(Int64(0), +)
+        let totalBytes = ModelDiscoveryResourcePolicy
+            .downloadCandidateFiles(from: summary.files, modalities: Self.modalities(from: summary))
+            .compactMap(\.size)
+            .reduce(Int64(0), +)
         return totalBytes > 0 ? totalBytes : nil
     }
 
@@ -2476,7 +2648,8 @@ final class PinesAppModel: ObservableObject {
         downloads: [ModelDownloadProgress],
         verification: ModelVerificationState?,
         installState: ModelInstallState?,
-        classifier: ModelPreflightClassifier
+        classifier: ModelPreflightClassifier,
+        resourcePolicy: ModelDiscoveryResourcePolicy?
     ) throws -> [PreparedRemoteModelInstall] {
         let installedByRepository = Dictionary(uniqueKeysWithValues: installed.map { ($0.repository.lowercased(), $0) })
         let downloadByRepository = latestDownloadByRepository(downloads)
@@ -2486,6 +2659,10 @@ final class PinesAppModel: ObservableObject {
         for summary in remoteModels {
             try Task.checkCancellation()
             let preflight = classifier.classify(summary.preflightInput)
+            if let resourcePolicy,
+               resourcePolicy.evaluate(summary.preflightInput, modalities: preflight.modalities).isRejected {
+                continue
+            }
             let existingInstall = installedByRepository[summary.repository.lowercased()]
             let install = existingInstall?.enriched(with: preflight)
                 ?? install(from: summary, preflight: preflight)
@@ -2513,6 +2690,7 @@ final class PinesAppModel: ObservableObject {
                 modalities: result.modalities,
                 verification: result.verification,
                 state: result.verification == .unsupported ? .unsupported : .remote,
+                parameterCount: result.parameterCount,
                 estimatedBytes: result.estimatedBytes,
                 license: result.license,
                 modelType: result.modelType,

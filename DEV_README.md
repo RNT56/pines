@@ -238,6 +238,50 @@ Model discovery uses Hugging Face primitives to query MLX-tagged models and fetc
 - safetensors files and size
 - repository tags and license
 
+### Discovery Resource Filter
+
+Pines filters Hugging Face discovery results through `ModelDiscoveryResourcePolicy` before presenting them as downloadable local models. The policy is intentionally in `PinesCore`, not in a SwiftUI view, so the same decision can be reused by search result preparation, late metadata enrichment, manual preflight, and install guardrails.
+
+The current filter level is tied to `DeviceProfile.recommendedMaxModelBytes`, which is the app's on-device weight/download ceiling for the active hardware profile:
+
+| Device profile | Current discovery ceiling | Rationale |
+| --- | ---: | --- |
+| `compactA16Phone` | 2.7 GB | Keeps room for iOS, app state, tokenizer/model configs, Metal heaps, KV cache, and thermal downshift on 6 GB-class devices. |
+| `balancedPhone` / A17 Pro | 3.5 GB | Targets 8 GB-class iPhone/iPad hardware without making 4B 4-bit models the default safe path. |
+| A18 standard | 3.8 GB | Slightly higher than A17 Pro, but still below common 4B MLX downloads. |
+| `proPhone` / A18 Pro | 5.0 GB | Allows selected 4B-class quantized models while leaving KV-cache and UI headroom. |
+| A19 standard / A19 Pro thin | 5.5 GB | Uses the stronger latest phone silicon, but keeps thin chassis and sustained-memory risk conservative. |
+| A19 Pro sustained | 7.0 GB | Allows larger quantized models only on the sustained Pro profile. |
+| `maxTabletOrMac` | 8.0 GB | For high-memory iPad/Mac-class devices. Future verified devices with less than 14 GB physical memory are capped back to 5.5 GB. |
+
+These are download/weight ceilings, not total process-memory ceilings. Local inference also needs KV cache, prompt cache, processor tensors for VLMs, temporary MLX allocations, vault embeddings, app UI state, and free memory for iOS. A model that barely fits on disk can still be a bad runtime default if it leaves no sustained headroom.
+
+As of 2026-05-18, Apple Support lists iPhone 17 as A19, iPhone 17 Pro as A19 Pro, iPad mini as A17 Pro, and iPad Pro M5 as 12 GB RAM for 256/512 GB storage or 16 GB RAM for 1/2 TB storage:
+
+- https://support.apple.com/125089
+- https://support.apple.com/125090
+- https://support.apple.com/en-us/121456
+- https://support.apple.com/en-za/125406
+
+Apple's iPhone technical specs do not publish RAM, so the runtime must keep using `ProcessInfo.processInfo.physicalMemory`, the hardware identifier map in `DeviceProfile`, and MLX/Metal self-test status rather than hard-coding phone RAM assumptions from third-party teardown reports.
+
+Filtering order:
+
+1. Exact downloadable file size wins. Search asks Hugging Face for blob metadata and the policy sums only files Pines would download: `*.safetensors`, `*.json`, `*.jinja`, tokenizer `.model`, `.txt`, and `.tiktoken`, ignoring hidden paths and text-only processor configs.
+2. If exact sizes are above the device profile ceiling, the result is rejected immediately.
+3. If file sizes are incomplete, the policy falls back to repository/tag hints. It parses parameter tokens such as `8B`, `1_7B`, `130M`, MoE totals such as `8x7B`, and total-vs-active names such as `21B-A3B`.
+4. Quantization hints are parsed from names/tags such as `4bit`, `4-bit`, `Q4_K_M`, `NF4`, `MXFP8`, `FP8`, `BF16`, and `FP16`. If no quantization hint exists, the fallback estimate assumes 16-bit weights. For <=4-bit MLX repos, the fallback uses a conservative 1 byte per parameter floor because published MLX safetensor downloads often include packing/scales/metadata overhead and can be much closer to 1 byte/parameter than the theoretical bit width.
+5. Search preparation skips rejected results. Metadata enrichment can remove a previously shown result when exact sizes arrive later. Manual preflight marks oversized repos unsupported. Install resolves missing HEAD sizes and rejects again before creating the queued download.
+
+Unknown-size repositories with no parameter or quantization signal are not rejected at search time, because there is no defensible way to distinguish a tiny repo with incomplete metadata from a huge repo with incomplete metadata. The install path still resolves remote file sizes before downloading and applies the same ceiling.
+
+To adjust this for new devices or runtime changes:
+
+- Update `DeviceProfile` byte ceilings and hardware identifier mapping first. That is the source of truth for the app's local-runtime resource class.
+- If MLX quantized safetensor storage becomes materially smaller or larger, adjust `ModelDiscoveryResourcePolicy.quantizedBytesPerParameterFloor`.
+- Add parser coverage in `CoreContractTests` for new naming patterns before relying on them in discovery.
+- Keep curated models separate. Curated status can make a model recommended or verified, but it must not bypass the resource filter.
+
 Curated models are separate from discoverable models. Keep curated recommendations conservative and device-aware. 1-bit/BitNet models stay experimental unless the exact repository/device combination is verified.
 
 Downloads are staged, resumable through byte ranges, checksum-verified when Hugging Face exposes an LFS SHA-256, and atomically promoted into the app model directory.

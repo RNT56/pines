@@ -110,6 +110,7 @@ public protocol ConversationRepository: Sendable {
     func messages(in conversationID: UUID) async throws -> [ChatMessage]
     func observeMessages(in conversationID: UUID) -> AsyncStream<[ChatMessage]>
     func appendMessage(_ message: ChatMessage, status: MessageStatus, conversationID: UUID, modelID: ModelID?, providerID: ProviderID?) async throws
+    func deleteMessages(after messageID: UUID, in conversationID: UUID) async throws
     func updateMessage(
         id: UUID,
         content: String,

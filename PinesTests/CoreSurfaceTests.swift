@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 import PinesCore
 
@@ -31,5 +32,31 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertEqual(options.semanticBatchSize, 32)
         XCTAssertEqual(options.semanticRerankCount, 1)
         XCTAssertEqual(options.timeoutMilliseconds, 250)
+    }
+
+    func testAppOptsIntoHighRefreshRendering() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let plistURL = repoRoot.appendingPathComponent("Pines/Info.plist")
+        let plistData = try Data(contentsOf: plistURL)
+        let plist = try PropertyListSerialization.propertyList(from: plistData, options: [], format: nil)
+        let info = try XCTUnwrap(plist as? [String: Any])
+
+        XCTAssertEqual(info["CADisableMinimumFrameDurationOnPhone"] as? Bool, true)
+
+        let rootView = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesRootView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(rootView.contains(".pinesHighRefreshRate()"))
+
+        let refreshSupport = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Runtime/PinesRefreshRateSupport.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(refreshSupport.contains("UIUpdateLink"))
+        XCTAssertTrue(refreshSupport.contains("preferredFrameRateRange"))
+        XCTAssertTrue(refreshSupport.contains("requiresContinuousUpdates = false"))
     }
 }

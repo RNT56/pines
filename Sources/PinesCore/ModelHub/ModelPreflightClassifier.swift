@@ -20,6 +20,10 @@ public struct ModelPreflightClassifier: Sendable {
         let processor = input.processorConfigJSON.flatMap(Self.decodeJSONObject)
         let modelType = config?["model_type"] as? String ?? inferredModelType(from: input.tags)
         let processorClass = processor?["processor_class"] as? String
+        let parameterCount = ModelDiscoveryResourcePolicy.inferredParameterCount(
+            repository: input.repository,
+            tags: input.tags
+        )
         let size = input.files.compactMap(\.size).reduce(Int64(0), +)
         let hasSafetensors = input.files.contains { $0.path.hasSuffix(".safetensors") }
         let hasTokenizerJSON = input.files.contains { Self.filename($0.path) == "tokenizer.json" }
@@ -121,6 +125,7 @@ public struct ModelPreflightClassifier: Sendable {
             modalities: modalities,
             modelType: modelType,
             processorClass: processorClass,
+            parameterCount: parameterCount,
             estimatedBytes: size,
             reasons: reasons,
             license: input.license

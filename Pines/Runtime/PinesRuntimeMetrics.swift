@@ -37,6 +37,18 @@ final class PinesRuntimeMetrics: NSObject, @unchecked Sendable {
         )
     }
 
+    func recordChatStreamUIUpdate(messageID: UUID, characters: Int, tokenCount: Int, live: Bool) {
+        logger.debug(
+            "chat_stream_ui_update message=\(messageID.uuidString, privacy: .public) chars=\(characters, privacy: .public) tokens=\(tokenCount, privacy: .public) live=\(live, privacy: .public)"
+        )
+    }
+
+    func recordChatStreamPersistenceUpdate(messageID: UUID, characters: Int, tokenCount: Int) {
+        logger.debug(
+            "chat_stream_persistence_update message=\(messageID.uuidString, privacy: .public) chars=\(characters, privacy: .public) tokens=\(tokenCount, privacy: .public)"
+        )
+    }
+
     func recordVaultRetrieval(resultCount: Int, elapsedSeconds: TimeInterval) {
         logger.info(
             "vault_retrieval results=\(resultCount, privacy: .public) elapsed=\(elapsedSeconds, privacy: .public)"

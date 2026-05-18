@@ -106,6 +106,7 @@ extension PinesAppModel {
             modalities: preflight.modalities.isEmpty ? Self.modalities(from: summary) : preflight.modalities,
             verification: preflight.verification,
             state: preflight.verification == .unsupported ? .unsupported : .remote,
+            parameterCount: preflight.parameterCount,
             estimatedBytes: preflight.estimatedBytes > 0 ? preflight.estimatedBytes : nil,
             license: preflight.license,
             modelType: preflight.modelType,

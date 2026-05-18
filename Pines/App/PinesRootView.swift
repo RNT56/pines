@@ -81,6 +81,7 @@ struct PinesRootView: View {
                     .zIndex(1)
             }
         }
+        .pinesHighRefreshRate()
         .preferredColorScheme(settingsState.interfaceMode.colorScheme)
         .task {
             guard !didStartBootstrap, !isBootstrapping else { return }

@@ -2,11 +2,68 @@ import Foundation
 import SwiftUI
 import PinesCore
 
+struct PinesLiveChatMessageSnapshot: Hashable {
+    var id: UUID
+    var content: String
+    var tokenCount: Int
+    var providerMetadata: [String: String]
+    var toolCalls: [ToolCallDelta]
+
+    func merged(into message: ChatMessage) -> ChatMessage {
+        var copy = message
+        copy.content = content
+        copy.providerMetadata = providerMetadata
+        copy.toolCalls = toolCalls
+        return copy
+    }
+}
+
+@MainActor
+final class PinesLiveChatMessage: ObservableObject, Identifiable {
+    let id: UUID
+    @Published private(set) var snapshot: PinesLiveChatMessageSnapshot
+
+    init(message: ChatMessage, tokenCount: Int = 0) {
+        id = message.id
+        snapshot = PinesLiveChatMessageSnapshot(
+            id: message.id,
+            content: message.content,
+            tokenCount: tokenCount,
+            providerMetadata: message.providerMetadata,
+            toolCalls: message.toolCalls
+        )
+    }
+
+    func update(
+        content: String? = nil,
+        tokenCount: Int? = nil,
+        providerMetadata: [String: String]? = nil,
+        toolCalls: [ToolCallDelta]? = nil
+    ) {
+        var next = snapshot
+        if let content {
+            next.content = content
+        }
+        if let tokenCount {
+            next.tokenCount = tokenCount
+        }
+        if let providerMetadata {
+            next.providerMetadata = providerMetadata
+        }
+        if let toolCalls {
+            next.toolCalls = toolCalls
+        }
+        guard next != snapshot else { return }
+        snapshot = next
+    }
+}
+
 @MainActor
 final class PinesChatState: ObservableObject {
     @Published var threads: [PinesThreadPreview]
     @Published var chatError: String?
     @Published var activeRunID: UUID?
+    private var liveMessages: [UUID: PinesLiveChatMessage]
 
     init(
         threads: [PinesThreadPreview] = [],
@@ -16,6 +73,38 @@ final class PinesChatState: ObservableObject {
         self.threads = threads
         self.chatError = chatError
         self.activeRunID = activeRunID
+        liveMessages = [:]
+    }
+
+    func liveMessage(for id: UUID) -> PinesLiveChatMessage? {
+        liveMessages[id]
+    }
+
+    func beginLiveMessage(_ message: ChatMessage) {
+        liveMessages[message.id] = PinesLiveChatMessage(message: message)
+    }
+
+    func updateLiveMessage(
+        id: UUID,
+        content: String? = nil,
+        tokenCount: Int? = nil,
+        providerMetadata: [String: String]? = nil,
+        toolCalls: [ToolCallDelta]? = nil
+    ) {
+        liveMessages[id]?.update(
+            content: content,
+            tokenCount: tokenCount,
+            providerMetadata: providerMetadata,
+            toolCalls: toolCalls
+        )
+    }
+
+    func removeLiveMessage(id: UUID) {
+        liveMessages[id] = nil
+    }
+
+    func removeAllLiveMessages() {
+        liveMessages.removeAll()
     }
 }
 

@@ -167,6 +167,7 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
     public var modalities: Set<ModelModality>
     public var modelType: String?
     public var processorClass: String?
+    public var parameterCount: Int64?
     public var estimatedBytes: Int64
     public var reasons: [String]
     public var license: String?
@@ -177,6 +178,7 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
         modalities: Set<ModelModality>,
         modelType: String? = nil,
         processorClass: String? = nil,
+        parameterCount: Int64? = nil,
         estimatedBytes: Int64 = 0,
         reasons: [String] = [],
         license: String? = nil
@@ -186,6 +188,7 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
         self.modalities = modalities
         self.modelType = modelType
         self.processorClass = processorClass
+        self.parameterCount = parameterCount
         self.estimatedBytes = estimatedBytes
         self.reasons = reasons
         self.license = license

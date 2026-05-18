@@ -961,6 +961,93 @@ struct CoreContractTests {
     }
 
     @Test
+    func modelDiscoveryResourcePolicyRejectsOversizedDownloadMetadata() throws {
+        let policy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 3_500_000_000)
+        let input = ModelPreflightInput(
+            repository: "mlx-community/Qwen3-4B-4bit",
+            configJSON: #"{"model_type":"qwen3"}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model-00001-of-00002.safetensors", size: 3_900_000_000),
+                ModelFileInfo(path: "model-00002-of-00002.safetensors", size: 300_000_000),
+                ModelFileInfo(path: "tokenizer.json", size: 250_000),
+                ModelFileInfo(path: "README.md", size: 1_000_000),
+            ],
+            tags: ["mlx", "qwen3", "4bit"]
+        )
+
+        let decision = policy.evaluate(input, modalities: [.text])
+
+        #expect(decision.isRejected)
+        #expect(decision.knownDownloadBytes == 4_200_250_000)
+        #expect(decision.reason?.contains("on-device discovery limit") == true)
+    }
+
+    @Test
+    func modelDiscoveryResourcePolicyFallsBackToParameterAndQuantizationHints() throws {
+        let policy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 5_000_000_000)
+        let sevenB = ModelPreflightInput(
+            repository: "mlx-community/Llama-3.1-8B-Instruct-4bit",
+            configJSON: #"{"model_type":"llama"}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ],
+            tags: ["mlx", "safetensors"]
+        )
+        let small = ModelPreflightInput(
+            repository: "mlx-community/Qwen3-3B-Instruct-4bit",
+            configJSON: #"{"model_type":"qwen3"}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ],
+            tags: ["mlx", "safetensors"]
+        )
+
+        let rejected = policy.evaluate(sevenB, modalities: [.text])
+        let allowed = policy.evaluate(small, modalities: [.text])
+
+        #expect(rejected.isRejected)
+        #expect(rejected.inferredParameterCount == 8_000_000_000)
+        #expect(rejected.inferredWeightBits == 4)
+        #expect(allowed.isRejected == false)
+    }
+
+    @Test
+    func modelDiscoveryResourcePolicyParsesMoEAndQuantizationEdgeCases() throws {
+        #expect(
+            ModelDiscoveryResourcePolicy.inferredParameterCount(
+                repository: "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit",
+                tags: []
+            ) == 56_000_000_000
+        )
+        #expect(
+            ModelDiscoveryResourcePolicy.inferredParameterCount(
+                repository: "mlx-community/ERNIE-4.5-21B-A3B-PT-4bit",
+                tags: []
+            ) == 21_000_000_000
+        )
+        #expect(
+            ModelDiscoveryResourcePolicy.inferredParameterCount(
+                repository: "mlx-community/Qwen3-1_7B-4bit",
+                tags: []
+            ) == 1_700_000_000
+        )
+        #expect(
+            ModelDiscoveryResourcePolicy.inferredWeightBits(
+                repository: "mlx-community/Qwen3-4B-Instruct-2507-mxfp8",
+                tags: []
+            ) == 8
+        )
+        #expect(
+            ModelDiscoveryResourcePolicy.inferredWeightBits(
+                repository: "mlx-community/llama-3.2-1B-Q4_K_M",
+                tags: []
+            ) == 4
+        )
+    }
+
+    @Test
     func calculatorHonorsOperatorPrecedenceAndRejectsDivisionByZero() throws {
         let evaluator = SafeCalculatorEvaluator()
 
@@ -1120,6 +1207,7 @@ private struct EmptyConversationRepository: ConversationRepository {
     func messages(in conversationID: UUID) async throws -> [ChatMessage] { [] }
     func observeMessages(in conversationID: UUID) -> AsyncStream<[ChatMessage]> { AsyncStream { $0.finish() } }
     func appendMessage(_ message: ChatMessage, status: MessageStatus, conversationID: UUID, modelID: ModelID?, providerID: ProviderID?) async throws {}
+    func deleteMessages(after messageID: UUID, in conversationID: UUID) async throws {}
     func updateMessage(
         id: UUID,
         content: String,

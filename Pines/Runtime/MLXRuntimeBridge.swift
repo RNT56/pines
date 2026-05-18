@@ -39,6 +39,14 @@ struct MLXRuntimeBridge: Sendable {
 
     var localProviderID: ProviderID { "mlx-local" }
 
+    var currentDeviceProfile: DeviceProfile {
+        deviceMonitor.currentProfile()
+    }
+
+    var modelDiscoveryResourcePolicy: ModelDiscoveryResourcePolicy {
+        .deviceDefault(for: currentDeviceProfile)
+    }
+
     var capabilities: ProviderCapabilities {
         let profile = deviceMonitor.currentProfile()
         return ProviderCapabilities(

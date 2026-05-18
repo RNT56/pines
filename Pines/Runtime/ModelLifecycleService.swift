@@ -58,10 +58,12 @@ struct ModelLifecycleService: Sendable {
     let downloadRepository: any ModelDownloadRepository
     let auditRepository: (any AuditEventRepository)?
     let secretStore: (any SecretStore)?
+    let resourcePolicy: ModelDiscoveryResourcePolicy?
 
     func preflight(repository: String, revision: String = "main") async throws -> ModelPreflightResult {
         let token = try await huggingFaceToken()
-        return classifier.classify(try await catalog.preflight(repository: repository, revision: revision, accessToken: token))
+        let input = try await catalog.preflight(repository: repository, revision: revision, accessToken: token)
+        return classify(input)
     }
 
     func install(repository: String, revision: String = "main", mode: ModelInstallMode = .automatic) async throws {
@@ -226,7 +228,7 @@ struct ModelLifecycleService: Sendable {
         try Task.checkCancellation()
         let accessToken = try await huggingFaceToken()
         let input = try await catalog.preflight(repository: repository, revision: revision, accessToken: accessToken)
-        var result = classifier.classify(input)
+        var result = classify(input)
         guard result.verification != .unsupported else {
             throw InferenceError.unsupportedCapability(result.reasons.joined(separator: "\n"))
         }
@@ -261,6 +263,10 @@ struct ModelLifecycleService: Sendable {
             fileSizes: resolvedFileSizes,
             fallback: result.estimatedBytes > 0 ? result.estimatedBytes : nil
         )
+        if let totalBytes,
+           let reason = resourcePolicy?.rejectionReason(repository: repository, knownDownloadBytes: totalBytes) {
+            throw InferenceError.unsupportedCapability(reason)
+        }
         let downloadID = UUID()
         var progress = ModelDownloadProgress(
             id: downloadID,
@@ -287,6 +293,7 @@ struct ModelLifecycleService: Sendable {
             modalities: result.modalities,
             verification: result.verification,
             state: .downloading,
+            parameterCount: result.parameterCount,
             estimatedBytes: result.estimatedBytes,
             license: result.license,
             modelType: result.modelType,
@@ -533,6 +540,24 @@ struct ModelLifecycleService: Sendable {
             service: HuggingFaceCredentialService.keychainService,
             account: HuggingFaceCredentialService.tokenAccount
         )
+    }
+
+    private func classify(_ input: ModelPreflightInput) -> ModelPreflightResult {
+        var result = classifier.classify(input)
+        guard let resourcePolicy else { return result }
+        let decision = resourcePolicy.evaluate(input, modalities: result.modalities)
+        if let knownDownloadBytes = decision.knownDownloadBytes, knownDownloadBytes > result.estimatedBytes {
+            result.estimatedBytes = knownDownloadBytes
+        } else if let estimatedWeightBytes = decision.estimatedWeightBytes, result.estimatedBytes == 0 {
+            result.estimatedBytes = estimatedWeightBytes
+        }
+        result.parameterCount = decision.inferredParameterCount ?? result.parameterCount
+        guard decision.isRejected else { return result }
+        result.verification = .unsupported
+        if let reason = decision.reason, !result.reasons.contains(reason) {
+            result.reasons.append(reason)
+        }
+        return result
     }
 
     private static func downloadFile(

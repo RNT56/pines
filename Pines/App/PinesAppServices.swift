@@ -237,7 +237,8 @@ final class PinesAppServices: Sendable {
             installRepository: modelInstallRepository,
             downloadRepository: modelDownloadRepository,
             auditRepository: auditRepository,
-            secretStore: secretStore
+            secretStore: secretStore,
+            resourcePolicy: mlxRuntime.modelDiscoveryResourcePolicy
         )
     }
 
