@@ -591,7 +591,7 @@ struct PinesCoreTestRunner {
         try expectEqual(TurboQuantPreset.allCases, [.turbo2_5, .turbo3_5, .turbo4, .turbo4v2])
         try expectEqual(TurboQuantPreset.defaultGeneration, .turbo4v2)
         try expectEqual(TurboQuantPreset.conservativeFallback, .turbo3_5)
-        try expectEqual(TurboQuantPreset.vaultVectorDefault, .turbo3_5)
+        try expectEqual(TurboQuantPreset.vaultVectorDefault, .turbo4v2)
         try expectEqual(TurboQuantPreset.turbo4v2.effectiveBits, 4)
         try expectEqual(TurboQuantPreset.turbo4v2.baseBits, 4)
         try expectEqual(TurboQuantPreset.turbo4v2.outlierBits, 4)
@@ -1017,10 +1017,11 @@ struct PinesCoreTestRunner {
     }
 
     private static func testTurboQuantVectorCodec() throws {
-        try expectEqual(TurboQuantVectorCodec().preset, .turbo3_5)
-        let codec = TurboQuantVectorCodec(preset: .turbo3_5, seed: 42)
+        try expectEqual(TurboQuantVectorCodec().preset, .turbo4v2)
+        let codec = TurboQuantVectorCodec(seed: 42)
         let vector: [Float] = [0.42, -0.2, 0.7, 0.1, -0.3, 0.15, 0.05, -0.4]
         let encoded = try codec.encode(vector)
+        try expectEqual(encoded.preset, .turbo4v2)
         let encodedAgain = try codec.encode(vector)
         try expectEqual(encoded, encodedAgain)
 
@@ -1032,6 +1033,12 @@ struct PinesCoreTestRunner {
 
         let roundTrip = try codec.decode(data: try codec.encodeToData(vector))
         try expectEqual(roundTrip.count, vector.count)
+
+        let legacyCodec = TurboQuantVectorCodec(preset: .turbo3_5, seed: 42)
+        let legacyEncoded = try legacyCodec.encode(vector)
+        try expectEqual(legacyEncoded.preset, .turbo3_5)
+        let legacyScore = try codec.approximateCosineSimilarity(query: vector, code: legacyEncoded)
+        try expect(legacyScore > 0.92, "Legacy TurboQuant approximation should remain readable")
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {

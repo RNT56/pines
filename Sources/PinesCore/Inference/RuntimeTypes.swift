@@ -36,7 +36,7 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
 
     public static let defaultGeneration: Self = .turbo4v2
     public static let conservativeFallback: Self = .turbo3_5
-    public static let vaultVectorDefault: Self = .turbo3_5
+    public static let vaultVectorDefault: Self = .turbo4v2
 
     public var displayName: String {
         switch self {

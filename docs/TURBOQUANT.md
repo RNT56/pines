@@ -23,7 +23,7 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 ## Vault Retrieval
 
 - Imported document chunks store an FP16 embedding for exact rerank and a compressed TurboQuant vector code for approximate candidate retrieval.
-- Vault vector codes remain on the `turbo3_5` codec default until Pines intentionally ships a storage/search codec migration.
+- Vault vector codes default to `turbo4v2`, matching the current MLX TurboQuant generation recommendation for new installs. Codes still carry their preset and seed in the blob, so explicit older `turbo3_5` rows remain decodable if developer or pre-release data exists.
 - Embedding ingestion is batched according to the active device profile to avoid avoidable jetsam on compact iOS devices.
 - Search uses compressed candidates first, filters by embedding model when available, bounds the scanned candidate set by device profile, reranks with the FP16 vector, and falls back to SQLite FTS when embeddings are unavailable.
 - Embeddings and compressed vector codes remain local-only unless the user explicitly enables both private iCloud sync and embedding sync through settings.
