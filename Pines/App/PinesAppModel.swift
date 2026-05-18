@@ -2329,6 +2329,7 @@ final class PinesAppModel: ObservableObject {
                 setIfChanged(\.serviceError, "Model lifecycle service is unavailable.")
                 return
             }
+            await services.mlxRuntime.unload()
             markModelDownloadQueued(repository: repository, services: services)
             try await lifecycle.install(repository: repository, mode: mode)
             if defaultModelID == nil {

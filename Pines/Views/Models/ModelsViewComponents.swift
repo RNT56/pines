@@ -105,7 +105,7 @@ private struct ModelRows: View {
                             await appModel.installModel(repository: model.install.repository, services: services)
                         }
                     } label: {
-                        Label("Download", systemImage: "arrow.down.circle")
+                        Label(model.downloadProgress?.canResume == true ? "Resume" : "Download", systemImage: "arrow.down.circle")
                     }
                     .tint(theme.colors.accent)
                 }
@@ -581,7 +581,7 @@ struct ModelDetailView: View {
                                 }
                             } label: {
                                 ModelActionLabel(
-                                    title: pendingAction == .download ? "Starting" : "Download",
+                                    title: pendingAction == .download ? "Starting" : downloadActionTitle,
                                     systemImage: "arrow.down.circle",
                                     isPending: pendingAction == .download
                                 )
@@ -595,7 +595,7 @@ struct ModelDetailView: View {
                                 }
                             } label: {
                                 ModelActionLabel(
-                                    title: pendingAction == .download ? "Starting" : "Download",
+                                    title: pendingAction == .download ? "Starting" : downloadActionTitle,
                                     systemImage: "arrow.down.circle",
                                     isPending: pendingAction == .download
                                 )
@@ -671,6 +671,9 @@ struct ModelDetailView: View {
         if let progress = model.downloadProgress, progress.isActive {
             return [progress.currentFile, progress.progressLabel].compactMap(\.self).joined(separator: " - ")
         }
+        if let progress = model.downloadProgress, progress.canResume {
+            return progress.errorMessage ?? "The last download was interrupted. Resume to continue."
+        }
         if model.status == .unsupported {
             return "This model is not compatible with the current runtime profile."
         }
@@ -681,6 +684,10 @@ struct ModelDetailView: View {
             return "The last download or install failed. Delete it and try again."
         }
         return "Available from Hugging Face and ready to download when compatible."
+    }
+
+    private var downloadActionTitle: String {
+        model.downloadProgress?.canResume == true ? "Resume download" : "Download"
     }
 
     private var readinessCard: some View {
@@ -975,6 +982,10 @@ private extension ModelDownloadProgress {
         case .installed, .failed, .cancelled:
             false
         }
+    }
+
+    var canResume: Bool {
+        status == .failed && bytesReceived > 0
     }
 
     var fractionCompleted: Double {

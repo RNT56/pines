@@ -51,6 +51,17 @@ private struct ModelDownloadProgressWriteGate {
 
 struct ModelLifecycleService: Sendable {
     private static let downloadTasks = ModelDownloadTaskCoordinator()
+    private static let rangedDownloadChunkBytes: Int64 = 64 * 1024 * 1024
+
+    private struct StagingRecoveryState {
+        static let empty = StagingRecoveryState(reusableBytes: 0)
+
+        var reusableBytes: Int64
+
+        var hasReusableBytes: Bool {
+            reusableBytes > 0
+        }
+    }
 
     let catalog: HuggingFaceModelCatalogService
     let classifier: ModelPreflightClassifier
@@ -100,6 +111,7 @@ struct ModelLifecycleService: Sendable {
             return
         }
 
+        await BackgroundModelFileDownloadCenter.shared.cancelBackgroundDownloads(for: repository)
         let cancelled = try await markActiveDownloadsCancelled(for: repository)
         guard cancelled else { return }
         try Self.removeStagingDirectory(for: repository)
@@ -110,15 +122,18 @@ struct ModelLifecycleService: Sendable {
     }
 
     func reconcileInterruptedDownloads() async throws {
+        await BackgroundModelFileDownloadCenter.shared.recoverBackgroundTasks()
         let downloads = try await downloadRepository.listDownloads()
-        var interruptedRepositories: [String: String] = [:]
+        var failedInstallRepositories: [String: String] = [:]
+        var cleanupRepositories = Set<String>()
         var interruptedDownloadByRepository: [String: ModelDownloadProgress] = [:]
         var activeDownloadByRepository: [String: ModelDownloadProgress] = [:]
 
         for download in downloads where download.status.isActive {
             let key = download.repository.lowercased()
             let hasActiveTask = await Self.downloadTasks.hasActiveDownload(for: download.repository)
-            guard !hasActiveTask else { continue }
+            let hasBackgroundTask = await BackgroundModelFileDownloadCenter.shared.hasBackgroundDownload(for: download.repository)
+            guard !hasActiveTask, !hasBackgroundTask else { continue }
             activeDownloadByRepository[key] = download
         }
 
@@ -139,21 +154,45 @@ struct ModelLifecycleService: Sendable {
                 try await upsertDownloadProgress(completed)
                 continue
             }
+            if let install = installByRepository[key],
+               try await promoteCompletedStagingDownloadIfPossible(repository: download.repository, install: install, download: download) {
+                continue
+            }
+
+            let recovery = (try? Self.stagingRecoveryState(for: download.repository)) ?? .empty
 
             var failed = download
             failed.status = .failed
-            failed.errorMessage = "Download was interrupted."
+            failed.bytesReceived = max(failed.bytesReceived, recovery.reusableBytes)
+            failed.errorMessage = recovery.hasReusableBytes
+                ? "Download was interrupted. Resume to continue."
+                : "Download was interrupted."
             failed.updatedAt = Date()
             interruptedDownloadByRepository[key] = failed
-            interruptedRepositories[key] = download.repository
+            failedInstallRepositories[key] = download.repository
+            if !recovery.hasReusableBytes {
+                cleanupRepositories.insert(key)
+            }
             try await upsertDownloadProgress(failed)
         }
 
         for install in installs where install.state == .downloading {
             let key = install.repository.lowercased()
             let hasActiveTask = await Self.downloadTasks.hasActiveDownload(for: install.repository)
-            guard !hasActiveTask else { continue }
-            interruptedRepositories[key] = install.repository
+            let hasBackgroundTask = await BackgroundModelFileDownloadCenter.shared.hasBackgroundDownload(for: install.repository)
+            guard !hasActiveTask, !hasBackgroundTask else { continue }
+            if try await promoteCompletedStagingDownloadIfPossible(
+                repository: install.repository,
+                install: install,
+                download: interruptedDownloadByRepository[key]
+            ) {
+                continue
+            }
+            let recovery = (try? Self.stagingRecoveryState(for: install.repository)) ?? .empty
+            failedInstallRepositories[key] = install.repository
+            if !recovery.hasReusableBytes {
+                cleanupRepositories.insert(key)
+            }
         }
 
         for install in installs where install.state == .installed {
@@ -181,11 +220,13 @@ struct ModelLifecycleService: Sendable {
             }
         }
 
-        for (key, repository) in interruptedRepositories {
-            do {
-                try Self.removeStagingDirectory(for: repository)
-            } catch {
-                modelLifecycleLogger.warning("Failed to remove interrupted staging directory for \(repository, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        for (key, repository) in failedInstallRepositories {
+            if cleanupRepositories.contains(key) {
+                do {
+                    try Self.removeStagingDirectory(for: repository)
+                } catch {
+                    modelLifecycleLogger.warning("Failed to remove interrupted staging directory for \(repository, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
             }
             let failed = Self.failedInstall(
                 repository: repository,
@@ -197,6 +238,51 @@ struct ModelLifecycleService: Sendable {
                 AuditEvent(category: .modelDownload, summary: "Interrupted \(repository)", modelID: ModelID(rawValue: repository))
             )
         }
+    }
+
+    private func promoteCompletedStagingDownloadIfPossible(
+        repository: String,
+        install: ModelInstall,
+        download: ModelDownloadProgress?
+    ) async throws -> Bool {
+        let stagingURL = try Self.stagingDirectory(for: repository)
+        guard FileManager.default.fileExists(atPath: stagingURL.path),
+              Self.resolvedModelDirectory(from: stagingURL, modalities: install.modalities) != nil,
+              try Self.validateStagedChecksumsIfPresent(stagingURL)
+        else {
+            return false
+        }
+
+        let finalURL = try Self.finalDirectory(for: repository)
+        if FileManager.default.fileExists(atPath: finalURL.path) {
+            try FileManager.default.removeItem(at: finalURL)
+        }
+        try FileManager.default.moveItem(at: stagingURL, to: finalURL)
+        try? FileManager.default.removeItem(at: ModelDownloadStagingManifestStore.manifestURL(in: finalURL))
+        let resolvedURL = try Self.validateModelDirectory(
+            finalURL,
+            repository: repository,
+            modalities: install.modalities
+        )
+
+        var installed = install
+        installed.localURL = resolvedURL
+        installed.state = .installed
+        try await installRepository.upsertInstall(installed)
+
+        if var completed = download {
+            completed.status = .installed
+            completed.bytesReceived = completed.totalBytes ?? (try? Self.directoryByteCount(finalURL)) ?? completed.bytesReceived
+            completed.localURL = resolvedURL
+            completed.errorMessage = nil
+            completed.updatedAt = Date()
+            try await upsertDownloadProgress(completed)
+        }
+
+        try await auditRepository?.append(
+            AuditEvent(category: .modelDownload, summary: "Recovered completed download \(repository)", modelID: install.modelID)
+        )
+        return true
     }
 
     private func performInstall(repository: String, revision: String = "main", mode: ModelInstallMode = .automatic) async throws {
@@ -267,6 +353,9 @@ struct ModelLifecycleService: Sendable {
            let reason = resourcePolicy?.rejectionReason(repository: repository, knownDownloadBytes: totalBytes) {
             throw InferenceError.unsupportedCapability(reason)
         }
+        if let totalBytes {
+            try Self.validateAvailableDiskSpace(for: totalBytes)
+        }
         let downloadID = UUID()
         var progress = ModelDownloadProgress(
             id: downloadID,
@@ -277,12 +366,21 @@ struct ModelLifecycleService: Sendable {
         )
         try await upsertDownloadProgress(progress)
 
-        let stagingURL = try Self.modelsDirectory()
-            .appending(path: "staging", directoryHint: .isDirectory)
-            .appending(path: Self.safeDirectoryName(repository), directoryHint: .isDirectory)
-        let finalURL = try Self.modelsDirectory()
-            .appending(path: Self.safeDirectoryName(repository), directoryHint: .isDirectory)
+        let stagingURL = try Self.stagingDirectory(for: repository)
+        let finalURL = try Self.finalDirectory(for: repository)
         try FileManager.default.createDirectory(at: stagingURL, withIntermediateDirectories: true)
+        let plannedFiles = files.map { file in
+            ModelFileInfo(path: file.path, size: resolvedFileSizes[file.path] ?? file.size, oid: file.oid)
+        }
+        var manifest = try ModelDownloadStagingManifestStore.read(from: stagingURL)
+            ?? ModelDownloadStagingManifest(repository: repository, revision: revision, totalBytes: totalBytes)
+        manifest.mergeDownloadPlan(
+            repository: repository,
+            revision: revision,
+            totalBytes: totalBytes,
+            files: plannedFiles
+        )
+        try ModelDownloadStagingManifestStore.write(manifest, to: stagingURL)
 
         let install = ModelInstall(
             modelID: ModelID(rawValue: repository),
@@ -305,7 +403,7 @@ struct ModelLifecycleService: Sendable {
             var received: Int64 = 0
             var progressWriteGate = ModelDownloadProgressWriteGate()
 
-            for file in files {
+            for file in plannedFiles {
                 try Task.checkCancellation()
                 progress.status = .downloading
                 progress.currentFile = file.path
@@ -319,8 +417,24 @@ struct ModelLifecycleService: Sendable {
                     withIntermediateDirectories: true
                 )
                 if try Self.isUsableDownloadedFile(file, at: destination) {
-                    received += try Self.byteCount(for: destination)
+                    let fileBytes = try Self.byteCount(for: destination)
+                    received += fileBytes
+                    try ModelDownloadStagingManifestStore.update(
+                        in: stagingURL,
+                        path: file.path,
+                        expectedBytes: file.size,
+                        checksum: file.oid,
+                        receivedBytes: fileBytes,
+                        status: .complete
+                    )
                     continue
+                }
+
+                var currentFileBytes = try Self.reusablePartialByteCount(file, at: destination)
+                if currentFileBytes > 0 {
+                    progress.bytesReceived = received + currentFileBytes
+                    progress.updatedAt = Date()
+                    try await upsertDownloadProgress(progress, gate: &progressWriteGate, force: true)
                 }
 
                 try await Self.downloadFile(
@@ -328,15 +442,17 @@ struct ModelLifecycleService: Sendable {
                     revision: revision,
                     file: file,
                     destination: destination,
+                    stagingDirectory: stagingURL,
+                    resumeOffset: currentFileBytes,
                     accessToken: accessToken
                 ) { bytes, expectedFileSize in
                     try Task.checkCancellation()
-                    received += bytes
-                    progress.bytesReceived = received
+                    currentFileBytes += bytes
+                    progress.bytesReceived = received + currentFileBytes
                     if let expectedFileSize {
                         resolvedFileSizes[file.path] = expectedFileSize
                         if let inferredTotal = Self.totalDownloadBytes(
-                            for: files,
+                            for: plannedFiles,
                             fileSizes: resolvedFileSizes,
                             fallback: progress.totalBytes
                         ) {
@@ -347,6 +463,16 @@ struct ModelLifecycleService: Sendable {
                     progress.updatedAt = now
                     try await upsertDownloadProgress(progress, gate: &progressWriteGate)
                 }
+                currentFileBytes = try Self.byteCount(for: destination)
+                received += currentFileBytes
+                try ModelDownloadStagingManifestStore.update(
+                    in: stagingURL,
+                    path: file.path,
+                    expectedBytes: resolvedFileSizes[file.path] ?? file.size,
+                    checksum: file.oid,
+                    receivedBytes: currentFileBytes,
+                    status: .complete
+                )
 
                 if let oid = file.oid, oid.count == 64 {
                     try Task.checkCancellation()
@@ -379,6 +505,7 @@ struct ModelLifecycleService: Sendable {
                 repository: repository,
                 modalities: result.modalities
             )
+            try? FileManager.default.removeItem(at: ModelDownloadStagingManifestStore.manifestURL(in: finalURL))
 
             var installed = install
             installed.localURL = resolvedURL
@@ -400,7 +527,7 @@ struct ModelLifecycleService: Sendable {
             throw InferenceError.cancelled
         } catch {
             progress.status = .failed
-            progress.errorMessage = error.localizedDescription
+            progress.errorMessage = Self.downloadFailureMessage(for: error)
             progress.updatedAt = Date()
             try await upsertDownloadProgress(progress)
             try await installRepository.updateInstallState(.failed, for: repository)
@@ -565,6 +692,8 @@ struct ModelLifecycleService: Sendable {
         revision: String,
         file: ModelFileInfo,
         destination: URL,
+        stagingDirectory: URL,
+        resumeOffset: Int64,
         accessToken: String?,
         progress: (Int64, Int64?) async throws -> Void
     ) async throws {
@@ -576,15 +705,69 @@ struct ModelLifecycleService: Sendable {
             throw URLError(.badURL)
         }
 
+        var offset = max(0, resumeOffset)
+        if let expectedSize = file.size, expectedSize > 0 {
+            guard offset < expectedSize else { return }
+            while offset < expectedSize {
+                try Task.checkCancellation()
+                let rangeEnd = min(offset + rangedDownloadChunkBytes - 1, expectedSize - 1)
+                var request = authorizedRequest(url: url, accessToken: accessToken)
+                request.addValue("bytes=\(offset)-\(rangeEnd)", forHTTPHeaderField: "Range")
+                let metadata = BackgroundModelFileDownloadMetadata(
+                    repository: repository,
+                    revision: revision,
+                    filePath: file.path,
+                    destinationPath: destination.path,
+                    stagingDirectoryPath: stagingDirectory.path,
+                    declaredSize: expectedSize,
+                    checksum: file.oid,
+                    resumeOffset: offset,
+                    rangeEnd: rangeEnd
+                )
+                try await downloadRequest(request, metadata: metadata, progress: progress)
+                let newOffset = try byteCount(for: destination)
+                guard newOffset > offset else {
+                    throw URLError(.networkConnectionLost)
+                }
+                offset = newOffset
+            }
+            return
+        }
+
+        var request = authorizedRequest(url: url, accessToken: accessToken)
+        if offset > 0 {
+            request.addValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
+        }
+        let metadata = BackgroundModelFileDownloadMetadata(
+            repository: repository,
+            revision: revision,
+            filePath: file.path,
+            destinationPath: destination.path,
+            stagingDirectoryPath: stagingDirectory.path,
+            declaredSize: file.size,
+            checksum: file.oid,
+            resumeOffset: offset,
+            rangeEnd: nil
+        )
+        try await downloadRequest(request, metadata: metadata, progress: progress)
+    }
+
+    private static func authorizedRequest(url: URL, accessToken: String?) -> URLRequest {
         var request = URLRequest(url: url)
         if let accessToken = accessToken?.trimmingCharacters(in: .whitespacesAndNewlines), !accessToken.isEmpty {
             request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
+        return request
+    }
 
+    private static func downloadRequest(
+        _ request: URLRequest,
+        metadata: BackgroundModelFileDownloadMetadata,
+        progress: (Int64, Int64?) async throws -> Void
+    ) async throws {
         let events = BackgroundModelFileDownloadCenter.shared.downloadEvents(
             request: request,
-            destination: destination,
-            declaredSize: file.size
+            metadata: metadata
         )
         for try await event in events {
             switch event {
@@ -622,12 +805,75 @@ struct ModelLifecycleService: Sendable {
     }
 
     private static func removeStagingDirectory(for repository: String) throws {
-        let stagingDirectory = try modelsDirectory()
-            .appending(path: "staging", directoryHint: .isDirectory)
-            .appending(path: safeDirectoryName(repository), directoryHint: .isDirectory)
+        let stagingDirectory = try stagingDirectory(for: repository)
         if FileManager.default.fileExists(atPath: stagingDirectory.path) {
             try FileManager.default.removeItem(at: stagingDirectory)
         }
+    }
+
+    private static func stagingDirectory(for repository: String) throws -> URL {
+        try modelsDirectory()
+            .appending(path: "staging", directoryHint: .isDirectory)
+            .appending(path: safeDirectoryName(repository), directoryHint: .isDirectory)
+    }
+
+    private static func finalDirectory(for repository: String) throws -> URL {
+        try modelsDirectory()
+            .appending(path: safeDirectoryName(repository), directoryHint: .isDirectory)
+    }
+
+    private static func stagingRecoveryState(for repository: String) throws -> StagingRecoveryState {
+        let stagingDirectory = try stagingDirectory(for: repository)
+        guard FileManager.default.fileExists(atPath: stagingDirectory.path) else {
+            return .empty
+        }
+
+        var reusableBytes = (try? ModelDownloadStagingManifestStore.read(from: stagingDirectory)?.reusableBytes) ?? 0
+        guard let enumerator = FileManager.default.enumerator(
+            at: stagingDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return StagingRecoveryState(reusableBytes: reusableBytes)
+        }
+
+        var fileBytes: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values.isRegularFile == true else { continue }
+            fileBytes += Int64(values.fileSize ?? 0)
+        }
+        reusableBytes = max(reusableBytes, fileBytes)
+        return StagingRecoveryState(reusableBytes: reusableBytes)
+    }
+
+    private static func validateStagedChecksumsIfPresent(_ stagingDirectory: URL) throws -> Bool {
+        guard let manifest = try ModelDownloadStagingManifestStore.read(from: stagingDirectory) else {
+            return true
+        }
+
+        for file in manifest.files where file.status == .complete {
+            guard let checksum = file.checksum, checksum.count == 64 else { continue }
+            let fileURL = stagingDirectory.appending(path: file.path)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                return false
+            }
+            let digest = try sha256Hex(url: fileURL)
+            if digest.caseInsensitiveCompare(checksum) != .orderedSame {
+                try? FileManager.default.removeItem(at: fileURL)
+                try? ModelDownloadStagingManifestStore.update(
+                    in: stagingDirectory,
+                    path: file.path,
+                    expectedBytes: file.expectedBytes,
+                    checksum: checksum,
+                    receivedBytes: 0,
+                    status: .failed,
+                    errorMessage: "Checksum mismatch."
+                )
+                return false
+            }
+        }
+        return true
     }
 
     private static func removeInstalledDirectory(for repository: String, localURL: URL?) throws {
@@ -688,6 +934,27 @@ struct ModelLifecycleService: Sendable {
             state: .failed,
             estimatedBytes: download?.totalBytes
         )
+    }
+
+    private static func downloadFailureMessage(for error: Error) -> String {
+        if let inferenceError = error as? InferenceError {
+            return inferenceError.localizedDescription
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .cannotWriteToFile, .cannotCreateFile, .noPermissionsToReadFile:
+                return "Not enough writable storage is available for this model download."
+            case .cannotDecodeContentData:
+                return "The downloaded model file did not match its expected checksum. Resume to retry the invalid file."
+            case .networkConnectionLost, .notConnectedToInternet, .timedOut, .cannotFindHost, .cannotConnectToHost:
+                return "The network connection was interrupted. Resume to continue."
+            case .badServerResponse:
+                return "The model host returned an unexpected response. Resume to retry."
+            default:
+                break
+            }
+        }
+        return error.localizedDescription
     }
 
     private static func validateModelDirectory(
@@ -822,7 +1089,26 @@ struct ModelLifecycleService: Sendable {
     }
 
     private static func byteCount(for url: URL) throws -> Int64 {
-        Int64(try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        guard FileManager.default.fileExists(atPath: url.path) else { return 0 }
+        return Int64(try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+    }
+
+    private static func directoryByteCount(_ directory: URL) throws -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return 0
+        }
+
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values.isRegularFile == true else { continue }
+            total += Int64(values.fileSize ?? 0)
+        }
+        return total
     }
 
     private static func expectedFileSize(
@@ -852,7 +1138,19 @@ struct ModelLifecycleService: Sendable {
         if let size = file.size {
             return try byteCount(for: destination) == size
         }
-        return try byteCount(for: destination) > 0
+        return false
+    }
+
+    private static func reusablePartialByteCount(_ file: ModelFileInfo, at destination: URL) throws -> Int64 {
+        guard FileManager.default.fileExists(atPath: destination.path) else { return 0 }
+        let count = try byteCount(for: destination)
+        guard count > 0 else { return 0 }
+        guard let size = file.size, size > 0 else { return 0 }
+        if count < size {
+            return count
+        }
+        try FileManager.default.removeItem(at: destination)
+        return 0
     }
 
     private static func validateAvailableDiskSpace(for estimatedBytes: Int64) throws {
@@ -865,7 +1163,8 @@ struct ModelLifecycleService: Sendable {
         )
         let values = try base.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         guard let available = values.volumeAvailableCapacityForImportantUsage else { return }
-        let required = Int64(Double(estimatedBytes) * 1.15)
+        let transientHeadroom = Int64(Double(estimatedBytes) * 0.5)
+        let required = estimatedBytes + max(transientHeadroom, 2_000_000_000)
         guard available > required else {
             throw URLError(.cannotWriteToFile)
         }

@@ -309,7 +309,7 @@ To adjust this for new devices or runtime changes:
 
 Curated models are separate from discoverable models. Keep curated recommendations conservative and device-aware. 1-bit/BitNet models stay experimental unless the exact repository/device combination is verified.
 
-Downloads are staged, resumable through byte ranges, checksum-verified when Hugging Face exposes an LFS SHA-256, and atomically promoted into the app model directory.
+Downloads are staged, resumable through byte ranges, checksum-verified when Hugging Face exposes an LFS SHA-256, and atomically promoted into the app model directory. Pines writes a hidden staging manifest beside in-progress files and downloads known-size files in bounded range chunks, so completed chunks survive a process crash or OS kill. Startup reconciliation must preserve reusable staging bytes, recover any still-running background `URLSession` tasks, and only clean staging for explicit user cancellation or non-resumable interrupted installs.
 
 When adding model-family support:
 

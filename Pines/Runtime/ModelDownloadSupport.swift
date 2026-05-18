@@ -1,5 +1,8 @@
 import Foundation
 import PinesCore
+import OSLog
+
+private let modelDownloadSupportLogger = Logger(subsystem: "com.schtack.pines", category: "ModelDownloadSupport")
 
 actor ModelDownloadTaskCoordinator {
     private struct ActiveDownload {
@@ -86,6 +89,144 @@ enum BackgroundModelFileDownloadEvent: Sendable {
     case progress(bytesWritten: Int64, expectedFileSize: Int64?)
 }
 
+struct BackgroundModelFileDownloadMetadata: Hashable, Codable, Sendable {
+    var repository: String
+    var revision: String
+    var filePath: String
+    var destinationPath: String
+    var stagingDirectoryPath: String
+    var declaredSize: Int64?
+    var checksum: String?
+    var resumeOffset: Int64
+    var rangeEnd: Int64?
+
+    var destination: URL {
+        URL(fileURLWithPath: destinationPath)
+    }
+
+    var stagingDirectory: URL {
+        URL(fileURLWithPath: stagingDirectoryPath)
+    }
+
+    func encodedTaskDescription() -> String? {
+        guard let data = try? JSONEncoder().encode(self) else { return nil }
+        return data.base64EncodedString()
+    }
+
+    static func decodeTaskDescription(_ value: String?) -> BackgroundModelFileDownloadMetadata? {
+        guard let value,
+              let data = Data(base64Encoded: value)
+        else {
+            return nil
+        }
+        return try? JSONDecoder().decode(Self.self, from: data)
+    }
+}
+
+enum ModelDownloadStagingManifestStore {
+    private static let manifestFilename = ".pines-download-manifest.json"
+    private static let lock = NSLock()
+
+    static func manifestURL(in stagingDirectory: URL) -> URL {
+        stagingDirectory.appending(path: manifestFilename)
+    }
+
+    static func read(from stagingDirectory: URL) throws -> ModelDownloadStagingManifest? {
+        try lock.withLock {
+            let url = manifestURL(in: stagingDirectory)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            let data = try Data(contentsOf: url)
+            return try JSONDecoder().decode(ModelDownloadStagingManifest.self, from: data)
+        }
+    }
+
+    static func write(_ manifest: ModelDownloadStagingManifest, to stagingDirectory: URL) throws {
+        try lock.withLock {
+            try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(manifest)
+            try data.write(to: manifestURL(in: stagingDirectory), options: [.atomic])
+        }
+    }
+
+    static func update(
+        in stagingDirectory: URL,
+        repository: String? = nil,
+        revision: String? = nil,
+        path: String,
+        expectedBytes: Int64? = nil,
+        checksum: String? = nil,
+        receivedBytes: Int64? = nil,
+        status: ModelDownloadStagingFileStatus? = nil,
+        errorMessage: String? = nil
+    ) throws {
+        try lock.withLock {
+            let url = manifestURL(in: stagingDirectory)
+            var manifest: ModelDownloadStagingManifest
+            if FileManager.default.fileExists(atPath: url.path) {
+                let data = try Data(contentsOf: url)
+                manifest = try JSONDecoder().decode(ModelDownloadStagingManifest.self, from: data)
+            } else {
+                manifest = ModelDownloadStagingManifest(repository: repository ?? "", revision: revision)
+            }
+            if let repository {
+                manifest.repository = repository
+            }
+            if let revision {
+                manifest.revision = revision
+            }
+            manifest.updateFile(
+                path: path,
+                expectedBytes: expectedBytes,
+                checksum: checksum,
+                receivedBytes: receivedBytes,
+                status: status,
+                errorMessage: errorMessage
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(manifest)
+            try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+            try data.write(to: url, options: [.atomic])
+        }
+    }
+
+    static func update(metadata: BackgroundModelFileDownloadMetadata, receivedBytes: Int64, expectedBytes: Int64?, status: ModelDownloadStagingFileStatus) {
+        do {
+            try update(
+                in: metadata.stagingDirectory,
+                repository: metadata.repository,
+                revision: metadata.revision,
+                path: metadata.filePath,
+                expectedBytes: expectedBytes ?? metadata.declaredSize,
+                checksum: metadata.checksum,
+                receivedBytes: receivedBytes,
+                status: status
+            )
+        } catch {
+            modelDownloadSupportLogger.warning("Failed to update download staging manifest for \(metadata.repository, privacy: .public)/\(metadata.filePath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    static func fail(metadata: BackgroundModelFileDownloadMetadata, error: Error) {
+        do {
+            try update(
+                in: metadata.stagingDirectory,
+                repository: metadata.repository,
+                revision: metadata.revision,
+                path: metadata.filePath,
+                expectedBytes: metadata.declaredSize,
+                checksum: metadata.checksum,
+                status: .failed,
+                errorMessage: error.localizedDescription
+            )
+        } catch {
+            modelDownloadSupportLogger.warning("Failed to mark staged model file failed for \(metadata.repository, privacy: .public)/\(metadata.filePath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+}
+
 // SAFETY: URLSession background delegates require NSObject identity. Shared
 // mutable dictionaries are only accessed under `lock`; delegate callbacks hand
 // data back through Sendable AsyncThrowingStream continuations.
@@ -95,9 +236,8 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
 
     private struct DownloadState: Sendable {
         var token: UUID
-        var destination: URL
-        var declaredSize: Int64?
-        var continuation: AsyncThrowingStream<BackgroundModelFileDownloadEvent, Error>.Continuation
+        var metadata: BackgroundModelFileDownloadMetadata
+        var continuation: AsyncThrowingStream<BackgroundModelFileDownloadEvent, Error>.Continuation?
     }
 
     private let lock = NSLock()
@@ -115,16 +255,15 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
 
     func downloadEvents(
         request: URLRequest,
-        destination: URL,
-        declaredSize: Int64?
+        metadata: BackgroundModelFileDownloadMetadata
     ) -> AsyncThrowingStream<BackgroundModelFileDownloadEvent, Error> {
         let token = UUID()
         return AsyncThrowingStream { continuation in
             let task = session.downloadTask(with: request)
+            task.taskDescription = metadata.encodedTaskDescription()
             let state = DownloadState(
                 token: token,
-                destination: destination,
-                declaredSize: declaredSize,
+                metadata: metadata,
                 continuation: continuation
             )
             continuation.onTermination = { @Sendable _ in
@@ -145,6 +284,44 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
         _ = session
     }
 
+    func recoverBackgroundTasks() async {
+        let tasks = await allTasks()
+        lock.withLock {
+            for task in tasks {
+                guard states[task.taskIdentifier] == nil,
+                      let metadata = BackgroundModelFileDownloadMetadata.decodeTaskDescription(task.taskDescription)
+                else {
+                    continue
+                }
+                states[task.taskIdentifier] = DownloadState(
+                    token: UUID(),
+                    metadata: metadata,
+                    continuation: nil
+                )
+            }
+        }
+    }
+
+    func hasBackgroundDownload(for repository: String) async -> Bool {
+        await recoverBackgroundTasks()
+        let key = Self.key(for: repository)
+        return lock.withLock {
+            states.values.contains { Self.key(for: $0.metadata.repository) == key }
+        }
+    }
+
+    func cancelBackgroundDownloads(for repository: String) async {
+        await recoverBackgroundTasks()
+        let key = Self.key(for: repository)
+        let tasks = await allTasks()
+        for task in tasks {
+            let metadata = state(for: task)?.metadata
+                ?? BackgroundModelFileDownloadMetadata.decodeTaskDescription(task.taskDescription)
+            guard metadata.map({ Self.key(for: $0.repository) == key }) == true else { continue }
+            task.cancel()
+        }
+    }
+
     private func cancelDownload(token: UUID) {
         let task = lock.withLock {
             tasksByToken[token]
@@ -159,9 +336,20 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
     ) {
-        guard let state = state(for: downloadTask.taskIdentifier) else { return }
-        let expected = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : state.declaredSize
-        state.continuation.yield(.progress(bytesWritten: bytesWritten, expectedFileSize: expected))
+        guard let state = state(for: downloadTask) else { return }
+        let expected = Self.expectedFileSize(
+            http: downloadTask.response as? HTTPURLResponse,
+            responseExpectedLength: totalBytesExpectedToWrite,
+            metadata: state.metadata
+        )
+        let receivedBytes = state.metadata.resumeOffset + totalBytesWritten
+        ModelDownloadStagingManifestStore.update(
+            metadata: state.metadata,
+            receivedBytes: receivedBytes,
+            expectedBytes: expected,
+            status: .downloading
+        )
+        state.continuation?.yield(.progress(bytesWritten: bytesWritten, expectedFileSize: expected))
     }
 
     func urlSession(
@@ -169,19 +357,26 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        guard let state = state(for: downloadTask.taskIdentifier) else { return }
+        guard let state = state(for: downloadTask) else { return }
         do {
             guard let http = downloadTask.response as? HTTPURLResponse,
                   (200 ..< 300).contains(http.statusCode)
             else {
                 throw URLError(.badServerResponse)
             }
-            if FileManager.default.fileExists(atPath: state.destination.path) {
-                try FileManager.default.removeItem(at: state.destination)
-            }
-            try FileManager.default.moveItem(at: location, to: state.destination)
+            try Self.persistDownloadedChunk(location: location, metadata: state.metadata, http: http)
+            let receivedBytes = try Self.byteCount(for: state.metadata.destination)
+            let expected = Self.expectedFileSize(http: http, responseExpectedLength: -1, metadata: state.metadata)
+            let isComplete = expected.map { receivedBytes >= $0 } ?? (state.metadata.rangeEnd == nil)
+            ModelDownloadStagingManifestStore.update(
+                metadata: state.metadata,
+                receivedBytes: receivedBytes,
+                expectedBytes: expected,
+                status: isComplete ? .complete : .downloading
+            )
             complete(taskIdentifier: downloadTask.taskIdentifier, result: .success(()))
         } catch {
+            ModelDownloadStagingManifestStore.fail(metadata: state.metadata, error: error)
             complete(taskIdentifier: downloadTask.taskIdentifier, result: .failure(error))
         }
     }
@@ -192,6 +387,10 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
         didCompleteWithError error: Error?
     ) {
         guard let error else { return }
+        let state = state(for: task)
+        if let metadata = state?.metadata {
+            ModelDownloadStagingManifestStore.fail(metadata: metadata, error: error)
+        }
         if (error as? URLError)?.code == .cancelled {
             complete(taskIdentifier: task.taskIdentifier, result: .failure(CancellationError()))
         } else {
@@ -206,10 +405,18 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
         completionHandler?()
     }
 
-    private func state(for taskIdentifier: Int) -> DownloadState? {
-        lock.withLock {
-            states[taskIdentifier]
+    private func state(for task: URLSessionTask) -> DownloadState? {
+        if let state = lock.withLock({ states[task.taskIdentifier] }) {
+            return state
         }
+        guard let metadata = BackgroundModelFileDownloadMetadata.decodeTaskDescription(task.taskDescription) else {
+            return nil
+        }
+        let recovered = DownloadState(token: UUID(), metadata: metadata, continuation: nil)
+        lock.withLock {
+            states[task.taskIdentifier] = recovered
+        }
+        return recovered
     }
 
     private func complete(taskIdentifier: Int, result: Result<Void, Error>) {
@@ -222,10 +429,99 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
 
         switch result {
         case .success:
-            state.continuation.finish()
+            state.continuation?.finish()
         case let .failure(error):
-            state.continuation.finish(throwing: error)
+            state.continuation?.finish(throwing: error)
         }
+    }
+
+    private func allTasks() async -> [URLSessionTask] {
+        await withCheckedContinuation { continuation in
+            session.getAllTasks { tasks in
+                continuation.resume(returning: tasks)
+            }
+        }
+    }
+
+    private static func persistDownloadedChunk(
+        location: URL,
+        metadata: BackgroundModelFileDownloadMetadata,
+        http: HTTPURLResponse
+    ) throws {
+        let destination = metadata.destination
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        if http.statusCode == 206 {
+            if metadata.resumeOffset > 0 {
+                let existingSize = try byteCount(for: destination)
+                guard existingSize == metadata.resumeOffset else {
+                    throw URLError(.cannotWriteToFile)
+                }
+                try append(contentsOf: location, to: destination)
+            } else {
+                try replaceItem(at: destination, with: location)
+            }
+            return
+        }
+
+        try replaceItem(at: destination, with: location)
+    }
+
+    private static func replaceItem(at destination: URL, with location: URL) throws {
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.moveItem(at: location, to: destination)
+    }
+
+    private static func append(contentsOf location: URL, to destination: URL) throws {
+        let input = try FileHandle(forReadingFrom: location)
+        defer {
+            try? input.close()
+        }
+
+        let output = try FileHandle(forWritingTo: destination)
+        defer {
+            try? output.close()
+        }
+
+        try output.seekToEnd()
+        while true {
+            guard let data = try input.read(upToCount: 1024 * 1024), !data.isEmpty else {
+                break
+            }
+            try output.write(contentsOf: data)
+        }
+    }
+
+    private static func byteCount(for url: URL) throws -> Int64 {
+        guard FileManager.default.fileExists(atPath: url.path) else { return 0 }
+        return Int64(try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+    }
+
+    private static func expectedFileSize(
+        http: HTTPURLResponse?,
+        responseExpectedLength: Int64,
+        metadata: BackgroundModelFileDownloadMetadata
+    ) -> Int64? {
+        if let declaredSize = metadata.declaredSize, declaredSize > 0 {
+            return declaredSize
+        }
+        if let contentRange = http?.value(forHTTPHeaderField: "Content-Range"),
+           let total = contentRange.split(separator: "/").last,
+           let parsed = Int64(total),
+           parsed > 0 {
+            return parsed
+        }
+        guard responseExpectedLength > 0 else { return nil }
+        return metadata.resumeOffset + responseExpectedLength
+    }
+
+    private nonisolated static func key(for repository: String) -> String {
+        repository.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
 
