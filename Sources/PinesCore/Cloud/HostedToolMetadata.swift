@@ -1,5 +1,9 @@
 import Foundation
 
+public extension CloudProviderMetadataKeys {
+    static let providerCitationsJSON = "pines.provider.citations_json"
+}
+
 public struct HostedToolAuditEntry: Identifiable, Hashable, Codable, Sendable {
     public var id: String
     public var providerItemID: String?
@@ -100,15 +104,32 @@ public extension Dictionary where Key == String, Value == String {
     var providerArtifactMaterializations: [ProviderArtifactMaterialization] {
         HostedToolMetadataParser.providerArtifactMaterializations(from: self)
     }
+
+    var providerCitations: [ProviderCitation] {
+        HostedToolMetadataParser.providerCitations(from: self)
+    }
 }
 
 public enum HostedToolMetadataParser {
     public static func hostedToolAuditEntries(from metadata: [String: String]) -> [HostedToolAuditEntry] {
-        decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON]).compactMap(hostedToolAuditEntry(from:))
+        let values = decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON])
+            + decodedJSONArray(metadata[CloudProviderMetadataKeys.anthropicHostedToolCallsJSON])
+        return values.compactMap(hostedToolAuditEntry(from:))
     }
 
     public static func providerArtifactMaterializations(from metadata: [String: String]) -> [ProviderArtifactMaterialization] {
-        decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIArtifactsJSON]).compactMap(providerArtifact(from:))
+        let values = decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIArtifactsJSON])
+            + decodedJSONArray(metadata[CloudProviderMetadataKeys.anthropicArtifactsJSON])
+            + decodedJSONArray(metadata[CloudProviderMetadataKeys.anthropicFileReferencesJSON])
+        return values.compactMap(providerArtifact(from:))
+    }
+
+    public static func providerCitations(from metadata: [String: String]) -> [ProviderCitation] {
+        guard let raw = metadata[CloudProviderMetadataKeys.providerCitationsJSON],
+              let data = raw.data(using: .utf8),
+              let citations = try? JSONDecoder().decode([ProviderCitation].self, from: data)
+        else { return [] }
+        return citations
     }
 
     private static func hostedToolAuditEntry(from object: [String: JSONValue]) -> HostedToolAuditEntry? {
@@ -116,7 +137,7 @@ public enum HostedToolMetadataParser {
         let id = object["id"]?.stringValue ?? object["provider_item_id"]?.stringValue ?? UUID().uuidString
         let kind = hostedToolKind(for: type)
         let status = object["status"]?.stringValue.flatMap(hostedToolStatus(from:))
-        let requiresAgent = kind == .computerUse || kind == .mcp
+        let requiresAgent = kind == .computerUse || kind == .mcp || kind == .textEditor || kind == .bash
         let requiresApproval = requiresAgent && object["require_approval"]?.stringValue != "never"
         return HostedToolAuditEntry(
             id: id,
@@ -168,18 +189,24 @@ public enum HostedToolMetadataParser {
 
     private static func hostedToolKind(for type: String) -> OpenAIHostedToolKind {
         switch type {
-        case "web_search_call":
+        case "web_search_call", "web_search_tool_result":
             return .webSearch
+        case "web_fetch_call", "web_fetch_tool_result", "web_fetch":
+            return .webFetch
         case "file_search_call":
             return .fileSearch
-        case "code_interpreter_call":
+        case "code_interpreter_call", "server_tool_use", "code_execution", "code_execution_tool_result":
             return .codeInterpreter
         case "image_generation_call":
             return .imageGeneration
         case "computer_call", "computer_call_output":
             return .computerUse
-        case "mcp_call", "mcp_list_tools":
+        case "mcp_call", "mcp_list_tools", "mcp_tool_result":
             return .mcp
+        case "text_editor_call", "text_editor":
+            return .textEditor
+        case "bash_call", "bash":
+            return .bash
         case "tool_search_call":
             return .toolSearch
         default:
@@ -202,9 +229,9 @@ public enum HostedToolMetadataParser {
         switch type {
         case "image", "partial_image":
             return .image
-        case "container_file":
+        case "container_file", "file_reference", "server_tool_use":
             return .file
-        case "code_interpreter":
+        case "code_interpreter", "code_execution", "code_execution_tool_result":
             return .code
         case "code_interpreter_logs":
             return .toolOutput

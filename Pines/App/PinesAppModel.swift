@@ -299,6 +299,31 @@ final class PinesAppModel: ObservableObject {
         set { settingsState.anthropicEffort = newValue }
     }
 
+    var anthropicThinkingMode: AnthropicThinkingMode {
+        get { settingsState.anthropicThinkingMode }
+        set { settingsState.anthropicThinkingMode = newValue }
+    }
+
+    var anthropicThinkingBudgetTokens: Int {
+        get { settingsState.anthropicThinkingBudgetTokens }
+        set { settingsState.anthropicThinkingBudgetTokens = AppSettingsSnapshot.normalizedAnthropicThinkingBudgetTokens(newValue) }
+    }
+
+    var anthropicPromptCachingEnabled: Bool {
+        get { settingsState.anthropicPromptCachingEnabled }
+        set { settingsState.anthropicPromptCachingEnabled = newValue }
+    }
+
+    var anthropicPromptCacheTTL: AnthropicPromptCacheTTL {
+        get { settingsState.anthropicPromptCacheTTL }
+        set { settingsState.anthropicPromptCacheTTL = newValue }
+    }
+
+    var anthropicCitationsEnabled: Bool {
+        get { settingsState.anthropicCitationsEnabled }
+        set { settingsState.anthropicCitationsEnabled = newValue }
+    }
+
     var geminiThinkingLevel: GeminiThinkingLevel {
         get { settingsState.geminiThinkingLevel }
         set { settingsState.geminiThinkingLevel = newValue }
@@ -1046,18 +1071,26 @@ final class PinesAppModel: ObservableObject {
         request: ChatRequest,
         services: PinesAppServices
     ) async {
-        let responseID = providerMetadata[CloudProviderMetadataKeys.openAIResponseID]
-            ?? providerMetadata[CloudProviderMetadataKeys.openAIChatCompletionID]
-        let hasOpenAIRecords = responseID != nil
+        let providerKind = providerKind(for: providerID)
+        let responseID = Self.providerResponseID(providerKind: providerKind, providerMetadata: providerMetadata)
+        let hasProviderRecords = responseID != nil
             || providerMetadata[CloudProviderMetadataKeys.openAIArtifactsJSON] != nil
             || providerMetadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON] != nil
             || providerMetadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON] != nil
-        guard hasOpenAIRecords || Self.usesStructuredOutput(request) else { return }
+            || providerMetadata[CloudProviderMetadataKeys.geminiArtifactsJSON] != nil
+            || providerMetadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON] != nil
+            || providerMetadata[CloudProviderMetadataKeys.geminiFileReferencesJSON] != nil
+            || providerMetadata[CloudProviderMetadataKeys.geminiURLContextJSON] != nil
+            || providerMetadata[CloudProviderMetadataKeys.anthropicArtifactsJSON] != nil
+            || providerMetadata[CloudProviderMetadataKeys.anthropicHostedToolCallsJSON] != nil
+            || providerMetadata[CloudProviderMetadataKeys.anthropicFileReferencesJSON] != nil
+        guard hasProviderRecords || Self.usesStructuredOutput(request) else { return }
 
         do {
             if let repository = services.providerStructuredOutputRepository,
                let record = Self.providerStructuredOutputRecord(
                 providerID: providerID,
+                providerKind: providerKind,
                 responseID: responseID,
                 messageID: messageID,
                 content: content,
@@ -1070,6 +1103,7 @@ final class PinesAppModel: ObservableObject {
             if let repository = services.providerArtifactRepository {
                 let records = Self.providerArtifactRecords(
                     providerID: providerID,
+                    providerKind: providerKind,
                     responseID: responseID,
                     providerMetadata: providerMetadata
                 )
@@ -1084,8 +1118,30 @@ final class PinesAppModel: ObservableObject {
         }
     }
 
+    private func providerKind(for providerID: ProviderID) -> CloudProviderKind {
+        cloudProviders.first(where: { $0.id == providerID })?.kind ?? .custom
+    }
+
+    private static func providerResponseID(
+        providerKind: CloudProviderKind,
+        providerMetadata: [String: String]
+    ) -> String? {
+        switch providerKind {
+        case .anthropic:
+            providerMetadata[CloudProviderMetadataKeys.anthropicMessageID]
+                ?? providerMetadata[CloudProviderMetadataKeys.anthropicRequestID]
+        case .gemini:
+            providerMetadata[CloudProviderMetadataKeys.geminiInteractionID]
+                ?? providerMetadata[CloudProviderMetadataKeys.geminiResponseID]
+        case .openAI, .openAICompatible, .openRouter, .custom, .voyageAI:
+            providerMetadata[CloudProviderMetadataKeys.openAIResponseID]
+                ?? providerMetadata[CloudProviderMetadataKeys.openAIChatCompletionID]
+        }
+    }
+
     private static func providerStructuredOutputRecord(
         providerID: ProviderID,
+        providerKind: CloudProviderKind,
         responseID: String?,
         messageID: UUID,
         content: String,
@@ -1131,7 +1187,7 @@ final class PinesAppModel: ObservableObject {
         return ProviderStructuredOutputRecord(
             id: result.id,
             providerID: providerID,
-            providerKind: .openAI,
+            providerKind: providerKind,
             responseID: result.responseID?.rawValue ?? responseID,
             messageID: messageID,
             schemaName: result.schemaName,
@@ -1147,6 +1203,7 @@ final class PinesAppModel: ObservableObject {
 
     private static func providerArtifactRecords(
         providerID: ProviderID,
+        providerKind: CloudProviderKind,
         responseID: String?,
         providerMetadata: [String: String]
     ) -> [ProviderArtifactRecord] {
@@ -1154,6 +1211,7 @@ final class PinesAppModel: ObservableObject {
         records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON]).enumerated().map { index, object in
             providerArtifactRecord(
                 providerID: providerID,
+                providerKind: providerKind,
                 responseID: responseID,
                 object: object,
                 fallbackID: "hosted-tool-\(responseID ?? "response")-\(index)",
@@ -1163,6 +1221,7 @@ final class PinesAppModel: ObservableObject {
         records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.openAIArtifactsJSON]).enumerated().map { index, object in
             providerArtifactRecord(
                 providerID: providerID,
+                providerKind: providerKind,
                 responseID: responseID,
                 object: object,
                 fallbackID: "artifact-\(responseID ?? "response")-\(index)",
@@ -1172,10 +1231,81 @@ final class PinesAppModel: ObservableObject {
         records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON]).enumerated().map { index, object in
             providerArtifactRecord(
                 providerID: providerID,
+                providerKind: providerKind,
                 responseID: responseID,
                 object: object,
                 fallbackID: "file-search-\(responseID ?? "response")-\(index)",
                 fallbackKind: "file_search_result"
+            )
+        })
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.geminiArtifactsJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                providerKind: providerKind,
+                responseID: responseID,
+                object: object,
+                fallbackID: "gemini-artifact-\(responseID ?? "response")-\(index)",
+                fallbackKind: object["type"] as? String ?? "artifact"
+            )
+        })
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                providerKind: providerKind,
+                responseID: responseID,
+                object: object,
+                fallbackID: "gemini-code-\(responseID ?? "response")-\(index)",
+                fallbackKind: "code_execution"
+            )
+        })
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.geminiFileReferencesJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                providerKind: providerKind,
+                responseID: responseID,
+                object: object,
+                fallbackID: "gemini-file-\(responseID ?? "response")-\(index)",
+                fallbackKind: "file_reference"
+            )
+        })
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.geminiURLContextJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                providerKind: providerKind,
+                responseID: responseID,
+                object: object,
+                fallbackID: "gemini-url-\(responseID ?? "response")-\(index)",
+                fallbackKind: "url_context"
+            )
+        })
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.anthropicHostedToolCallsJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                providerKind: providerKind,
+                responseID: responseID,
+                object: object,
+                fallbackID: "anthropic-hosted-tool-\(responseID ?? "response")-\(index)",
+                fallbackKind: "hosted_tool_call"
+            )
+        })
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.anthropicArtifactsJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                providerKind: providerKind,
+                responseID: responseID,
+                object: object,
+                fallbackID: "anthropic-artifact-\(responseID ?? "response")-\(index)",
+                fallbackKind: object["type"] as? String ?? "artifact"
+            )
+        })
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.anthropicFileReferencesJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                providerKind: providerKind,
+                responseID: responseID,
+                object: object,
+                fallbackID: "anthropic-file-\(responseID ?? "response")-\(index)",
+                fallbackKind: "file_reference"
             )
         })
         return records
@@ -1183,6 +1313,7 @@ final class PinesAppModel: ObservableObject {
 
     private static func providerArtifactRecord(
         providerID: ProviderID,
+        providerKind: CloudProviderKind,
         responseID: String?,
         object: [String: Any],
         fallbackID: String,
@@ -1196,20 +1327,32 @@ final class PinesAppModel: ObservableObject {
         return ProviderArtifactRecord(
             id: providerItemID.map { "\(fallbackKind)-\($0)" } ?? fallbackID,
             providerID: providerID,
-            providerKind: .openAI,
+            providerKind: providerKind,
             responseID: responseID,
             toolCallID: providerItemID,
-            providerFileID: stringValue(object["file_id"]),
+            providerFileID: stringValue(object["file_id"])
+                ?? stringValue(object["fileUri"])
+                ?? stringValue(object["file_uri"])
+                ?? stringValue(object["uri"]),
             kind: kind,
-            fileName: stringValue(object["filename"]) ?? stringValue(object["file_name"]),
-            contentType: stringValue(object["content_type"]) ?? stringValue(object["mime_type"]),
+            fileName: stringValue(object["filename"])
+                ?? stringValue(object["file_name"])
+                ?? stringValue(object["displayName"])
+                ?? stringValue(object["display_name"]),
+            contentType: stringValue(object["content_type"])
+                ?? stringValue(object["mime_type"])
+                ?? stringValue(object["mimeType"]),
             byteCount: int64Value(object["bytes"]) ?? int64Value(object["byte_hint"]),
             text: stringValue(object["prompt"])
                 ?? stringValue(object["status"])
                 ?? stringValue(object["text"])
+                ?? stringValue(object["outcome"])
                 ?? stringValue(object["filename"]),
             content: content,
-            remoteURL: stringValue(object["url"]).flatMap(URL.init(string:))
+            remoteURL: (stringValue(object["url"])
+                ?? stringValue(object["uri"])
+                ?? stringValue(object["fileUri"])
+                ?? stringValue(object["file_uri"])).flatMap(URL.init(string:))
         )
     }
 
@@ -1342,6 +1485,11 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.openAIReasoningEffort, settings.openAIReasoningEffort)
         setIfChanged(\.openAITextVerbosity, settings.openAITextVerbosity)
         setIfChanged(\.anthropicEffort, settings.anthropicEffort)
+        setIfChanged(\.anthropicThinkingMode, settings.anthropicThinkingMode)
+        setIfChanged(\.anthropicThinkingBudgetTokens, settings.anthropicThinkingBudgetTokens)
+        setIfChanged(\.anthropicPromptCachingEnabled, settings.anthropicPromptCachingEnabled)
+        setIfChanged(\.anthropicPromptCacheTTL, settings.anthropicPromptCacheTTL)
+        setIfChanged(\.anthropicCitationsEnabled, settings.anthropicCitationsEnabled)
         setIfChanged(\.geminiThinkingLevel, settings.geminiThinkingLevel)
         setIfChanged(\.cloudWebSearchMode, settings.cloudWebSearchMode)
         setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
@@ -2230,7 +2378,8 @@ final class PinesAppModel: ObservableObject {
                 allowsTools: !availableTools.isEmpty,
                 availableTools: availableTools,
                 vaultContextIDs: includePrivateContext ? (vaultContext?.documentIDs ?? []) : [],
-                executionContext: isAgentMode ? .agent : .chat
+                executionContext: isAgentMode ? .agent : .chat,
+                anthropicOptions: anthropicRequestOptions(for: selectedProviderID, settings: settings, services: services)
             )
             let session = AgentSession(
                 title: isAgentMode ? "Agent" : "Chat",
@@ -2663,6 +2812,7 @@ final class PinesAppModel: ObservableObject {
             openAIReasoningEfforts: supportsOpenAI ? CloudProviderModelEligibility.openAIReasoningEffortOptions(for: selection.modelID) : [],
             supportsOpenAITextVerbosity: supportsOpenAI ? CloudProviderModelEligibility.supportsOpenAITextVerbosity(modelID: selection.modelID) : false,
             anthropicEfforts: supportsAnthropic ? CloudProviderModelEligibility.anthropicEffortOptions(for: selection.modelID) : [],
+            anthropicThinkingModes: supportsAnthropic ? CloudProviderModelEligibility.anthropicThinkingModes(for: selection.modelID) : [],
             geminiThinkingLevels: supportsGemini ? CloudProviderModelEligibility.geminiThinkingLevelOptions(for: selection.modelID) : [],
             cloudWebSearchModes: cloudNativeWebSearchModes(providerID: selection.providerID, providerKind: selection.providerKind, modelID: selection.modelID, services: services)
         )
@@ -2727,6 +2877,11 @@ final class PinesAppModel: ObservableObject {
                 openAIReasoningEffort: openAIReasoningEffort,
                 openAITextVerbosity: openAITextVerbosity,
                 anthropicEffort: anthropicEffort,
+                anthropicThinkingMode: anthropicThinkingMode,
+                anthropicThinkingBudgetTokens: anthropicThinkingBudgetTokens,
+                anthropicPromptCachingEnabled: anthropicPromptCachingEnabled,
+                anthropicPromptCacheTTL: anthropicPromptCacheTTL,
+                anthropicCitationsEnabled: anthropicCitationsEnabled,
                 geminiThinkingLevel: geminiThinkingLevel,
                 cloudWebSearchMode: cloudWebSearchMode,
                 requireToolApproval: true,
@@ -2774,6 +2929,29 @@ final class PinesAppModel: ObservableObject {
         let mode = settings?.cloudWebSearchMode ?? cloudWebSearchMode
         guard mode != .off else { return nil }
         return await services.webSearchLocationProvider.options()
+    }
+
+    func anthropicRequestOptions(
+        for providerID: ProviderID,
+        settings: AppSettingsSnapshot?,
+        services: PinesAppServices
+    ) -> AnthropicRequestOptions? {
+        guard providerID != services.mlxRuntime.localProviderID,
+              cloudProviders.first(where: { $0.id == providerID })?.kind == .anthropic
+        else { return nil }
+        return AnthropicRequestOptions(
+            promptCache: AnthropicPromptCacheOptions(
+                enabled: settings?.anthropicPromptCachingEnabled ?? anthropicPromptCachingEnabled,
+                ttl: settings?.anthropicPromptCacheTTL ?? anthropicPromptCacheTTL
+            ),
+            thinking: AnthropicThinkingOptions(
+                mode: settings?.anthropicThinkingMode ?? anthropicThinkingMode,
+                budgetTokens: settings?.anthropicThinkingBudgetTokens ?? anthropicThinkingBudgetTokens,
+                effort: settings?.anthropicEffort ?? anthropicEffort,
+                showSummaries: true
+            ),
+            citations: AnthropicCitationOptions(enabled: settings?.anthropicCitationsEnabled ?? anthropicCitationsEnabled)
+        )
     }
 
     func localRuntimeProfile(
@@ -4167,6 +4345,12 @@ final class PinesAppModel: ObservableObject {
                         self?.setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
                         self?.setIfChanged(\.openAIReasoningEffort, settings.openAIReasoningEffort)
                         self?.setIfChanged(\.openAITextVerbosity, settings.openAITextVerbosity)
+                        self?.setIfChanged(\.anthropicEffort, settings.anthropicEffort)
+                        self?.setIfChanged(\.anthropicThinkingMode, settings.anthropicThinkingMode)
+                        self?.setIfChanged(\.anthropicThinkingBudgetTokens, settings.anthropicThinkingBudgetTokens)
+                        self?.setIfChanged(\.anthropicPromptCachingEnabled, settings.anthropicPromptCachingEnabled)
+                        self?.setIfChanged(\.anthropicPromptCacheTTL, settings.anthropicPromptCacheTTL)
+                        self?.setIfChanged(\.anthropicCitationsEnabled, settings.anthropicCitationsEnabled)
                         if let theme = PinesThemeTemplate(rawValue: settings.themeTemplate) {
                             self?.setIfChanged(\.selectedThemeTemplate, theme)
                         }

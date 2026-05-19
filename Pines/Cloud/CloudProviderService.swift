@@ -59,4 +59,32 @@ struct CloudProviderService {
     func geminiProviderService(for provider: CloudProviderConfiguration) -> GeminiProviderService {
         GeminiProviderService(configuration: provider, secretStore: secretStore)
     }
+
+    func anthropicProviderService(for provider: CloudProviderConfiguration) -> AnthropicProviderService {
+        AnthropicProviderService(configuration: provider, secretStore: secretStore)
+    }
+
+    func geminiLiveSessionService(for provider: CloudProviderConfiguration) -> GeminiLiveSessionService {
+        GeminiLiveSessionService(configuration: provider, secretStore: secretStore)
+    }
+
+    func geminiLifecycleCoordinator(
+        for provider: CloudProviderConfiguration,
+        repositories: GeminiProviderLifecycleRepositories
+    ) -> GeminiProviderLifecycleCoordinator {
+        GeminiProviderLifecycleCoordinator(
+            service: geminiProviderService(for: provider),
+            repositories: repositories
+        )
+    }
+
+    func anthropicLifecycleCoordinator(
+        for provider: CloudProviderConfiguration,
+        repositories: AnthropicProviderLifecycleRepositories
+    ) -> AnthropicProviderLifecycleCoordinator {
+        AnthropicProviderLifecycleCoordinator(
+            service: anthropicProviderService(for: provider),
+            repositories: repositories
+        )
+    }
 }

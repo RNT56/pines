@@ -125,6 +125,66 @@ public struct OpenAIBatchID: RawRepresentable, Hashable, Codable, Sendable, Expr
     }
 }
 
+public struct AnthropicProviderFileID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct AnthropicBatchID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct AnthropicMessageID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct AnthropicRequestID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct AnthropicHostedToolCallID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
 public typealias ProviderFileID = OpenAIProviderFileID
 public typealias ProviderDataStoreID = OpenAIVectorStoreID
 public typealias ProviderDataStoreFileID = OpenAIVectorStoreFileID
@@ -285,13 +345,13 @@ public extension CloudProviderConfiguration {
             files = true
             hostedTools = true
             structuredOutputs = true
-            contextCache = kind == .gemini
+            contextCache = true
             live = kind == .gemini
             generatedImages = kind == .gemini
             generatedAudio = false
             generatedVideo = kind == .gemini
-            batch = kind == .gemini
-            tokenCounting = kind == .gemini
+            batch = true
+            tokenCounting = true
         case .openRouter:
             imageInputs = true
             audioInputs = false
@@ -612,6 +672,43 @@ public enum CloudProviderModelEligibility: Sendable {
             || modelName.contains("claude-opus-4-6")
             || modelName.contains("claude-sonnet-4-6")
             || modelName.contains("claude-mythos-preview")
+    }
+
+    public static func anthropicThinkingModes(for modelID: ModelID) -> [AnthropicThinkingMode] {
+        let modelName = normalizedModelName(modelID)
+        let effortOptions = anthropicEffortOptions(for: modelID)
+        guard isAllowedAnthropicTextModel(modelName)
+                || !effortOptions.isEmpty
+                || usesAnthropicAdaptiveThinking(modelID: modelID)
+        else { return [] }
+
+        var modes: [AnthropicThinkingMode] = [.off]
+        if usesAnthropicAdaptiveThinking(modelID: modelID) {
+            modes.append(.adaptive)
+        }
+        modes.append(.budgeted)
+        if !effortOptions.isEmpty {
+            modes.append(.effort)
+        }
+        return modes
+    }
+
+    public static func anthropicThinkingOptions(
+        for modelID: ModelID,
+        requested: AnthropicThinkingOptions
+    ) -> AnthropicThinkingOptions {
+        let modes = anthropicThinkingModes(for: modelID)
+        guard !modes.isEmpty else {
+            return AnthropicThinkingOptions(mode: .off, effort: requested.effort, showSummaries: requested.showSummaries)
+        }
+        var options = requested
+        if !modes.contains(options.mode) {
+            options.mode = modes.contains(.adaptive) ? .adaptive : modes[0]
+        }
+        if options.mode == .effort {
+            options.effort = anthropicEffort(for: modelID, requested: options.effort)
+        }
+        return options
     }
 
     public static func geminiThinkingLevel(for modelID: ModelID, requested: GeminiThinkingLevel) -> GeminiThinkingLevel {

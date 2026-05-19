@@ -469,7 +469,7 @@ struct SettingsDetailView: View {
 
             PinesMetricPillGroup(items: providerMetricItems(for: provider))
 
-            if provider.kind == .openAI {
+            if provider.kind == .openAI || provider.kind == .anthropic {
                 openAIProviderLifecycleSummary(for: provider)
             }
 
@@ -493,7 +493,7 @@ struct SettingsDetailView: View {
 
         return VStack(alignment: .leading, spacing: theme.spacing.small) {
             HStack(alignment: .firstTextBaseline) {
-                Text("OpenAI Dashboard")
+                Text("\(provider.kind.title) Dashboard")
                     .font(theme.typography.caption.weight(.semibold))
                     .foregroundStyle(theme.colors.primaryText)
                 Spacer()
@@ -507,7 +507,7 @@ struct SettingsDetailView: View {
             }
 
             PinesMetricPillGroup(items: [
-                .init("Responses", value: "\(settingsState.openAIReasoningEffort.rawValue)/\(settingsState.openAITextVerbosity.rawValue)", systemImage: "slider.horizontal.3", tone: .accent),
+                .init("Responses", value: provider.kind == .anthropic ? settingsState.anthropicThinkingMode.rawValue : "\(settingsState.openAIReasoningEffort.rawValue)/\(settingsState.openAITextVerbosity.rawValue)", systemImage: "slider.horizontal.3", tone: .accent),
                 .init("Storage", value: "\(files.count) files", systemImage: "doc", tone: .warning),
                 .init("Vectors", value: "\(vectorStores.count)", systemImage: "square.stack.3d.up", tone: .warning),
                 .init("Artifacts", value: "\(artifacts.count)", systemImage: "sparkles", tone: .accent),
@@ -516,7 +516,9 @@ struct SettingsDetailView: View {
                 .init("Research", value: "\(research.count)", systemImage: "doc.text.magnifyingglass", tone: .success),
             ], minimumWidth: 112)
 
-            Text("Advanced Responses: web search \(settingsState.cloudWebSearchMode.rawValue), provider storage opt-in, structured output records persisted.")
+            Text(provider.kind == .anthropic
+                ? "Anthropic Messages: prompt cache \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off"), citations \(settingsState.anthropicCitationsEnabled ? "on" : "off"), provider storage opt-in."
+                : "Advanced Responses: web search \(settingsState.cloudWebSearchMode.rawValue), provider storage opt-in, structured output records persisted.")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -674,6 +676,46 @@ struct SettingsDetailView: View {
                         .init("Cache", value: "TTL", systemImage: "memorychip", tone: .warning),
                         .init("Live", value: "separate", systemImage: "dot.radiowaves.left.and.right", tone: .warning),
                         .init("Batch", value: "jobs", systemImage: "tray.full", tone: .warning),
+                    ]
+                ),
+            ])
+        }
+        if kind == .anthropic {
+            rows.append(contentsOf: [
+                .init(
+                    title: "Anthropic Messages",
+                    detail: "Messages, Files, prompt caching, citations, and signed thinking blocks use shared provider records and per-model eligibility.",
+                    systemImage: "text.bubble",
+                    status: .accountGated,
+                    secondaryStatus: .needsValidation,
+                    metrics: [
+                        .init("Thinking", value: settingsState.anthropicThinkingMode.rawValue, systemImage: "brain", tone: .accent),
+                        .init("Cache", value: settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off", systemImage: "memorychip", tone: .warning),
+                        .init("Citations", value: settingsState.anthropicCitationsEnabled ? "on" : "off", systemImage: "quote.bubble", tone: .info),
+                    ]
+                ),
+                .init(
+                    title: "Anthropic Hosted Tools",
+                    detail: "Web search/fetch can run with explicit enablement; code execution, remote MCP, text editor, and bash stay approval-gated.",
+                    systemImage: "wrench.and.screwdriver",
+                    status: .accountGated,
+                    secondaryStatus: .custom("Policy gated", .warning),
+                    metrics: [
+                        .init("Web", value: "search/fetch", systemImage: "safari", tone: .success),
+                        .init("Code", value: "approval", systemImage: "chevron.left.forwardslash.chevron.right", tone: .warning),
+                        .init("Computer", value: "disabled", systemImage: "display", tone: .neutral),
+                    ]
+                ),
+                .init(
+                    title: "Anthropic Operations",
+                    detail: "Files, token counting, message batches, generated files, and provider provenance participate in the lifecycle dashboard.",
+                    systemImage: "rectangle.stack.badge.play",
+                    status: .accountGated,
+                    secondaryStatus: .custom("Provider-hosted", .warning),
+                    metrics: [
+                        .init("Files", value: "API", systemImage: "doc", tone: .warning),
+                        .init("Batch", value: "messages", systemImage: "tray.full", tone: .info),
+                        .init("Tokens", value: "preflight", systemImage: "number", tone: .accent),
                     ]
                 ),
             ])

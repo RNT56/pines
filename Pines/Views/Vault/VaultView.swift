@@ -152,8 +152,10 @@ private struct VaultProviderStorageSection: View {
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     @EnvironmentObject private var settingsState: PinesSettingsState
 
-    private var openAIProviders: [CloudProviderConfiguration] {
-        settingsState.cloudProviders.filter { $0.kind == .openAI }
+    private var providerStorageProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.filter { provider in
+            provider.kind == .openAI || provider.kind == .anthropic || provider.kind == .gemini
+        }
     }
 
     private var fileSearchConfigSummary: String {
@@ -171,7 +173,7 @@ private struct VaultProviderStorageSection: View {
                     PinesProviderStorageBadge(kind: .vectorStore, compact: true)
                 }
 
-                Text("Uploads are opt-in and provider-hosted until deleted. Vault files stay local unless explicitly exported to OpenAI storage.")
+                Text("Uploads are opt-in and provider-hosted until deleted. Vault files stay local unless explicitly exported to cloud provider storage.")
                     .font(theme.typography.caption)
                     .foregroundStyle(theme.colors.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -190,9 +192,9 @@ private struct VaultProviderStorageSection: View {
             Button {
                 Task { await refreshProviderStorage() }
             } label: {
-                Label(providerState.isRefreshingProviderLifecycle ? "Refreshing" : "Refresh OpenAI storage", systemImage: "arrow.triangle.2.circlepath")
+                Label(providerState.isRefreshingProviderLifecycle ? "Refreshing" : "Refresh provider storage", systemImage: "arrow.triangle.2.circlepath")
             }
-            .disabled(openAIProviders.isEmpty || providerState.isRefreshingProviderLifecycle)
+            .disabled(providerStorageProviders.isEmpty || providerState.isRefreshingProviderLifecycle)
 
             if !providerState.providerVectorStorePreviews.isEmpty {
                 Text("File search config")
@@ -224,7 +226,18 @@ private struct VaultProviderStorageSection: View {
     @MainActor
     private func refreshProviderStorage() async {
         do {
-            _ = try await appModel.refreshOpenAIProviderStorage(services: services)
+            for provider in providerStorageProviders {
+                switch provider.kind {
+                case .openAI:
+                    _ = try await appModel.refreshOpenAIProviderStorage(providerID: provider.id, services: services)
+                case .anthropic:
+                    _ = try await appModel.refreshAnthropicProviderStorage(providerID: provider.id, services: services)
+                case .gemini:
+                    _ = try await appModel.refreshGeminiProviderStorage(providerID: provider.id, services: services)
+                default:
+                    break
+                }
+            }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -330,11 +343,16 @@ private struct VaultProviderFileRow: View {
     @MainActor
     private func deleteFile() async {
         do {
-            try await appModel.deleteOpenAIProviderFile(
-                providerID: file.providerID,
-                fileID: file.id,
-                services: services
-            )
+            switch file.providerKind {
+            case .openAI:
+                try await appModel.deleteOpenAIProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            case .anthropic:
+                try await appModel.deleteAnthropicProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            case .gemini:
+                try await appModel.deleteGeminiProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(file.providerKind.rawValue) file deletion is not supported here.")
+            }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }

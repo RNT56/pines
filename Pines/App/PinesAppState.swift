@@ -184,6 +184,11 @@ final class PinesSettingsState: ObservableObject {
     @Published var openAIReasoningEffort: OpenAIReasoningEffort
     @Published var openAITextVerbosity: OpenAITextVerbosity
     @Published var anthropicEffort: AnthropicEffort
+    @Published var anthropicThinkingMode: AnthropicThinkingMode
+    @Published var anthropicThinkingBudgetTokens: Int
+    @Published var anthropicPromptCachingEnabled: Bool
+    @Published var anthropicPromptCacheTTL: AnthropicPromptCacheTTL
+    @Published var anthropicCitationsEnabled: Bool
     @Published var geminiThinkingLevel: GeminiThinkingLevel
     @Published var cloudWebSearchMode: CloudWebSearchMode
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]]
@@ -213,6 +218,11 @@ final class PinesSettingsState: ObservableObject {
         openAIReasoningEffort: OpenAIReasoningEffort = AppSettingsSnapshot.defaultOpenAIReasoningEffort,
         openAITextVerbosity: OpenAITextVerbosity = AppSettingsSnapshot.defaultOpenAITextVerbosity,
         anthropicEffort: AnthropicEffort = AppSettingsSnapshot.defaultAnthropicEffort,
+        anthropicThinkingMode: AnthropicThinkingMode = AppSettingsSnapshot.defaultAnthropicThinkingMode,
+        anthropicThinkingBudgetTokens: Int = AppSettingsSnapshot.defaultAnthropicThinkingBudgetTokens,
+        anthropicPromptCachingEnabled: Bool = false,
+        anthropicPromptCacheTTL: AnthropicPromptCacheTTL = .fiveMinutes,
+        anthropicCitationsEnabled: Bool = true,
         geminiThinkingLevel: GeminiThinkingLevel = AppSettingsSnapshot.defaultGeminiThinkingLevel,
         cloudWebSearchMode: CloudWebSearchMode = AppSettingsSnapshot.defaultCloudWebSearchMode,
         cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:],
@@ -241,6 +251,11 @@ final class PinesSettingsState: ObservableObject {
         self.openAIReasoningEffort = openAIReasoningEffort
         self.openAITextVerbosity = openAITextVerbosity
         self.anthropicEffort = anthropicEffort
+        self.anthropicThinkingMode = anthropicThinkingMode
+        self.anthropicThinkingBudgetTokens = AppSettingsSnapshot.normalizedAnthropicThinkingBudgetTokens(anthropicThinkingBudgetTokens)
+        self.anthropicPromptCachingEnabled = anthropicPromptCachingEnabled
+        self.anthropicPromptCacheTTL = anthropicPromptCacheTTL
+        self.anthropicCitationsEnabled = anthropicCitationsEnabled
         self.geminiThinkingLevel = geminiThinkingLevel
         self.cloudWebSearchMode = cloudWebSearchMode
         self.cloudModelCatalog = cloudModelCatalog

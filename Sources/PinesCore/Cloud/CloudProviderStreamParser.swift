@@ -25,6 +25,15 @@ public enum CloudProviderMetadataKeys {
     public static let anthropicMessageID = "anthropic.message_id"
     public static let anthropicRequestID = "anthropic.request_id"
     public static let anthropicThinkingContentJSON = "anthropic.thinking_content_json"
+    public static let anthropicUsageJSON = "anthropic.usage_json"
+    public static let anthropicCacheUsageJSON = "anthropic.cache_usage_json"
+    public static let anthropicCacheReadInputTokens = "anthropic.cache_read_input_tokens"
+    public static let anthropicCacheCreationInputTokens = "anthropic.cache_creation_input_tokens"
+    public static let anthropicHostedToolCallsJSON = "anthropic.hosted_tool_calls_json"
+    public static let anthropicArtifactsJSON = "anthropic.artifacts_json"
+    public static let anthropicFileReferencesJSON = "anthropic.file_references_json"
+    public static let anthropicErrorType = "anthropic.error.type"
+    public static let anthropicErrorJSON = "anthropic.error_json"
     public static let geminiResponseID = "gemini.response_id"
     public static let geminiModelVersion = "gemini.model_version"
     public static let geminiRequestID = "gemini.request_id"
@@ -120,6 +129,7 @@ public struct CloudProviderStreamParser {
             state.recordAnthropicMessage(message)
             if let usage = message["usage"] as? [String: Any],
                let metrics = Self.anthropicMetrics(from: usage) {
+                state.recordAnthropicUsage(usage)
                 events.append(.metrics(metrics))
             }
         }
@@ -139,13 +149,22 @@ public struct CloudProviderStreamParser {
                 state.anthropicThinkingText = block["thinking"] as? String ?? ""
                 state.anthropicThinkingSignature = block["signature"] as? String
             case "text":
-                state.recordAnthropicSearchBlock(block)
+                state.recordAnthropicContentBlock(block)
                 if let text = block["text"] as? String, !text.isEmpty {
                     events.append(.token(TokenDelta(kind: .token, text: text, tokenCount: 1)))
                 }
-            case "web_search_tool_result":
-                state.recordAnthropicSearchBlock(block)
+            case "server_tool_use":
+                state.anthropicServerToolIndex = index
+                state.anthropicServerToolID = block["id"] as? String
+                state.anthropicServerToolName = block["name"] as? String
+                let initialInput = Self.jsonString(from: block["input"]) ?? ""
+                state.anthropicServerToolArguments = initialInput == "{}" ? "" : initialInput
+                state.recordAnthropicHostedToolBlock(block, status: "in_progress")
+            case "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result", "mcp_tool_result":
+                state.recordAnthropicHostedToolBlock(block, status: "completed")
+                state.recordAnthropicContentBlock(block)
             default:
+                state.recordAnthropicContentBlock(block)
                 break
             }
         }
@@ -158,7 +177,12 @@ public struct CloudProviderStreamParser {
             }
             if delta["type"] as? String == "input_json_delta",
                let partial = delta["partial_json"] as? String {
-                state.anthropicArguments += partial
+                if let index = json["index"] as? Int,
+                   index == state.anthropicServerToolIndex {
+                    state.anthropicServerToolArguments += partial
+                } else {
+                    state.anthropicArguments += partial
+                }
             }
             if delta["type"] as? String == "thinking_delta",
                let thinking = delta["thinking"] as? String {
@@ -167,6 +191,10 @@ public struct CloudProviderStreamParser {
             if delta["type"] as? String == "signature_delta",
                let signature = delta["signature"] as? String {
                 state.anthropicThinkingSignature = signature
+            }
+            if delta["type"] as? String == "citations_delta",
+               let citation = delta["citation"] as? [String: Any] {
+                state.recordAnthropicCitationObjects([citation])
             }
         }
 
@@ -185,6 +213,12 @@ public struct CloudProviderStreamParser {
         }
         if type == "content_block_stop",
            let index = json["index"] as? Int,
+           index == state.anthropicServerToolIndex {
+            state.recordAnthropicCompletedServerTool()
+            state.clearAnthropicServerTool()
+        }
+        if type == "content_block_stop",
+           let index = json["index"] as? Int,
            index == state.anthropicThinkingIndex {
             state.recordAnthropicThinkingBlock()
         }
@@ -192,6 +226,7 @@ public struct CloudProviderStreamParser {
         if type == "message_delta" {
             if let usage = json["usage"] as? [String: Any],
                let metrics = Self.anthropicMetrics(from: usage) {
+                state.recordAnthropicUsage(usage)
                 events.append(.metrics(metrics))
             }
             if let delta = json["delta"] as? [String: Any],
@@ -202,6 +237,7 @@ public struct CloudProviderStreamParser {
 
         if type == "error" {
             let error = json["error"] as? [String: Any]
+            state.recordAnthropicError(error)
             finish = InferenceFinish(
                 reason: .error,
                 message: error?["message"] as? String ?? "Anthropic returned a streaming error.",
@@ -900,6 +936,14 @@ public struct CloudProviderStreamState {
     public var anthropicThinkingText = ""
     public var anthropicThinkingSignature: String?
     public var anthropicThinkingBlocks = [[String: Any]]()
+    public var anthropicServerToolIndex: Int?
+    public var anthropicServerToolID: String?
+    public var anthropicServerToolName: String?
+    public var anthropicServerToolArguments = ""
+    public var anthropicHostedToolCalls = [[String: Any]]()
+    public var anthropicArtifacts = [[String: Any]]()
+    public var anthropicFileReferences = [[String: Any]]()
+    public var anthropicProviderCitations = [[String: Any]]()
 
     public var geminiProviderMetadata = [String: String]()
     public var geminiCompletedToolCallIDs = Set<String>()
@@ -963,6 +1007,14 @@ public struct CloudProviderStreamState {
               let queries = try? JSONDecoder().decode([String].self, from: data)
         else { return [] }
         return queries
+    }
+
+    private static func existingProviderCitations(from metadata: [String: String]) -> [ProviderCitation] {
+        guard let raw = metadata[CloudProviderMetadataKeys.providerCitationsJSON],
+              let data = raw.data(using: .utf8),
+              let citations = try? JSONDecoder().decode([ProviderCitation].self, from: data)
+        else { return [] }
+        return citations
     }
 
     private static func openAIWebSearchCitations(from response: [String: Any]) -> [WebSearchCitation] {
@@ -1303,6 +1355,146 @@ public struct CloudProviderStreamState {
         }
     }
 
+    private static func anthropicProviderCitations(from value: [String: Any]) -> [ProviderCitation] {
+        var citations = [ProviderCitation]()
+        citations.append(contentsOf: anthropicProviderCitations(fromCitationValue: value["citations"]))
+        for block in value["content"] as? [[String: Any]] ?? [] {
+            citations.append(contentsOf: anthropicProviderCitations(fromCitationValue: block["citations"]))
+            if let nested = block["content"] as? [[String: Any]] {
+                for nestedBlock in nested {
+                    citations.append(contentsOf: anthropicProviderCitations(fromCitationValue: nestedBlock["citations"]))
+                }
+            }
+        }
+        return citations
+    }
+
+    private static func anthropicProviderCitations(fromCitationValue value: Any?) -> [ProviderCitation] {
+        (value as? [[String: Any]] ?? []).compactMap { citation in
+            let type = stringValue(citation["type"]) ?? "unknown"
+            let url = stringValue(citation["url"])
+            let fileID = stringValue(citation["file_id"]) ?? stringValue(citation["fileId"])
+            let title = stringValue(citation["title"])
+                ?? stringValue(citation["document_title"])
+                ?? stringValue(citation["cited_text"])
+                ?? url
+                ?? fileID
+            let startOffset = citation["start_char_index"] == nil ? nil : intValue(citation["start_char_index"])
+            let endOffset = citation["end_char_index"] == nil ? nil : intValue(citation["end_char_index"])
+            let page = positiveInt(citation["page"])
+                ?? positiveInt(citation["page_number"])
+                ?? positiveInt(citation["start_page_number"])
+            var idParts = [String]()
+            idParts.append(type)
+            if let url, !url.isEmpty { idParts.append(url) }
+            if let fileID, !fileID.isEmpty { idParts.append(fileID) }
+            if let page { idParts.append(String(page)) }
+            if let startOffset { idParts.append(String(startOffset)) }
+            if let endOffset { idParts.append(String(endOffset)) }
+            if let citedText = stringValue(citation["cited_text"]), !citedText.isEmpty {
+                idParts.append(citedText)
+            }
+            let raw = jsonValue(from: citation)
+            return ProviderCitation(
+                id: idParts.isEmpty ? UUID().uuidString : idParts.joined(separator: "#"),
+                providerKind: .anthropic,
+                sourceType: anthropicCitationSourceType(type: type, url: url, fileID: fileID),
+                title: title,
+                url: url,
+                fileID: fileID,
+                page: page,
+                chunkID: stringValue(citation["chunk_id"]) ?? stringValue(citation["content_block_id"]),
+                documentID: stringValue(citation["document_id"]),
+                startOffset: startOffset,
+                endOffset: endOffset,
+                citedText: stringValue(citation["cited_text"]) ?? stringValue(citation["text"]),
+                source: "Anthropic",
+                raw: raw
+            )
+        }
+    }
+
+    private static func anthropicCitationSourceType(type: String, url: String?, fileID: String?) -> ProviderCitationSourceType {
+        if url != nil || type.contains("web") {
+            return .web
+        }
+        if type.contains("page") || type.contains("pdf") {
+            return .pdf
+        }
+        if fileID != nil {
+            return .file
+        }
+        if type.contains("search") {
+            return .searchResult
+        }
+        if type.contains("char") || type.contains("content_block") {
+            return .text
+        }
+        return .unknown
+    }
+
+    private static func anthropicHostedToolSummary(from block: [String: Any], status: String) -> [String: Any]? {
+        guard let type = stringValue(block["type"]), !type.isEmpty else { return nil }
+        let isHosted = type == "server_tool_use"
+            || type.hasSuffix("_tool_result")
+            || type.contains("web_search")
+            || type.contains("web_fetch")
+            || type.contains("code_execution")
+            || type.contains("mcp")
+        guard isHosted else { return nil }
+        var summary: [String: Any] = [
+            "id": stringValue(block["id"]) ?? stringValue(block["tool_use_id"]) ?? "",
+            "type": type,
+            "status": status,
+        ]
+        if let name = stringValue(block["name"]) {
+            summary["name"] = name
+        }
+        if let toolUseID = stringValue(block["tool_use_id"]) {
+            summary["tool_use_id"] = toolUseID
+        }
+        for key in ["input", "content", "result", "error", "is_error", "server_name", "server_label"] where block[key] != nil {
+            summary[key] = block[key]
+        }
+        return summary
+    }
+
+    private static func anthropicArtifacts(from value: [String: Any]) -> [[String: Any]] {
+        var artifacts = [[String: Any]]()
+        collectAnthropicArtifacts(in: value, records: &artifacts)
+        return artifacts
+    }
+
+    private static func collectAnthropicArtifacts(in value: Any?, records: inout [[String: Any]]) {
+        if let object = value as? [String: Any] {
+            if let fileID = stringValue(object["file_id"]) ?? stringValue((object["file"] as? [String: Any])?["id"]) {
+                var artifact: [String: Any] = [
+                    "type": stringValue(object["type"]) ?? "file_reference",
+                    "file_id": fileID,
+                ]
+                for key in ["filename", "file_name", "name", "mime_type", "mimeType", "size_bytes", "bytes", "tool_use_id", "id"] {
+                    if let value = object[key] {
+                        artifact[key] = value
+                    }
+                }
+                records.append(artifact)
+            }
+            for child in object.values {
+                collectAnthropicArtifacts(in: child, records: &records)
+            }
+        } else if let array = value as? [Any] {
+            for child in array {
+                collectAnthropicArtifacts(in: child, records: &records)
+            }
+        }
+    }
+
+    private static func anthropicFileReferences(from value: [String: Any]) -> [[String: Any]] {
+        anthropicArtifacts(from: value).filter { object in
+            object["file_id"] != nil
+        }
+    }
+
     private static func geminiWebSearchCitations(from response: [String: Any]) -> [WebSearchCitation] {
         (response["candidates"] as? [[String: Any]] ?? []).flatMap { candidate in
             geminiGroundingCitations(from: candidate["groundingMetadata"] as? [String: Any])
@@ -1568,6 +1760,19 @@ public struct CloudProviderStreamState {
         return nil
     }
 
+    private static func positiveInt(_ value: Any?) -> Int? {
+        let value = intValue(value)
+        return value > 0 ? value : nil
+    }
+
+    private static func jsonValue(from value: Any?) -> JSONValue? {
+        guard let value,
+              JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value)
+        else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
     public mutating func clearOpenAITools() {
         openAIToolIDs.removeAll(keepingCapacity: true)
         openAIToolNames.removeAll(keepingCapacity: true)
@@ -1739,15 +1944,139 @@ public struct CloudProviderStreamState {
         anthropicArguments.removeAll(keepingCapacity: true)
     }
 
+    public mutating func clearAnthropicServerTool() {
+        anthropicServerToolIndex = nil
+        anthropicServerToolID = nil
+        anthropicServerToolName = nil
+        anthropicServerToolArguments.removeAll(keepingCapacity: true)
+    }
+
     public mutating func recordAnthropicMessage(_ message: [String: Any]) {
         if let messageID = message["id"] as? String, !messageID.isEmpty {
             anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicMessageID] = messageID
         }
+        if let model = message["model"] as? String, !model.isEmpty {
+            anthropicProviderMetadata["anthropic.model"] = model
+        }
+        if let usage = message["usage"] as? [String: Any] {
+            recordAnthropicUsage(usage)
+        }
         Self.recordSearchCitations(CloudProviderStreamState.anthropicWebSearchCitations(from: message), into: &anthropicProviderMetadata)
+        recordAnthropicCitations(from: Self.anthropicProviderCitations(from: message))
+        recordAnthropicArtifacts(Self.anthropicArtifacts(from: message))
+        recordAnthropicFileReferences(Self.anthropicFileReferences(from: message))
     }
 
     public mutating func recordAnthropicSearchBlock(_ block: [String: Any]) {
         Self.recordSearchCitations(Self.anthropicWebSearchCitations(from: block), into: &anthropicProviderMetadata)
+    }
+
+    public mutating func recordAnthropicContentBlock(_ block: [String: Any]) {
+        recordAnthropicSearchBlock(block)
+        recordAnthropicCitations(from: Self.anthropicProviderCitations(from: block))
+        recordAnthropicArtifacts(Self.anthropicArtifacts(from: block))
+        recordAnthropicFileReferences(Self.anthropicFileReferences(from: block))
+    }
+
+    public mutating func recordAnthropicUsage(_ usage: [String: Any]) {
+        guard JSONSerialization.isValidJSONObject(usage),
+              let data = try? JSONSerialization.data(withJSONObject: usage),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicUsageJSON] = json
+
+        var cacheUsage = [String: Any]()
+        for key in [
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "cache_creation",
+            "cache_read",
+            "input_tokens_details",
+        ] where usage[key] != nil {
+            cacheUsage[key] = usage[key]
+        }
+        if !cacheUsage.isEmpty,
+           JSONSerialization.isValidJSONObject(cacheUsage),
+           let data = try? JSONSerialization.data(withJSONObject: cacheUsage),
+           let json = String(data: data, encoding: .utf8) {
+            anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicCacheUsageJSON] = json
+        }
+        let cacheReadTokens = Self.intValue(usage["cache_read_input_tokens"])
+        if cacheReadTokens > 0 {
+            anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicCacheReadInputTokens] = String(cacheReadTokens)
+        }
+        let cacheCreationTokens = Self.intValue(usage["cache_creation_input_tokens"])
+        if cacheCreationTokens > 0 {
+            anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicCacheCreationInputTokens] = String(cacheCreationTokens)
+        }
+    }
+
+    public mutating func recordAnthropicHostedToolBlock(_ block: [String: Any], status: String) {
+        guard let summary = Self.anthropicHostedToolSummary(from: block, status: status) else { return }
+        anthropicHostedToolCalls = Self.appendingJSONObjectSummaries([summary], to: anthropicHostedToolCalls)
+        if let json = Self.jsonString(fromJSONObjectSummaries: anthropicHostedToolCalls) {
+            anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicHostedToolCallsJSON] = json
+        }
+    }
+
+    public mutating func recordAnthropicCompletedServerTool() {
+        var block: [String: Any] = [
+            "type": "server_tool_use",
+            "status": "completed",
+        ]
+        if let id = anthropicServerToolID, !id.isEmpty {
+            block["id"] = id
+        }
+        if let name = anthropicServerToolName, !name.isEmpty {
+            block["name"] = name
+        }
+        if !anthropicServerToolArguments.isEmpty {
+            if let data = anthropicServerToolArguments.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: data) {
+                block["input"] = object
+            } else {
+                block["input"] = anthropicServerToolArguments
+            }
+        }
+        recordAnthropicHostedToolBlock(block, status: "completed")
+    }
+
+    public mutating func recordAnthropicArtifacts(_ values: [[String: Any]]) {
+        anthropicArtifacts = Self.appendingJSONObjectSummaries(values, to: anthropicArtifacts)
+        if let json = Self.jsonString(fromJSONObjectSummaries: anthropicArtifacts) {
+            anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicArtifactsJSON] = json
+        }
+    }
+
+    public mutating func recordAnthropicFileReferences(_ values: [[String: Any]]) {
+        anthropicFileReferences = Self.appendingJSONObjectSummaries(values, to: anthropicFileReferences)
+        if let json = Self.jsonString(fromJSONObjectSummaries: anthropicFileReferences) {
+            anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicFileReferencesJSON] = json
+        }
+    }
+
+    public mutating func recordAnthropicCitations(from citations: [ProviderCitation]) {
+        guard !citations.isEmpty else { return }
+        var combined = Self.existingProviderCitations(from: anthropicProviderMetadata)
+        for citation in citations where !combined.contains(where: { $0.id == citation.id }) {
+            combined.append(citation)
+        }
+        guard let data = try? JSONEncoder().encode(Array(combined.prefix(64))) else { return }
+        anthropicProviderMetadata[CloudProviderMetadataKeys.providerCitationsJSON] = String(decoding: data, as: UTF8.self)
+    }
+
+    public mutating func recordAnthropicCitationObjects(_ citations: [[String: Any]]) {
+        recordAnthropicCitations(from: Self.anthropicProviderCitations(fromCitationValue: citations))
+    }
+
+    public mutating func recordAnthropicError(_ error: [String: Any]?) {
+        guard let error else { return }
+        if let type = error["type"] as? String, !type.isEmpty {
+            anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicErrorType] = type
+        }
+        if let json = CloudProviderStreamParser.jsonString(from: error) {
+            anthropicProviderMetadata[CloudProviderMetadataKeys.anthropicErrorJSON] = json
+        }
     }
 
     public mutating func recordAnthropicThinkingBlock() {

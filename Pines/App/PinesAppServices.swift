@@ -358,6 +358,54 @@ final class PinesAppServices: Sendable {
         )
     }
 
+    var geminiProviderLifecycleRepositories: GeminiProviderLifecycleRepositories {
+        GeminiProviderLifecycleRepositories(
+            files: providerFileRepository,
+            artifacts: providerArtifactRepository,
+            caches: providerCacheRepository,
+            batches: providerBatchRepository,
+            liveSessions: providerLiveSessionRepository,
+            structuredOutputs: providerStructuredOutputRepository,
+            modelCapabilities: providerModelCapabilityRepository,
+            researchRuns: providerResearchRunRepository,
+            audit: auditRepository
+        )
+    }
+
+    var anthropicProviderLifecycleRepositories: AnthropicProviderLifecycleRepositories {
+        AnthropicProviderLifecycleRepositories(
+            files: providerFileRepository,
+            artifacts: providerArtifactRepository,
+            caches: providerCacheRepository,
+            batches: providerBatchRepository,
+            liveSessions: providerLiveSessionRepository,
+            structuredOutputs: providerStructuredOutputRepository,
+            modelCapabilities: providerModelCapabilityRepository,
+            researchRuns: providerResearchRunRepository,
+            audit: auditRepository
+        )
+    }
+
+    func geminiLifecycleCoordinator(for provider: CloudProviderConfiguration) throws -> GeminiProviderLifecycleCoordinator {
+        guard let cloudProviderService else {
+            throw InferenceError.providerUnavailable(provider.id)
+        }
+        return GeminiProviderLifecycleCoordinator(
+            service: cloudProviderService.geminiProviderService(for: provider),
+            repositories: geminiProviderLifecycleRepositories
+        )
+    }
+
+    func anthropicLifecycleCoordinator(for provider: CloudProviderConfiguration) throws -> AnthropicProviderLifecycleCoordinator {
+        guard let cloudProviderService else {
+            throw InferenceError.providerUnavailable(provider.id)
+        }
+        return cloudProviderService.anthropicLifecycleCoordinator(
+            for: provider,
+            repositories: anthropicProviderLifecycleRepositories
+        )
+    }
+
     var mcpServerService: MCPServerService? {
         guard let mcpServerRepository else {
             return nil

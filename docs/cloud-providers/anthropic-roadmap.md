@@ -16,6 +16,17 @@ Make Anthropic in Pines production-complete for Claude's relevant API strengths:
 - Token counting, batch jobs, fine-grained tool streaming, and tool-result reliability.
 - Themed UI for prompt caching, Files API, citations, thinking controls, hosted tools, batches, and run provenance.
 
+## Implementation Status
+
+Updated 2026-05-19:
+
+- Added shared Anthropic request options for prompt cache, thinking modes, citations, hosted tools, file IDs, batches, token count preflight, beta headers, and settings migration.
+- Moved prompt caching to eligible Anthropic content blocks and added cache TTL/header handling, structured system blocks, provider file ID blocks, and citation-enabled document/text/file blocks.
+- Added Anthropic Files, Message Batches, token counting, model capability refresh, retry/backoff, provider audit events, generated file download/import hooks, and generic provider record mapping.
+- Extended stream parsing for request/message IDs, usage/cache metrics, signed thinking, provider citations, web-source mirroring, server tool use/results, hosted tool metadata, file references, artifacts, and streaming errors.
+- Added Anthropic participation in the shared lifecycle dashboard, Settings capability rows, Vault provider storage refresh/delete, chat quick settings, file manager, batch refresh/cancel/import, chat provenance pills, and provider citation/source panel.
+- Added core contract coverage for Anthropic options, legacy effort migration, hosted tool gating, provider citation metadata, cache metrics, signed thinking preservation, hosted tool parsing, and citation metadata.
+
 ## Explicitly Out Of Scope
 
 - Anthropic organization/admin management.

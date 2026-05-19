@@ -24,6 +24,13 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     let secretStore: any SecretStore
     private let embeddingRequestBuilder = CloudEmbeddingRequestBuilder()
 
+    private struct AnthropicHostedToolMapping {
+        var tools: [[String: Any]] = []
+        var mcpServers: [[String: Any]] = []
+        var betaHeaders = Set<String>()
+        var containerID: String?
+    }
+
     var id: ProviderID { configuration.id }
 
     var capabilities: ProviderCapabilities {
@@ -455,17 +462,52 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         request.addValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let anthropicOptions = chatRequest.resolvedAnthropicOptions.resolvingLegacyEffort(chatRequest.sampling.anthropicEffort)
+        let thinkingOptions = CloudProviderModelEligibility.anthropicThinkingOptions(for: chatRequest.modelID, requested: anthropicOptions.thinking)
+        let promptCacheEnabled = shouldEnableAnthropicPromptCaching(for: chatRequest, options: anthropicOptions)
+        let promptCacheControl = promptCacheEnabled ? Self.anthropicPromptCacheControl(ttl: anthropicOptions.promptCache.ttl == .oneHour ? "1h" : nil) : nil
+        let systemBlocks = Self.anthropicSystemBlocks(
+            from: chatRequest.messages,
+            cacheControl: anthropicOptions.promptCache.cacheSystemPrompt ? promptCacheControl : nil
+        )
+        let nonSystemMessages = chatRequest.messages.filter { $0.role != .system }
+        let messageCacheIndex = promptCacheEnabled && anthropicOptions.promptCache.cacheMessages
+            ? Self.anthropicMessageCacheBoundaryIndex(in: nonSystemMessages)
+            : nil
+        var betaHeaders = Set(anthropicOptions.requiredBetaHeaders)
+        if nonSystemMessages.contains(where: Self.messageHasAnthropicProviderFileReference) {
+            betaHeaders.insert(AnthropicBetaHeaders.filesAPI)
+        }
+        var messages = try nonSystemMessages.enumerated().map { index, message in
+            try Self.anthropicMessageObject(
+                message,
+                cacheControl: index == messageCacheIndex ? promptCacheControl : nil,
+                enableCitations: anthropicOptions.citations.enabled
+            )
+        }
+        if !anthropicOptions.providerFileIDs.isEmpty {
+            messages = Self.appendingAnthropicProviderFileIDs(
+                anthropicOptions.providerFileIDs,
+                to: messages,
+                enableCitations: anthropicOptions.citations.enabled,
+                cacheControl: anthropicOptions.promptCache.cacheFileBlocks ? promptCacheControl : nil
+            )
+            betaHeaders.insert(AnthropicBetaHeaders.filesAPI)
+        }
         var body: [String: Any] = [
             "model": chatRequest.modelID.rawValue,
             "stream": true,
             "max_tokens": chatRequest.sampling.maxTokens ?? 1024,
-            "messages": try chatRequest.messages.filter { $0.role != .system }.map(Self.anthropicMessageObject),
-            "system": chatRequest.messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n"),
+            "messages": messages,
         ]
-        if shouldEnableAnthropicPromptCaching(for: chatRequest) {
-            body["cache_control"] = ["type": "ephemeral"]
+        if !systemBlocks.isEmpty {
+            if promptCacheEnabled {
+                body["system"] = systemBlocks
+            } else {
+                body["system"] = systemBlocks.compactMap { $0["text"] as? String }.joined(separator: "\n\n")
+            }
         }
-        if let thinking = anthropicThinkingConfiguration(for: chatRequest.modelID) {
+        if let thinking = anthropicThinkingConfiguration(for: chatRequest.modelID, options: thinkingOptions) {
             body["thinking"] = thinking
             if chatRequest.sampling.topP >= 0.95, chatRequest.sampling.topP < 1 {
                 body["top_p"] = chatRequest.sampling.topP
@@ -479,23 +521,42 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 body["top_k"] = chatRequest.sampling.topK
             }
         }
-        let anthropicEffortOptions = CloudProviderModelEligibility.anthropicEffortOptions(for: chatRequest.modelID)
-        if !anthropicEffortOptions.isEmpty {
+        if thinkingOptions.mode == .effort,
+           !CloudProviderModelEligibility.anthropicEffortOptions(for: chatRequest.modelID).isEmpty {
             body["output_config"] = [
                 "effort": CloudProviderModelEligibility.anthropicEffort(
                     for: chatRequest.modelID,
-                    requested: chatRequest.sampling.anthropicEffort
+                    requested: thinkingOptions.effort
                 ).rawValue,
             ]
         }
         let anthropicFunctionTools = chatRequest.allowsTools
             ? chatRequest.availableTools.map { Self.jsonSerializable($0.anthropicToolObject()) }
             : []
+        let hostedToolMapping = try anthropicHostedTools(for: chatRequest)
+        betaHeaders.formUnion(hostedToolMapping.betaHeaders)
         let anthropicNativeTools = anthropicNativeWebSearchEnabled(for: chatRequest) ? [Self.anthropicWebSearchToolObject(options: chatRequest.webSearchOptions)] : []
-        let anthropicTools = anthropicFunctionTools + anthropicNativeTools
+        let nativeToolNames = Set(anthropicNativeTools.compactMap { $0["name"] as? String })
+        let anthropicHostedTools = hostedToolMapping.tools.filter { tool in
+            guard let name = tool["name"] as? String else { return true }
+            return !nativeToolNames.contains(name)
+        }
+        var anthropicTools = anthropicFunctionTools + anthropicNativeTools + anthropicHostedTools
+        if let promptCacheControl, anthropicOptions.promptCache.cacheTools {
+            anthropicTools = Self.annotatingLastAnthropicToolForPromptCaching(anthropicTools, cacheControl: promptCacheControl)
+        }
         if !anthropicTools.isEmpty {
             body["tools"] = anthropicTools
             body["tool_choice"] = anthropicToolChoice(for: chatRequest, hasNativeSearch: !anthropicNativeTools.isEmpty)
+        }
+        if !hostedToolMapping.mcpServers.isEmpty {
+            body["mcp_servers"] = hostedToolMapping.mcpServers
+        }
+        if let containerID = hostedToolMapping.containerID, !containerID.isEmpty {
+            body["container"] = containerID
+        }
+        if !betaHeaders.isEmpty {
+            request.setValue(betaHeaders.sorted().joined(separator: ","), forHTTPHeaderField: "anthropic-beta")
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try await applyExtraHeaders(to: &request)
@@ -691,6 +752,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         switch tool {
         case .webSearch:
             return (openAIWebSearchToolObject(options: nil), ["web_search_call.action.sources"])
+        case .webFetch:
+            throw InferenceError.unsupportedCapability("OpenAI hosted web fetch is not available through Pines yet.")
         case let .fileSearch(vectorStoreIDs, maxResults):
             return (openAIFileSearchToolObject(vectorStoreIDs: vectorStoreIDs, maxResults: maxResults), ["file_search_call.results"])
         case let .codeInterpreter(containerID, memoryLimit):
@@ -711,6 +774,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         case .toolSearch:
             try requireAgentContext(executionContext, toolName: "Tool Search")
             return (["type": "tool_search"], [])
+        case .textEditor, .bash:
+            try requireAgentContext(executionContext, toolName: "hosted shell/editor tools")
+            throw InferenceError.unsupportedCapability("OpenAI hosted text editor and bash tools are not available through Pines yet.")
         }
     }
 
@@ -721,6 +787,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         switch tool.kind {
         case .webSearch:
             return (openAIWebSearchToolObject(options: nil), ["web_search_call.action.sources"])
+        case .webFetch:
+            throw InferenceError.unsupportedCapability("OpenAI hosted web fetch is not available through Pines yet.")
         case .fileSearch:
             let maxResults = tool.configuration?.objectValue?["max_results"].flatMap(intValue)
             return (
@@ -777,6 +845,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         case .toolSearch:
             try requireAgentContext(executionContext, toolName: "Tool Search")
             return (["type": "tool_search"], [])
+        case .textEditor, .bash:
+            try requireAgentContext(executionContext, toolName: "hosted shell/editor tools")
+            throw InferenceError.unsupportedCapability("OpenAI hosted text editor and bash tools are not available through Pines yet.")
         case .custom:
             guard let configuration = tool.configuration else {
                 throw InferenceError.invalidRequest("Custom hosted tools require a provider configuration object.")
@@ -891,6 +962,90 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return tool
     }
 
+    private func anthropicHostedTools(for chatRequest: ChatRequest) throws -> AnthropicHostedToolMapping {
+        var mapping = AnthropicHostedToolMapping()
+        for tool in chatRequest.hostedTools + chatRequest.resolvedAnthropicOptions.hostedTools {
+            switch tool {
+            case .webSearch:
+                mapping.tools.append(Self.anthropicWebSearchToolObject(options: chatRequest.webSearchOptions))
+            case let .webFetch(allowedDomains, blockedDomains, maxUses):
+                var tool: [String: Any] = [
+                    "type": "web_fetch_20250910",
+                    "name": "web_fetch",
+                ]
+                if let maxUses {
+                    tool["max_uses"] = maxUses
+                }
+                let allowed = Self.normalizedWebSearchDomains(allowedDomains)
+                if !allowed.isEmpty {
+                    tool["allowed_domains"] = allowed
+                }
+                let blocked = Self.normalizedWebSearchDomains(blockedDomains)
+                if !blocked.isEmpty {
+                    tool["blocked_domains"] = blocked
+                }
+                mapping.tools.append(tool)
+                mapping.betaHeaders.insert("web-fetch-2025-09-10")
+            case .fileSearch:
+                throw InferenceError.unsupportedCapability("Anthropic Files API inputs are passed as provider file attachments, not through Pines hosted file search.")
+            case let .codeInterpreter(containerID, _):
+                mapping.tools.append([
+                    "type": "code_execution_20250825",
+                    "name": "code_execution",
+                ])
+                mapping.betaHeaders.insert("files-api-2025-04-14")
+                if let containerID, !containerID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    mapping.containerID = containerID
+                }
+            case .imageGeneration:
+                throw InferenceError.unsupportedCapability("Anthropic image generation is not available through Pines hosted tools.")
+            case .computerUse:
+                try Self.requireAgentContext(chatRequest.executionContext, toolName: "Computer Use")
+                throw InferenceError.unsupportedCapability("Anthropic computer use requires a dedicated Pines safety approval surface before it can be enabled.")
+            case let .remoteMCP(serverLabel, serverURL, requireApproval):
+                try Self.requireAgentContext(chatRequest.executionContext, toolName: "remote MCP")
+                var server: [String: Any] = [
+                    "type": "url",
+                    "url": serverURL,
+                    "name": serverLabel,
+                ]
+                if requireApproval != "never" {
+                    server["tool_configuration"] = [
+                        "enabled": true,
+                    ]
+                }
+                mapping.mcpServers.append(server)
+                mapping.betaHeaders.insert("mcp-client-2025-04-04")
+            case .toolSearch:
+                throw InferenceError.unsupportedCapability("Anthropic does not support Pines hosted tool search.")
+            case .textEditor:
+                try Self.requireAgentContext(chatRequest.executionContext, toolName: "Anthropic text editor")
+                mapping.tools.append([
+                    "type": "text_editor_20250728",
+                    "name": "str_replace_editor",
+                ])
+                mapping.betaHeaders.insert("text-editor-2025-07-28")
+            case .bash:
+                try Self.requireAgentContext(chatRequest.executionContext, toolName: "Anthropic bash")
+                mapping.tools.append([
+                    "type": "bash_20250124",
+                    "name": "bash",
+                ])
+                mapping.betaHeaders.insert("bash-tool-2025-01-24")
+            }
+        }
+        return mapping
+    }
+
+    private static func annotatingLastAnthropicToolForPromptCaching(_ tools: [[String: Any]], cacheControl: [String: Any]) -> [[String: Any]] {
+        var tools = tools
+        guard let index = tools.indices.reversed().first(where: { tools[$0]["cache_control"] == nil }) else {
+            return tools
+        }
+        tools[index]["cache_control"] = cacheControl
+        return tools
+    }
+
     private static func openAIWebSearchFilters(from options: CloudWebSearchOptions) -> [String: Any]? {
         let allowedDomains = normalizedWebSearchDomains(options.allowedDomains)
         let blockedDomains = normalizedWebSearchDomains(options.blockedDomains)
@@ -960,21 +1115,105 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return true
     }
 
-    private func shouldEnableAnthropicPromptCaching(for chatRequest: ChatRequest) -> Bool {
+    private func shouldEnableAnthropicPromptCaching(for chatRequest: ChatRequest, options: AnthropicRequestOptions) -> Bool {
         guard configuration.kind == .anthropic else { return false }
+        if chatRequest.anthropicOptions != nil {
+            return options.promptCache.enabled
+        }
         return chatRequest.messages.count > 2
             || chatRequest.allowsTools
+            || !chatRequest.hostedTools.isEmpty
             || chatRequest.messages.contains { !$0.attachments.isEmpty || $0.role == .system }
     }
 
-    private func anthropicThinkingConfiguration(for modelID: ModelID) -> [String: Any]? {
-        guard CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: modelID) else {
-            return nil
+    private static func appendingAnthropicProviderFileIDs(
+        _ fileIDs: [AnthropicProviderFileID],
+        to messages: [[String: Any]],
+        enableCitations: Bool,
+        cacheControl: [String: Any]?
+    ) -> [[String: Any]] {
+        guard !fileIDs.isEmpty else { return messages }
+        let blocks = fileIDs.map {
+            anthropicProviderFileBlock(fileID: $0, enableCitations: enableCitations)
         }
-        return [
-            "type": "adaptive",
-            "display": "omitted",
-        ]
+        var messages = messages
+        let targetIndex = messages.indices.reversed().first { messages[$0]["role"] as? String == "user" }
+        if let targetIndex {
+            let content = messages[targetIndex]["content"]
+            var contentBlocks: [[String: Any]]
+            if let existing = content as? [[String: Any]] {
+                contentBlocks = existing
+            } else if let text = content as? String, !text.isEmpty {
+                contentBlocks = [["type": "text", "text": text]]
+            } else {
+                contentBlocks = []
+            }
+            contentBlocks.append(contentsOf: blocks)
+            if let cacheControl {
+                contentBlocks = annotatingLastCacheableAnthropicBlock(in: contentBlocks, cacheControl: cacheControl)
+            }
+            messages[targetIndex]["content"] = contentBlocks
+        } else {
+            var contentBlocks = blocks
+            if let cacheControl {
+                contentBlocks = annotatingLastCacheableAnthropicBlock(in: contentBlocks, cacheControl: cacheControl)
+            }
+            messages.append([
+                "role": "user",
+                "content": contentBlocks,
+            ])
+        }
+        return messages
+    }
+
+    private static func anthropicPromptCacheControl(ttl: String? = nil) -> [String: Any] {
+        var cacheControl: [String: Any] = ["type": "ephemeral"]
+        if let ttl, !ttl.isEmpty {
+            cacheControl["ttl"] = ttl
+        }
+        return cacheControl
+    }
+
+    private static func anthropicMessageCacheBoundaryIndex(in messages: [ChatMessage]) -> Int? {
+        guard !messages.isEmpty else { return nil }
+        if messages.count > 1 {
+            return messages.index(before: messages.endIndex - 1)
+        }
+        return messages.indices.first { messageHasAnthropicCacheableContent(messages[$0]) }
+    }
+
+    private static func messageHasAnthropicCacheableContent(_ message: ChatMessage) -> Bool {
+        !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !message.attachments.isEmpty
+            || message.role == .tool
+    }
+
+    private static func messageHasAnthropicProviderFileReference(_ message: ChatMessage) -> Bool {
+        guard message.role == .user else { return false }
+        return message.attachments.contains { attachment in
+            guard let url = attachment.localURL else { return false }
+            return !url.isFileURL
+        }
+    }
+
+    private func anthropicThinkingConfiguration(for modelID: ModelID, options: AnthropicThinkingOptions) -> [String: Any]? {
+        switch options.mode {
+        case .off, .effort:
+            return nil
+        case .adaptive:
+            guard CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: modelID) else {
+                return nil
+            }
+            return [
+                "type": "adaptive",
+                "display": "omitted",
+            ]
+        case .budgeted:
+            return [
+                "type": "enabled",
+                "budget_tokens": max(options.budgetTokens ?? 4096, 1024),
+            ]
+        }
     }
 
     private func usesGeminiInteractionsAPI(chatRequest: ChatRequest) -> Bool {
@@ -1245,13 +1484,13 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         case .codeInterpreter:
             try requireAgentContext(executionContext, toolName: "Gemini code execution")
             return usesInteractionsAPI ? ["type": "code_execution"] : ["codeExecution": [:] as [String: Any]]
-        case .webSearch:
+        case .webSearch, .webFetch:
             return usesInteractionsAPI ? ["type": "url_context"] : ["urlContext": [:] as [String: Any]]
         case .fileSearch:
             throw InferenceError.unsupportedCapability("Gemini does not support Pines hosted file search. Use Gemini fileData parts or cached contents instead.")
         case .imageGeneration:
-            throw InferenceError.unsupportedCapability("Gemini image generation is not available through Pines hosted tools yet.")
-        case .computerUse, .remoteMCP, .toolSearch:
+            return usesInteractionsAPI ? ["type": "image_generation"] : ["imageGeneration": [:] as [String: Any]]
+        case .computerUse, .remoteMCP, .textEditor, .bash, .toolSearch:
             throw InferenceError.unsupportedCapability("This hosted tool is not supported by Gemini.")
         }
     }

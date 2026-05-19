@@ -208,6 +208,15 @@ struct CoreContractTests {
         #expect(anthropic.capabilities.imageInputs)
         #expect(anthropic.capabilities.pdfInputs)
         #expect(anthropic.capabilities.textDocumentInputs)
+        #expect(anthropic.capabilities.files)
+        #expect(anthropic.capabilities.hostedTools)
+        #expect(anthropic.capabilities.structuredOutputs)
+        #expect(anthropic.capabilities.contextCache)
+        #expect(anthropic.capabilities.batch)
+        #expect(anthropic.capabilities.tokenCounting)
+        #expect(anthropic.capabilities.modelCapabilities.contains(.contextCache))
+        #expect(anthropic.capabilities.modelCapabilities.contains(.batch))
+        #expect(anthropic.capabilities.modelCapabilities.contains(.tokenCounting))
         #expect(!anthropic.capabilities.embeddings)
 
         let gemini = cloudConfiguration(kind: .gemini, baseURL: "https://generativelanguage.googleapis.com")
@@ -523,6 +532,13 @@ struct CoreContractTests {
         #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-5") == [.low, .medium, .high])
         #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-sonnet-4-5").isEmpty)
         #expect(CloudProviderModelEligibility.anthropicEffort(for: "claude-sonnet-4-6", requested: .xhigh) == .high)
+        #expect(CloudProviderModelEligibility.anthropicThinkingModes(for: "claude-sonnet-4-6") == [.off, .adaptive, .budgeted, .effort])
+        #expect(CloudProviderModelEligibility.anthropicThinkingModes(for: "claude-opus-4-5") == [.off, .budgeted, .effort])
+        let clampedAnthropicThinking = CloudProviderModelEligibility.anthropicThinkingOptions(
+            for: "claude-sonnet-4-6",
+            requested: AnthropicThinkingOptions(mode: .effort, effort: .xhigh)
+        )
+        #expect(clampedAnthropicThinking.effort == .high)
 
         #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-pro-preview") == [.low, .medium, .high])
         #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-flash-lite") == [.minimal, .low, .medium, .high])
@@ -706,12 +722,16 @@ struct CoreContractTests {
         var allEvents = [InferenceStreamEvent]()
         var finish: InferenceFinish?
         for payload in [
-            #"{"type":"message_start","message":{"id":"msg_123","usage":{"input_tokens":10}}}"#,
+            #"{"type":"message_start","message":{"id":"msg_123","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"cache_read_input_tokens":4,"cache_creation_input_tokens":2}}}"#,
             #"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#,
             #"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plan"}}"#,
             #"{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}"#,
             #"{"type":"content_block_stop","index":0}"#,
+            #"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":"","citations":[{"type":"page_location","file_id":"file_pdf","title":"Spec","start_page_number":3,"cited_text":"quoted"}]}}"#,
             #"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hello"}}"#,
+            #"{"type":"content_block_start","index":3,"content_block":{"type":"server_tool_use","id":"srv_1","name":"web_fetch","input":{"url":"https://example.com"}}}"#,
+            #"{"type":"content_block_stop","index":3}"#,
+            #"{"type":"content_block_start","index":4,"content_block":{"type":"web_fetch_tool_result","tool_use_id":"srv_1","content":[{"type":"document","title":"Example","url":"https://example.com"}]}}"#,
             #"{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"tool_1","name":"lookup","input":{}}}"#,
             #"{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"q\":\"pines\"}"}}"#,
             #"{"type":"content_block_stop","index":2}"#,
@@ -723,13 +743,18 @@ struct CoreContractTests {
         }
 
         #expect(allEvents.contains(.token(TokenDelta(kind: .token, text: "hello", tokenCount: 1))))
-        #expect(allEvents.contains(.metrics(InferenceMetrics(promptTokens: 10, completionTokens: 0))))
+        #expect(allEvents.contains(.metrics(InferenceMetrics(promptTokens: 16, completionTokens: 0))))
         #expect(allEvents.contains(.metrics(InferenceMetrics(promptTokens: 0, completionTokens: 3))))
         #expect(allEvents.contains(.toolCall(ToolCallDelta(id: "tool_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
         #expect(finish?.reason == .toolCall)
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicRequestID] == "req_123")
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicMessageID] == "msg_123")
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicThinkingContentJSON]?.contains("sig_123") == true)
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicCacheReadInputTokens] == "4")
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicCacheCreationInputTokens] == "2")
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicHostedToolCallsJSON]?.contains("srv_1") == true)
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.providerCitationsJSON]?.contains("file_pdf") == true)
+        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.webSearchCitationsJSON]?.contains("example.com") == true)
     }
 
     @Test
@@ -848,6 +873,207 @@ struct CoreContractTests {
         #expect(metadata[CloudProviderMetadataKeys.geminiURLContextJSON]?.contains("example.com") == true)
         #expect(metadata[CloudProviderMetadataKeys.geminiFileReferencesJSON]?.contains("audio") == true)
         #expect(metadata[CloudProviderMetadataKeys.geminiArtifactsJSON]?.contains("image") == true)
+    }
+
+    @Test
+    func geminiProviderRecordFixtureMaterializesLifecycleRecords() throws {
+        let providerID = ProviderID(rawValue: "gemini")
+        let modelID = ModelID(rawValue: "gemini-3.1-pro-preview")
+        let file = GeminiProviderLifecycleRecordMapperFixture.providerFile(
+            from: .object([
+                "name": .string("files/audio_123"),
+                "displayName": .string("meeting.mp3"),
+                "mimeType": .string("audio/mpeg"),
+                "sizeBytes": .string("4096"),
+                "state": .string("ACTIVE"),
+                "uri": .string("https://generativelanguage.googleapis.com/v1beta/files/audio_123"),
+                "sha256Hash": .string("abc123"),
+                "metadata": .object(["workspace": .string("pines"), "transient": .bool(true)]),
+            ]),
+            providerID: providerID
+        )
+        let cache = GeminiProviderLifecycleRecordMapperFixture.providerCache(
+            from: .object([
+                "name": .string("cachedContents/cache_123"),
+                "model": .string("models/gemini-3.1-pro-preview"),
+                "displayName": .string("Research cache"),
+                "usageMetadata": .object([
+                    "totalTokenCount": .number(2048),
+                    "cachedContentTokenCount": .number(1536),
+                ]),
+                "metadata": .object(["purpose": .string("research")]),
+            ]),
+            providerID: providerID
+        )
+        let batch = GeminiProviderLifecycleRecordMapperFixture.providerBatch(
+            from: .object([
+                "name": .string("batches/batch_123"),
+                "state": .string("JOB_STATE_RUNNING"),
+                "endpoint": .string("models/gemini-3.1-pro-preview:batchGenerateContent"),
+                "inputConfig": .object(["fileName": .string("files/input_123")]),
+                "outputInfo": .object(["fileName": .string("files/output_123")]),
+                "metadata": .object(["trace": .string("batch")]),
+            ]),
+            providerID: providerID
+        )
+        let live = GeminiProviderLifecycleRecordMapperFixture.providerLiveSession(
+            from: .object([
+                "name": .string("liveSessions/session_123"),
+                "model": .string("models/gemini-live-2.5-flash-preview"),
+                "state": .string("ACTIVE"),
+                "modalities": .array([.string("audio"), .string("text")]),
+                "expireTime": .string("2026-05-19T12:00:00Z"),
+                "metadata": .object(["voice": .string("default")]),
+            ]),
+            providerID: providerID
+        )
+        let fileArtifact = GeminiProviderLifecycleRecordMapperFixture.providerArtifact(
+            from: .object([
+                "fileData": .object([
+                    "fileUri": .string("files/generated_image"),
+                    "mimeType": .string("image/png"),
+                ]),
+            ]),
+            providerID: providerID,
+            responseID: "resp_gemini",
+            toolCallID: nil
+        )
+        let inlineArtifact = GeminiProviderLifecycleRecordMapperFixture.providerArtifact(
+            from: .object([
+                "inlineData": .object([
+                    "mimeType": .string("image/png"),
+                    "data": .string("aW1n"),
+                ]),
+            ]),
+            providerID: providerID,
+            responseID: "resp_gemini",
+            toolCallID: "code_1"
+        )
+        let researchRun = GeminiProviderLifecycleRecordMapperFixture.providerResearchRun(
+            providerID: providerID,
+            modelID: modelID,
+            title: "Market map",
+            prompt: "Research Gemini lifecycle records.",
+            sourcePolicy: .object(["scope": .string("web")]),
+            responseID: "resp_gemini",
+            status: "completed",
+            providerMetadata: [
+                CloudProviderMetadataKeys.geminiResponseID: "resp_gemini",
+                CloudProviderMetadataKeys.webSearchCitationsJSON: #"[{"title":"Gemini lifecycle","url":"https://example.com/gemini","source":"Gemini"}]"#,
+                CloudProviderMetadataKeys.webSearchQueriesJSON: #"["gemini lifecycle"]"#,
+            ]
+        )
+        let capability = ProviderModelCapabilityRecord(
+            providerID: providerID,
+            providerKind: .gemini,
+            modelID: modelID,
+            capabilities: cloudConfiguration(kind: .gemini, baseURL: "https://generativelanguage.googleapis.com").capabilities,
+            contextWindowTokens: 1_048_576,
+            inputModalities: ["text", "image", "audio", "video", "pdf"],
+            outputModalities: ["text", "image", "video"],
+            metadata: ["publisher": "google"]
+        )
+
+        let decodedFile = try JSONDecoder().decode(ProviderFileRecord.self, from: JSONEncoder().encode(try #require(file)))
+        let decodedCache = try JSONDecoder().decode(ProviderCacheRecord.self, from: JSONEncoder().encode(try #require(cache)))
+        let decodedBatch = try JSONDecoder().decode(ProviderBatchRecord.self, from: JSONEncoder().encode(try #require(batch)))
+        let decodedLive = try JSONDecoder().decode(ProviderLiveSessionRecord.self, from: JSONEncoder().encode(try #require(live)))
+        let decodedFileArtifact = try JSONDecoder().decode(ProviderArtifactRecord.self, from: JSONEncoder().encode(try #require(fileArtifact)))
+        let decodedInlineArtifact = try JSONDecoder().decode(ProviderArtifactRecord.self, from: JSONEncoder().encode(try #require(inlineArtifact)))
+        let decodedResearchRun = try JSONDecoder().decode(ProviderResearchRunRecord.self, from: JSONEncoder().encode(researchRun))
+        let decodedCapability = try JSONDecoder().decode(ProviderModelCapabilityRecord.self, from: JSONEncoder().encode(capability))
+
+        #expect(decodedFile.id == "files/audio_123")
+        #expect(decodedFile.providerKind == .gemini)
+        #expect(decodedFile.fileName == "meeting.mp3")
+        #expect(decodedFile.byteCount == 4096)
+        #expect(decodedFile.providerMetadata["transient"] == "true")
+        #expect(decodedCache.kind == "context_cache")
+        #expect(decodedCache.modelID == modelID)
+        #expect(decodedCache.itemCounts?.objectValue?["cachedContentTokenCount"]?.intValue == 1536)
+        #expect(decodedBatch.endpoint == "models/gemini-3.1-pro-preview:batchGenerateContent")
+        #expect(decodedBatch.inputFileID == "files/input_123")
+        #expect(decodedLive.modelID == "gemini-live-2.5-flash-preview")
+        #expect(decodedLive.modalities == ["audio", "text"])
+        #expect(decodedFileArtifact.providerFileID == "files/generated_image")
+        #expect(decodedInlineArtifact.byteCount == 3)
+        #expect(decodedResearchRun.providerKind == .gemini)
+        #expect(decodedResearchRun.citationCount == 1)
+        #expect(decodedResearchRun.providerMetadata[CloudProviderMetadataKeys.geminiResponseID] == "resp_gemini")
+        #expect(decodedCapability.capabilities.modelCapabilities.contains(.contextCache))
+        #expect(decodedCapability.capabilities.modelCapabilities.contains(.live))
+        #expect(decodedCapability.capabilities.modelCapabilities.contains(.batch))
+        #expect(decodedCapability.capabilities.modelCapabilities.contains(.tokenCounting))
+    }
+
+    @Test
+    func geminiParserMetadataFeedsProviderLifecycleRecordFixture() throws {
+        var parser = CloudProviderStreamParser()
+        parser.recordRequestMetadata(providerKind: .gemini, serverRequestID: "req_gemini", clientRequestID: "client_gemini")
+        let payload = """
+        {
+          "responseId": "resp_lifecycle",
+          "modelVersion": "gemini-3.1-pro-preview",
+          "usageMetadata": {
+            "promptTokenCount": 20,
+            "candidatesTokenCount": 4,
+            "cachedContentTokenCount": 12
+          },
+          "candidates": [{
+            "content": {
+              "role": "model",
+              "parts": [
+                { "text": "{\\"answer\\":\\"ok\\"}" },
+                { "executableCode": { "language": "PYTHON", "code": "print(1)" } },
+                { "codeExecutionResult": { "outcome": "OUTCOME_OK", "output": "1" } },
+                { "fileData": { "mimeType": "application/pdf", "fileUri": "files/source_pdf" } },
+                { "inlineData": { "mimeType": "image/png", "data": "aW1n" } }
+              ]
+            },
+            "groundingMetadata": {
+              "webSearchQueries": ["gemini cache lifecycle"],
+              "groundingChunks": [{ "web": { "uri": "https://example.com/gemini", "title": "Gemini lifecycle" } }]
+            },
+            "finishReason": "STOP"
+          }]
+        }
+        """
+
+        let output = parser.parse(data: Data(payload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
+        let metadata = try #require(output.finish?.providerMetadata)
+        let artifacts = GeminiProviderLifecycleRecordMapperFixture.providerArtifacts(
+            fromGeminiMetadata: metadata,
+            providerID: "gemini",
+            responseID: metadata[CloudProviderMetadataKeys.geminiResponseID]
+        )
+        let cache = GeminiProviderLifecycleRecordMapperFixture.providerCache(
+            fromCachedContentName: "cachedContents/cache_lifecycle",
+            providerID: "gemini",
+            modelID: "gemini-3.1-pro-preview",
+            metadata: metadata
+        )
+        let structured = ProviderStructuredOutputRecord(
+            providerID: "gemini",
+            providerKind: .gemini,
+            responseID: metadata[CloudProviderMetadataKeys.geminiResponseID],
+            schemaName: "answer",
+            schema: .object(["type": .string("object")]),
+            content: .object(["answer": .string("ok")]),
+            status: "parsed"
+        )
+
+        #expect(metadata[CloudProviderMetadataKeys.geminiRequestID] == "req_gemini")
+        #expect(metadata[CloudProviderMetadataKeys.geminiResponseID] == "resp_lifecycle")
+        #expect(metadata[CloudProviderMetadataKeys.geminiModelVersion] == "gemini-3.1-pro-preview")
+        #expect(metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON]?.contains("cachedContentTokenCount") == true)
+        #expect(metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]?.contains("OUTCOME_OK") == true)
+        #expect(metadata[CloudProviderMetadataKeys.webSearchCitationsJSON]?.contains("Gemini lifecycle") == true)
+        #expect(artifacts.contains { $0.providerFileID == "files/source_pdf" && $0.contentType == "application/pdf" })
+        #expect(artifacts.contains { $0.kind == "inline_data" && $0.byteCount == 4 })
+        #expect(cache.usageBytes == 12)
+        #expect(cache.itemCounts?.objectValue?["cachedContentTokenCount"]?.intValue == 12)
+        #expect(structured.providerKind == .gemini)
+        #expect(structured.responseID == "resp_lifecycle")
     }
 
     @Test
@@ -1232,6 +1458,71 @@ struct CoreContractTests {
         #expect(decodedWebSearchRequest.webSearchOptions?.contextSize == .high)
         #expect(decodedWebSearchRequest.webSearchOptions?.userLocation?.city == "Berlin")
         #expect(decodedWebSearchRequest.webSearchOptions?.allowedDomains == ["example.com"])
+    }
+
+    @Test
+    func anthropicRequestOptionsRoundTripAndKeepLegacyEffortDefaults() throws {
+        let legacyRequestJSON = """
+        {"modelID":"claude-sonnet-4-6","messages":[{"id":"00000000-0000-0000-0000-000000000001","role":"user","content":"hi"}],"sampling":{"anthropicEffort":"xhigh"}}
+        """
+        let legacyRequest = try JSONDecoder().decode(ChatRequest.self, from: Data(legacyRequestJSON.utf8))
+        #expect(legacyRequest.anthropicOptions == nil)
+        #expect(legacyRequest.resolvedAnthropicOptions.thinking.effort == .xhigh)
+        #expect(legacyRequest.resolvedAnthropicOptions.thinking.mode == .adaptive)
+
+        let request = ChatRequest(
+            modelID: "claude-sonnet-4-6",
+            messages: [ChatMessage(role: .user, content: "Use Anthropic files")],
+            anthropicOptions: AnthropicRequestOptions(
+                promptCache: AnthropicPromptCacheOptions(enabled: true, ttl: .oneHour, breakpointLimit: 8),
+                thinking: AnthropicThinkingOptions(mode: .budgeted, budgetTokens: 4_096, effort: .high, showSummaries: false),
+                citations: AnthropicCitationOptions(enabled: true),
+                hostedTools: [.webFetch(allowedDomains: ["docs.anthropic.com"], blockedDomains: [], maxUses: 2)],
+                providerFileIDs: ["file_abc"],
+                batch: AnthropicBatchRequestOptions(customID: "job-1", metadata: ["trace": "anthropic"]),
+                countTokensBeforeSend: true,
+                betaHeaders: ["custom-beta"],
+                metadata: ["purpose": "contract"]
+            )
+        )
+
+        let decoded = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(request))
+        #expect(decoded.anthropicOptions?.promptCache.enabled == true)
+        #expect(decoded.anthropicOptions?.promptCache.ttl == .oneHour)
+        #expect(decoded.anthropicOptions?.thinking.mode == .budgeted)
+        #expect(decoded.anthropicOptions?.thinking.budgetTokens == 4_096)
+        #expect(decoded.anthropicOptions?.citations.enabled == true)
+        #expect(decoded.anthropicOptions?.hostedTools == [.webFetch(allowedDomains: ["docs.anthropic.com"], blockedDomains: [], maxUses: 2)])
+        #expect(decoded.anthropicOptions?.providerFileIDs == ["file_abc"])
+        #expect(decoded.anthropicOptions?.batch?.customID == "job-1")
+        #expect(decoded.anthropicOptions?.countTokensBeforeSend == true)
+        #expect(decoded.anthropicOptions?.requiredBetaHeaders.contains(AnthropicBetaHeaders.extendedCacheTTL) == true)
+        #expect(decoded.anthropicOptions?.requiredBetaHeaders.contains(AnthropicBetaHeaders.filesAPI) == true)
+        #expect(decoded.anthropicOptions?.requiredBetaHeaders.contains("custom-beta") == true)
+    }
+
+    @Test
+    func providerCitationsRoundTripThroughSharedMetadata() throws {
+        let citations = [
+            ProviderCitation(
+                id: "cite_1",
+                providerKind: .anthropic,
+                sourceType: .pdf,
+                title: "Policy",
+                fileID: "file_abc",
+                page: 3,
+                chunkID: "chunk_1",
+                documentID: "doc_1",
+                startOffset: 10,
+                endOffset: 42,
+                citedText: "Grounded answer.",
+                source: "Anthropic"
+            ),
+        ]
+        let data = try JSONEncoder().encode(citations)
+        let metadata = [CloudProviderMetadataKeys.providerCitationsJSON: String(decoding: data, as: UTF8.self)]
+
+        #expect(metadata.providerCitations == citations)
     }
 
     @Test
@@ -1780,6 +2071,32 @@ struct CoreContractTests {
             content: .object(["ok": .bool(true)]),
             status: "parsed"
         ))
+        try await repository.upsertProviderModelCapability(ProviderModelCapabilityRecord(
+            providerID: openAI,
+            providerKind: .openAI,
+            modelID: "gpt-5.5",
+            capabilities: ProviderCapabilities(local: false, files: true, hostedTools: true, structuredOutputs: true),
+            contextWindowTokens: 128_000,
+            inputModalities: ["text", "image"],
+            outputModalities: ["text"],
+            metadata: ["source": "test"]
+        ))
+        try await repository.upsertProviderResearchRun(ProviderResearchRunRecord(
+            id: "research_1",
+            providerID: openAI,
+            providerKind: .openAI,
+            modelID: "gpt-5.5-pro",
+            title: "Market map",
+            prompt: "Map the market.",
+            depth: "deep",
+            sourcePolicy: .object(["scope": .string("web")]),
+            reportFormat: "citation_first",
+            serviceTier: "priority",
+            responseID: "resp_research",
+            status: "in_progress",
+            citationCount: 2,
+            toolCallCount: 1
+        ))
 
         #expect(try await repository.listProviderFiles(providerID: openAI).map(\.id) == ["file_1"])
         #expect(try await repository.listProviderArtifacts(responseID: "resp_1").map(\.id) == ["artifact_1"])
@@ -1787,12 +2104,18 @@ struct CoreContractTests {
         #expect(try await repository.listProviderBatches(providerID: openAI).map(\.id) == ["batch_1"])
         #expect(try await repository.listProviderLiveSessions(providerID: openAI).map(\.id) == ["sess_1"])
         #expect(try await repository.listProviderStructuredOutputs(responseID: "resp_1").map(\.id) == [structuredID])
+        #expect(try await repository.listProviderModelCapabilities(providerID: openAI).map(\.id) == ["openai::gpt-5.5"])
+        #expect(try await repository.listProviderResearchRuns(providerID: openAI, status: "in_progress").map(\.id) == ["research_1"])
 
         try await repository.deleteProviderArtifact(id: "artifact_1")
         try await repository.deleteProviderStructuredOutput(id: structuredID)
+        try await repository.deleteProviderModelCapability(providerID: openAI, modelID: "gpt-5.5")
+        try await repository.deleteProviderResearchRun(id: "research_1")
 
         #expect(try await repository.listProviderArtifacts(responseID: "resp_1").isEmpty)
         #expect(try await repository.listProviderStructuredOutputs(responseID: "resp_1").isEmpty)
+        #expect(try await repository.listProviderModelCapabilities(providerID: openAI).isEmpty)
+        #expect(try await repository.listProviderResearchRuns(providerID: openAI, status: nil).isEmpty)
     }
 
     @Test
@@ -1938,23 +2261,50 @@ struct CoreContractTests {
             modelID: "gpt-5.5",
             messages: [ChatMessage(role: .user, content: "Use desktop and MCP")],
             hostedTools: [
+                .webFetch(allowedDomains: ["example.com"], blockedDomains: [], maxUses: 1),
                 .computerUse(displayWidth: 1280, displayHeight: 720),
                 .remoteMCP(serverLabel: "docs", serverURL: "https://mcp.example.test", requireApproval: "always"),
+                .textEditor,
+                .bash,
             ],
             executionContext: .chat
         )
         let agentRequest = chatRequest.replacing(executionContext: .agent)
+        let anthropicAgentToolRequest = ChatRequest(
+            modelID: "claude-sonnet-4-6",
+            messages: [ChatMessage(role: .user, content: "Edit files")],
+            executionContext: .chat,
+            anthropicOptions: AnthropicRequestOptions(hostedTools: [.textEditor, .bash])
+        )
         let legacyRemoteMCP = try JSONDecoder().decode(
             HostedToolConfiguration.self,
             from: Data(#"{"type":"remoteMCP","serverLabel":"docs","serverURL":"https://mcp.example.test"}"#.utf8)
         )
+        let webFetch = try JSONDecoder().decode(
+            HostedToolConfiguration.self,
+            from: Data(#"{"type":"webFetch","allowedDomains":["example.com"],"maxUses":1}"#.utf8)
+        )
+        let metadata = [
+            CloudProviderMetadataKeys.openAIHostedToolCallsJSON: #"[{"id":"fetch_1","type":"web_fetch_tool_result","status":"completed"},{"id":"bash_1","type":"bash_call","status":"requires_action"}]"#,
+        ]
+        let audit = metadata.hostedToolAuditEntries
 
         #expect(chatRequest.hasAgentOnlyHostedTools)
         #expect(chatRequest.hasApprovalGatedHostedTools)
         #expect(!chatRequest.hostedToolsAreAllowedForExecutionContext())
         #expect(agentRequest.hostedToolsAreAllowedForExecutionContext())
+        #expect(!webFetch.requiresAgentExecution)
+        #expect(!webFetch.requiresApproval)
         #expect(legacyRemoteMCP.requiresAgentExecution)
         #expect(legacyRemoteMCP.requiresApproval)
+        #expect(HostedToolConfiguration.textEditor.requiresAgentExecution)
+        #expect(HostedToolConfiguration.textEditor.requiresApproval)
+        #expect(HostedToolConfiguration.bash.requiresAgentExecution)
+        #expect(HostedToolConfiguration.bash.requiresApproval)
+        #expect(anthropicAgentToolRequest.hasAgentOnlyHostedTools)
+        #expect(!anthropicAgentToolRequest.hostedToolsAreAllowedForExecutionContext())
+        #expect(audit.contains { $0.id == "fetch_1" && $0.kind == .webFetch && !$0.requiresAgentExecution })
+        #expect(audit.contains { $0.id == "bash_1" && $0.kind == .bash && $0.requiresAgentExecution && $0.requiresApproval })
     }
 
     @Test
@@ -2605,7 +2955,9 @@ private actor InMemoryProviderLifecycleRepository:
     ProviderCacheRepository,
     ProviderBatchRepository,
     ProviderLiveSessionRepository,
-    ProviderStructuredOutputRepository
+    ProviderStructuredOutputRepository,
+    ProviderModelCapabilityRepository,
+    ProviderResearchRunRepository
 {
     private var files = [String: ProviderFileRecord]()
     private var artifacts = [String: ProviderArtifactRecord]()
@@ -2613,6 +2965,8 @@ private actor InMemoryProviderLifecycleRepository:
     private var batches = [String: ProviderBatchRecord]()
     private var liveSessions = [String: ProviderLiveSessionRecord]()
     private var structuredOutputs = [UUID: ProviderStructuredOutputRecord]()
+    private var modelCapabilities = [String: ProviderModelCapabilityRecord]()
+    private var researchRuns = [String: ProviderResearchRunRecord]()
 
     func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord] {
         sorted(files.values.filter { providerID == nil || $0.providerID == providerID })
@@ -2690,8 +3044,296 @@ private actor InMemoryProviderLifecycleRepository:
         structuredOutputs[id] = nil
     }
 
+    func listProviderModelCapabilities(providerID: ProviderID?) async throws -> [ProviderModelCapabilityRecord] {
+        sorted(modelCapabilities.values.filter { providerID == nil || $0.providerID == providerID })
+    }
+
+    func upsertProviderModelCapability(_ capability: ProviderModelCapabilityRecord) async throws {
+        modelCapabilities[capability.id] = capability
+    }
+
+    func deleteProviderModelCapability(providerID: ProviderID, modelID: ModelID) async throws {
+        modelCapabilities["\(providerID.rawValue)::\(modelID.rawValue)"] = nil
+    }
+
+    func listProviderResearchRuns(providerID: ProviderID?, status: String?) async throws -> [ProviderResearchRunRecord] {
+        sorted(researchRuns.values.filter { run in
+            (providerID == nil || run.providerID == providerID) && (status == nil || run.status == status)
+        })
+    }
+
+    func upsertProviderResearchRun(_ run: ProviderResearchRunRecord) async throws {
+        researchRuns[run.id] = run
+    }
+
+    func deleteProviderResearchRun(id: String) async throws {
+        researchRuns[id] = nil
+    }
+
     private func sorted<T: Identifiable>(_ values: some Sequence<T>) -> [T] where T.ID == String {
         values.sorted { $0.id < $1.id }
+    }
+}
+
+private enum GeminiProviderLifecycleRecordMapperFixture {
+    static func providerFile(from object: JSONValue, providerID: ProviderID) -> ProviderFileRecord? {
+        guard let fields = object.objectValue,
+              let id = fields.string("name")
+        else { return nil }
+        return ProviderFileRecord(
+            id: id,
+            providerID: providerID,
+            providerKind: .gemini,
+            purpose: fields.string("purpose") ?? "prompt",
+            fileName: fields.string("displayName") ?? fields.string("filename") ?? id,
+            contentType: fields.string("mimeType"),
+            byteCount: Int64(fields.int("sizeBytes") ?? fields.int("size_bytes") ?? 0),
+            status: normalizedStatus(fields.string("state") ?? fields.string("status")),
+            sha256: fields.string("sha256Hash"),
+            providerObject: fields.string("uri"),
+            providerMetadata: metadata(from: fields["metadata"])
+        )
+    }
+
+    static func providerCache(from object: JSONValue, providerID: ProviderID) -> ProviderCacheRecord? {
+        guard let fields = object.objectValue,
+              let id = fields.string("name")
+        else { return nil }
+        let usage = fields["usageMetadata"]
+        return ProviderCacheRecord(
+            id: id,
+            providerID: providerID,
+            providerKind: .gemini,
+            kind: "context_cache",
+            name: fields.string("displayName") ?? id,
+            modelID: normalizedModelID(fields.string("model")),
+            status: normalizedStatus(fields.string("state") ?? fields.string("status") ?? "ACTIVE"),
+            usageBytes: Int64(usage?.objectValue?.int("cachedContentTokenCount") ?? usage?.objectValue?.int("totalTokenCount") ?? 0),
+            itemCounts: usage,
+            configuration: fields["configuration"],
+            metadata: metadata(from: fields["metadata"])
+        )
+    }
+
+    static func providerCache(
+        fromCachedContentName name: String,
+        providerID: ProviderID,
+        modelID: ModelID,
+        metadata: [String: String]
+    ) -> ProviderCacheRecord {
+        let cacheUsage = jsonValue(fromJSONString: metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON])
+        let cachedTokens = cacheUsage?.objectValue?.int("cachedContentTokenCount") ?? 0
+        return ProviderCacheRecord(
+            id: name,
+            providerID: providerID,
+            providerKind: .gemini,
+            kind: "context_cache",
+            name: name,
+            modelID: modelID,
+            status: "active",
+            usageBytes: Int64(cachedTokens),
+            itemCounts: cacheUsage,
+            metadata: metadata
+        )
+    }
+
+    static func providerBatch(from object: JSONValue, providerID: ProviderID) -> ProviderBatchRecord? {
+        guard let fields = object.objectValue,
+              let id = fields.string("name")
+        else { return nil }
+        return ProviderBatchRecord(
+            id: id,
+            providerID: providerID,
+            providerKind: .gemini,
+            endpoint: fields.string("endpoint") ?? "",
+            status: normalizedStatus(fields.string("state") ?? fields.string("status")),
+            inputFileID: fields["inputConfig"]?.objectValue?.string("fileName"),
+            outputFileID: fields["outputInfo"]?.objectValue?.string("fileName"),
+            errorFileID: fields["errorInfo"]?.objectValue?.string("fileName"),
+            requestCounts: fields["requestCounts"],
+            metadata: metadata(from: fields["metadata"])
+        )
+    }
+
+    static func providerLiveSession(from object: JSONValue, providerID: ProviderID) -> ProviderLiveSessionRecord? {
+        guard let fields = object.objectValue,
+              let id = fields.string("name")
+        else { return nil }
+        return ProviderLiveSessionRecord(
+            id: id,
+            providerID: providerID,
+            providerKind: .gemini,
+            modelID: normalizedModelID(fields.string("model")) ?? "gemini-live",
+            status: normalizedStatus(fields.string("state") ?? fields.string("status") ?? "ACTIVE"),
+            modalities: fields.arrayStrings("modalities"),
+            expiresAt: fields.string("expireTime").flatMap(iso8601Date),
+            providerMetadata: metadata(from: fields["metadata"])
+        )
+    }
+
+    static func providerArtifact(
+        from part: JSONValue,
+        providerID: ProviderID,
+        responseID: String?,
+        toolCallID: String?
+    ) -> ProviderArtifactRecord? {
+        guard let fields = part.objectValue else { return nil }
+        if let fileData = fields["fileData"]?.objectValue,
+           let fileURI = fileData.string("fileUri") {
+            return ProviderArtifactRecord(
+                id: fileURI,
+                providerID: providerID,
+                providerKind: .gemini,
+                responseID: responseID,
+                toolCallID: toolCallID,
+                providerFileID: fileURI,
+                kind: "file_data",
+                contentType: fileData.string("mimeType")
+            )
+        }
+        if let inlineData = fields["inlineData"]?.objectValue,
+           let data = inlineData.string("data") {
+            return ProviderArtifactRecord(
+                id: "gemini-inline-\(responseID ?? UUID().uuidString)-\(toolCallID ?? "model")",
+                providerID: providerID,
+                providerKind: .gemini,
+                responseID: responseID,
+                toolCallID: toolCallID,
+                kind: "inline_data",
+                contentType: inlineData.string("mimeType"),
+                byteCount: Int64(Data(base64Encoded: data)?.count ?? 0)
+            )
+        }
+        return nil
+    }
+
+    static func providerArtifacts(
+        fromGeminiMetadata metadata: [String: String],
+        providerID: ProviderID,
+        responseID: String?
+    ) -> [ProviderArtifactRecord] {
+        let fileReferences = jsonArray(fromJSONString: metadata[CloudProviderMetadataKeys.geminiFileReferencesJSON])
+        let fileArtifacts = fileReferences.map { object in
+            ProviderArtifactRecord(
+                id: object.string("fileUri") ?? UUID().uuidString,
+                providerID: providerID,
+                providerKind: .gemini,
+                responseID: responseID,
+                providerFileID: object.string("fileUri"),
+                kind: "file_data",
+                contentType: object.string("mimeType")
+            )
+        }
+        let inlineArtifacts = jsonArray(fromJSONString: metadata[CloudProviderMetadataKeys.geminiArtifactsJSON]).map { object in
+            ProviderArtifactRecord(
+                id: object.string("id") ?? object.string("fileUri") ?? UUID().uuidString,
+                providerID: providerID,
+                providerKind: .gemini,
+                responseID: responseID,
+                kind: object.string("type") ?? "inline_data",
+                contentType: object.string("mimeType"),
+                byteCount: Int64(object.int("byteCount") ?? object.int("byte_hint") ?? 0)
+            )
+        }
+        return fileArtifacts + inlineArtifacts
+    }
+
+    static func providerResearchRun(
+        providerID: ProviderID,
+        modelID: ModelID,
+        title: String,
+        prompt: String,
+        sourcePolicy: JSONValue,
+        responseID: String?,
+        status: String,
+        providerMetadata: [String: String]
+    ) -> ProviderResearchRunRecord {
+        ProviderResearchRunRecord(
+            id: responseID ?? UUID().uuidString,
+            providerID: providerID,
+            providerKind: .gemini,
+            modelID: modelID,
+            title: title,
+            prompt: prompt,
+            depth: "standard",
+            sourcePolicy: sourcePolicy,
+            reportFormat: "citation_first",
+            includeCodeInterpreter: providerMetadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON] != nil,
+            serviceTier: "default",
+            responseID: responseID,
+            status: status,
+            citationCount: webCitationCount(providerMetadata),
+            toolCallCount: geminiToolCallCount(providerMetadata),
+            providerMetadata: providerMetadata
+        )
+    }
+
+    private static func normalizedStatus(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "unknown" }
+        return value
+            .replacingOccurrences(of: "JOB_STATE_", with: "")
+            .lowercased()
+    }
+
+    private static func normalizedModelID(_ value: String?) -> ModelID? {
+        guard let value else { return nil }
+        return ModelID(rawValue: value.replacingOccurrences(of: "models/", with: ""))
+    }
+
+    private static func metadata(from value: JSONValue?) -> [String: String] {
+        guard let object = value?.objectValue else { return [:] }
+        return object.reduce(into: [String: String]()) { result, pair in
+            if let string = pair.value.stringValue {
+                result[pair.key] = string
+            } else if let int = pair.value.intValue {
+                result[pair.key] = String(int)
+            } else if let bool = pair.value.boolValue {
+                result[pair.key] = String(bool)
+            }
+        }
+    }
+
+    private static func jsonValue(fromJSONString raw: String?) -> JSONValue? {
+        guard let raw else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: Data(raw.utf8))
+    }
+
+    private static func jsonArray(fromJSONString raw: String?) -> [[String: JSONValue]] {
+        guard case let .array(values) = jsonValue(fromJSONString: raw) else { return [] }
+        return values.compactMap(\.objectValue)
+    }
+
+    private static func webCitationCount(_ metadata: [String: String]) -> Int {
+        jsonArray(fromJSONString: metadata[CloudProviderMetadataKeys.webSearchCitationsJSON]).count
+    }
+
+    private static func geminiToolCallCount(_ metadata: [String: String]) -> Int {
+        jsonArray(fromJSONString: metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]).count
+    }
+
+    private static func iso8601Date(_ raw: String) -> Date? {
+        ISO8601DateFormatter().date(from: raw)
+    }
+}
+
+private extension Dictionary where Key == String, Value == JSONValue {
+    func string(_ key: String) -> String? {
+        self[key]?.stringValue
+    }
+
+    func int(_ key: String) -> Int? {
+        if let int = self[key]?.intValue {
+            return int
+        }
+        if let string = self[key]?.stringValue {
+            return Int(string)
+        }
+        return nil
+    }
+
+    func arrayStrings(_ key: String) -> [String] {
+        guard case let .array(values) = self[key] else { return [] }
+        return values.compactMap(\.stringValue)
     }
 }
 

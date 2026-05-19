@@ -1,6 +1,7 @@
 import SwiftUI
 import LocalAuthentication
 import PinesCore
+import UniformTypeIdentifiers
 
 #if canImport(WatchConnectivity)
 import WatchConnectivity
@@ -685,9 +686,19 @@ private struct ProviderWorkspaceView: View {
 
                     ProviderLifecycleDashboard()
 
+                    AnthropicFileManager()
+
+                    GeminiFileMediaManager()
+
+                    GeminiCacheManager()
+
                     DeepResearchWorkspace()
 
                     RealtimeWorkspace()
+
+                    GeminiGeneratedMediaWorkspace()
+
+                    ProviderModelCapabilitySection()
 
                     ProviderLibrarySection(
                         title: "Artifacts",
@@ -702,7 +713,7 @@ private struct ProviderWorkspaceView: View {
 
                     ProviderLibrarySection(
                         title: "Structured Outputs",
-                        subtitle: "Persisted schema results and validation state from cloud responses.",
+                        subtitle: "Persisted schema results, validation state, refusal/truncation metadata, and local JSON validation.",
                         systemImage: "curlybraces.square",
                         isEmpty: providerState.providerStructuredOutputPreviews.isEmpty
                     ) {
@@ -713,7 +724,7 @@ private struct ProviderWorkspaceView: View {
 
                     ProviderLibrarySection(
                         title: "Batches",
-                        subtitle: "Background batch jobs and vector-store file batches.",
+                        subtitle: "Background jobs, operation state, output/error files, and imported result artifacts.",
                         systemImage: "tray.full",
                         isEmpty: providerState.providerBatchPreviews.isEmpty
                     ) {
@@ -742,13 +753,17 @@ private struct ProviderWorkspaceView: View {
                     }
                     .accessibilityLabel("Refresh provider artifacts")
 
-                    Button {
-                        Task { await refreshOpenAIStorage() }
+                    Menu {
+                        ForEach(lifecycleProviders) { provider in
+                            Button(provider.displayName) {
+                                Task { await refreshProviderStorage(provider) }
+                            }
+                        }
                     } label: {
                         Image(systemName: "cloud")
                     }
-                    .accessibilityLabel("Refresh OpenAI provider storage")
-                    .disabled(openAIProviders.isEmpty)
+                    .accessibilityLabel("Refresh provider storage")
+                    .disabled(lifecycleProviders.isEmpty)
                 }
             }
             .task {
@@ -757,14 +772,23 @@ private struct ProviderWorkspaceView: View {
         }
     }
 
-    private var openAIProviders: [CloudProviderConfiguration] {
-        settingsState.cloudProviders.filter { $0.kind == .openAI }
+    private var lifecycleProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.pinesLifecycleProviders
     }
 
     @MainActor
-    private func refreshOpenAIStorage() async {
+    private func refreshProviderStorage(_ provider: CloudProviderConfiguration) async {
         do {
-            _ = try await appModel.refreshOpenAIProviderStorage(services: services)
+            switch provider.kind {
+            case .openAI:
+                _ = try await appModel.refreshOpenAIProviderStorage(providerID: provider.id, services: services)
+            case .anthropic:
+                _ = try await appModel.refreshAnthropicProviderStorage(providerID: provider.id, services: services)
+            case .gemini:
+                _ = try await appModel.refreshGeminiProviderStorage(providerID: provider.id, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) provider storage is not supported here.")
+            }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -790,6 +814,349 @@ private struct ProviderLifecycleDashboard: View {
     }
 }
 
+private struct AnthropicFileManager: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    @State private var selectedProviderID: ProviderID?
+    @State private var isImporterPresented = false
+    @State private var isUploading = false
+
+    private var anthropicProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.filter { $0.kind == .anthropic }
+    }
+
+    private var selectedProvider: CloudProviderConfiguration? {
+        if let selectedProviderID, let provider = anthropicProviders.first(where: { $0.id == selectedProviderID }) {
+            return provider
+        }
+        return anthropicProviders.first
+    }
+
+    private var files: [PinesProviderFilePreview] {
+        providerState.providerFilePreviews.filter { preview in
+            preview.providerKind == .anthropic && (selectedProvider == nil || preview.providerID == selectedProvider?.id)
+        }
+    }
+
+    var body: some View {
+        PinesCardSection("Anthropic Files", subtitle: "Provider-hosted PDFs, documents, images, and generated code-execution files stay labeled as Anthropic storage.", systemImage: "doc.badge.arrow.up") {
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                HStack(spacing: theme.spacing.small) {
+                    providerPicker
+
+                    Button {
+                        isImporterPresented = true
+                    } label: {
+                        Label(isUploading ? "Uploading" : "Upload", systemImage: isUploading ? "hourglass" : "square.and.arrow.up")
+                    }
+                    .disabled(isUploading || selectedProvider == nil)
+                    .pinesButtonStyle(.primary)
+
+                    Button {
+                        Task { await refreshStorage() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(selectedProvider == nil)
+                }
+
+                PinesMetricPillGroup(items: [
+                    .init("Files", value: "\(files.count)", systemImage: "doc", tone: .warning),
+                    .init("Provider", value: selectedProvider?.displayName ?? "None", systemImage: "cloud", tone: .info),
+                    .init("Retention", value: "provider-hosted", systemImage: "timer", tone: .warning),
+                ], minimumWidth: 126)
+
+                if files.isEmpty {
+                    PinesEmptyState(title: "No Anthropic files", detail: "Uploaded documents and generated hosted-tool files appear here after refresh.", systemImage: "doc.badge.plus")
+                        .pinesSurface(.inset, padding: theme.spacing.small)
+                } else {
+                    ForEach(files) { file in
+                        ProviderFileRow(file: file)
+                    }
+                }
+            }
+        }
+        .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
+            Task { await handleImport(result) }
+        }
+    }
+
+    @ViewBuilder
+    private var providerPicker: some View {
+        if !anthropicProviders.isEmpty {
+            Picker("Provider", selection: Binding(
+                get: { selectedProvider?.id },
+                set: { selectedProviderID = $0 }
+            )) {
+                ForEach(anthropicProviders) { provider in
+                    Text(provider.displayName).tag(Optional(provider.id))
+                }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+
+    @MainActor
+    private func handleImport(_ result: Result<[URL], Error>) async {
+        guard let provider = selectedProvider else { return }
+        do {
+            guard let url = try result.get().first else { return }
+            isUploading = true
+            defer { isUploading = false }
+            let byteCount = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+            let consent = PinesAnthropicProviderStorageConsent(
+                isGranted: true,
+                sourceDescription: url.lastPathComponent,
+                destinationDescription: "Anthropic Files API for \(provider.displayName)",
+                byteCount: byteCount
+            )
+            _ = try await appModel.uploadAnthropicLocalFile(providerID: provider.id, fileURL: url, consent: consent, services: services)
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+            isUploading = false
+        }
+    }
+
+    @MainActor
+    private func refreshStorage() async {
+        guard let provider = selectedProvider else { return }
+        do {
+            _ = try await appModel.refreshAnthropicProviderStorage(providerID: provider.id, services: services)
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
+private struct GeminiFileMediaManager: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    @State private var selectedProviderID: ProviderID?
+    @State private var isImporterPresented = false
+    @State private var isUploading = false
+
+    private var geminiProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.filter { $0.kind == .gemini }
+    }
+
+    private var selectedProvider: CloudProviderConfiguration? {
+        if let selectedProviderID, let provider = geminiProviders.first(where: { $0.id == selectedProviderID }) {
+            return provider
+        }
+        return geminiProviders.first
+    }
+
+    private var files: [PinesProviderFilePreview] {
+        providerState.providerFilePreviews.filter { preview in
+            preview.providerKind == .gemini && (selectedProvider == nil || preview.providerID == selectedProvider?.id)
+        }
+    }
+
+    var body: some View {
+        PinesCardSection("Gemini Files and Media", subtitle: "Provider-hosted media is explicit, retained by Gemini, and deletable independently from local Vault files.", systemImage: "doc.badge.arrow.up") {
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                HStack(spacing: theme.spacing.small) {
+                    providerPicker
+
+                    Button {
+                        isImporterPresented = true
+                    } label: {
+                        Label(isUploading ? "Uploading" : "Upload", systemImage: isUploading ? "hourglass" : "square.and.arrow.up")
+                    }
+                    .disabled(isUploading || selectedProvider == nil)
+                    .pinesButtonStyle(.primary)
+
+                    Button {
+                        Task { await refreshStorage() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(selectedProvider == nil)
+                }
+
+                PinesMetricPillGroup(items: [
+                    .init("Files", value: "\(files.count)", systemImage: "doc", tone: .warning),
+                    .init("Provider", value: selectedProvider?.displayName ?? "None", systemImage: "cloud", tone: .info),
+                    .init("Retention", value: "provider-hosted", systemImage: "timer", tone: .warning),
+                ], minimumWidth: 126)
+
+                if files.isEmpty {
+                    PinesEmptyState(title: "No Gemini files", detail: "Uploaded audio, video, PDFs, images, and reusable documents appear here with processing state.", systemImage: "doc.badge.plus")
+                        .pinesSurface(.inset, padding: theme.spacing.small)
+                } else {
+                    ForEach(files) { file in
+                        ProviderFileRow(file: file)
+                    }
+                }
+            }
+        }
+        .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
+            Task { await handleImport(result) }
+        }
+    }
+
+    @ViewBuilder
+    private var providerPicker: some View {
+        if !geminiProviders.isEmpty {
+            Picker("Provider", selection: Binding(
+                get: { selectedProvider?.id },
+                set: { selectedProviderID = $0 }
+            )) {
+                ForEach(geminiProviders) { provider in
+                    Text(provider.displayName).tag(Optional(provider.id))
+                }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+
+    @MainActor
+    private func handleImport(_ result: Result<[URL], Error>) async {
+        guard let provider = selectedProvider else { return }
+        do {
+            guard let url = try result.get().first else { return }
+            isUploading = true
+            defer { isUploading = false }
+            let byteCount = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+            let consent = PinesGeminiProviderStorageConsent(
+                isGranted: true,
+                sourceDescription: url.lastPathComponent,
+                destinationDescription: "Gemini Files API for \(provider.displayName)",
+                byteCount: byteCount
+            )
+            _ = try await appModel.uploadGeminiLocalFile(providerID: provider.id, fileURL: url, consent: consent, services: services)
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+            isUploading = false
+        }
+    }
+
+    @MainActor
+    private func refreshStorage() async {
+        guard let provider = selectedProvider else { return }
+        do {
+            _ = try await appModel.refreshGeminiProviderStorage(providerID: provider.id, services: services)
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
+private struct GeminiCacheManager: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    @State private var selectedProviderID: ProviderID?
+    @State private var modelID = "gemini-2.5-pro"
+    @State private var displayName = ""
+    @State private var cacheText = ""
+    @State private var ttlSeconds = "3600"
+    @State private var isCreating = false
+
+    private var geminiProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.filter { $0.kind == .gemini }
+    }
+
+    private var selectedProvider: CloudProviderConfiguration? {
+        if let selectedProviderID, let provider = geminiProviders.first(where: { $0.id == selectedProviderID }) {
+            return provider
+        }
+        return geminiProviders.first
+    }
+
+    private var caches: [PinesProviderCachePreview] {
+        providerState.providerCachePreviews.filter { preview in
+            preview.providerKind == .gemini && (selectedProvider == nil || preview.providerID == selectedProvider?.id)
+        }
+    }
+
+    var body: some View {
+        PinesCardSection("Gemini Context Caches", subtitle: "Create and clean up provider-hosted cached context with TTL, token usage, and linked model state.", systemImage: "externaldrive.badge.icloud") {
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                HStack(spacing: theme.spacing.small) {
+                    if !geminiProviders.isEmpty {
+                        Picker("Provider", selection: Binding(
+                            get: { selectedProvider?.id },
+                            set: { selectedProviderID = $0 }
+                        )) {
+                            ForEach(geminiProviders) { provider in
+                                Text(provider.displayName).tag(Optional(provider.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    TextField("Model", text: $modelID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .pinesFieldChrome()
+                        .frame(maxWidth: 180)
+
+                    TextField("TTL seconds", text: $ttlSeconds)
+                        .pinesFieldChrome()
+                        .frame(maxWidth: 110)
+                }
+
+                TextField("Cache name", text: $displayName)
+                    .pinesFieldChrome()
+
+                TextField("Context to cache", text: $cacheText, axis: .vertical)
+                    .lineLimit(2...6)
+                    .pinesFieldChrome()
+
+                HStack {
+                    Button {
+                        Task { await createCache() }
+                    } label: {
+                        Label(isCreating ? "Creating" : "Create cache", systemImage: isCreating ? "hourglass" : "plus.circle")
+                    }
+                    .disabled(isCreating || selectedProvider == nil || cacheText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .pinesButtonStyle(.primary)
+
+                    Spacer()
+                }
+
+                if caches.isEmpty {
+                    PinesEmptyState(title: "No Gemini caches", detail: "Approved Vault context, reusable prompts, and media context caches appear here.", systemImage: "externaldrive")
+                        .pinesSurface(.inset, padding: theme.spacing.small)
+                } else {
+                    ForEach(caches) { cache in
+                        ProviderCacheRow(cache: cache)
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func createCache() async {
+        guard let provider = selectedProvider else { return }
+        isCreating = true
+        defer { isCreating = false }
+        do {
+            _ = try await appModel.createGeminiContextCache(
+                providerID: provider.id,
+                modelID: ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines)),
+                displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+                text: cacheText,
+                ttlSeconds: Int(ttlSeconds),
+                services: services
+            )
+            cacheText = ""
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
 private struct DeepResearchWorkspace: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
@@ -804,24 +1171,32 @@ private struct DeepResearchWorkspace: View {
     @State private var reportFormat: OpenAIDeepResearchReportFormat = .memo
     @State private var isStarting = false
 
-    private var openAIProviders: [CloudProviderConfiguration] {
-        settingsState.cloudProviders.filter { $0.kind == .openAI }
+    private var lifecycleProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.pinesLifecycleProviders
     }
 
-    private var providerID: ProviderID? {
-        selectedProviderID ?? openAIProviders.first?.id
+    private var selectedProvider: CloudProviderConfiguration? {
+        if let selectedProviderID, let provider = lifecycleProviders.first(where: { $0.id == selectedProviderID }) {
+            return provider
+        }
+        return lifecycleProviders.first
     }
 
     var body: some View {
-        PinesCardSection("Deep Research", subtitle: "Start, refresh, cancel, and resume OpenAI background research runs.", systemImage: "doc.text.magnifyingglass") {
+        PinesCardSection("Deep Research", subtitle: "Start, refresh, cancel, and resume provider background research runs.", systemImage: "doc.text.magnifyingglass") {
             VStack(alignment: .leading, spacing: theme.spacing.small) {
-                if !openAIProviders.isEmpty {
+                if !lifecycleProviders.isEmpty {
                     Picker("Provider", selection: Binding(
-                        get: { providerID },
-                        set: { selectedProviderID = $0 }
+                        get: { selectedProvider?.id },
+                        set: { providerID in
+                            selectedProviderID = providerID
+                            if let providerID, let provider = lifecycleProviders.first(where: { $0.id == providerID }) {
+                                applyDefaultDeepResearchModel(for: provider.kind)
+                            }
+                        }
                     )) {
-                        ForEach(openAIProviders) { provider in
-                            Text(provider.displayName).tag(Optional(provider.id))
+                        ForEach(lifecycleProviders) { provider in
+                            Text("\(provider.displayName) - \(provider.kind.pinesLifecycleTitle)").tag(Optional(provider.id))
                         }
                     }
                     .pickerStyle(.menu)
@@ -863,7 +1238,7 @@ private struct DeepResearchWorkspace: View {
                     } label: {
                         Label(isStarting ? "Starting" : "Start", systemImage: isStarting ? "hourglass" : "play.fill")
                     }
-                    .disabled(isStarting || providerID == nil || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isStarting || selectedProvider == nil || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .pinesButtonStyle(.primary)
                 }
 
@@ -873,7 +1248,7 @@ private struct DeepResearchWorkspace: View {
                     } label: {
                         Label("Resume", systemImage: "arrow.clockwise")
                     }
-                    .disabled(providerID == nil)
+                    .disabled(selectedProvider == nil)
 
                     Button {
                         Task { await appModel.refreshProviderLifecycleState(services: services) }
@@ -892,28 +1267,50 @@ private struct DeepResearchWorkspace: View {
 
     @MainActor
     private func startRun() async {
-        guard let providerID else { return }
+        guard let provider = selectedProvider else { return }
         isStarting = true
         defer { isStarting = false }
         do {
             let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let request = OpenAIDeepResearchRequest(
-                providerID: providerID,
-                modelID: ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines)),
-                title: trimmedTitle.isEmpty ? "Deep research" : trimmedTitle,
-                prompt: prompt,
-                depth: depth,
-                sourcePolicy: .webAndFiles(
-                    vectorStoreIDs: providerState.providerVectorStores
-                        .filter { $0.providerID == providerID }
-                        .map { OpenAIVectorStoreID(rawValue: $0.id) },
-                    providerFileIDs: providerState.providerFiles
-                        .filter { $0.providerID == providerID }
-                        .map { OpenAIProviderFileID(rawValue: $0.id) }
-                ),
-                reportFormat: reportFormat
-            )
-            _ = try await appModel.startOpenAIDeepResearch(request, services: services)
+            let title = trimmedTitle.isEmpty ? "Deep research" : trimmedTitle
+            let modelID = ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines))
+            let vectorStoreIDs = providerState.providerVectorStores
+                .filter { $0.providerID == provider.id }
+                .map(\.id)
+            let providerFileIDs = providerState.providerFiles
+                .filter { $0.providerID == provider.id }
+                .map(\.id)
+            switch provider.kind {
+            case .openAI:
+                let request = OpenAIDeepResearchRequest(
+                    providerID: provider.id,
+                    modelID: modelID,
+                    title: title,
+                    prompt: prompt,
+                    depth: depth,
+                    sourcePolicy: .webAndFiles(
+                        vectorStoreIDs: vectorStoreIDs.map { OpenAIVectorStoreID(rawValue: $0) },
+                        providerFileIDs: providerFileIDs.map { OpenAIProviderFileID(rawValue: $0) }
+                    ),
+                    reportFormat: reportFormat
+                )
+                _ = try await appModel.startOpenAIDeepResearch(request, services: services)
+            case .gemini:
+                let request = PinesProviderDeepResearchRequest(
+                    providerID: provider.id,
+                    providerKind: provider.kind,
+                    modelID: modelID,
+                    title: title,
+                    prompt: prompt,
+                    depth: depth.rawValue,
+                    reportFormat: reportFormat.rawValue,
+                    vectorStoreIDs: vectorStoreIDs,
+                    providerFileIDs: providerFileIDs
+                )
+                _ = try await appModel.startGeminiDeepResearch(request, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) Deep Research is not supported here.")
+            }
             prompt = ""
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
@@ -922,11 +1319,31 @@ private struct DeepResearchWorkspace: View {
 
     @MainActor
     private func resumeRuns() async {
-        guard let providerID else { return }
+        guard let provider = selectedProvider else { return }
         do {
-            _ = try await appModel.resumeOpenAIDeepResearchRuns(providerID: providerID, services: services)
+            switch provider.kind {
+            case .openAI:
+                _ = try await appModel.resumeOpenAIDeepResearchRuns(providerID: provider.id, services: services)
+            case .gemini:
+                _ = try await appModel.resumeGeminiDeepResearchRuns(providerID: provider.id, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) Deep Research is not supported here.")
+            }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
+    private func applyDefaultDeepResearchModel(for providerKind: CloudProviderKind) {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty || trimmed == "gpt-5.5-pro" || trimmed == "gemini-2.5-deep-research" else { return }
+        switch providerKind {
+        case .openAI:
+            modelID = "gpt-5.5-pro"
+        case .gemini:
+            modelID = "gemini-2.5-deep-research"
+        default:
+            break
         }
     }
 }
@@ -942,24 +1359,32 @@ private struct RealtimeWorkspace: View {
     @State private var includesAudio = true
     @State private var isCreating = false
 
-    private var openAIProviders: [CloudProviderConfiguration] {
-        settingsState.cloudProviders.filter { $0.kind == .openAI }
+    private var lifecycleProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.pinesLifecycleProviders
     }
 
-    private var providerID: ProviderID? {
-        selectedProviderID ?? openAIProviders.first?.id
+    private var selectedProvider: CloudProviderConfiguration? {
+        if let selectedProviderID, let provider = lifecycleProviders.first(where: { $0.id == selectedProviderID }) {
+            return provider
+        }
+        return lifecycleProviders.first
     }
 
     var body: some View {
         PinesCardSection("Realtime", subtitle: "Persisted session history, diagnostics, and transcript placeholders.", systemImage: "dot.radiowaves.left.and.right") {
             HStack(spacing: theme.spacing.small) {
-                if !openAIProviders.isEmpty {
+                if !lifecycleProviders.isEmpty {
                     Picker("Provider", selection: Binding(
-                        get: { providerID },
-                        set: { selectedProviderID = $0 }
+                        get: { selectedProvider?.id },
+                        set: { providerID in
+                            selectedProviderID = providerID
+                            if let providerID, let provider = lifecycleProviders.first(where: { $0.id == providerID }) {
+                                applyDefaultRealtimeModel(for: provider.kind)
+                            }
+                        }
                     )) {
-                        ForEach(openAIProviders) { provider in
-                            Text(provider.displayName).tag(Optional(provider.id))
+                        ForEach(lifecycleProviders) { provider in
+                            Text("\(provider.displayName) - \(provider.kind.pinesLifecycleTitle)").tag(Optional(provider.id))
                         }
                     }
                     .pickerStyle(.menu)
@@ -978,7 +1403,7 @@ private struct RealtimeWorkspace: View {
                 } label: {
                     Label(isCreating ? "Creating" : "Session", systemImage: isCreating ? "hourglass" : "plus.circle")
                 }
-                .disabled(isCreating || providerID == nil)
+                .disabled(isCreating || selectedProvider == nil)
                 .pinesButtonStyle(.primary)
             }
 
@@ -995,23 +1420,193 @@ private struct RealtimeWorkspace: View {
 
     @MainActor
     private func createSession() async {
-        guard let providerID else { return }
+        guard let provider = selectedProvider else { return }
         isCreating = true
         defer { isCreating = false }
         do {
             let modalities = includesAudio ? ["text", "audio"] : ["text"]
+            let modelID = ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines))
             let session: JSONValue = .object([
                 "type": .string("realtime"),
-                "model": .string(modelID.trimmingCharacters(in: .whitespacesAndNewlines)),
+                "model": .string(modelID.rawValue),
                 "modalities": .array(modalities.map { .string($0) }),
             ])
-            let request = OpenAIRealtimeSessionWorkflowRequest(
-                kind: .clientSecret(OpenAIRealtimeClientSecretRequest(session: session), modalities: modalities),
-                fallbackModelID: ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines))
-            )
-            _ = try await appModel.createOpenAIRealtimeSessionRecord(request, providerID: providerID, services: services)
+            switch provider.kind {
+            case .openAI:
+                let request = OpenAIRealtimeSessionWorkflowRequest(
+                    kind: .clientSecret(OpenAIRealtimeClientSecretRequest(session: session), modalities: modalities),
+                    fallbackModelID: modelID
+                )
+                _ = try await appModel.createOpenAIRealtimeSessionRecord(request, providerID: provider.id, services: services)
+            case .gemini:
+                let request = PinesProviderRealtimeSessionRequest(
+                    providerID: provider.id,
+                    providerKind: provider.kind,
+                    modelID: modelID,
+                    modalities: modalities,
+                    session: session
+                )
+                _ = try await appModel.createGeminiRealtimeSessionRecord(request, providerID: provider.id, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) Realtime is not supported here.")
+            }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
+    private func applyDefaultRealtimeModel(for providerKind: CloudProviderKind) {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty || trimmed == "gpt-4o-realtime-preview" || trimmed == "gemini-live-2.5-flash-preview" else { return }
+        switch providerKind {
+        case .openAI:
+            modelID = "gpt-4o-realtime-preview"
+        case .gemini:
+            modelID = "gemini-live-2.5-flash-preview"
+        default:
+            break
+        }
+    }
+}
+
+private struct GeminiGeneratedMediaWorkspace: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    @State private var selectedProviderID: ProviderID?
+    @State private var modelID = "imagen-4.0-generate-preview"
+    @State private var prompt = ""
+    @State private var kind = "image"
+    @State private var isGenerating = false
+
+    private var geminiProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.filter { $0.kind == .gemini }
+    }
+
+    private var selectedProvider: CloudProviderConfiguration? {
+        if let selectedProviderID, let provider = geminiProviders.first(where: { $0.id == selectedProviderID }) {
+            return provider
+        }
+        return geminiProviders.first
+    }
+
+    private var mediaArtifacts: [PinesProviderArtifactPreview] {
+        providerState.providerArtifactPreviews.filter { artifact in
+            artifact.providerKind == .gemini
+                && ["image", "video", "audio", "generated_media", "media_operation"].contains(artifact.kind)
+        }
+    }
+
+    var body: some View {
+        PinesCardSection("Gemini Generated Media", subtitle: "Images, Veo video jobs, and speech outputs are stored as provider artifacts with prompt/model provenance.", systemImage: "photo.stack") {
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                HStack(spacing: theme.spacing.small) {
+                    if !geminiProviders.isEmpty {
+                        Picker("Provider", selection: Binding(
+                            get: { selectedProvider?.id },
+                            set: { selectedProviderID = $0 }
+                        )) {
+                            ForEach(geminiProviders) { provider in
+                                Text(provider.displayName).tag(Optional(provider.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    Picker("Kind", selection: $kind) {
+                        Text("Image").tag("image")
+                        Text("Video").tag("video")
+                        Text("Speech").tag("speech")
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 260)
+                    .onChange(of: kind) { _, value in
+                        switch value {
+                        case "video":
+                            modelID = "veo-3.1-generate-preview"
+                        case "speech":
+                            modelID = "gemini-2.5-flash-preview-tts"
+                        default:
+                            modelID = "imagen-4.0-generate-preview"
+                        }
+                    }
+
+                    TextField("Model", text: $modelID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .pinesFieldChrome()
+                }
+
+                TextField("Prompt", text: $prompt, axis: .vertical)
+                    .lineLimit(2...5)
+                    .pinesFieldChrome()
+
+                HStack {
+                    Button {
+                        Task { await createMedia() }
+                    } label: {
+                        Label(isGenerating ? "Creating" : "Create", systemImage: isGenerating ? "hourglass" : "sparkles")
+                    }
+                    .disabled(isGenerating || selectedProvider == nil || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .pinesButtonStyle(.primary)
+
+                    Spacer()
+                }
+
+                if mediaArtifacts.isEmpty {
+                    PinesEmptyState(title: "No Gemini media artifacts", detail: "Generated images, videos, speech, and operation records appear here.", systemImage: "photo")
+                        .pinesSurface(.inset, padding: theme.spacing.small)
+                } else {
+                    ForEach(mediaArtifacts.prefix(6)) { artifact in
+                        ProviderArtifactRow(artifact: artifact)
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func createMedia() async {
+        guard let provider = selectedProvider else { return }
+        isGenerating = true
+        defer { isGenerating = false }
+        do {
+            _ = try await appModel.createGeminiGeneratedMedia(
+                providerID: provider.id,
+                modelID: ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines)),
+                prompt: prompt,
+                kind: kind,
+                services: services
+            )
+            prompt = ""
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
+private struct ProviderModelCapabilitySection: View {
+    @Environment(\.pinesTheme) private var theme
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+
+    private var capabilities: [PinesProviderModelCapabilityPreview] {
+        providerState.providerModelCapabilityPreviews
+            .filter { $0.providerKind == .gemini || $0.providerKind == .anthropic }
+            .sorted { $0.title < $1.title }
+    }
+
+    var body: some View {
+        ProviderLibrarySection(
+            title: "Provider Model Capabilities",
+            subtitle: "Model picker gating uses provider metadata when available; absent metadata remains an estimated fallback.",
+            systemImage: "cpu",
+            isEmpty: capabilities.isEmpty
+        ) {
+            ForEach(capabilities.prefix(12)) { capability in
+                ProviderModelCapabilityRow(capability: capability)
+            }
         }
     }
 }
@@ -1054,6 +1649,136 @@ private struct ProviderArtifactRow: View {
     }
 }
 
+private struct ProviderFileRow: View {
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    let file: PinesProviderFilePreview
+
+    var body: some View {
+        PinesCapabilityRow(
+            title: file.title,
+            detail: file.detail,
+            systemImage: file.providerKind == .gemini ? "waveform.badge.magnifyingglass" : "doc",
+            status: file.status.providerCloudStatus,
+            secondaryStatus: file.expiresLabel.map { .custom("Expires \($0)", .warning) },
+            metricItems: [
+                .init("Purpose", value: file.purpose, systemImage: "tag", tone: .info),
+                .init("Size", value: file.byteCountLabel, systemImage: "internaldrive", tone: .neutral),
+                .init("Created", value: file.createdLabel, systemImage: "clock", tone: .neutral),
+            ]
+        )
+        HStack {
+            Spacer()
+            Button("Refresh") {
+                Task { await refreshFile() }
+            }
+            .buttonStyle(.borderless)
+            Button("Delete") {
+                Task { await deleteFile() }
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    @MainActor
+    private func refreshFile() async {
+        do {
+            switch file.providerKind {
+            case .anthropic:
+                _ = try await appModel.refreshAnthropicProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            case .gemini:
+                _ = try await appModel.refreshGeminiProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(file.providerKind.pinesLifecycleTitle) file refresh is not supported here.")
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func deleteFile() async {
+        do {
+            switch file.providerKind {
+            case .openAI:
+                try await appModel.deleteOpenAIProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            case .anthropic:
+                try await appModel.deleteAnthropicProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            case .gemini:
+                try await appModel.deleteGeminiProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(file.providerKind.pinesLifecycleTitle) file deletion is not supported here.")
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
+private struct ProviderCacheRow: View {
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    let cache: PinesProviderCachePreview
+
+    var body: some View {
+        PinesCapabilityRow(
+            title: cache.title,
+            detail: cache.detail,
+            systemImage: cache.kind == "cached_content" ? "externaldrive.badge.icloud" : "square.stack.3d.up",
+            status: cache.status.providerCloudStatus,
+            secondaryStatus: cache.expiresLabel.map { .custom("Expires \($0)", .warning) },
+            metricItems: [
+                .init("Kind", value: cache.kind, systemImage: "tag", tone: .info),
+                .init("Usage", value: cache.usageLabel, systemImage: "number", tone: .neutral),
+                .init("Created", value: cache.createdLabel, systemImage: "clock", tone: .neutral),
+            ]
+        )
+        HStack {
+            Spacer()
+            Button("Refresh") {
+                Task { await refreshCache() }
+            }
+            .buttonStyle(.borderless)
+            Button("Delete") {
+                Task { await deleteCache() }
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    @MainActor
+    private func refreshCache() async {
+        do {
+            switch cache.providerKind {
+            case .gemini:
+                _ = try await appModel.refreshGeminiContextCache(providerID: cache.providerID, cacheID: cache.id, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(cache.providerKind.pinesLifecycleTitle) cache refresh is not supported here.")
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func deleteCache() async {
+        do {
+            switch cache.providerKind {
+            case .openAI:
+                try await appModel.deleteOpenAIVectorStore(providerID: cache.providerID, vectorStoreID: cache.id, services: services)
+            case .gemini:
+                try await appModel.deleteGeminiContextCache(providerID: cache.providerID, cacheID: cache.id, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(cache.providerKind.pinesLifecycleTitle) cache deletion is not supported here.")
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
 private struct ProviderStructuredOutputRow: View {
     let output: PinesProviderStructuredOutputPreview
 
@@ -1065,6 +1790,24 @@ private struct ProviderStructuredOutputRow: View {
             status: output.status.providerCloudStatus,
             secondaryStatus: .custom(output.validationSummary, output.validationSummary == "Valid" ? .success : .warning),
             metricItems: [.init("Created", value: output.createdLabel, systemImage: "clock", tone: .neutral)]
+        )
+    }
+}
+
+private struct ProviderModelCapabilityRow: View {
+    let capability: PinesProviderModelCapabilityPreview
+
+    var body: some View {
+        PinesCapabilityRow(
+            title: capability.title,
+            detail: capability.detail,
+            systemImage: "cpu",
+            status: .custom("metadata", .success),
+            secondaryStatus: capability.expiresLabel.map { .custom("Expires \($0)", .warning) },
+            metricItems: [
+                .init("Capabilities", value: capability.capabilitySummary, systemImage: "checklist", tone: .info),
+                .init("Fetched", value: capability.fetchedLabel, systemImage: "clock", tone: .neutral),
+            ]
         )
     }
 }
@@ -1098,13 +1841,29 @@ private struct ProviderBatchRow: View {
             }
             .buttonStyle(.borderless)
             .disabled(batch.status.providerIsTerminal)
+            if batch.providerKind == .anthropic {
+                Button("Import") {
+                    Task { await importResults() }
+                }
+                .buttonStyle(.borderless)
+                .disabled(!batch.status.providerIsTerminal)
+            }
         }
     }
 
     @MainActor
     private func refreshBatch() async {
         do {
-            _ = try await appModel.refreshOpenAIBatch(id: batch.id, providerID: batch.providerID, services: services)
+            switch batch.providerKind {
+            case .openAI:
+                _ = try await appModel.refreshOpenAIBatch(id: batch.id, providerID: batch.providerID, services: services)
+            case .anthropic:
+                _ = try await appModel.refreshAnthropicBatch(id: batch.id, providerID: batch.providerID, services: services)
+            case .gemini:
+                _ = try await appModel.refreshGeminiBatch(id: batch.id, providerID: batch.providerID, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(batch.providerKind.pinesLifecycleTitle) batch lifecycle is not supported here.")
+            }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -1113,7 +1872,30 @@ private struct ProviderBatchRow: View {
     @MainActor
     private func cancelBatch() async {
         do {
-            _ = try await appModel.cancelOpenAIBatch(id: batch.id, providerID: batch.providerID, services: services)
+            switch batch.providerKind {
+            case .openAI:
+                _ = try await appModel.cancelOpenAIBatch(id: batch.id, providerID: batch.providerID, services: services)
+            case .anthropic:
+                _ = try await appModel.cancelAnthropicBatch(id: batch.id, providerID: batch.providerID, services: services)
+            case .gemini:
+                _ = try await appModel.cancelGeminiBatch(id: batch.id, providerID: batch.providerID, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(batch.providerKind.pinesLifecycleTitle) batch lifecycle is not supported here.")
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func importResults() async {
+        do {
+            switch batch.providerKind {
+            case .anthropic:
+                _ = try await appModel.importAnthropicBatchResults(id: batch.id, providerID: batch.providerID, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(batch.providerKind.pinesLifecycleTitle) batch result import is not supported here.")
+            }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -1152,7 +1934,14 @@ private struct ProviderResearchRunRow: View {
     @MainActor
     private func refreshRun() async {
         do {
-            _ = try await appModel.refreshOpenAIDeepResearchRun(id: run.id, providerID: run.providerID, services: services)
+            switch run.providerKind {
+            case .openAI:
+                _ = try await appModel.refreshOpenAIDeepResearchRun(id: run.id, providerID: run.providerID, services: services)
+            case .gemini:
+                _ = try await appModel.refreshGeminiDeepResearchRun(id: run.id, providerID: run.providerID, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(run.providerKind.pinesLifecycleTitle) Deep Research is not supported here.")
+            }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -1161,7 +1950,14 @@ private struct ProviderResearchRunRow: View {
     @MainActor
     private func cancelRun() async {
         do {
-            _ = try await appModel.cancelOpenAIDeepResearchRun(id: run.id, providerID: run.providerID, services: services)
+            switch run.providerKind {
+            case .openAI:
+                _ = try await appModel.cancelOpenAIDeepResearchRun(id: run.id, providerID: run.providerID, services: services)
+            case .gemini:
+                _ = try await appModel.cancelGeminiDeepResearchRun(id: run.id, providerID: run.providerID, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(run.providerKind.pinesLifecycleTitle) Deep Research is not supported here.")
+            }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -1183,6 +1979,33 @@ private struct ProviderLiveSessionRow: View {
                 .init("Created", value: session.createdLabel, systemImage: "clock", tone: .neutral),
             ]
         )
+    }
+}
+
+private extension Array where Element == CloudProviderConfiguration {
+    var pinesLifecycleProviders: [CloudProviderConfiguration] {
+        filter { $0.kind == .openAI || $0.kind == .anthropic || $0.kind == .gemini }
+    }
+}
+
+private extension CloudProviderKind {
+    var pinesLifecycleTitle: String {
+        switch self {
+        case .openAI:
+            "OpenAI"
+        case .openAICompatible:
+            "OpenAI-compatible"
+        case .anthropic:
+            "Anthropic"
+        case .gemini:
+            "Gemini"
+        case .openRouter:
+            "OpenRouter"
+        case .voyageAI:
+            "Voyage AI"
+        case .custom:
+            "Custom"
+        }
     }
 }
 

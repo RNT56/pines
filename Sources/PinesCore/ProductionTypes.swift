@@ -1476,6 +1476,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let defaultOpenAIReasoningEffort: OpenAIReasoningEffort = .low
     public static let defaultOpenAITextVerbosity: OpenAITextVerbosity = .low
     public static let defaultAnthropicEffort: AnthropicEffort = .medium
+    public static let defaultAnthropicThinkingMode: AnthropicThinkingMode = .adaptive
+    public static let defaultAnthropicThinkingBudgetTokens = 4096
     public static let defaultGeminiThinkingLevel: GeminiThinkingLevel = .medium
     public static let defaultCloudWebSearchMode: CloudWebSearchMode = .off
 
@@ -1491,6 +1493,11 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var openAIReasoningEffort: OpenAIReasoningEffort
     public var openAITextVerbosity: OpenAITextVerbosity
     public var anthropicEffort: AnthropicEffort
+    public var anthropicThinkingMode: AnthropicThinkingMode
+    public var anthropicThinkingBudgetTokens: Int
+    public var anthropicPromptCachingEnabled: Bool
+    public var anthropicPromptCacheTTL: AnthropicPromptCacheTTL
+    public var anthropicCitationsEnabled: Bool
     public var geminiThinkingLevel: GeminiThinkingLevel
     public var cloudWebSearchMode: CloudWebSearchMode
     public var requireToolApproval: Bool
@@ -1512,6 +1519,11 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         case openAIReasoningEffort
         case openAITextVerbosity
         case anthropicEffort
+        case anthropicThinkingMode
+        case anthropicThinkingBudgetTokens
+        case anthropicPromptCachingEnabled
+        case anthropicPromptCacheTTL
+        case anthropicCitationsEnabled
         case geminiThinkingLevel
         case cloudWebSearchMode
         case requireToolApproval
@@ -1534,6 +1546,11 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         openAIReasoningEffort: OpenAIReasoningEffort = Self.defaultOpenAIReasoningEffort,
         openAITextVerbosity: OpenAITextVerbosity = Self.defaultOpenAITextVerbosity,
         anthropicEffort: AnthropicEffort = Self.defaultAnthropicEffort,
+        anthropicThinkingMode: AnthropicThinkingMode = Self.defaultAnthropicThinkingMode,
+        anthropicThinkingBudgetTokens: Int = Self.defaultAnthropicThinkingBudgetTokens,
+        anthropicPromptCachingEnabled: Bool = false,
+        anthropicPromptCacheTTL: AnthropicPromptCacheTTL = .fiveMinutes,
+        anthropicCitationsEnabled: Bool = true,
         geminiThinkingLevel: GeminiThinkingLevel = Self.defaultGeminiThinkingLevel,
         cloudWebSearchMode: CloudWebSearchMode = Self.defaultCloudWebSearchMode,
         requireToolApproval: Bool = true,
@@ -1554,6 +1571,11 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         self.openAIReasoningEffort = openAIReasoningEffort
         self.openAITextVerbosity = openAITextVerbosity
         self.anthropicEffort = anthropicEffort
+        self.anthropicThinkingMode = anthropicThinkingMode
+        self.anthropicThinkingBudgetTokens = Self.normalizedAnthropicThinkingBudgetTokens(anthropicThinkingBudgetTokens)
+        self.anthropicPromptCachingEnabled = anthropicPromptCachingEnabled
+        self.anthropicPromptCacheTTL = anthropicPromptCacheTTL
+        self.anthropicCitationsEnabled = anthropicCitationsEnabled
         self.geminiThinkingLevel = geminiThinkingLevel
         self.cloudWebSearchMode = cloudWebSearchMode
         self.requireToolApproval = requireToolApproval
@@ -1583,6 +1605,13 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         openAIReasoningEffort = try container.decodeIfPresent(OpenAIReasoningEffort.self, forKey: .openAIReasoningEffort) ?? Self.defaultOpenAIReasoningEffort
         openAITextVerbosity = try container.decodeIfPresent(OpenAITextVerbosity.self, forKey: .openAITextVerbosity) ?? Self.defaultOpenAITextVerbosity
         anthropicEffort = try container.decodeIfPresent(AnthropicEffort.self, forKey: .anthropicEffort) ?? Self.defaultAnthropicEffort
+        anthropicThinkingMode = try container.decodeIfPresent(AnthropicThinkingMode.self, forKey: .anthropicThinkingMode) ?? Self.defaultAnthropicThinkingMode
+        anthropicThinkingBudgetTokens = Self.normalizedAnthropicThinkingBudgetTokens(
+            try container.decodeIfPresent(Int.self, forKey: .anthropicThinkingBudgetTokens) ?? Self.defaultAnthropicThinkingBudgetTokens
+        )
+        anthropicPromptCachingEnabled = try container.decodeIfPresent(Bool.self, forKey: .anthropicPromptCachingEnabled) ?? false
+        anthropicPromptCacheTTL = try container.decodeIfPresent(AnthropicPromptCacheTTL.self, forKey: .anthropicPromptCacheTTL) ?? .fiveMinutes
+        anthropicCitationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .anthropicCitationsEnabled) ?? true
         geminiThinkingLevel = try container.decodeIfPresent(GeminiThinkingLevel.self, forKey: .geminiThinkingLevel) ?? Self.defaultGeminiThinkingLevel
         cloudWebSearchMode = try container.decodeIfPresent(CloudWebSearchMode.self, forKey: .cloudWebSearchMode) ?? Self.defaultCloudWebSearchMode
         requireToolApproval = try container.decodeIfPresent(Bool.self, forKey: .requireToolApproval) ?? true
@@ -1598,6 +1627,10 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
 
     public static func normalizedLocalContextTokens(_ value: Int) -> Int {
         min(max(value, minLocalContextTokens), maxLocalContextTokens)
+    }
+
+    public static func normalizedAnthropicThinkingBudgetTokens(_ value: Int) -> Int {
+        min(max(value, 1_024), 128_000)
     }
 }
 

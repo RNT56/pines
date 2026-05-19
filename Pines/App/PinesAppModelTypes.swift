@@ -36,6 +36,69 @@ extension String {
     }
 }
 
+enum PinesGeminiMediaTransport: String, Codable, Hashable, Sendable {
+    case inlineData
+    case fileData
+}
+
+struct PinesGeminiMediaDisposition: Codable, Hashable, Sendable {
+    static let maxInlineImageBytes: Int64 = 20 * 1024 * 1024
+    static let maxInlineFileBytes: Int64 = 50 * 1024 * 1024
+
+    var transport: PinesGeminiMediaTransport
+    var contentType: String
+    var byteCount: Int64?
+    var inlineLimitBytes: Int64
+    var reason: String
+
+    var shouldUploadToFiles: Bool {
+        transport == .fileData
+    }
+
+    static func decision(
+        contentType: String,
+        byteCount: Int64?,
+        hasProviderURI: Bool = false
+    ) -> PinesGeminiMediaDisposition {
+        let normalizedContentType = contentType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let limit = normalizedContentType.hasPrefix("image/") ? maxInlineImageBytes : maxInlineFileBytes
+        if hasProviderURI {
+            return PinesGeminiMediaDisposition(
+                transport: .fileData,
+                contentType: normalizedContentType,
+                byteCount: byteCount,
+                inlineLimitBytes: limit,
+                reason: "provider_uri"
+            )
+        }
+        guard let byteCount else {
+            return PinesGeminiMediaDisposition(
+                transport: .fileData,
+                contentType: normalizedContentType,
+                byteCount: nil,
+                inlineLimitBytes: limit,
+                reason: "unknown_size"
+            )
+        }
+        let transport: PinesGeminiMediaTransport = byteCount <= limit ? .inlineData : .fileData
+        return PinesGeminiMediaDisposition(
+            transport: transport,
+            contentType: normalizedContentType,
+            byteCount: byteCount,
+            inlineLimitBytes: limit,
+            reason: transport == .inlineData ? "within_inline_limit" : "exceeds_inline_limit"
+        )
+    }
+
+    static func decision(for attachment: ChatAttachment) -> PinesGeminiMediaDisposition {
+        decision(
+            contentType: attachment.normalizedContentType,
+            byteCount: attachment.byteCount > 0 ? Int64(attachment.byteCount) : nil,
+            hasProviderURI: attachment.localURL?.isFileURL == false
+        )
+    }
+}
+
 extension Array {
     func asyncMap<T>(_ transform: (Element) async throws -> T) async throws -> [T] {
         var values = [T]()
@@ -112,6 +175,7 @@ struct ChatQuickSettingsAvailability: Hashable {
     let openAIReasoningEfforts: [OpenAIReasoningEffort]
     let supportsOpenAITextVerbosity: Bool
     let anthropicEfforts: [AnthropicEffort]
+    let anthropicThinkingModes: [AnthropicThinkingMode]
     let geminiThinkingLevels: [GeminiThinkingLevel]
     let cloudWebSearchModes: [CloudWebSearchMode]
 
@@ -119,6 +183,7 @@ struct ChatQuickSettingsAvailability: Hashable {
         openAIReasoningEfforts.isEmpty
             && !supportsOpenAITextVerbosity
             && anthropicEfforts.isEmpty
+            && anthropicThinkingModes.isEmpty
             && geminiThinkingLevels.isEmpty
             && cloudWebSearchModes.isEmpty
     }
@@ -384,6 +449,26 @@ struct PinesProviderResearchRunPreview: Identifiable, Hashable {
     let detail: String
     let activitySummary: String
     let updatedLabel: String
+}
+
+struct PinesProviderDeepResearchRequest: Hashable, Sendable {
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let modelID: ModelID
+    let title: String
+    let prompt: String
+    let depth: String
+    let reportFormat: String
+    let vectorStoreIDs: [String]
+    let providerFileIDs: [String]
+}
+
+struct PinesProviderRealtimeSessionRequest: Hashable, Sendable {
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let modelID: ModelID
+    let modalities: [String]
+    let session: JSONValue
 }
 
 enum PinesVaultKind: String, Hashable {
