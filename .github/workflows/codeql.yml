@@ -32,14 +32,6 @@ jobs:
         # actions/checkout v6.0.2
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
-      - name: Initialize CodeQL
-        # github/codeql-action v4.35.5
-        uses: github/codeql-action/init@f25eda876ebb741d872b63b9f2c6dfdd77f14b83
-        with:
-          languages: swift
-          build-mode: manual
-          queries: security-and-quality
-
       - name: Select Xcode and Metal toolchain
         run: bash scripts/ci/select-xcode.sh
 
@@ -53,6 +45,14 @@ jobs:
 
       - name: Prepare CodeQL Metal tools
         run: bash scripts/ci/prepare-codeql-metal-tools.sh
+
+      - name: Initialize CodeQL
+        # github/codeql-action v4.35.5
+        uses: github/codeql-action/init@f25eda876ebb741d872b63b9f2c6dfdd77f14b83
+        with:
+          languages: swift
+          build-mode: manual
+          queries: security-and-quality
 
       - name: Build app for CodeQL
         run: bash scripts/ci/run-xcode-validation.sh build-app
