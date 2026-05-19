@@ -12,6 +12,7 @@ Make the official OpenAI provider in Pines feel like a first-class OpenAI API cl
 - Structured Outputs and schema-backed extraction.
 - Provider-hosted Files API, vector stores, File Search, and local Vault integration choices.
 - Hosted tools: web search, file search, code interpreter, image generation, computer use, remote MCP, tool search.
+- Deep Research through Responses/background mode for long-running citation-rich reports.
 - Reasoning controls, verbosity, reasoning summaries/encrypted reasoning, state handling, prompt caching.
 - Image, video, speech, transcription, translation, and realtime voice workflows.
 - Batch, moderation, eval-oriented developer workflows where they support Pines power users.
@@ -33,6 +34,7 @@ All UI must follow the shared [cloud provider UI roadmap](ui-roadmap.md).
 Provider-specific screens/components:
 
 - OpenAI capability dashboard showing Responses, Chat Completions fallback, structured outputs, hosted tools, files/vector stores, realtime, image/video generation, and batch availability.
+- Deep Research workspace with prompt, scope, source policy, estimated duration/cost, progress timeline, citations, and final report export/import actions.
 - Responses state controls in provider settings: storage mode, encrypted reasoning/stateless mode, background runs, service tier, prompt cache retention, and safety identifier.
 - Files/vector store manager with upload, vector store membership, File Search enablement, provider retention labels, and delete paths.
 - Hosted tool timeline rows for web search, file search, code interpreter, image generation, computer use, remote MCP, and tool search.
@@ -46,6 +48,7 @@ UI production requirements:
 - OpenAI-hosted files/vector stores must be visually distinct from local Vault.
 - Hosted tools must be clearly labeled as OpenAI-hosted, not Pines-local.
 - Video generation must use job/status UI, not a blocking chat spinner.
+- Deep Research must use a long-running job UI with reconnect/resume, not a normal chat typing indicator.
 - Realtime mode must live in a dedicated surface rather than normal text chat controls.
 
 ## Phase 1: Responses API Foundation
@@ -173,7 +176,31 @@ Production complete when:
 - Long OpenAI runs survive app interruptions and expose cost/cache telemetry.
 - Users can disable provider-side storage/state clearly.
 
-## Phase 6: Audio, Realtime, And Generated Media
+## Phase 6: Deep Research
+
+Goal: Add OpenAI Deep Research as a first-class research workflow.
+
+Todos:
+
+- Add a Deep Research run type backed by Responses/background mode.
+- Support deep-research model selection and high/xhigh reasoning web-research mode where appropriate.
+- Add research scope controls: web only, web plus hosted files, web plus user-approved Vault export, domain filters, source count/depth, and report format.
+- Parse progress events, web-search calls, code-execution calls, citations, final report, and usage/cost.
+- Add resume/poll/cancel for long-running research tasks.
+- Add final report actions: attach to chat, save to Vault, export, and create follow-up chat.
+- Add tests for completed, failed, cancelled, reconnect/resume, citation parsing, and partial progress.
+
+Possible hiccups:
+
+- Research runs can last minutes and may exceed normal mobile foreground expectations.
+- Citation/source event shapes can differ from normal web-search responses.
+- User-approved local Vault context may need transformation into provider-hosted files or remote MCP.
+
+Production complete when:
+
+- A user can start, monitor, resume, cancel, and inspect an OpenAI Deep Research run with citations and final report artifacts.
+
+## Phase 7: Audio, Realtime, And Generated Media
 
 Goal: Add OpenAI media workflows without overloading text chat.
 
@@ -198,7 +225,7 @@ Production complete when:
 - Voice/media workflows have dedicated UI, persistence, cost controls, and accessibility support.
 - Text chat remains stable and uncomplicated for users who do not enable media.
 
-## Phase 7: Batch, Moderation, And Developer Workflows
+## Phase 8: Batch, Moderation, And Developer Workflows
 
 Goal: Support advanced workflows only where they fit Pines.
 

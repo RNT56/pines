@@ -80,6 +80,7 @@
 		C3A8E8F1D7ADC06A8E2EBA43 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 7CB37824DF7BF3CFC294142D /* GRDB */; };
 		C411EB6B042D0FE7426C58C8 /* WatchChatOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41ED12D2A8BE4F962735AC89 /* WatchChatOrchestrator.swift */; };
 		C7D06A852855C5632281E2CC /* AgentToolExecutionContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A85F05A80784C10515CC86 /* AgentToolExecutionContext.swift */; };
+		CA648B545AEC6D84C2D29D05 /* GeminiProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4AAEA18A8AFE76C3844F9A /* GeminiProviderService.swift */; };
 		D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */; };
 		D1E10E7EF6C3E07FA3696372 /* MCPServerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5934CC4A82DA53648B598CD5 /* MCPServerService.swift */; };
 		E30D2CC16F579D56D14DA498 /* CoreSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 989263AE706043656C31B580 /* CoreSurfaceTests.swift */; };
@@ -202,6 +203,7 @@
 		AEC56EEE76C86B70FF02D9AF /* GRDBPinesStore+Mapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GRDBPinesStore+Mapping.swift"; sourceTree = "<group>"; };
 		AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRuntimeMetrics.swift; sourceTree = "<group>"; };
 		B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProviderService.swift; sourceTree = "<group>"; };
+		BD4AAEA18A8AFE76C3844F9A /* GeminiProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiProviderService.swift; sourceTree = "<group>"; };
 		C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
 		C4BAE1B582D05CB5B511A886 /* EncryptedBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptedBlobStore.swift; sourceTree = "<group>"; };
 		D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
@@ -520,6 +522,7 @@
 				ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */,
 				443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */,
 				4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */,
+				BD4AAEA18A8AFE76C3844F9A /* GeminiProviderService.swift */,
 				B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */,
 			);
 			path = Cloud;
@@ -732,6 +735,7 @@
 				368944A065D96B6F78A3E0E6 /* GRDBPinesStore+CloudKit.swift in Sources */,
 				0101B36D3B132435D7763B4A /* GRDBPinesStore+Mapping.swift in Sources */,
 				8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */,
+				CA648B545AEC6D84C2D29D05 /* GeminiProviderService.swift in Sources */,
 				2AA5EBBAD5AC8336B9F3DD0D /* HuggingFaceCredentialService.swift in Sources */,
 				FF4D60F77559E9389E312BD7 /* KeychainSecretStore.swift in Sources */,
 				1A048AEA62053C4EE5E0F694 /* MCPOAuthService.swift in Sources */,

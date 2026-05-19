@@ -7,6 +7,8 @@ Primary sources:
 - [Using GPT-5.5](https://developers.openai.com/api/docs/guides/latest-model)
 - [Migrate to the Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses)
 - [Using tools](https://developers.openai.com/api/docs/guides/tools)
+- [Deep Research API cookbook](https://developers.openai.com/cookbook/examples/deep_research_api/introduction_to_deep_research_api)
+- [Web search](https://developers.openai.com/api/docs/guides/tools-web-search)
 - [Images and vision](https://developers.openai.com/api/docs/guides/images-vision)
 - [Realtime and audio](https://developers.openai.com/api/docs/guides/realtime)
 - [Video generation with Sora](https://developers.openai.com/api/docs/guides/video-generation)
@@ -157,7 +159,23 @@ Implementation notes:
 - Keep this separate from local MCP approval policy; remote MCP sends data to a third-party service through OpenAI.
 - Store remote MCP server configs per provider and expose per-tool allowlists.
 
-### 10. Prompt caching controls
+### 10. Deep Research API
+
+OpenAI exposes Deep Research through the Responses API. It is an agentic, long-running research workflow that plans sub-questions, searches the web, can use tools such as code execution, and returns citation-rich reports. Current docs identify dedicated deep-research model IDs as well as high-reasoning web-search workflows.
+
+Value:
+
+- Long-form research reports, market/competitive analysis, literature reviews, technical investigations, due diligence, and multi-source synthesis.
+- Strong fit for Pines if it can combine provider web research with user-approved local Vault or hosted file context.
+
+Implementation notes:
+
+- Requires background runs, status polling/resume, citation parsing, and progress UI.
+- Should have a dedicated "Research" run type, not just normal chat.
+- Needs source/citation review, research-plan/progress display, and cost/time warnings.
+- Should support provider-hosted MCP/File Search only with explicit consent.
+
+### 11. Prompt caching controls
 
 OpenAI can use `prompt_cache_key` and cache retention policies. Pines currently relies on provider defaults and does not expose cache keys or retention settings.
 
@@ -171,7 +189,7 @@ Implementation notes:
 - Track cached token counts in metrics.
 - Allow per-thread or per-workflow cache policy.
 
-### 11. Background mode, conversations, and response lifecycle APIs
+### 12. Background mode, conversations, and response lifecycle APIs
 
 Pines streams foreground requests only. It does not expose `background`, `conversation`, response retrieval/cancel, or provider-side conversation objects.
 
@@ -184,7 +202,7 @@ Implementation notes:
 - Needs local run records that can reconcile provider response IDs and statuses.
 - Avoid silent provider-side persistence unless the user chooses it.
 
-### 12. Service tier, safety identifier, metadata, and governance controls
+### 13. Service tier, safety identifier, metadata, and governance controls
 
 Pines does not expose `service_tier`, `safety_identifier`, metadata, or organization/project governance fields.
 
@@ -197,7 +215,7 @@ Implementation notes:
 - Add optional per-provider advanced settings.
 - Hash user/device identifiers before sending safety IDs.
 
-### 13. Batch API, evals, moderation, and fine-tuning
+### 14. Batch API, evals, moderation, and fine-tuning
 
 These are not part of Pines today.
 
@@ -221,9 +239,10 @@ Implementation notes:
 4. Code Interpreter.
 5. Realtime/audio.
 6. Image and video generation/editing.
-7. Prompt caching and lifecycle controls.
-8. Remote MCP/tool search/computer use.
-9. Batch/evals/moderation/governance settings.
+7. Deep Research as a dedicated long-running research workflow.
+8. Prompt caching and lifecycle controls.
+9. Remote MCP/tool search/computer use.
+10. Batch/evals/moderation/governance settings.
 
 ## Review Checklist
 

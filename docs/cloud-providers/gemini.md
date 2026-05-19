@@ -9,6 +9,7 @@ Primary sources:
 - [Structured outputs](https://ai.google.dev/gemini-api/docs/structured-output)
 - [Function calling](https://ai.google.dev/gemini-api/docs/function-calling)
 - [Code execution](https://ai.google.dev/gemini-api/docs/code-execution)
+- [Gemini Deep Research Agent](https://ai.google.dev/gemini-api/docs/deep-research)
 - [Live API](https://ai.google.dev/gemini-api/docs/live)
 - [Live API capabilities guide](https://ai.google.dev/gemini-api/docs/live-guide)
 - [Gemini pricing/model capability pages](https://ai.google.dev/gemini-api/docs/pricing)
@@ -114,7 +115,21 @@ Implementation notes:
 - Add cache creation/list/delete lifecycle and TTL/cost display.
 - Use cache IDs in follow-up Generate Content requests.
 
-### 7. Live API and realtime audio/video
+### 7. Gemini Deep Research Agent
+
+Gemini exposes a Deep Research Agent through the Interactions API. It is currently preview, requires `background=true`, is not available through `generate_content`, uses web search and URL context by default, can use File Search for user data experimentally, supports streaming progress, and can continue follow-ups with `previous_interaction_id`.
+
+Value:
+
+- Long-running cited reports, market analysis, due diligence, literature reviews, comparative research, and "analyst-in-a-box" workflows.
+- Directly relevant to Pines because the app already has a Gemini Interactions path and local Vault context that could be bridged with consent.
+
+Implementation notes:
+
+- Pines currently has model-ID-based Deep Research routing, but production parity needs background execution, polling, resumable streams, event IDs, thinking summaries, citations, File Search integration, and a dedicated research UI.
+- Must expose limitations: preview status, no `generate_content`, max research time, no custom function tools/MCP currently, no structured output/plan approval, store requirement, and no audio input.
+
+### 8. Live API and realtime audio/video
 
 Pines does not use Gemini Live API.
 
@@ -127,7 +142,7 @@ Implementation notes:
 - Requires WebSocket/WebRTC style session orchestration, not SSE.
 - Separate normal chat from live sessions in UI and persistence.
 
-### 8. Image, video, speech, and music generation
+### 9. Image, video, speech, and music generation
 
 Pines only consumes Gemini text output today. It does not expose Imagen, Veo, speech generation, or Lyria/music generation.
 
@@ -141,7 +156,7 @@ Implementation notes:
 - Add generated media persistence and safety policy display.
 - Consider separate workflows instead of mixing every media type into normal chat.
 
-### 9. Batch API
+### 10. Batch API
 
 Pines does not use Gemini Batch API.
 
@@ -153,7 +168,7 @@ Implementation notes:
 
 - Add batch job records, result import, cancellation, and status polling.
 
-### 10. Advanced grounding and citation controls
+### 11. Advanced grounding and citation controls
 
 Pines toggles Google Search but does not expose detailed grounding metadata, source display controls, or search retrieval configuration beyond mode.
 
@@ -166,7 +181,7 @@ Implementation notes:
 - Parse grounding chunks, search queries, and rendered suggestions consistently.
 - Expose search requirement and source filters where available.
 
-### 11. Thinking budgets and summaries
+### 12. Thinking budgets and summaries
 
 Pines maps thinking level, but not detailed thinking budget/summaries and model-specific controls.
 
@@ -178,7 +193,7 @@ Implementation notes:
 
 - Add per-model controls and display only provider-approved summaries.
 
-### 12. Token counting and request preflight
+### 13. Token counting and request preflight
 
 Pines does not use Gemini token-counting endpoints before cloud requests.
 
@@ -197,9 +212,10 @@ Implementation notes:
 3. Code execution and URL context.
 4. Context caching.
 5. Grounding citation metadata.
-6. Live API/realtime.
-7. Generated media.
-8. Batch and token counting.
+6. Deep Research Agent as a dedicated long-running research workflow.
+7. Live API/realtime.
+8. Generated media.
+9. Batch and token counting.
 
 ## Review Checklist
 

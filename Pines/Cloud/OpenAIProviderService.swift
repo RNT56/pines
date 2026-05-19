@@ -249,6 +249,39 @@ struct OpenAIProviderService {
         try await rawJSON(method: .post, path: "responses/\(responseID)/cancel")
     }
 
+    func createDeepResearchRun(_ request: OpenAIDeepResearchRequest) async throws -> OpenAIProviderResponse {
+        try await rawJSON(method: .post, path: "responses", body: request.openAIResponsesBody)
+    }
+
+    func createDeepResearchRunRecord(_ request: OpenAIDeepResearchRequest) async throws -> (response: OpenAIProviderResponse, run: ProviderResearchRunRecord) {
+        let response = try await createDeepResearchRun(request)
+        return (response, OpenAIProviderRecordMapper.providerResearchRun(from: request, response: response.json))
+    }
+
+    func retrieveDeepResearchRun(responseID: OpenAIResponseID) async throws -> OpenAIProviderResponse {
+        try await retrieveResponse(responseID.rawValue)
+    }
+
+    func retrieveDeepResearchRunRecord(_ run: ProviderResearchRunRecord) async throws -> (response: OpenAIProviderResponse, run: ProviderResearchRunRecord) {
+        guard let responseID = run.responseID, !responseID.isEmpty else {
+            throw InferenceError.invalidRequest("OpenAI Deep Research run \(run.id) does not have a provider response ID.")
+        }
+        let response = try await retrieveResponse(responseID)
+        return (response, OpenAIProviderRecordMapper.providerResearchRun(updating: run, response: response.json))
+    }
+
+    func cancelDeepResearchRun(responseID: OpenAIResponseID) async throws -> OpenAIProviderResponse {
+        try await cancelResponse(responseID.rawValue)
+    }
+
+    func cancelDeepResearchRunRecord(_ run: ProviderResearchRunRecord) async throws -> (response: OpenAIProviderResponse, run: ProviderResearchRunRecord) {
+        guard let responseID = run.responseID, !responseID.isEmpty else {
+            throw InferenceError.invalidRequest("OpenAI Deep Research run \(run.id) does not have a provider response ID.")
+        }
+        let response = try await cancelResponse(responseID)
+        return (response, OpenAIProviderRecordMapper.providerResearchRun(updating: run, response: response.json))
+    }
+
     private func send(
         method: OpenAIHTTPMethod,
         path: String,
@@ -812,5 +845,145 @@ struct OpenAIMultipartFile {
 private extension Data {
     mutating func append(_ string: String) {
         append(Data(string.utf8))
+    }
+}
+
+private extension OpenAIDeepResearchRequest {
+    var openAIResponsesBody: JSONValue {
+        var metadata = metadata
+        metadata["pines_run_type"] = OpenAIRunKind.deepResearch.rawValue
+        metadata["pines_research_request_id"] = id.uuidString
+        metadata["pines_research_depth"] = depth.rawValue
+        metadata["pines_research_source_scope"] = sourcePolicy.scope.rawValue
+
+        var fields: [String: JSONValue] = [
+            "model": .string(modelID.rawValue),
+            "background": .bool(true),
+            "store": .bool(true),
+            "service_tier": .string(serviceTier.rawValue),
+            "metadata": .object(metadata.mapValues(JSONValue.string)),
+            "reasoning": .object([
+                "effort": .string(reasoningEffort),
+                "summary": .string(reasoningSummary),
+            ]),
+            "input": .array([
+                .object([
+                    "role": .string("developer"),
+                    "content": .array([
+                        .object([
+                            "type": .string("input_text"),
+                            "text": .string(developerInstructions),
+                        ]),
+                    ]),
+                ]),
+                .object([
+                    "role": .string("user"),
+                    "content": .array([
+                        .object([
+                            "type": .string("input_text"),
+                            "text": .string(prompt),
+                        ]),
+                    ]),
+                ]),
+            ]),
+            "tools": .array(toolConfigurations),
+        ]
+
+        if let maxToolCalls {
+            fields["max_tool_calls"] = .number(Double(maxToolCalls))
+        }
+        return .object(fields)
+    }
+
+    private var reasoningSummary: String {
+        switch depth {
+        case .quick:
+            return "auto"
+        case .standard, .deep:
+            return "detailed"
+        }
+    }
+
+    private var reasoningEffort: String {
+        switch depth {
+        case .quick:
+            return "medium"
+        case .standard:
+            return "high"
+        case .deep:
+            return "xhigh"
+        }
+    }
+
+    private var maxToolCalls: Int? {
+        switch depth {
+        case .quick:
+            return 8
+        case .standard:
+            return 16
+        case .deep:
+            return 32
+        }
+    }
+
+    private var developerInstructions: String {
+        """
+        You are running an OpenAI Deep Research workflow inside Pines.
+        Produce a citation-rich \(reportFormat.rawValue) report titled "\(title)".
+        Depth: \(depth.rawValue).
+        Source policy: \(sourcePolicy.scope.rawValue).
+        Use web research to decompose the question, gather evidence, and synthesize findings.
+        Prefer primary sources and clearly distinguish facts, estimates, and uncertainty.
+        Include a concise executive summary, key findings, cited evidence, and follow-up questions.
+        Do not claim local Vault access unless provider-hosted files or explicitly approved MCP sources are supplied.
+        """
+    }
+
+    private var toolConfigurations: [JSONValue] {
+        var tools: [JSONValue] = [.object(webSearchTool)]
+        if !sourcePolicy.vectorStoreIDs.isEmpty {
+            tools.append(.object([
+                "type": .string("file_search"),
+                "vector_store_ids": .array(sourcePolicy.vectorStoreIDs.map { .string($0.rawValue) }),
+            ]))
+        }
+        if includeCodeInterpreter {
+            tools.append(.object([
+                "type": .string("code_interpreter"),
+                "container": .object(["type": .string("auto")]),
+            ]))
+        }
+        if sourcePolicy.scope == .webAndMCP,
+           let serverLabel = sourcePolicy.mcpServerLabel,
+           let serverURL = sourcePolicy.mcpServerURL {
+            tools.append(.object([
+                "type": .string("mcp"),
+                "server_label": .string(serverLabel),
+                "server_url": .string(serverURL.absoluteString),
+                "require_approval": .string(sourcePolicy.requireMCPApproval),
+            ]))
+        }
+        return tools
+    }
+
+    private var webSearchTool: [String: JSONValue] {
+        var tool: [String: JSONValue] = [
+            "type": .string("web_search"),
+            "search_context_size": .string(depth == .quick ? "medium" : "high"),
+        ]
+        var filters = [String: JSONValue]()
+        if !sourcePolicy.allowedDomains.isEmpty {
+            filters["allowed_domains"] = .array(sourcePolicy.allowedDomains.map(JSONValue.string))
+        }
+        if !sourcePolicy.blockedDomains.isEmpty {
+            filters["blocked_domains"] = .array(sourcePolicy.blockedDomains.map(JSONValue.string))
+        }
+        if !filters.isEmpty {
+            tool["filters"] = .object(filters)
+        }
+        if depth == .deep {
+            tool["return_token_budget"] = .string("unlimited")
+        }
+        return tool
     }
 }

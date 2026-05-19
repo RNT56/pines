@@ -125,6 +125,27 @@ public struct OpenAIBatchID: RawRepresentable, Hashable, Codable, Sendable, Expr
     }
 }
 
+public typealias ProviderFileID = OpenAIProviderFileID
+public typealias ProviderDataStoreID = OpenAIVectorStoreID
+public typealias ProviderDataStoreFileID = OpenAIVectorStoreFileID
+public typealias ProviderRunID = OpenAIResponseID
+public typealias ProviderHostedToolCallID = OpenAIHostedToolCallID
+public typealias ProviderArtifactID = OpenAIArtifactID
+public typealias ProviderLiveSessionID = OpenAIRealtimeSessionID
+public typealias ProviderBatchJobID = OpenAIBatchID
+
+public struct ProviderContextCacheID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
 public enum CloudProviderHeaderKind: String, Hashable, Codable, Sendable, CaseIterable {
     case publicValue
     case secretReference
@@ -220,30 +241,108 @@ public extension CloudProviderConfiguration {
     var capabilities: ProviderCapabilities {
         let officialOpenAI = isOfficialOpenAIAPI
         let imageInputs: Bool
+        let audioInputs: Bool
+        let audioOutputs: Bool
+        let videoInputs: Bool
         let pdfInputs: Bool
         let textDocumentInputs: Bool
+        let files: Bool
+        let hostedTools: Bool
+        let structuredOutputs: Bool
+        let contextCache: Bool
+        let live: Bool
+        let generatedImages: Bool
+        let generatedAudio: Bool
+        let generatedVideo: Bool
+        let batch: Bool
+        let tokenCounting: Bool
 
         switch kind {
         case .openAI:
             imageInputs = officialOpenAI
+            audioInputs = officialOpenAI
+            audioOutputs = officialOpenAI
+            videoInputs = officialOpenAI
             pdfInputs = officialOpenAI
             textDocumentInputs = officialOpenAI
+            files = officialOpenAI
+            hostedTools = officialOpenAI
+            structuredOutputs = officialOpenAI
+            contextCache = false
+            live = officialOpenAI
+            generatedImages = officialOpenAI
+            generatedAudio = officialOpenAI
+            generatedVideo = officialOpenAI
+            batch = officialOpenAI
+            tokenCounting = false
         case .anthropic, .gemini:
             imageInputs = true
+            audioInputs = kind == .gemini
+            audioOutputs = false
+            videoInputs = kind == .gemini
             pdfInputs = true
             textDocumentInputs = true
+            files = true
+            hostedTools = true
+            structuredOutputs = true
+            contextCache = kind == .gemini
+            live = kind == .gemini
+            generatedImages = kind == .gemini
+            generatedAudio = false
+            generatedVideo = kind == .gemini
+            batch = kind == .gemini
+            tokenCounting = kind == .gemini
         case .openRouter:
             imageInputs = true
+            audioInputs = false
+            audioOutputs = false
+            videoInputs = false
             pdfInputs = true
             textDocumentInputs = false
+            files = false
+            hostedTools = false
+            structuredOutputs = true
+            contextCache = false
+            live = false
+            generatedImages = false
+            generatedAudio = false
+            generatedVideo = false
+            batch = false
+            tokenCounting = false
         case .voyageAI:
             imageInputs = false
+            audioInputs = false
+            audioOutputs = false
+            videoInputs = false
             pdfInputs = false
             textDocumentInputs = false
+            files = false
+            hostedTools = false
+            structuredOutputs = false
+            contextCache = false
+            live = false
+            generatedImages = false
+            generatedAudio = false
+            generatedVideo = false
+            batch = false
+            tokenCounting = false
         case .openAICompatible, .custom:
             imageInputs = officialOpenAI
+            audioInputs = officialOpenAI
+            audioOutputs = officialOpenAI
+            videoInputs = officialOpenAI
             pdfInputs = officialOpenAI
             textDocumentInputs = officialOpenAI
+            files = officialOpenAI
+            hostedTools = officialOpenAI
+            structuredOutputs = officialOpenAI
+            contextCache = false
+            live = officialOpenAI
+            generatedImages = officialOpenAI
+            generatedAudio = officialOpenAI
+            generatedVideo = officialOpenAI
+            batch = officialOpenAI
+            tokenCounting = false
         }
 
         return ProviderCapabilities(
@@ -252,11 +351,25 @@ public extension CloudProviderConfiguration {
             textGeneration: kind != .voyageAI,
             vision: imageInputs,
             imageInputs: imageInputs,
+            audioInputs: audioInputs,
+            audioOutputs: audioOutputs,
+            videoInputs: videoInputs,
+            videoOutputs: false,
             pdfInputs: pdfInputs,
             textDocumentInputs: textDocumentInputs,
+            files: files,
             embeddings: kind.supportsVaultEmbeddings,
             toolCalling: kind != .custom && kind != .voyageAI,
+            hostedTools: hostedTools,
             jsonMode: kind != .custom && kind != .voyageAI,
+            structuredOutputs: structuredOutputs,
+            contextCache: contextCache,
+            live: live,
+            generatedImages: generatedImages,
+            generatedAudio: generatedAudio,
+            generatedVideo: generatedVideo,
+            batch: batch,
+            tokenCounting: tokenCounting,
             maxContextTokens: nil
         )
     }

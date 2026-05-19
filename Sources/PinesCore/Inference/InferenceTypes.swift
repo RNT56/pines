@@ -148,18 +148,87 @@ public struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public enum ProviderModelCapability: String, Hashable, Codable, Sendable, CaseIterable {
+    case streaming
+    case textGeneration
+    case vision
+    case imageInputs
+    case audioInputs
+    case audioOutputs
+    case videoInputs
+    case videoOutputs
+    case pdfInputs
+    case textDocumentInputs
+    case files
+    case embeddings
+    case toolCalling
+    case hostedTools
+    case jsonMode
+    case structuredOutputs
+    case contextCache
+    case live
+    case generatedImages
+    case generatedAudio
+    case generatedVideo
+    case batch
+    case tokenCounting
+}
+
 public struct ProviderCapabilities: Hashable, Codable, Sendable {
     public var local: Bool
     public var streaming: Bool
     public var textGeneration: Bool
     public var vision: Bool
     public var imageInputs: Bool
+    public var audioInputs: Bool
+    public var audioOutputs: Bool
+    public var videoInputs: Bool
+    public var videoOutputs: Bool
     public var pdfInputs: Bool
     public var textDocumentInputs: Bool
+    public var files: Bool
     public var embeddings: Bool
     public var toolCalling: Bool
+    public var hostedTools: Bool
     public var jsonMode: Bool
+    public var structuredOutputs: Bool
+    public var contextCache: Bool
+    public var live: Bool
+    public var generatedImages: Bool
+    public var generatedAudio: Bool
+    public var generatedVideo: Bool
+    public var batch: Bool
+    public var tokenCounting: Bool
     public var maxContextTokens: Int?
+    public var maxOutputTokens: Int?
+
+    public var modelCapabilities: Set<ProviderModelCapability> {
+        var capabilities = Set<ProviderModelCapability>()
+        if streaming { capabilities.insert(.streaming) }
+        if textGeneration { capabilities.insert(.textGeneration) }
+        if vision { capabilities.insert(.vision) }
+        if imageInputs { capabilities.insert(.imageInputs) }
+        if audioInputs { capabilities.insert(.audioInputs) }
+        if audioOutputs { capabilities.insert(.audioOutputs) }
+        if videoInputs { capabilities.insert(.videoInputs) }
+        if videoOutputs { capabilities.insert(.videoOutputs) }
+        if pdfInputs { capabilities.insert(.pdfInputs) }
+        if textDocumentInputs { capabilities.insert(.textDocumentInputs) }
+        if files { capabilities.insert(.files) }
+        if embeddings { capabilities.insert(.embeddings) }
+        if toolCalling { capabilities.insert(.toolCalling) }
+        if hostedTools { capabilities.insert(.hostedTools) }
+        if jsonMode { capabilities.insert(.jsonMode) }
+        if structuredOutputs { capabilities.insert(.structuredOutputs) }
+        if contextCache { capabilities.insert(.contextCache) }
+        if live { capabilities.insert(.live) }
+        if generatedImages { capabilities.insert(.generatedImages) }
+        if generatedAudio { capabilities.insert(.generatedAudio) }
+        if generatedVideo { capabilities.insert(.generatedVideo) }
+        if batch { capabilities.insert(.batch) }
+        if tokenCounting { capabilities.insert(.tokenCounting) }
+        return capabilities
+    }
 
     public init(
         local: Bool,
@@ -167,24 +236,54 @@ public struct ProviderCapabilities: Hashable, Codable, Sendable {
         textGeneration: Bool = true,
         vision: Bool = false,
         imageInputs: Bool = false,
+        audioInputs: Bool = false,
+        audioOutputs: Bool = false,
+        videoInputs: Bool = false,
+        videoOutputs: Bool = false,
         pdfInputs: Bool = false,
         textDocumentInputs: Bool = false,
+        files: Bool = false,
         embeddings: Bool = false,
         toolCalling: Bool = false,
+        hostedTools: Bool = false,
         jsonMode: Bool = false,
-        maxContextTokens: Int? = nil
+        structuredOutputs: Bool = false,
+        contextCache: Bool = false,
+        live: Bool = false,
+        generatedImages: Bool = false,
+        generatedAudio: Bool = false,
+        generatedVideo: Bool = false,
+        batch: Bool = false,
+        tokenCounting: Bool = false,
+        maxContextTokens: Int? = nil,
+        maxOutputTokens: Int? = nil
     ) {
         self.local = local
         self.streaming = streaming
         self.textGeneration = textGeneration
         self.vision = vision
         self.imageInputs = imageInputs
+        self.audioInputs = audioInputs
+        self.audioOutputs = audioOutputs
+        self.videoInputs = videoInputs
+        self.videoOutputs = videoOutputs
         self.pdfInputs = pdfInputs
         self.textDocumentInputs = textDocumentInputs
+        self.files = files
         self.embeddings = embeddings
         self.toolCalling = toolCalling
+        self.hostedTools = hostedTools
         self.jsonMode = jsonMode
+        self.structuredOutputs = structuredOutputs
+        self.contextCache = contextCache
+        self.live = live
+        self.generatedImages = generatedImages
+        self.generatedAudio = generatedAudio
+        self.generatedVideo = generatedVideo
+        self.batch = batch
+        self.tokenCounting = tokenCounting
         self.maxContextTokens = maxContextTokens
+        self.maxOutputTokens = maxOutputTokens
     }
 
     enum CodingKeys: String, CodingKey {
@@ -193,12 +292,27 @@ public struct ProviderCapabilities: Hashable, Codable, Sendable {
         case textGeneration
         case vision
         case imageInputs
+        case audioInputs
+        case audioOutputs
+        case videoInputs
+        case videoOutputs
         case pdfInputs
         case textDocumentInputs
+        case files
         case embeddings
         case toolCalling
+        case hostedTools
         case jsonMode
+        case structuredOutputs
+        case contextCache
+        case live
+        case generatedImages
+        case generatedAudio
+        case generatedVideo
+        case batch
+        case tokenCounting
         case maxContextTokens
+        case maxOutputTokens
     }
 
     public init(from decoder: Decoder) throws {
@@ -208,26 +322,47 @@ public struct ProviderCapabilities: Hashable, Codable, Sendable {
         textGeneration = try container.decodeIfPresent(Bool.self, forKey: .textGeneration) ?? true
         vision = try container.decodeIfPresent(Bool.self, forKey: .vision) ?? false
         imageInputs = try container.decodeIfPresent(Bool.self, forKey: .imageInputs) ?? false
+        audioInputs = try container.decodeIfPresent(Bool.self, forKey: .audioInputs) ?? false
+        audioOutputs = try container.decodeIfPresent(Bool.self, forKey: .audioOutputs) ?? false
+        videoInputs = try container.decodeIfPresent(Bool.self, forKey: .videoInputs) ?? false
+        videoOutputs = try container.decodeIfPresent(Bool.self, forKey: .videoOutputs) ?? false
         pdfInputs = try container.decodeIfPresent(Bool.self, forKey: .pdfInputs) ?? false
         textDocumentInputs = try container.decodeIfPresent(Bool.self, forKey: .textDocumentInputs) ?? false
+        files = try container.decodeIfPresent(Bool.self, forKey: .files) ?? false
         embeddings = try container.decodeIfPresent(Bool.self, forKey: .embeddings) ?? false
         toolCalling = try container.decodeIfPresent(Bool.self, forKey: .toolCalling) ?? false
+        hostedTools = try container.decodeIfPresent(Bool.self, forKey: .hostedTools) ?? false
         jsonMode = try container.decodeIfPresent(Bool.self, forKey: .jsonMode) ?? false
+        structuredOutputs = try container.decodeIfPresent(Bool.self, forKey: .structuredOutputs) ?? jsonMode
+        contextCache = try container.decodeIfPresent(Bool.self, forKey: .contextCache) ?? false
+        live = try container.decodeIfPresent(Bool.self, forKey: .live) ?? false
+        generatedImages = try container.decodeIfPresent(Bool.self, forKey: .generatedImages) ?? false
+        generatedAudio = try container.decodeIfPresent(Bool.self, forKey: .generatedAudio) ?? false
+        generatedVideo = try container.decodeIfPresent(Bool.self, forKey: .generatedVideo) ?? false
+        batch = try container.decodeIfPresent(Bool.self, forKey: .batch) ?? false
+        tokenCounting = try container.decodeIfPresent(Bool.self, forKey: .tokenCounting) ?? false
         maxContextTokens = try container.decodeIfPresent(Int.self, forKey: .maxContextTokens)
+        maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
     }
 }
 
 public struct ProviderInputRequirements: Hashable, Codable, Sendable {
     public var requiresImages: Bool
+    public var requiresAudio: Bool
+    public var requiresVideo: Bool
     public var requiresPDFs: Bool
     public var requiresTextDocuments: Bool
 
     public init(
         requiresImages: Bool = false,
+        requiresAudio: Bool = false,
+        requiresVideo: Bool = false,
         requiresPDFs: Bool = false,
         requiresTextDocuments: Bool = false
     ) {
         self.requiresImages = requiresImages
+        self.requiresAudio = requiresAudio
+        self.requiresVideo = requiresVideo
         self.requiresPDFs = requiresPDFs
         self.requiresTextDocuments = requiresTextDocuments
     }
@@ -235,9 +370,13 @@ public struct ProviderInputRequirements: Hashable, Codable, Sendable {
     public init(messages: [ChatMessage]) {
         self.init()
         for attachment in messages.flatMap(\.attachments) {
-            switch attachment.cloudInputKind {
+            switch attachment.cloudMediaInputKind {
             case .image:
                 requiresImages = true
+            case .audio:
+                requiresAudio = true
+            case .video:
+                requiresVideo = true
             case .pdf:
                 requiresPDFs = true
             case .textDocument:
@@ -253,11 +392,13 @@ public struct ProviderInputRequirements: Hashable, Codable, Sendable {
     }
 
     public var isEmpty: Bool {
-        !requiresImages && !requiresPDFs && !requiresTextDocuments
+        !requiresImages && !requiresAudio && !requiresVideo && !requiresPDFs && !requiresTextDocuments
     }
 
     public func isSatisfied(by capabilities: ProviderCapabilities) -> Bool {
         if requiresImages && !(capabilities.imageInputs || capabilities.vision) { return false }
+        if requiresAudio && !capabilities.audioInputs { return false }
+        if requiresVideo && !capabilities.videoInputs { return false }
         if requiresPDFs && !capabilities.pdfInputs { return false }
         if requiresTextDocuments && !capabilities.textDocumentInputs { return false }
         return true
@@ -266,6 +407,15 @@ public struct ProviderInputRequirements: Hashable, Codable, Sendable {
 
 public enum CloudAttachmentInputKind: Hashable, Codable, Sendable {
     case image
+    case pdf
+    case textDocument
+    case unsupported
+}
+
+public enum CloudAttachmentMediaInputKind: Hashable, Codable, Sendable {
+    case image
+    case audio
+    case video
     case pdf
     case textDocument
     case unsupported
@@ -299,6 +449,34 @@ public extension ChatAttachment {
             return "image/heic-sequence"
         case "heifs":
             return "image/heif-sequence"
+        case "mp3":
+            return "audio/mpeg"
+        case "wav", "wave":
+            return "audio/wav"
+        case "m4a":
+            return "audio/mp4"
+        case "aac":
+            return "audio/aac"
+        case "flac":
+            return "audio/flac"
+        case "oga", "ogg":
+            return "audio/ogg"
+        case "opus":
+            return "audio/opus"
+        case "aif", "aiff":
+            return "audio/aiff"
+        case "mp4", "m4v":
+            return "video/mp4"
+        case "mov", "qt":
+            return "video/quicktime"
+        case "webm":
+            return "video/webm"
+        case "mpeg", "mpg":
+            return "video/mpeg"
+        case "avi":
+            return "video/x-msvideo"
+        case "mkv":
+            return "video/x-matroska"
         case "pdf":
             return "application/pdf"
         case "md", "markdown":
@@ -326,6 +504,32 @@ public extension ChatAttachment {
             switch kind {
             case .image:
                 return .image
+            default:
+                return .unsupported
+            }
+        }
+    }
+
+    var cloudMediaInputKind: CloudAttachmentMediaInputKind {
+        switch normalizedContentType {
+        case "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence":
+            return .image
+        case let contentType where contentType.hasPrefix("audio/"):
+            return .audio
+        case let contentType where contentType.hasPrefix("video/"):
+            return .video
+        case "application/pdf":
+            return .pdf
+        case "text/plain", "text/markdown", "text/x-markdown", "application/json", "text/csv":
+            return .textDocument
+        default:
+            switch kind {
+            case .image:
+                return .image
+            case .audio:
+                return .audio
+            case .video:
+                return .video
             default:
                 return .unsupported
             }
@@ -803,6 +1007,34 @@ public struct OpenAIResponseRequestOptions: Hashable, Codable, Sendable {
     }
 }
 
+public struct GeminiRequestOptions: Hashable, Codable, Sendable {
+    public var cachedContentName: String?
+    public var responseMimeType: String?
+    public var responseSchema: JSONValue?
+    public var safetySettings: [JSONValue]
+    public var toolConfig: JSONValue?
+    public var generationConfig: JSONValue?
+    public var labels: [String: String]
+
+    public init(
+        cachedContentName: String? = nil,
+        responseMimeType: String? = nil,
+        responseSchema: JSONValue? = nil,
+        safetySettings: [JSONValue] = [],
+        toolConfig: JSONValue? = nil,
+        generationConfig: JSONValue? = nil,
+        labels: [String: String] = [:]
+    ) {
+        self.cachedContentName = cachedContentName
+        self.responseMimeType = responseMimeType
+        self.responseSchema = responseSchema
+        self.safetySettings = safetySettings
+        self.toolConfig = toolConfig
+        self.generationConfig = generationConfig
+        self.labels = labels
+    }
+}
+
 public struct ChatRequest: Hashable, Codable, Sendable {
     public enum ExecutionContext: String, Hashable, Codable, Sendable {
         case chat
@@ -822,6 +1054,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
     public var vaultContextIDs: [UUID]
     public var executionContext: ExecutionContext
     public var openAIResponseOptions: OpenAIResponseRequestOptions?
+    public var geminiOptions: GeminiRequestOptions?
 
     public init(
         id: UUID = UUID(),
@@ -836,7 +1069,8 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         availableTools: [AnyToolSpec] = [],
         vaultContextIDs: [UUID] = [],
         executionContext: ExecutionContext = .chat,
-        openAIResponseOptions: OpenAIResponseRequestOptions? = nil
+        openAIResponseOptions: OpenAIResponseRequestOptions? = nil,
+        geminiOptions: GeminiRequestOptions? = nil
     ) {
         self.id = id
         self.modelID = modelID
@@ -851,6 +1085,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         self.vaultContextIDs = vaultContextIDs
         self.executionContext = executionContext
         self.openAIResponseOptions = openAIResponseOptions
+        self.geminiOptions = geminiOptions
     }
 
     enum CodingKeys: String, CodingKey {
@@ -867,6 +1102,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         case vaultContextIDs
         case executionContext
         case openAIResponseOptions
+        case geminiOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -884,6 +1120,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         vaultContextIDs = try container.decodeIfPresent([UUID].self, forKey: .vaultContextIDs) ?? []
         executionContext = try container.decodeIfPresent(ExecutionContext.self, forKey: .executionContext) ?? .chat
         openAIResponseOptions = try container.decodeIfPresent(OpenAIResponseRequestOptions.self, forKey: .openAIResponseOptions)
+        geminiOptions = try container.decodeIfPresent(GeminiRequestOptions.self, forKey: .geminiOptions)
     }
 }
 

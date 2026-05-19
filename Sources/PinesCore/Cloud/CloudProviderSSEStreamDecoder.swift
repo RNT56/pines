@@ -2,25 +2,30 @@ import Foundation
 
 public struct CloudProviderSSEEvent: Hashable, Sendable {
     public var eventName: String?
+    public var eventID: String?
     public var payload: String
 
-    public init(eventName: String?, payload: String) {
+    public init(eventName: String?, eventID: String? = nil, payload: String) {
         self.eventName = eventName
+        self.eventID = eventID
         self.payload = payload
     }
 
-    public func jsonData() -> Data? {
+    public func jsonData(eventTypeField: String = "type") -> Data? {
         let trimmedPayload = payload.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedPayload != "[DONE]", let data = trimmedPayload.data(using: .utf8) else {
             return nil
         }
         guard let eventName, !eventName.isEmpty,
               var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              object["type"] == nil
+              object[eventTypeField] == nil
         else {
             return data
         }
-        object["type"] = eventName
+        object[eventTypeField] = eventName
+        if let eventID, !eventID.isEmpty, object["id"] == nil {
+            object["id"] = eventID
+        }
         guard JSONSerialization.isValidJSONObject(object) else {
             return data
         }
@@ -30,6 +35,7 @@ public struct CloudProviderSSEEvent: Hashable, Sendable {
 
 public struct CloudProviderSSEStreamDecoder: Sendable {
     private var eventName: String?
+    private var eventID: String?
     private var dataLines = [String]()
 
     public init() {}
@@ -63,6 +69,12 @@ public struct CloudProviderSSEStreamDecoder: Sendable {
                 return pending
             }
             eventName = String(value)
+        case "id":
+            if let pending = dispatchBeforeStartingNextEvent() {
+                eventID = String(value)
+                return pending
+            }
+            eventID = String(value)
         case "data":
             if eventName == nil,
                let pending = dispatchBeforeStartingNextDataLine() {
@@ -83,6 +95,7 @@ public struct CloudProviderSSEStreamDecoder: Sendable {
     private mutating func dispatch() -> CloudProviderSSEEvent? {
         defer {
             eventName = nil
+            eventID = nil
             dataLines.removeAll(keepingCapacity: true)
         }
         guard !dataLines.isEmpty else {
@@ -90,6 +103,7 @@ public struct CloudProviderSSEStreamDecoder: Sendable {
         }
         return CloudProviderSSEEvent(
             eventName: eventName,
+            eventID: eventID,
             payload: dataLines.joined(separator: "\n")
         )
     }

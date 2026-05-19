@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 14
+    public static let currentVersion = 15
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -756,7 +756,7 @@ public enum PinesDatabaseSchema {
                 voice TEXT,
                 input_audio_format TEXT,
                 output_audio_format TEXT,
-                client_secret_keychain_account TEXT,
+                credential_keychain_account TEXT,
                 expires_at REAL,
                 provider_metadata_json TEXT,
                 created_at REAL NOT NULL,
@@ -813,6 +813,243 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_openai_realtime_sessions_provider ON openai_realtime_sessions(provider_id, created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_openai_batch_jobs_provider ON openai_batch_jobs(provider_id, created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_openai_structured_output_results_response ON openai_structured_output_results(response_id);",
+        ]),
+        DatabaseMigration(version: 15, name: "generic-provider-persistence", sql: [
+            """
+            CREATE TABLE IF NOT EXISTS provider_files (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                content_type TEXT,
+                byte_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                sha256 TEXT,
+                local_path TEXT,
+                provider_object TEXT,
+                provider_metadata_json TEXT,
+                created_at REAL NOT NULL,
+                expires_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS provider_artifacts (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT,
+                provider_kind TEXT NOT NULL,
+                response_id TEXT,
+                tool_call_id TEXT,
+                provider_file_id TEXT,
+                kind TEXT NOT NULL,
+                file_name TEXT,
+                content_type TEXT,
+                byte_count INTEGER,
+                text TEXT,
+                content_json TEXT,
+                local_path TEXT,
+                remote_url TEXT,
+                created_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS provider_caches (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                name TEXT,
+                model_id TEXT,
+                status TEXT NOT NULL,
+                usage_bytes INTEGER NOT NULL DEFAULT 0,
+                item_counts_json TEXT,
+                configuration_json TEXT,
+                metadata_json TEXT,
+                created_at REAL NOT NULL,
+                expires_at REAL,
+                last_active_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS provider_batches (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                input_file_id TEXT,
+                output_file_id TEXT,
+                error_file_id TEXT,
+                completion_window TEXT,
+                request_counts_json TEXT,
+                metadata_json TEXT,
+                created_at REAL NOT NULL,
+                in_progress_at REAL,
+                finalizing_at REAL,
+                completed_at REAL,
+                failed_at REAL,
+                expired_at REAL,
+                cancelled_at REAL,
+                expires_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS provider_live_sessions (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                modalities_json TEXT,
+                voice TEXT,
+                input_audio_format TEXT,
+                output_audio_format TEXT,
+                credential_keychain_account TEXT,
+                expires_at REAL,
+                provider_metadata_json TEXT,
+                created_at REAL NOT NULL,
+                closed_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS provider_structured_outputs (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT,
+                provider_kind TEXT NOT NULL,
+                response_id TEXT,
+                message_id TEXT,
+                schema_name TEXT,
+                schema_json TEXT,
+                content_json TEXT,
+                refusal TEXT,
+                incomplete_reason TEXT,
+                validation_errors_json TEXT,
+                status TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS provider_model_capabilities (
+                provider_id TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                capabilities_json TEXT NOT NULL,
+                context_window_tokens INTEGER,
+                input_modalities_json TEXT,
+                output_modalities_json TEXT,
+                metadata_json TEXT,
+                fetched_at REAL NOT NULL,
+                expires_at REAL,
+                PRIMARY KEY(provider_id, model_id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS provider_research_runs (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                depth TEXT NOT NULL,
+                source_policy_json TEXT NOT NULL,
+                report_format TEXT NOT NULL,
+                include_code_interpreter INTEGER NOT NULL DEFAULT 1,
+                service_tier TEXT NOT NULL,
+                response_id TEXT,
+                status TEXT NOT NULL,
+                final_report_artifact_id TEXT REFERENCES provider_artifacts(id) ON DELETE SET NULL,
+                citation_count INTEGER NOT NULL DEFAULT 0,
+                tool_call_count INTEGER NOT NULL DEFAULT 0,
+                provider_metadata_json TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                completed_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            INSERT OR IGNORE INTO provider_files
+                (id, provider_id, provider_kind, purpose, file_name, content_type, byte_count,
+                 status, sha256, local_path, provider_object, provider_metadata_json, created_at,
+                 expires_at, last_error)
+            SELECT
+                id, provider_id, 'openAI', purpose, file_name, content_type, byte_count,
+                status, sha256, local_path, provider_object, provider_metadata_json, created_at,
+                expires_at, last_error
+            FROM openai_provider_files;
+            """,
+            """
+            INSERT OR IGNORE INTO provider_artifacts
+                (id, provider_id, provider_kind, response_id, tool_call_id, provider_file_id,
+                 kind, file_name, content_type, byte_count, text, content_json, local_path,
+                 remote_url, created_at)
+            SELECT
+                id, NULL, 'openAI', response_id, hosted_tool_call_id, provider_file_id,
+                kind, file_name, content_type, byte_count, text, content_json, local_path,
+                remote_url, created_at
+            FROM openai_artifacts;
+            """,
+            """
+            INSERT OR IGNORE INTO provider_caches
+                (id, provider_id, provider_kind, kind, name, model_id, status, usage_bytes,
+                 item_counts_json, configuration_json, metadata_json, created_at, expires_at,
+                 last_active_at, last_error)
+            SELECT
+                id, provider_id, 'openAI', 'vector_store', name, NULL, status, usage_bytes,
+                file_counts_json, expiration_policy_json, metadata_json, created_at, expires_at,
+                last_active_at, last_error
+            FROM openai_vector_stores;
+            """,
+            """
+            INSERT OR IGNORE INTO provider_batches
+                (id, provider_id, provider_kind, endpoint, status, input_file_id, output_file_id,
+                 error_file_id, completion_window, request_counts_json, metadata_json, created_at,
+                 in_progress_at, finalizing_at, completed_at, failed_at, expired_at, cancelled_at,
+                 expires_at, last_error)
+            SELECT
+                id, provider_id, 'openAI', endpoint, status, input_file_id, output_file_id,
+                error_file_id, completion_window, request_counts_json, metadata_json, created_at,
+                in_progress_at, finalizing_at, completed_at, failed_at, expired_at, cancelled_at,
+                expires_at, last_error
+            FROM openai_batch_jobs;
+            """,
+            """
+            INSERT OR IGNORE INTO provider_live_sessions
+                (id, provider_id, provider_kind, model_id, status, modalities_json, voice,
+                 input_audio_format, output_audio_format, credential_keychain_account,
+                 expires_at, provider_metadata_json, created_at, closed_at, last_error)
+            SELECT
+                id, provider_id, 'openAI', model_id, status, modalities_json, voice,
+                input_audio_format, output_audio_format, credential_keychain_account,
+                expires_at, provider_metadata_json, created_at, closed_at, last_error
+            FROM openai_realtime_sessions;
+            """,
+            """
+            INSERT OR IGNORE INTO provider_structured_outputs
+                (id, provider_id, provider_kind, response_id, message_id, schema_name,
+                 schema_json, content_json, refusal, incomplete_reason, validation_errors_json,
+                 status, created_at)
+            SELECT
+                id, NULL, 'openAI', response_id, message_id, schema_name,
+                schema_json, content_json, refusal, incomplete_reason, validation_errors_json,
+                status, created_at
+            FROM openai_structured_output_results;
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_provider_files_provider ON provider_files(provider_id, provider_kind, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_provider_artifacts_response ON provider_artifacts(provider_kind, response_id, created_at);",
+            "CREATE INDEX IF NOT EXISTS idx_provider_caches_provider ON provider_caches(provider_id, provider_kind, kind, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_provider_batches_provider ON provider_batches(provider_id, provider_kind, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_provider_live_sessions_provider ON provider_live_sessions(provider_id, provider_kind, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_provider_structured_outputs_response ON provider_structured_outputs(provider_kind, response_id);",
+            "CREATE INDEX IF NOT EXISTS idx_provider_model_capabilities_provider ON provider_model_capabilities(provider_id, provider_kind, fetched_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_provider ON provider_research_runs(provider_id, provider_kind, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_response ON provider_research_runs(provider_kind, response_id);",
+            "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_status ON provider_research_runs(status, updated_at);",
         ]),
     ]
 }

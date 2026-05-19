@@ -66,6 +66,25 @@ struct CoreContractTests {
         #expect(ChatAttachment(kind: .image, fileName: "photo.heif", contentType: "").cloudInputKind == .image)
         #expect(ChatAttachment(kind: .image, fileName: "sequence.heics", contentType: "").normalizedContentType == "image/heic-sequence")
 
+        let mediaRequirements = ProviderInputRequirements(
+            messages: [
+                ChatMessage(
+                    role: .user,
+                    content: "analyze",
+                    attachments: [
+                        ChatAttachment(kind: .audio, fileName: "clip.mp3", contentType: ""),
+                        ChatAttachment(kind: .video, fileName: "scene.mov", contentType: ""),
+                    ]
+                ),
+            ]
+        )
+        #expect(ChatAttachment(kind: .audio, fileName: "clip.wav", contentType: "").cloudMediaInputKind == .audio)
+        #expect(ChatAttachment(kind: .video, fileName: "scene.webm", contentType: "").cloudMediaInputKind == .video)
+        #expect(mediaRequirements.requiresAudio)
+        #expect(mediaRequirements.requiresVideo)
+        #expect(!mediaRequirements.isSatisfied(by: ProviderCapabilities(local: false, audioInputs: true)))
+        #expect(mediaRequirements.isSatisfied(by: ProviderCapabilities(local: false, audioInputs: true, videoInputs: true)))
+
         let pdfRequirements = ProviderInputRequirements(
             messages: [
                 ChatMessage(
@@ -169,9 +188,19 @@ struct CoreContractTests {
 
         let gemini = cloudConfiguration(kind: .gemini, baseURL: "https://generativelanguage.googleapis.com")
         #expect(gemini.capabilities.imageInputs)
+        #expect(gemini.capabilities.audioInputs)
+        #expect(gemini.capabilities.videoInputs)
         #expect(gemini.capabilities.pdfInputs)
         #expect(gemini.capabilities.textDocumentInputs)
+        #expect(gemini.capabilities.files)
         #expect(gemini.capabilities.embeddings)
+        #expect(gemini.capabilities.structuredOutputs)
+        #expect(gemini.capabilities.hostedTools)
+        #expect(gemini.capabilities.contextCache)
+        #expect(gemini.capabilities.live)
+        #expect(gemini.capabilities.batch)
+        #expect(gemini.capabilities.tokenCounting)
+        #expect(gemini.capabilities.modelCapabilities.contains(.contextCache))
 
         let openRouter = cloudConfiguration(kind: .openRouter, baseURL: "https://openrouter.ai/api/v1")
         #expect(openRouter.capabilities.imageInputs)
@@ -192,6 +221,30 @@ struct CoreContractTests {
         #expect(customOpenAIHost.capabilities.imageInputs)
         #expect(customOpenAIHost.capabilities.pdfInputs)
         #expect(customOpenAIHost.capabilities.textDocumentInputs)
+        #expect(customOpenAIHost.capabilities.files)
+    }
+
+    @Test
+    func providerCapabilitiesDecodeMissingGeminiParityFieldsWithDefaults() throws {
+        let legacy = """
+        {
+          "local": false,
+          "streaming": true,
+          "textGeneration": true,
+          "jsonMode": true
+        }
+        """
+
+        let capabilities = try JSONDecoder().decode(ProviderCapabilities.self, from: Data(legacy.utf8))
+
+        #expect(capabilities.structuredOutputs)
+        #expect(!capabilities.files)
+        #expect(!capabilities.audioInputs)
+        #expect(!capabilities.videoInputs)
+        #expect(!capabilities.contextCache)
+        #expect(!capabilities.live)
+        #expect(!capabilities.batch)
+        #expect(!capabilities.tokenCounting)
     }
 
     @Test
@@ -736,6 +789,60 @@ struct CoreContractTests {
     }
 
     @Test
+    func geminiParserCapturesToolFileCacheAndArtifactMetadata() {
+        var parser = CloudProviderStreamParser()
+        let payload = """
+        {
+          "responseId": "resp_meta",
+          "usageMetadata": {
+            "promptTokenCount": 20,
+            "candidatesTokenCount": 4,
+            "cachedContentTokenCount": 12,
+            "thoughtsTokenCount": 3
+          },
+          "candidates": [{
+            "content": {
+              "role": "model",
+              "parts": [
+                { "executableCode": { "language": "PYTHON", "code": "print(1)" } },
+                { "codeExecutionResult": { "outcome": "OUTCOME_OK", "output": "1" } },
+                { "fileData": { "mimeType": "audio/mpeg", "fileUri": "https://files.example/audio" } },
+                { "inlineData": { "mimeType": "image/png", "data": "abcd" } }
+              ]
+            },
+            "urlContextMetadata": { "urlMetadata": [{ "retrievedUrl": "https://example.com" }] },
+            "finishReason": "STOP"
+          }]
+        }
+        """
+
+        let output = parser.parse(data: Data(payload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
+        let metadata = output.finish?.providerMetadata ?? parser.state.geminiProviderMetadata
+
+        #expect(metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON]?.contains("cachedContentTokenCount") == true)
+        #expect(metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]?.contains("OUTCOME_OK") == true)
+        #expect(metadata[CloudProviderMetadataKeys.geminiURLContextJSON]?.contains("example.com") == true)
+        #expect(metadata[CloudProviderMetadataKeys.geminiFileReferencesJSON]?.contains("audio") == true)
+        #expect(metadata[CloudProviderMetadataKeys.geminiArtifactsJSON]?.contains("image") == true)
+    }
+
+    @Test
+    func geminiSSEDecoderInjectsEventTypeAndPreservesID() throws {
+        var decoder = CloudProviderSSEStreamDecoder()
+        #expect(decoder.ingest("id: evt_1") == nil)
+        #expect(decoder.ingest("event: interaction.completed") == nil)
+        #expect(decoder.ingest(#"data: {"interaction":{"id":"ia_1","usage":{"total_input_tokens":1,"total_output_tokens":1}}}"#) == nil)
+        let maybeEvent = decoder.ingest("")
+        let event = try #require(maybeEvent)
+        #expect(event.eventID == "evt_1")
+
+        let data = try #require(event.jsonData(eventTypeField: "event_type"))
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["event_type"] as? String == "interaction.completed")
+        #expect(object["id"] as? String == "evt_1")
+    }
+
+    @Test
     func openAIResponsesParserReportsEmptyCompletions() {
         var parser = CloudProviderStreamParser()
         let payload = #"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}"#
@@ -1162,18 +1269,40 @@ struct CoreContractTests {
             schemaName: "answer",
             content: .object(["ok": .bool(true)])
         )
+        let cache = ProviderContextCache(
+            id: "cachedContents/cache_1",
+            providerID: "gemini",
+            modelID: "gemini-3.1-pro",
+            name: "cachedContents/cache_1",
+            status: .active,
+            contentTokenCount: 128
+        )
+        let providerFile: ProviderFile = OpenAIProviderFile(
+            id: "file_1",
+            providerID: "openai",
+            purpose: .assistants,
+            fileName: "doc.pdf"
+        )
+        let providerDataStore: ProviderDataStore = vectorStore
+        let providerBackgroundRun: ProviderBackgroundRun = background
+        let providerStructured: StructuredOutputResult = structured
 
         #expect(try JSONDecoder().decode(OpenAIVectorStore.self, from: JSONEncoder().encode(vectorStore)) == vectorStore)
         #expect(try JSONDecoder().decode(OpenAIBackgroundResponse.self, from: JSONEncoder().encode(background)) == background)
         #expect(try JSONDecoder().decode(OpenAIStructuredOutputResult.self, from: JSONEncoder().encode(structured)) == structured)
+        #expect(try JSONDecoder().decode(ProviderContextCache.self, from: JSONEncoder().encode(cache)) == cache)
+        #expect(providerFile.id == "file_1")
+        #expect(providerDataStore.id == "vs_1")
+        #expect(providerBackgroundRun.id == "resp_1")
+        #expect(providerStructured.schemaName == "answer")
     }
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 14)
-        let migration = try #require(PinesDatabaseSchema.migrations.last)
-        #expect(migration.version == 14)
-        let sql = migration.sql.joined(separator: "\n")
+        #expect(PinesDatabaseSchema.currentVersion == 15)
+        let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
+        let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
+        let sql = openAIMigration.sql.joined(separator: "\n")
 
         for table in [
             "openai_provider_files",
@@ -1202,6 +1331,206 @@ struct CoreContractTests {
         ] {
             #expect(sql.contains("ALTER TABLE chat_runs ADD COLUMN \(column)"))
         }
+
+        let genericSQL = genericProviderMigration.sql.joined(separator: "\n")
+        for table in [
+            "provider_files",
+            "provider_artifacts",
+            "provider_caches",
+            "provider_batches",
+            "provider_live_sessions",
+            "provider_structured_outputs",
+            "provider_model_capabilities",
+            "provider_research_runs",
+        ] {
+            #expect(genericSQL.contains("CREATE TABLE IF NOT EXISTS \(table)"))
+        }
+        #expect(genericSQL.contains("credential_keychain_account"))
+        #expect(!genericSQL.contains("client_secret_keychain_account"))
+    }
+
+    @Test
+    func openAIDeepResearchContractsRoundTrip() throws {
+        let request = OpenAIDeepResearchRequest(
+            providerID: "openai",
+            title: "Market map",
+            prompt: "Map the market and cite sources.",
+            depth: .deep,
+            sourcePolicy: OpenAIDeepResearchSourcePolicy(
+                scope: .webAndProviderFiles,
+                vectorStoreIDs: ["vs_123"],
+                providerFileIDs: ["file_123"],
+                allowedDomains: ["example.com"]
+            ),
+            reportFormat: .citationFirst,
+            includeCodeInterpreter: true,
+            serviceTier: .priority,
+            metadata: ["trace": "research"]
+        )
+        let run = OpenAIDeepResearchRun(
+            request: request,
+            responseID: "resp_123",
+            status: .inProgress,
+            citationCount: 4,
+            toolCallCount: 2,
+            providerMetadata: [CloudProviderMetadataKeys.openAIResponseID: "resp_123"]
+        )
+        let providerRun = ProviderResearchRunRecord(
+            id: run.id.uuidString,
+            providerID: request.providerID,
+            providerKind: .openAI,
+            modelID: request.modelID,
+            title: request.title,
+            prompt: request.prompt,
+            depth: request.depth.rawValue,
+            sourcePolicy: .object([
+                "scope": .string(request.sourcePolicy.scope.rawValue),
+                "vector_store_ids": .array(request.sourcePolicy.vectorStoreIDs.map { .string($0.rawValue) }),
+            ]),
+            reportFormat: request.reportFormat.rawValue,
+            includeCodeInterpreter: request.includeCodeInterpreter,
+            serviceTier: request.serviceTier.rawValue,
+            responseID: run.responseID?.rawValue,
+            status: run.status.rawValue,
+            citationCount: run.citationCount,
+            toolCallCount: run.toolCallCount,
+            providerMetadata: run.providerMetadata
+        )
+
+        let decodedRequest = try JSONDecoder().decode(OpenAIDeepResearchRequest.self, from: JSONEncoder().encode(request))
+        let decodedRun = try JSONDecoder().decode(OpenAIDeepResearchRun.self, from: JSONEncoder().encode(run))
+        let decodedProviderRun = try JSONDecoder().decode(ProviderResearchRunRecord.self, from: JSONEncoder().encode(providerRun))
+
+        #expect(decodedRequest == request)
+        #expect(decodedRun == run)
+        #expect(decodedProviderRun == providerRun)
+        #expect(decodedRun.request.modelID == "gpt-5.5-pro")
+        #expect(decodedRun.request.sourcePolicy.vectorStoreIDs == ["vs_123"])
+        #expect(decodedProviderRun.responseID == "resp_123")
+    }
+
+    @Test
+    func openAIProviderRecordMapperMaterializesLifecycleRecords() throws {
+        let providerID = ProviderID(rawValue: "openai")
+        let file = OpenAIProviderRecordMapper.providerFile(
+            from: .object([
+                "id": .string("file_123"),
+                "object": .string("file"),
+                "purpose": .string("assistants"),
+                "filename": .string("brief.pdf"),
+                "bytes": .number(2048),
+                "status": .string("processed"),
+                "created_at": .number(1_700_000_000),
+                "metadata": .object(["workspace": .string("pines")]),
+            ]),
+            providerID: providerID
+        )
+        let vectorStore = OpenAIProviderRecordMapper.providerCache(
+            fromVectorStore: .object([
+                "id": .string("vs_123"),
+                "name": .string("Research"),
+                "status": .string("completed"),
+                "usage_bytes": .number(4096),
+                "file_counts": .object(["completed": .number(2), "total": .number(2)]),
+                "expires_after": .object(["anchor": .string("last_active_at"), "days": .number(7)]),
+                "created_at": .number(1_700_000_001),
+            ]),
+            providerID: providerID
+        )
+        let batch = OpenAIProviderRecordMapper.providerBatch(
+            from: .object([
+                "id": .string("batch_123"),
+                "endpoint": .string("/v1/responses"),
+                "status": .string("in_progress"),
+                "input_file_id": .string("file_123"),
+                "completion_window": .string("24h"),
+                "request_counts": .object(["total": .number(10), "completed": .number(2)]),
+                "created_at": .number(1_700_000_002),
+            ]),
+            providerID: providerID
+        )
+        let live = OpenAIProviderRecordMapper.providerLiveSession(
+            from: .object([
+                "id": .string("sess_123"),
+                "model": .string("gpt-realtime"),
+                "status": .string("created"),
+                "modalities": .array([.string("audio"), .string("text")]),
+                "expires_at": .number(1_700_003_600),
+            ]),
+            providerID: providerID
+        )
+        let researchRequest = OpenAIDeepResearchRequest(
+            providerID: providerID,
+            title: "Market map",
+            prompt: "Map the market.",
+            sourcePolicy: .init(scope: .webAndProviderFiles, vectorStoreIDs: ["vs_123"]),
+            metadata: ["local": "true"]
+        )
+        let researchRun = OpenAIProviderRecordMapper.providerResearchRun(
+            from: researchRequest,
+            response: .object([
+                "id": .string("resp_123"),
+                "status": .string("in_progress"),
+                "created_at": .number(1_700_000_003),
+                "metadata": .object(["provider": .string("openai")]),
+                "output": .array([
+                    .object(["type": .string("web_search_call")]),
+                    .object([
+                        "type": .string("message"),
+                        "content": .array([
+                            .object([
+                                "type": .string("output_text"),
+                                "annotations": .array([
+                                    .object(["type": .string("url_citation"), "url": .string("https://example.com")]),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                ]),
+            ])
+        )
+        let refreshedResearchRun = OpenAIProviderRecordMapper.providerResearchRun(
+            updating: researchRun,
+            response: .object([
+                "id": .string("resp_123"),
+                "status": .string("completed"),
+                "metadata": .object(["provider": .string("openai"), "final": .bool(true)]),
+                "output": .array([
+                    .object(["type": .string("code_interpreter_call")]),
+                    .object([
+                        "type": .string("message"),
+                        "content": .array([
+                            .object([
+                                "type": .string("output_text"),
+                                "annotations": .array([
+                                    .object(["type": .string("url_citation"), "url": .string("https://example.org")]),
+                                    .object(["type": .string("url_citation"), "url": .string("https://example.net")]),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                ]),
+            ])
+        )
+
+        #expect(file?.id == "file_123")
+        #expect(file?.byteCount == 2048)
+        #expect(file?.providerMetadata["workspace"] == "pines")
+        #expect(vectorStore?.id == "vs_123")
+        #expect(vectorStore?.configuration?.objectValue?["expires_after"] != nil)
+        #expect(batch?.status == OpenAIBackgroundResponseStatus.inProgress.rawValue)
+        #expect(batch?.requestCounts?.objectValue?["total"]?.intValue == 10)
+        #expect(live?.modalities == ["audio", "text"])
+        #expect(researchRun.responseID == "resp_123")
+        #expect(researchRun.status == OpenAIBackgroundResponseStatus.inProgress.rawValue)
+        #expect(researchRun.citationCount == 1)
+        #expect(researchRun.toolCallCount == 1)
+        #expect(researchRun.providerMetadata["provider"] == "openai")
+        #expect(researchRun.providerMetadata["local"] == "true")
+        #expect(refreshedResearchRun.status == "completed")
+        #expect(refreshedResearchRun.citationCount == 2)
+        #expect(refreshedResearchRun.toolCallCount == 1)
+        #expect(refreshedResearchRun.providerMetadata["final"] == "true")
     }
 
     private func decodedCitations(_ metadata: [String: String]) throws -> [WebSearchCitation] {
