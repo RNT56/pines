@@ -1,0 +1,78 @@
+---
+import MarketingLayout from "../layouts/MarketingLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import DeviceShowcase from "../components/DeviceShowcase.astro";
+import ProductTour from "../components/ProductTour.astro";
+import FeatureBands from "../components/FeatureBands.astro";
+import BuilderSection from "../components/BuilderSection.astro";
+import PreviewSuite from "../components/PreviewSuite.astro";
+import OnboardingSection from "../components/OnboardingSection.astro";
+import MarketingCompleteness from "../components/MarketingCompleteness.astro";
+
+const proofItems = [
+  "iPhone workbench",
+  "Apple Watch companion",
+  "MLX on device",
+  "Cloud only by choice",
+  "Private vault",
+  "Tool approval",
+];
+---
+
+<MarketingLayout path="/">
+  <div class="page-shell">
+    <SiteNav />
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <div class="hero-badge">
+            <img src="/brand/pines-mark.svg" alt="" />
+            <span>Local-first AI for iPhone and Apple Watch</span>
+          </div>
+          <h1 id="hero-title">Pines</h1>
+          <p class="hero-lede">
+            Run local models, bring in private context, add cloud power only when it earns
+            the trip, and keep conversations close from your wrist.
+          </p>
+          <div class="hero-actions" aria-label="Primary actions">
+            <a class="button primary" href="https://github.com/RNT56/pines">View source</a>
+            <a class="button secondary" href="/status/">Check availability</a>
+          </div>
+          <div class="hero-note">
+            <span>iPhone app in development</span>
+            <span>Watch companion included</span>
+            <span>Source available today</span>
+          </div>
+        </div>
+        <DeviceShowcase />
+      </section>
+
+      <section class="proof-strip" aria-label="Pines capability summary">
+        {proofItems.map((item) => <span>{item}</span>)}
+      </section>
+
+      <FeatureBands />
+      <PreviewSuite />
+      <ProductTour />
+      <OnboardingSection />
+      <MarketingCompleteness />
+      <BuilderSection />
+
+      <section class="section status-cta" aria-labelledby="status-title">
+        <div>
+          <span class="section-kicker">Current Status</span>
+          <h2 id="status-title">Transparent about what is ready and what is still being hardened.</h2>
+          <p>
+            Pines already has the iPhone app foundation, Watch companion, local model runtime,
+            BYOK providers, vault ingestion, MCP support, tool approval, audit surfaces,
+            and release validation. Public distribution still depends on real-device acceptance
+            and final App Store polish.
+          </p>
+        </div>
+        <a class="button primary" href="/status/">Read status</a>
+      </section>
+    </main>
+    <SiteFooter />
+  </div>
+</MarketingLayout>

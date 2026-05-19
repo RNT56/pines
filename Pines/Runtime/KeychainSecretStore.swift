@@ -25,7 +25,7 @@ actor KeychainSecretStore: SecretStore {
     func write(_ secret: String, service: String, account: String) async throws {
         let data = Data(secret.utf8)
         var query = baseQuery(service: service, account: account)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
 
         let update: [String: Any] = [kSecValueData as String: data]
         let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)

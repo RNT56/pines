@@ -16,6 +16,7 @@ typealias PinesLiveStore = any ConversationRepository
 
 final class PinesAppServices: Sendable {
     let secretStore: any SecretStore
+    let secureKeyStore: SecureKeyStore
     let modelCatalog: HuggingFaceModelCatalogService
     let preflightClassifier: ModelPreflightClassifier
     let executionRouter: ExecutionRouter
@@ -41,6 +42,7 @@ final class PinesAppServices: Sendable {
 
     init(
         secretStore: any SecretStore = KeychainSecretStore(),
+        secureKeyStore: SecureKeyStore = SecureKeyStore(),
         modelCatalog: HuggingFaceModelCatalogService = HuggingFaceModelCatalogService(),
         preflightClassifier: ModelPreflightClassifier = ModelPreflightClassifier(),
         executionRouter: ExecutionRouter = ExecutionRouter(),
@@ -69,6 +71,7 @@ final class PinesAppServices: Sendable {
             storeStartupError = nil
         }
         self.secretStore = secretStore
+        self.secureKeyStore = secureKeyStore
         self.modelCatalog = modelCatalog
         self.preflightClassifier = preflightClassifier
         self.executionRouter = executionRouter
@@ -246,6 +249,21 @@ final class PinesAppServices: Sendable {
         HuggingFaceCredentialService(secretStore: secretStore, auditRepository: auditRepository)
     }
 
+    var encryptedBlobStore: EncryptedBlobStore {
+        EncryptedBlobStore(secureKeyStore: secureKeyStore)
+    }
+
+    var securityResetCoordinator: SecurityResetCoordinator {
+        SecurityResetCoordinator(
+            settingsRepository: settingsRepository,
+            cloudProviderRepository: cloudProviderRepository,
+            mcpServerRepository: mcpServerRepository,
+            secretStore: secretStore,
+            auditRepository: auditRepository,
+            redactor: redactor
+        )
+    }
+
     var vaultIngestionService: VaultIngestionService? {
         guard let vaultRepository else {
             return nil
@@ -255,6 +273,7 @@ final class PinesAppServices: Sendable {
             settingsRepository: settingsRepository,
             inferenceProvider: mlxRuntime,
             embeddingService: vaultEmbeddingService,
+            encryptedBlobStore: encryptedBlobStore,
             auditRepository: auditRepository
         )
     }
@@ -320,6 +339,7 @@ final class PinesAppServices: Sendable {
             conversationRepository: conversationRepository,
             vaultRepository: vaultRepository,
             settingsRepository: settingsRepository,
+            secureKeyStore: secureKeyStore,
             auditRepository: auditRepository
         )
     }

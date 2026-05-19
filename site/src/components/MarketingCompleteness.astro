@@ -1,0 +1,82 @@
+---
+const useCases = [
+  {
+    title: "Think privately",
+    body: "Ask ordinary questions, draft notes, and work through personal context without making every prompt a network request.",
+  },
+  {
+    title: "Research with context",
+    body: "Use vault retrieval, web fetch, search, and MCP resources when a conversation needs more than memory.",
+  },
+  {
+    title: "Switch routes clearly",
+    body: "Keep local models and BYOK providers in one workflow instead of spreading work across apps and dashboards.",
+  },
+  {
+    title: "Stay close on Watch",
+    body: "Check conversations, send quick replies, stop active runs, and recover pending requests from Apple Watch.",
+  },
+];
+
+const essentials = [
+  ["Availability", "Pines is source-available now. Public App Store or TestFlight availability will be announced only when distribution is ready."],
+  ["License", "PolyForm Noncommercial 1.0.0. Commercial use requires a separate written Schtack license."],
+  ["Platforms", "Built for iPhone with an Apple Watch companion, Live Activity support, and shared Swift packages."],
+  ["Data boundary", "Local-first defaults, Keychain secrets, optional iCloud sync, and explicit cloud context approval."],
+  ["Models", "Local MLX models are treated as a first-class path, with provider routes available when configured."],
+  ["Source", "The code, architecture notes, security model, MCP notes, and current status are available on GitHub."],
+];
+
+const faqs = [
+  ["Is Pines a finished App Store app?", "No. It is a working production-oriented foundation with final App Store hardening and device acceptance still in progress."],
+  ["Does Pines require cloud AI?", "No. Local execution is a first-class route. Cloud is BYOK-only and explicit."],
+  ["Can cloud providers see vault context automatically?", "No. Private local context requires a visible per-turn approval path before cloud use."],
+  ["Why source-available instead of open source?", "The repository is available for noncommercial inspection, building, and contribution under PolyForm Noncommercial 1.0.0. Commercial use needs a separate license."],
+  ["What should a new visitor do first?", "Read the status page for maturity, then follow GitHub releases or inspect the source."],
+];
+---
+
+<section class="section use-cases" aria-labelledby="use-cases-title">
+  <div class="section-copy">
+    <span class="section-kicker">What It Is For</span>
+    <h2 id="use-cases-title">A personal AI workspace for people who care where the work runs.</h2>
+  </div>
+  <div class="use-case-grid">
+    {useCases.map((item) => (
+      <article>
+        <h3>{item.title}</h3>
+        <p>{item.body}</p>
+      </article>
+    ))}
+  </div>
+</section>
+
+<section class="section essentials" aria-labelledby="essentials-title">
+  <div>
+    <span class="section-kicker">Availability And Trust</span>
+    <h2 id="essentials-title">Clear expectations before you build, follow, or install.</h2>
+  </div>
+  <div class="essentials-grid">
+    {essentials.map(([label, body]) => (
+      <article>
+        <span>{label}</span>
+        <p>{body}</p>
+      </article>
+    ))}
+  </div>
+</section>
+
+<section class="section faq" aria-labelledby="faq-title">
+  <div class="section-copy">
+    <span class="section-kicker">FAQ</span>
+    <h2 id="faq-title">Straight answers about Pines today.</h2>
+  </div>
+  <div class="faq-list">
+    {faqs.map(([question, answer]) => (
+      <details>
+        <summary>{question}</summary>
+        <p>{answer}</p>
+      </details>
+    ))}
+  </div>
+</section>

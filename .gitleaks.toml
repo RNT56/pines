@@ -1,0 +1,19 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Ignore generated local artifacts that are never committed or released."
+paths = [
+  '''^build/''',
+  '''^\.build/''',
+  '''^\.git/''',
+  '''^site/\.astro/''',
+  '''^site/dist/''',
+  '''^site/node_modules/''',
+]
+
+[[allowlists]]
+description = "Synthetic JWT fixture used to verify Redactor behavior."
+regexes = [
+  '''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJwZW5lcyJ9\.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ''',
+]

@@ -120,7 +120,9 @@ struct CloudKitSyncService {
 
     private let container: CKContainer
     private let database: CKDatabase
-    private let zoneID = CKRecordZone.ID(zoneName: "PinesPrivate", ownerName: CKCurrentUserDefaultName)
+    private let zoneID = CKRecordZone.ID(zoneName: "PinesPrivateEncryptedV1", ownerName: CKCurrentUserDefaultName)
+    private let legacyZoneID = CKRecordZone.ID(zoneName: "PinesPrivate", ownerName: CKCurrentUserDefaultName)
+    private let recordCipher: CloudKitRecordCipher
 
     let conversationRepository: any ConversationRepository
     let vaultRepository: any VaultRepository
@@ -134,10 +136,12 @@ struct CloudKitSyncService {
         vaultRepository: any VaultRepository,
         settingsRepository: any SettingsRepository,
         syncRepository: (any CloudKitSyncRepository)? = nil,
+        secureKeyStore: SecureKeyStore,
         auditRepository: (any AuditEventRepository)?
     ) {
         container = CKContainer(identifier: containerIdentifier)
         database = container.privateCloudDatabase
+        recordCipher = CloudKitRecordCipher(secureKeyStore: secureKeyStore)
         self.conversationRepository = conversationRepository
         self.vaultRepository = vaultRepository
         self.settingsRepository = settingsRepository
@@ -181,7 +185,9 @@ struct CloudKitSyncService {
             includeEmbeddings: mergedSettings.storeConfiguration.syncsEmbeddings,
             includeClean: !hadServerChangeToken
         )
-        try await save(records(from: localSnapshot))
+        let encryptedRecords = try await records(from: localSnapshot)
+        try await save(encryptedRecords)
+        try? await database.modifyRecordZones(saving: [], deleting: [legacyZoneID])
 
         let remoteAfterUpload = try await fetchRemoteSnapshot(using: syncRepository)
         if !remoteAfterUpload.isEmpty {
@@ -227,7 +233,7 @@ struct CloudKitSyncService {
 
             for result in changes.modificationResultsByID.values {
                 let modification = try result.get()
-                batch.add(record: modification.record)
+                try await batch.add(record: modification.record, cipher: recordCipher)
             }
 
             let deletedAt = Date()
@@ -258,15 +264,47 @@ struct CloudKitSyncService {
         }
     }
 
-    private func records(from snapshot: CloudKitLocalSnapshot) throws -> [CKRecord] {
+    private func records(from snapshot: CloudKitLocalSnapshot) async throws -> [CKRecord] {
         var records = [CKRecord]()
-        records.append(try settingsRecord(snapshot.settings))
-        records.append(contentsOf: snapshot.conversations.map(conversationRecord))
-        records.append(contentsOf: snapshot.messages.map(messageRecord))
-        records.append(contentsOf: snapshot.documents.map(vaultDocumentRecord))
-        records.append(contentsOf: snapshot.chunks.map(vaultChunkRecord))
-        records.append(contentsOf: snapshot.embeddings.map(vaultEmbeddingRecord))
+        records.append(try await encryptedRecord(type: "AppSettings", name: "app", payload: snapshot.settings, updatedAt: snapshot.settings.updatedAt))
+        for conversation in snapshot.conversations {
+            records.append(try await encryptedRecord(type: "Conversation", name: conversation.id.uuidString, payload: conversation, updatedAt: conversation.updatedAt, tombstone: conversation.deletedAt != nil))
+        }
+        for message in snapshot.messages {
+            records.append(try await encryptedRecord(type: "Message", name: message.id.uuidString, payload: message, updatedAt: message.updatedAt, tombstone: message.deletedAt != nil))
+        }
+        for document in snapshot.documents {
+            records.append(try await encryptedRecord(type: "VaultDocument", name: document.id.uuidString, payload: document, updatedAt: document.updatedAt, tombstone: document.deletedAt != nil))
+        }
+        for chunk in snapshot.chunks {
+            records.append(try await encryptedRecord(type: "VaultChunk", name: chunk.id, payload: chunk, updatedAt: chunk.createdAt))
+        }
+        for embedding in snapshot.embeddings {
+            let name = "\(embedding.chunkID)-\(Self.stableRecordSuffix(embedding.modelID.rawValue))"
+            records.append(try await encryptedRecord(type: "VaultEmbedding", name: name, payload: embedding, updatedAt: embedding.createdAt))
+        }
         return records
+    }
+
+    private func encryptedRecord<Payload: Encodable>(
+        type: String,
+        name: String,
+        payload: Payload,
+        updatedAt: Date,
+        tombstone: Bool = false
+    ) async throws -> CKRecord {
+        let encrypted = try await recordCipher.seal(payload, recordType: type, recordName: name, updatedAt: updatedAt, tombstone: tombstone)
+        let record = CKRecord(recordType: "EncryptedRecord", recordID: CKRecord.ID(recordName: "\(type)::\(name)", zoneID: zoneID))
+        record["payloadRecordType"] = type as CKRecordValue
+        record["payloadRecordName"] = name as CKRecordValue
+        record["updatedAt"] = updatedAt as CKRecordValue
+        record["tombstone"] = tombstone as CKRecordValue
+        record["schemaVersion"] = encrypted.schemaVersion as CKRecordValue
+        record["keyID"] = encrypted.keyID as CKRecordValue
+        record["nonce"] = encrypted.nonce as NSData
+        record["ciphertext"] = encrypted.ciphertext as NSData
+        record["tag"] = encrypted.tag as NSData
+        return record
     }
 
     private func settingsRecord(_ settings: CloudKitSettingsSnapshot) throws -> CKRecord {
@@ -389,7 +427,11 @@ struct CloudKitSyncService {
 }
 
 private extension CloudKitRemoteSnapshot {
-    mutating func add(record: CKRecord) {
+    mutating func add(record: CKRecord, cipher: CloudKitRecordCipher) async throws {
+        if record.recordType == "EncryptedRecord" {
+            try await addEncrypted(record: record, cipher: cipher)
+            return
+        }
         switch record.recordType {
         case "AppSettings":
             guard let valueJSON = record["valueJSON"] as? String,
@@ -506,6 +548,41 @@ private extension CloudKitRemoteSnapshot {
                 )
             )
 
+        default:
+            return
+        }
+    }
+
+    mutating func addEncrypted(record: CKRecord, cipher: CloudKitRecordCipher) async throws {
+        guard let payloadType = record["payloadRecordType"] as? String,
+              let payloadName = record["payloadRecordName"] as? String,
+              let keyID = record["keyID"] as? String,
+              let nonce = Self.data("nonce", in: record),
+              let ciphertext = Self.data("ciphertext", in: record),
+              let tag = Self.data("tag", in: record)
+        else { return }
+        let encrypted = CloudKitEncryptedPayload(
+            schemaVersion: Self.int("schemaVersion", in: record),
+            keyID: keyID,
+            nonce: nonce,
+            ciphertext: ciphertext,
+            tag: tag,
+            updatedAt: (record["updatedAt"] as? Date) ?? Date(timeIntervalSinceReferenceDate: 0),
+            tombstone: Self.bool("tombstone", in: record)
+        )
+        switch payloadType {
+        case "AppSettings":
+            settings = try await cipher.open(encrypted, as: CloudKitSettingsSnapshot.self, recordType: payloadType, recordName: payloadName)
+        case "Conversation":
+            conversations.append(try await cipher.open(encrypted, as: CloudKitConversationSnapshot.self, recordType: payloadType, recordName: payloadName))
+        case "Message":
+            messages.append(try await cipher.open(encrypted, as: CloudKitMessageSnapshot.self, recordType: payloadType, recordName: payloadName))
+        case "VaultDocument":
+            documents.append(try await cipher.open(encrypted, as: CloudKitVaultDocumentSnapshot.self, recordType: payloadType, recordName: payloadName))
+        case "VaultChunk":
+            chunks.append(try await cipher.open(encrypted, as: CloudKitVaultChunkSnapshot.self, recordType: payloadType, recordName: payloadName))
+        case "VaultEmbedding":
+            embeddings.append(try await cipher.open(encrypted, as: VaultStoredEmbedding.self, recordType: payloadType, recordName: payloadName))
         default:
             return
         }

@@ -8,12 +8,24 @@ CI runs on pull requests, pushes to `main`, and manual dispatch.
 
 Jobs:
 
-- `swift-core`: public-repo hygiene, Swift package build, `swift test`, and `PinesCoreTestRunner`. SwiftPM commands run with automatic resolution disabled so CI honors the committed `Package.resolved` graph.
-- `xcode-project`: XcodeGen project generation, immediate generated-project drift check, locked package resolution from `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`, unsigned generic iOS build, simulator build-for-testing, simulator runtime smoke tests when an iPhone simulator is available, generated-project restoration, and final package lockfile drift checks.
+- `workflow-lint`: pinned `actionlint` validation for all GitHub Actions workflows.
+- `shell-static-analysis`: pinned ShellCheck validation for CI scripts.
+- `secret-scan`: pinned gitleaks source scan with explicit allowlists for synthetic test fixtures and ignored build outputs.
+- `dependency-review`: GitHub dependency review on pull requests, failing on high-severity dependency changes.
+- `repo-hygiene`: shell-script syntax validation, public-repo hygiene, license and notice checks, privacy manifest linting, MLX package-pin checks, tracked-artifact checks, secret-pattern scanning, and high-assurance security-boundary checks.
+- `site`: Netlify/Astro site dependency install, build, and `site/dist/index.html` artifact verification.
+- `swift-package-build`: Swift package build with automatic resolution disabled.
+- `swift-package-tests`: Swift package tests with automatic resolution disabled.
+- `core-verification`: `PinesCoreTestRunner` with automatic resolution disabled.
+- `xcode-project`: XcodeGen project snapshotting, generated-project drift check, locked package resolution from `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`, unsigned generic iOS build, simulator build-for-testing, simulator runtime smoke tests, generated-project restoration, and final package lockfile drift checks.
 
-The iOS job uses the `macos-26` GitHub-hosted runner and verifies the full iOS and watchOS build destinations needed by the `Pines` and `PinesWatch` schemes before running project validation. SDK visibility from `xcodebuild -showsdks` is not sufficient for the generic device builds on hosted runners, so the workflow installs missing platform payloads only when the actual scheme destinations are unavailable. Regenerate `Pines.xcodeproj` with `bash scripts/ci/xcodegen.sh generate`; the wrapper pins XcodeGen `2.45.4` and verifies the release checksum so local and CI scheme output stay aligned.
+The Xcode job uses the `macos-26` GitHub-hosted runner and verifies the full iOS and watchOS build destinations needed by the `Pines` and `PinesWatch` schemes before running project validation. SDK visibility from `xcodebuild -showsdks` is not sufficient for the generic device builds on hosted runners, so the workflow installs missing platform payloads only when the actual scheme destinations are unavailable. CI requires an available iPhone simulator for runtime smoke tests; local runs can still skip simulator execution with `PINES_SKIP_SIMULATOR_TEST_RUN=1`. Regenerate `Pines.xcodeproj` with `bash scripts/ci/xcodegen.sh generate`; the wrapper pins XcodeGen `2.45.4` and verifies the release checksum so local and CI scheme output stay aligned.
 
-The release workflow uses the same Xcode validation script as CI, verifies the iOS and watchOS scheme destinations before installing missing platforms, runs SwiftPM and Xcode with automatic package resolution disabled, builds an unsigned iOS archive from the committed deployment graph, and packages source artifacts. Keep both package lockfiles, `scripts/ci/run-xcode-validation.sh`, `scripts/ci/ensure-xcode-platforms.sh`, `ci.yml`, and `release.yml` aligned when adding required checks.
+The CodeQL workflow runs separately from the main CI gate on pull requests, pushes to `main`, a weekly schedule, and manual dispatch. Swift analysis uses a manual Xcode build so the database is built from the app target, while JavaScript/TypeScript analysis covers the Netlify/Astro site.
+
+The release workflow uses the same Xcode validation phases as CI, verifies the iOS and watchOS scheme destinations before installing missing platforms, runs SwiftPM and Xcode with automatic package resolution disabled, validates the site build, builds an unsigned iOS archive from the committed deployment graph, and packages source artifacts. Keep both package lockfiles, `scripts/ci/run-xcode-validation.sh`, `scripts/ci/ensure-xcode-platforms.sh`, `ci.yml`, and `release.yml` aligned when adding required checks.
+
+Release artifacts include a CycloneDX SBOM generated from SwiftPM and npm lockfiles. The release workflow also creates GitHub artifact attestations for the source bundle, checksum, and SBOM.
 
 ## Release Tags
 
@@ -46,6 +58,7 @@ Until signing and App Store Connect automation are configured, releases publish 
 
 - `pines-<tag>-source.tar.gz`
 - `pines-<tag>-source.tar.gz.sha256`
+- `pines-<tag>-sbom.cdx.json`
 - validation logs as workflow artifacts
 
 Do not publish an unsigned `.ipa`.
@@ -64,6 +77,7 @@ Before pushing the tag, verify:
 - `bash scripts/ci/check-public-hygiene.sh`
 - `swift test --disable-automatic-resolution`
 - `swift run --disable-automatic-resolution PinesCoreTestRunner`
+- `npm --prefix site ci && npm --prefix site run build`
 - `bash scripts/ci/run-xcode-validation.sh`
 - `bash scripts/ci/package-release.sh v0.1.0`
 

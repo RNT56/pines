@@ -518,6 +518,8 @@ struct ChatComposerBar: View {
         } else {
             try FileManager.default.copyItem(at: sourceURL, to: destination)
         }
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: destination.path)
+        try excludeFromBackup(destination)
 
         let byteCount = try fileByteCount(at: destination)
         let maxBytes = kind == .image ? maxInlineImageBytes : maxInlineFileBytes
@@ -625,7 +627,16 @@ struct ChatComposerBar: View {
         )
         let directory = base.appending(path: "Pines/ChatAttachments", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: directory.path)
+        try excludeFromBackup(directory)
         return directory
+    }
+
+    nonisolated private static func excludeFromBackup(_ url: URL) throws {
+        var mutableURL = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try mutableURL.setResourceValues(values)
     }
 
     nonisolated private static func fileByteCount(at url: URL) throws -> Int {

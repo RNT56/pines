@@ -65,6 +65,9 @@ struct MCPOAuthService {
 
         let verifier = Self.codeVerifier()
         let challenge = Self.codeChallenge(for: verifier)
+        let state = UUID().uuidString
+        try EndpointSecurityPolicy().validate(authorizationURL, useCase: .oauthAuthorization)
+        try EndpointSecurityPolicy().validate(tokenURL, useCase: .oauthToken)
         var components = URLComponents(url: authorizationURL, resolvingAgainstBaseURL: false)
         var queryItems = components?.queryItems ?? []
         queryItems.append(contentsOf: [
@@ -74,7 +77,7 @@ struct MCPOAuthService {
             URLQueryItem(name: "code_challenge", value: challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "resource", value: server.oauthResource ?? server.endpointURL.absoluteString),
-            URLQueryItem(name: "state", value: UUID().uuidString),
+            URLQueryItem(name: "state", value: state),
         ])
         if let scopes = server.oauthScopes, !scopes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             queryItems.append(URLQueryItem(name: "scope", value: scopes))
@@ -89,6 +92,9 @@ struct MCPOAuthService {
               let code = callbackComponents.queryItems?.first(where: { $0.name == "code" })?.value
         else {
             throw InferenceError.invalidRequest("OAuth callback did not contain an authorization code.")
+        }
+        guard callbackComponents.queryItems?.first(where: { $0.name == "state" })?.value == state else {
+            throw InferenceError.invalidRequest("OAuth callback state did not match the request.")
         }
 
         let token = try await exchangeCode(
@@ -150,6 +156,7 @@ struct MCPOAuthService {
         clientID: String,
         resource: String
     ) async throws -> OAuthTokenResponse {
+        try EndpointSecurityPolicy().validate(tokenURL, useCase: .oauthToken)
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -219,17 +226,11 @@ struct MCPOAuthDiscoveryService {
     }
 
     private func validateEndpoint(_ server: MCPServerConfiguration) throws {
-        guard server.endpointURL.scheme?.lowercased() == "http" else { return }
-        let host = server.endpointURL.host(percentEncoded: false)?.lowercased()
-        let local = host == "localhost"
-            || host == "127.0.0.1"
-            || host == "::1"
-            || host?.hasSuffix(".local") == true
-            || host?.hasPrefix("10.") == true
-            || host?.hasPrefix("192.168.") == true
-        guard server.allowInsecureLocalHTTP, local else {
-            throw MCPTransportError.insecureHTTPNotAllowed(server.endpointURL)
-        }
+        try EndpointSecurityPolicy().validate(
+            server.endpointURL,
+            useCase: .mcpEndpoint,
+            allowsExplicitLocalHTTP: server.allowInsecureLocalHTTP
+        )
     }
 
     private func protectedResourceMetadataURL(for server: MCPServerConfiguration) async throws -> URL {

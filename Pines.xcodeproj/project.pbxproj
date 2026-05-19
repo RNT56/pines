@@ -19,12 +19,14 @@
 		1696C482B2BFEADAD7A1744D /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */; };
 		18C03354C01E800E9DF94E48 /* PhoneWatchSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70C871149DDD6846E8A71E4 /* PhoneWatchSessionService.swift */; };
 		1A048AEA62053C4EE5E0F694 /* MCPOAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 630E036C1689081D43923576 /* MCPOAuthService.swift */; };
+		1B52E0E2F83496E860CFF466 /* EncryptedBlobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4BAE1B582D05CB5B511A886 /* EncryptedBlobStore.swift */; };
 		1CF322F450C7E7AB6D6DF9D3 /* MCPStreamableHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5A5CF6509EEA6D6BE1D3F3 /* MCPStreamableHTTPClient.swift */; };
 		20F26BE2E7912BE9CB92702C /* ModelDownloadActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A472B2663AB6487C0FB5A6B /* ModelDownloadActivityAttributes.swift */; };
 		255ABB7194C40BA6E2E25069 /* DeviceRuntimeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9114B5CA23ED60D86D72253 /* DeviceRuntimeMonitor.swift */; };
 		2AA5EBBAD5AC8336B9F3DD0D /* HuggingFaceCredentialService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7C4EBAAC5E84277A718C17 /* HuggingFaceCredentialService.swift */; };
 		2B7347D3CA9E68EB3EBE327E /* PinesWatchSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 5B2EE41E8AC9FFB4D0356A8C /* PinesWatchSupport */; };
 		2CAAEFE65E1DD44DFDF11701 /* WatchChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58FC276317CB9F908EE2727B /* WatchChatViewModel.swift */; };
+		2CB5C82AECCDA02EF25BD4FF /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 907CAD8C8D83C6A5B614EB5A /* HighlightSwift */; };
 		2D09CE6C392BBD594E95F249 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = D09EC77F4F444343B14A238C /* PinesCore */; };
 		2DC7F4355DC8D047D2D5460C /* PinesAppModelTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */; };
 		30026D20DA004DF5A0C2BE13 /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */; };
@@ -35,7 +37,7 @@
 		4A8B7ADED7E800D30BC296A1 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 2F62656B16557CFACC3CBFF7 /* PinesCore */; };
 		515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = 85E4D304B541EE6A90CEFD6F /* MLXEmbedders */; };
 		5177468AEE90F3F5B0176C01 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 95DFE02F2971CD6781ED862B /* MLXLMCommon */; };
-		51F0003C051BEA5B35753F1D /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 907CAD8C8D83C6A5B614EB5A /* HighlightSwift */; };
+		51F0003C051BEA5B35753F1D /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 79453BB5651564170C3A0B1C /* Markdown */; };
 		52B797063FB95D83A2D63E7A /* PinesAppModel+MCP.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE279F766D8B0CC93D1D150 /* PinesAppModel+MCP.swift */; };
 		55937CA552490AEA6ED46131 /* PinesDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45C618F4FAB69FDDE0FC788B /* PinesDesignSystem.swift */; };
 		56FB9E2B958AE80AB1CB0856 /* MarkdownMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD9A00CA54B90E791E77F56 /* MarkdownMessageView.swift */; };
@@ -48,13 +50,14 @@
 		667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */; };
 		69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */; };
 		6F2B60A874B79E3B73C27624 /* CloudProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */; };
-		74762C61D2E73B7909039286 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 79453BB5651564170C3A0B1C /* Markdown */; };
+		74762C61D2E73B7909039286 /* SQLCipher in Frameworks */ = {isa = PBXBuildFile; productRef = 47290C155F603BA3AA043C93 /* SQLCipher */; };
 		75BAD67E75A276A731EF918B /* PinesLiveActivities.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2EC8BB0262D2F49A7518608A /* PinesLiveActivities.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		78A1D2B0783CF04BAE99BC62 /* WatchTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC95D2DA4ED0AE5A971C6BA3 /* WatchTranscriptView.swift */; };
 		79BE7BF0C5BD5EE6979AD3B9 /* VaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CFBB6BB9E0574B8AA20150 /* VaultView.swift */; };
 		7A75A7192BA0A4B4EE4C3237 /* WatchHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */; };
 		7C1B3D61D81211AD1F0FBCF7 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = D445A834A842FDF08C100D34 /* MLXVLM */; };
 		87777CD59861247F27DE9C34 /* PinesRefreshRateSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095ED637BD4CD7B01DBD9F9C /* PinesRefreshRateSupport.swift */; };
+		8876615E142B278FD678F6A4 /* SecurityResetCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8CF846797DB3246FDC4FE5F /* SecurityResetCoordinator.swift */; };
 		8B285F546F931039BCA44F33 /* ModelDownloadActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A472B2663AB6487C0FB5A6B /* ModelDownloadActivityAttributes.swift */; };
 		8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */; };
 		8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 79248E6D82F6B41C4A99016B /* Tokenizers */; };
@@ -66,6 +69,7 @@
 		A23582944454AFA76540B625 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500C1CF070133DCF6885979F /* ModelsView.swift */; };
 		A4A6874199B926262EDBC80B /* PinesWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 1E1D28BDF947E8721585572A /* PinesWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A710B3F4F7869D3FBAC38A93 /* MLXEmbeddingRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6395FE07FF217EF3444678FA /* MLXEmbeddingRuntime.swift */; };
+		A98FB291F3056FD1DF91BEF1 /* CloudKitRecordCipher.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */; };
 		B11DDE4F6B5FAC4D4C811660 /* BYOKCloudInferenceProvider+Payloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB2DDD7A0B86BB137BF397A /* BYOKCloudInferenceProvider+Payloads.swift */; };
 		B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8627F9808A76C0F0A91729 /* SettingsView.swift */; };
 		B925E264EAB46D0C3EB6B307 /* PinesHubXetSupport in Frameworks */ = {isa = PBXBuildFile; productRef = F5BE958969B414C35418437A /* PinesHubXetSupport */; };
@@ -90,6 +94,7 @@
 		F726DC5360EC760DFADDE5FE /* ModelLifecycleService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */; };
 		FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */; };
 		FF4D60F77559E9389E312BD7 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */; };
+		FF7A2AF24CE204653E49DD36 /* SecureKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EBAE2CAEBA893A441A679F0 /* SecureKeyStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -142,6 +147,7 @@
 		103EAAA54824744E18DB139D /* PinesHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHaptics.swift; sourceTree = "<group>"; };
 		1485AEE015D2E1E941159B3F /* PinesTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PinesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1E1D28BDF947E8721585572A /* PinesWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PinesWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1EBAE2CAEBA893A441A679F0 /* SecureKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureKeyStore.swift; sourceTree = "<group>"; };
 		21E4C4124C8DDDCA58BDB764 /* MLXCompatibleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXCompatibleModels.swift; sourceTree = "<group>"; };
 		231A63B8882B7235FD4DD6B7 /* Pines.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Pines.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		27F8A15281AD531830EEBB98 /* PinesAppModel+Presentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+Presentation.swift"; sourceTree = "<group>"; };
@@ -191,10 +197,13 @@
 		9CB6251B36A1F706D8884A9E /* ModelDownloadSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadSupport.swift; sourceTree = "<group>"; };
 		A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHaptics.swift; sourceTree = "<group>"; };
 		A790E0D7CCFB1AF34B214B13 /* PinesHuggingFaceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHuggingFaceBridge.swift; sourceTree = "<group>"; };
+		ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitRecordCipher.swift; sourceTree = "<group>"; };
 		AEC56EEE76C86B70FF02D9AF /* GRDBPinesStore+Mapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GRDBPinesStore+Mapping.swift"; sourceTree = "<group>"; };
 		AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRuntimeMetrics.swift; sourceTree = "<group>"; };
 		C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
+		C4BAE1B582D05CB5B511A886 /* EncryptedBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptedBlobStore.swift; sourceTree = "<group>"; };
 		D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
+		D8CF846797DB3246FDC4FE5F /* SecurityResetCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityResetCoordinator.swift; sourceTree = "<group>"; };
 		DA300803A417F81AEA21D094 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelLifecycleService.swift; sourceTree = "<group>"; };
 		DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppServices.swift; sourceTree = "<group>"; };
@@ -224,8 +233,9 @@
 				E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */,
 				8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */,
 				C3A8E8F1D7ADC06A8E2EBA43 /* GRDB in Frameworks */,
-				74762C61D2E73B7909039286 /* Markdown in Frameworks */,
-				51F0003C051BEA5B35753F1D /* HighlightSwift in Frameworks */,
+				74762C61D2E73B7909039286 /* SQLCipher in Frameworks */,
+				51F0003C051BEA5B35753F1D /* Markdown in Frameworks */,
+				2CB5C82AECCDA02EF25BD4FF /* HighlightSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -265,6 +275,7 @@
 				0C5E3CDF58D288579F2CB064 /* MCP */,
 				EF13282535E058B9BD5CA12A /* Persistence */,
 				8216D235A1572028B3065549 /* Runtime */,
+				54773081FA437B68FF0E6DEB /* Security */,
 				9617E933B2A1D1595AB3F04D /* Tools */,
 				60540D5B27662B0651C9298F /* Vault */,
 				A622C4E24201419386EE5E3B /* Views */,
@@ -350,6 +361,16 @@
 				1E1D28BDF947E8721585572A /* PinesWatch.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		54773081FA437B68FF0E6DEB /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				C4BAE1B582D05CB5B511A886 /* EncryptedBlobStore.swift */,
+				1EBAE2CAEBA893A441A679F0 /* SecureKeyStore.swift */,
+				D8CF846797DB3246FDC4FE5F /* SecurityResetCoordinator.swift */,
+			);
+			path = Security;
 			sourceTree = "<group>";
 		};
 		60540D5B27662B0651C9298F /* Vault */ = {
@@ -494,6 +515,7 @@
 			children = (
 				7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */,
 				5EB2DDD7A0B86BB137BF397A /* BYOKCloudInferenceProvider+Payloads.swift */,
+				ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */,
 				443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */,
 				4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */,
 			);
@@ -568,6 +590,7 @@
 				9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */,
 				79248E6D82F6B41C4A99016B /* Tokenizers */,
 				7CB37824DF7BF3CFC294142D /* GRDB */,
+				47290C155F603BA3AA043C93 /* SQLCipher */,
 				79453BB5651564170C3A0B1C /* Markdown */,
 				907CAD8C8D83C6A5B614EB5A /* HighlightSwift */,
 			);
@@ -656,6 +679,7 @@
 				621CA3ADA0972125D0A0FBCD /* XCRemoteSwiftPackageReference "highlightswift" */,
 				82C15679A79285F6F8F33DE7 /* XCRemoteSwiftPackageReference "mlx-swift" */,
 				E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
+				A43A495519F824800780FBF4 /* XCRemoteSwiftPackageReference "SQLCipher.swift" */,
 				01E98600A0BAFFF175DAF8CC /* XCRemoteSwiftPackageReference "swift-markdown" */,
 				0A791BAE7FC59744192EC64B /* XCRemoteSwiftPackageReference "swift-transformers" */,
 				B9AD7F6A00FA0B347C765B5E /* XCLocalSwiftPackageReference "." */,
@@ -697,9 +721,11 @@
 				EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */,
 				0D13A988324EF08D8E6AF29F /* ChatComposerBar.swift in Sources */,
 				39CF2E229241A26056922251 /* ChatsView.swift in Sources */,
+				A98FB291F3056FD1DF91BEF1 /* CloudKitRecordCipher.swift in Sources */,
 				667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */,
 				6F2B60A874B79E3B73C27624 /* CloudProviderService.swift in Sources */,
 				255ABB7194C40BA6E2E25069 /* DeviceRuntimeMonitor.swift in Sources */,
+				1B52E0E2F83496E860CFF466 /* EncryptedBlobStore.swift in Sources */,
 				368944A065D96B6F78A3E0E6 /* GRDBPinesStore+CloudKit.swift in Sources */,
 				0101B36D3B132435D7763B4A /* GRDBPinesStore+Mapping.swift in Sources */,
 				8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */,
@@ -736,6 +762,8 @@
 				87777CD59861247F27DE9C34 /* PinesRefreshRateSupport.swift in Sources */,
 				57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */,
 				FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */,
+				FF7A2AF24CE204653E49DD36 /* SecureKeyStore.swift in Sources */,
+				8876615E142B278FD678F6A4 /* SecurityResetCoordinator.swift in Sources */,
 				45E76EAAE862C883439A1A7E /* SettingsDetailView.swift in Sources */,
 				B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */,
 				EF023CED82C75823EC051432 /* VaultEmbeddingService.swift in Sources */,
@@ -906,6 +934,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WLDMWQ963U;
+				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) SQLITE_HAS_CODEC=1";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Pines/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -1055,6 +1084,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WLDMWQ963U;
+				GCC_PREPROCESSOR_DEFINITIONS = "$(inherited) SQLITE_HAS_CODEC=1";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Pines/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -1180,7 +1210,15 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift";
 			requirement = {
 				kind = revision;
-				revision = 48375f1d8f0694dee2ce8aab7f46be50c5297aec;
+				revision = 8f0718404a323698c7b5730f2de3af2b5e21f854;
+			};
+		};
+		A43A495519F824800780FBF4 /* XCRemoteSwiftPackageReference "SQLCipher.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sqlcipher/SQLCipher.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.10.0;
 			};
 		};
 		E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {
@@ -1188,7 +1226,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift-lm";
 			requirement = {
 				kind = revision;
-				revision = bb5f6f837896503b1f660eaeed2850fb0f232a64;
+				revision = 2178543c34f6ff86989a485b60670f01f6c125a3;
 			};
 		};
 		ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
@@ -1210,6 +1248,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXLLM;
+		};
+		47290C155F603BA3AA043C93 /* SQLCipher */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A43A495519F824800780FBF4 /* XCRemoteSwiftPackageReference "SQLCipher.swift" */;
+			productName = SQLCipher;
 		};
 		5B2EE41E8AC9FFB4D0356A8C /* PinesWatchSupport */ = {
 			isa = XCSwiftPackageProductDependency;

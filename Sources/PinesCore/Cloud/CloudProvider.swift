@@ -29,6 +29,51 @@ public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public enum CloudProviderHeaderKind: String, Hashable, Codable, Sendable, CaseIterable {
+    case publicValue
+    case secretReference
+}
+
+public struct CloudProviderHeader: Identifiable, Hashable, Codable, Sendable {
+    public var id: String { name.lowercased() }
+    public var name: String
+    public var kind: CloudProviderHeaderKind
+    public var value: String?
+    public var keychainService: String?
+    public var keychainAccount: String?
+
+    public init(
+        name: String,
+        kind: CloudProviderHeaderKind,
+        value: String? = nil,
+        keychainService: String? = nil,
+        keychainAccount: String? = nil
+    ) {
+        self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.kind = kind
+        self.value = value
+        self.keychainService = keychainService
+        self.keychainAccount = keychainAccount
+    }
+
+    public var normalizedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    public var storesSecretInPlaintext: Bool {
+        kind == .publicValue && Self.isSecretLikeName(name)
+    }
+
+    public static func isSecretLikeName(_ name: String) -> Bool {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        if ["authorization", "cookie", "proxy-authorization"].contains(normalized) {
+            return true
+        }
+        return ["key", "token", "secret", "credential", "password"].contains { normalized.contains($0) }
+    }
+}
+
 public struct CloudProviderConfiguration: Identifiable, Hashable, Codable, Sendable {
     public var id: ProviderID
     public var kind: CloudProviderKind
@@ -37,9 +82,10 @@ public struct CloudProviderConfiguration: Identifiable, Hashable, Codable, Senda
     public var defaultModelID: ModelID?
     public var validationStatus: ProviderValidationStatus
     public var lastValidationError: String?
-    public var extraHeadersJSON: String?
+    public var headers: [CloudProviderHeader]
     public var keychainService: String
     public var keychainAccount: String
+    public var allowInsecureLocalHTTP: Bool
     public var enabledForAgents: Bool
     public var lastValidatedAt: Date?
 
@@ -51,9 +97,10 @@ public struct CloudProviderConfiguration: Identifiable, Hashable, Codable, Senda
         defaultModelID: ModelID? = nil,
         validationStatus: ProviderValidationStatus = .unvalidated,
         lastValidationError: String? = nil,
-        extraHeadersJSON: String? = nil,
+        headers: [CloudProviderHeader] = [],
         keychainService: String = "com.schtack.pines.cloud",
         keychainAccount: String,
+        allowInsecureLocalHTTP: Bool = false,
         enabledForAgents: Bool = false,
         lastValidatedAt: Date? = nil
     ) {
@@ -64,9 +111,10 @@ public struct CloudProviderConfiguration: Identifiable, Hashable, Codable, Senda
         self.defaultModelID = defaultModelID
         self.validationStatus = validationStatus
         self.lastValidationError = lastValidationError
-        self.extraHeadersJSON = extraHeadersJSON
+        self.headers = headers
         self.keychainService = keychainService
         self.keychainAccount = keychainAccount
+        self.allowInsecureLocalHTTP = allowInsecureLocalHTTP
         self.enabledForAgents = enabledForAgents
         self.lastValidatedAt = lastValidatedAt
     }

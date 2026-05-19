@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 12
+    public static let currentVersion = 13
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -608,6 +608,30 @@ public enum PinesDatabaseSchema {
             END;
             """,
         ]),
+        DatabaseMigration(version: 13, name: "high-assurance-security-reset", sql: [
+            "ALTER TABLE cloud_providers ADD COLUMN headers_json TEXT;",
+            "ALTER TABLE cloud_providers ADD COLUMN allow_insecure_local_http INTEGER NOT NULL DEFAULT 0;",
+            "UPDATE cloud_providers SET headers_json = NULL, extra_headers_json = NULL, validation_status = 'unvalidated', last_validation_error = NULL;",
+            "UPDATE mcp_servers SET status = 'disconnected', last_error = NULL;",
+            """
+            INSERT INTO audit_events (id, created_at, category, summary, redacted_payload, provider_id, model_id, tool_name, network_domains)
+            VALUES (
+                lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+                substr(lower(hex(randomblob(2))), 2) || '-' ||
+                substr('89ab', abs(random()) % 4 + 1, 1) ||
+                substr(lower(hex(randomblob(2))), 2) || '-' ||
+                lower(hex(randomblob(6))),
+                strftime('%s','now') - 978307200,
+                'security',
+                'Completed high-assurance security reset for sensitive provider and MCP configuration.',
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                ''
+            );
+            """,
+        ]),
     ]
 }
 
@@ -625,7 +649,7 @@ public struct LocalStoreConfiguration: Hashable, Codable, Sendable {
 
     public init(
         databaseFileName: String = "pines.sqlite",
-        dataProtection: DataProtectionClass = .completeUntilFirstUserAuthentication,
+        dataProtection: DataProtectionClass = .complete,
         iCloudSyncEnabled: Bool = false,
         syncsSourceDocuments: Bool = true,
         syncsEmbeddings: Bool = false

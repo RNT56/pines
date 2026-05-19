@@ -166,6 +166,7 @@ final class PinesVaultState: ObservableObject {
 @MainActor
 final class PinesSettingsState: ObservableObject {
     @Published var settingsSections: [PinesSettingsSection]
+    @Published var securityConfiguration: SecurityConfiguration
     @Published var executionMode: AgentExecutionMode
     @Published var storeConfiguration: LocalStoreConfiguration
     @Published var selectedThemeTemplate: PinesThemeTemplate
@@ -194,6 +195,7 @@ final class PinesSettingsState: ObservableObject {
 
     init(
         settingsSections: [PinesSettingsSection] = PinesStaticSettings.sections,
+        securityConfiguration: SecurityConfiguration = .init(),
         executionMode: AgentExecutionMode = .preferLocal,
         storeConfiguration: LocalStoreConfiguration = .init(),
         selectedThemeTemplate: PinesThemeTemplate = .evergreen,
@@ -221,6 +223,7 @@ final class PinesSettingsState: ObservableObject {
         braveSearchCredentialStatus: String = "Not configured"
     ) {
         self.settingsSections = settingsSections
+        self.securityConfiguration = securityConfiguration
         self.executionMode = executionMode
         self.storeConfiguration = storeConfiguration
         self.selectedThemeTemplate = selectedThemeTemplate

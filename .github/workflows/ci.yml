@@ -18,14 +18,135 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  swift-core:
-    name: Swift core checks
-    runs-on: macos-26
-    timeout-minutes: 30
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Run actionlint
+        run: |
+          export PINES_CI_TOOL_ROOT="$RUNNER_TEMP/pines-ci-tools"
+          actionlint="$(bash scripts/ci/install-ci-tool.sh actionlint)"
+          "$actionlint" -color
+
+  shell-static-analysis:
+    name: Shell static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Run ShellCheck
+        run: |
+          export PINES_CI_TOOL_ROOT="$RUNNER_TEMP/pines-ci-tools"
+          shellcheck="$(bash scripts/ci/install-ci-tool.sh shellcheck)"
+          "$shellcheck" scripts/ci/*.sh
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        run: |
+          export PINES_CI_TOOL_ROOT="$RUNNER_TEMP/pines-ci-tools"
+          gitleaks="$(bash scripts/ci/install-ci-tool.sh gitleaks)"
+          "$gitleaks" detect --source . --no-git --redact --verbose --config .gitleaks.toml
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Review dependency changes
+        # actions/dependency-review-action v5.0.0
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
+        with:
+          fail-on-severity: high
+
+  repo-hygiene:
+    name: Repository hygiene
+    runs-on: macos-26
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Print tool versions
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Validate CI shell scripts
+        run: bash -n scripts/ci/*.sh
+
+      - name: Public repo hygiene
+        run: bash scripts/ci/check-public-hygiene.sh
+
+  site:
+    name: Site build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Setup Node
+        # actions/setup-node v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install site dependencies
+        run: npm --prefix site ci
+
+      - name: Build site
+        run: npm --prefix site run build
+
+      - name: Verify site artifact
+        run: test -f site/dist/index.html
+
+  swift-package-build:
+    name: Swift package build
+    runs-on: macos-26
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Print tool versions
         run: |
@@ -33,14 +154,43 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Public repo hygiene
-        run: bash scripts/ci/check-public-hygiene.sh
-
       - name: Build Swift package
         run: swift build --disable-automatic-resolution
 
+  swift-package-tests:
+    name: Swift package tests
+    runs-on: macos-26
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Print tool versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
       - name: Run Swift package tests
         run: swift test --disable-automatic-resolution
+
+  core-verification:
+    name: Core verification runner
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Print tool versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
 
       - name: Run core verification
         run: swift run --disable-automatic-resolution PinesCoreTestRunner
@@ -52,7 +202,8 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Select Xcode with iPhoneOS SDK
         run: |
@@ -79,12 +230,32 @@ jobs:
       - name: Ensure Apple platforms are installed
         run: bash scripts/ci/ensure-xcode-platforms.sh
 
-      - name: Validate Xcode project
-        run: bash scripts/ci/run-xcode-validation.sh
+      - name: Prepare Xcode validation snapshot
+        run: bash scripts/ci/run-xcode-validation.sh prepare
+
+      - name: Generate project and verify drift
+        run: bash scripts/ci/run-xcode-validation.sh generate
+
+      - name: Resolve Xcode package dependencies
+        run: bash scripts/ci/run-xcode-validation.sh resolve
+
+      - name: Build unsigned iOS app
+        run: bash scripts/ci/run-xcode-validation.sh build-app
+
+      - name: Build simulator smoke tests
+        run: bash scripts/ci/run-xcode-validation.sh build-tests
+
+      - name: Run simulator smoke tests
+        run: bash scripts/ci/run-xcode-validation.sh run-tests
+
+      - name: Check final Xcode drift
+        if: always()
+        run: bash scripts/ci/run-xcode-validation.sh finalize
 
       - name: Upload Xcode build log
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: xcodebuild-log
           path: |

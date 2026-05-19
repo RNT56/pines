@@ -418,11 +418,11 @@ final class MCPStreamableHTTPClient: Sendable {
     }
 
     private func validateEndpoint(_ url: URL, server: MCPServerConfiguration) throws {
-        guard url.scheme?.lowercased() == "http" else { return }
-        if server.allowInsecureLocalHTTP, Self.isLocalHTTPHost(url.host(percentEncoded: false)) {
-            return
-        }
-        throw MCPTransportError.insecureHTTPNotAllowed(url)
+        try EndpointSecurityPolicy().validate(
+            url,
+            useCase: .mcpEndpoint,
+            allowsExplicitLocalHTTP: server.allowInsecureLocalHTTP
+        )
     }
 
     private func applyBaseHeaders(to request: inout URLRequest) async {
@@ -469,6 +469,7 @@ final class MCPStreamableHTTPClient: Sendable {
         else {
             return nil
         }
+        try EndpointSecurityPolicy().validate(tokenURL, useCase: .oauthToken)
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -603,14 +604,6 @@ final class MCPStreamableHTTPClient: Sendable {
     }
 
     private static func isLocalHTTPHost(_ host: String?) -> Bool {
-        guard let host = host?.lowercased() else { return false }
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" || host.hasSuffix(".local") {
-            return true
-        }
-        if host.hasPrefix("10.") || host.hasPrefix("192.168.") {
-            return true
-        }
-        let parts = host.split(separator: ".").compactMap { Int($0) }
-        return parts.count == 4 && parts[0] == 172 && (16...31).contains(parts[1])
+        EndpointSecurityPolicy.isLoopbackHost(host)
     }
 }

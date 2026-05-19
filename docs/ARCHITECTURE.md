@@ -27,6 +27,8 @@
 - `MLXRuntimeBridge`
 - `PinesRuntimeMetrics`
 - `GRDBPinesStore`
+- `SecureKeyStore`
+- `EncryptedBlobStore`
 - `ModelLifecycleService`
 - `VaultIngestionService`
 - `CloudProviderService`
@@ -58,11 +60,23 @@ Repository protocols separate UI from storage:
 - `ModelDownloadRepository`
 - `AuditEventRepository`
 
-The production local store is GRDB/SQLite with optional CloudKit private-database sync for user-enabled settings, conversations, messages, vault metadata, vault chunks, and source documents. API keys, model binaries, prompt caches, browser state, chat attachment files, and transient tool state do not sync. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
+The production local store is GRDB on SQLCipher with optional E2E-encrypted CloudKit private-database sync for user-enabled settings, conversations, messages, vault metadata, and vault chunks. API keys, model binaries, prompt caches, browser state, chat attachment files, and transient tool state do not sync. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
 
-Chat attachments are staged under app support storage, capped at eight files per draft, and limited to inline-safe sizes before they can enter provider requests. Supported user-selected files include PNG, JPEG, WebP, GIF, HEIC/HEIF, PDF, plain text, Markdown, JSON, and CSV. HEIC/HEIF and sequence variants are decoded through ImageIO and staged as JPEG attachments so downstream provider capability checks can use the existing image path. Attachment-only sends and edits normalize empty text into explicit prompts such as image or file analysis instructions before persistence and routing.
+`SecureKeyStore` owns data keys for the encrypted database, encrypted blob store, and CloudKit sync. Device-local keys are non-migrating Keychain items; the CloudKit content key is synchronizable through iCloud Keychain. `SecurityResetCoordinator` runs before normal repository use and clears sensitive configuration from previous versions while preserving user content.
 
-The GRDB implementation is split by repository concern: base SQLite repository operations remain in `GRDBPinesStore.swift`, while CloudKit snapshot/apply/delete merge support lives in `GRDBPinesStore+CloudKit.swift`.
+Chat attachments are staged under app support storage with complete file protection and backup exclusion, capped at eight files per draft, and limited to inline-safe sizes before they can enter provider requests. Supported user-selected files include PNG, JPEG, WebP, GIF, HEIC/HEIF, PDF, plain text, Markdown, JSON, and CSV. HEIC/HEIF and sequence variants are decoded through ImageIO and staged as JPEG attachments so downstream provider capability checks can use the existing image path. Attachment-only sends and edits normalize empty text into explicit prompts such as image or file analysis instructions before persistence and routing.
+
+Vault source files are copied only long enough for extraction, then encrypted through `EncryptedBlobStore`; SQLite stores the encrypted blob path and source checksum.
+
+The GRDB implementation is split by repository concern: encrypted local-store opening, plaintext-to-SQLCipher migration, and base repository operations remain in `GRDBPinesStore.swift`, while CloudKit snapshot/apply/delete merge support lives in `GRDBPinesStore+CloudKit.swift`.
+
+## Security Model
+
+`EndpointSecurityPolicy` is the shared network gate for BYOK providers, MCP servers, OAuth authorization and token exchange, model catalog calls, and web fetch. Remote URLs must be HTTPS. HTTP is permitted only for `localhost`, `127.0.0.1`, and `[::1]` when the integration explicitly opts into local development; LAN/private HTTP remains blocked.
+
+`CloudProviderHeader` replaces raw custom header JSON. Plaintext header values are rejected for secret-like names, while secret headers must reference Keychain items. `Redactor` is applied before audit persistence and covers provider keys, bearer/OAuth/JWT/cookie values, private keys, and generic long credential shapes.
+
+CloudKit sync writes encrypted payload records to `PinesPrivateEncryptedV1` through `CloudKitRecordCipher`; the legacy plaintext `PinesPrivate` zone is retained only as a deletion target after encrypted sync succeeds. Optional app lock is independent of storage encryption and adds LocalAuthentication plus a privacy cover for app switcher snapshots.
 
 ## Local-First Inference
 
@@ -81,10 +95,10 @@ Vault retrieval stores both FP16 embeddings and compressed TurboQuant vector cod
 
 The app links MLX through exact fork pins in `project.yml`:
 
-- `https://github.com/RNT56/mlx-swift` at `48375f1d8f0694dee2ce8aab7f46be50c5297aec`
-- `https://github.com/RNT56/mlx-swift-lm` at `bb5f6f837896503b1f660eaeed2850fb0f232a64`
-- Nested `mlx` inside `RNT56/mlx-swift` at `292c54b7bbf95a7061b3d70c05c1785dfb9b9a85`
-- Nested `mlx-c` inside `RNT56/mlx-swift` at `f53f40c7a5d0db5cb2a8661e67e29a18470d8863`
+- `https://github.com/RNT56/mlx-swift` at `8f0718404a323698c7b5730f2de3af2b5e21f854`
+- `https://github.com/RNT56/mlx-swift-lm` at `2178543c34f6ff86989a485b60670f01f6c125a3`
+- Nested `mlx` inside `RNT56/mlx-swift` at `8f13e02fa85252f2a569a43c6759f07490b816a5`
+- Nested `mlx-c` inside `RNT56/mlx-swift` at `fff19671eed2e556bdf4552328a1791a8f37b651`
 
 Compatibility implementations for model families not yet present in linked MLX packages are split into `MLXCompatibleModels+Llama4.swift` and `MLXCompatibleModels+DeepseekV4.swift`.
 

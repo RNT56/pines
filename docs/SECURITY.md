@@ -4,10 +4,21 @@
 
 ## Secrets
 
-- API keys must be stored in Keychain through `SecretStore`.
+- API keys must be stored in Keychain through `SecretStore` or the typed `SecureKeyStore` wrapper.
+- Device-local secrets use `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
+- The CloudKit E2E content key is the only synchronizable secret. It uses a stable key ID, iCloud Keychain synchronization, and `kSecAttrAccessibleWhenUnlocked`.
 - Keys must not be stored in SQLite, UserDefaults, CloudKit, logs, or audit payloads.
+- Cloud provider custom headers use typed `CloudProviderHeader` values. Secret-like names such as `Authorization`, `Cookie`, names containing `key`, `token`, `secret`, `credential`, or `password` must be stored as Keychain references, not plaintext header values.
 - Public examples must not include real or realistic secret literals.
-- `Redactor` is used to strip common API-key shapes from diagnostic payloads.
+- `Redactor` strips OpenAI/Anthropic/Gemini/Voyage/Hugging Face/Brave/GitHub-style keys, bearer tokens, OAuth/JWT/cookie values, private keys, and generic long credential shapes from diagnostics and audit records.
+
+## Local Storage
+
+The production local store is SQLCipher-backed GRDB. `GRDBPinesStore` derives a 256-bit database key from `SecureKeyStore`, applies the key before normal repository access, verifies `PRAGMA cipher_version`, and fails closed if SQLCipher is unavailable.
+
+On first secure launch, an existing plaintext `pines.sqlite` is copied into a keyed database, critical row counts are verified, the encrypted file replaces the plaintext file, and plaintext SQLite/WAL/SHM files are deleted on a best-effort basis. Flash storage cannot guarantee forensic wipe, so release notes must describe the migration as best-effort deletion rather than cryptographic erasure.
+
+Vault source payloads are written through `EncryptedBlobStore` with CryptoKit `AES.GCM`, random nonces, SHA-256 verification, complete file protection, and backup exclusion. Chat attachment staging uses complete file protection and backup exclusion; provider requests still perform per-turn capability and size checks before reading staged files.
 
 ## Cloud Execution
 
@@ -21,6 +32,8 @@ Allowed execution modes:
 - `cloudRequired`
 
 If cloud is required but not configured, execution must fail with a consent/configuration path. Local vault and MCP resource context is not sent to cloud automatically; the app presents a per-turn approval sheet so the user can send without that context or explicitly include it.
+
+All remote endpoints must use HTTPS. `EndpointSecurityPolicy` is shared by BYOK providers, MCP endpoints, OAuth authorization/token URLs, model catalog calls, and `web.fetch`. `http://localhost`, `http://127.0.0.1`, and `http://[::1]` are allowed only when the integration has an explicit local-development flag. RFC1918/LAN HTTP is never treated as local.
 
 ## Tool Execution
 
@@ -37,9 +50,11 @@ Web and browser outputs should be treated as untrusted content. Browser automati
 
 ## Sync Boundary
 
-Optional iCloud sync may sync settings, conversations, messages, vault metadata, vault chunks, and source documents after user opt-in.
+Optional iCloud sync may sync settings, conversations, messages, vault metadata, and vault chunks after user opt-in.
 
 CloudKit repository merge/apply code lives in `GRDBPinesStore+CloudKit.swift` so the sync boundary stays isolated from the base local-store implementation.
+
+CloudKit uses the encrypted private zone `PinesPrivateEncryptedV1`. `CloudKitRecordCipher` encrypts record payloads with `AES.GCM` before upload; only record type, record name, updated timestamp, tombstone flag, schema version, nonce, key ID, ciphertext, and tag are visible to CloudKit. After encrypted sync succeeds, the service attempts to delete the legacy plaintext `PinesPrivate` zone.
 
 Do not sync:
 
@@ -54,3 +69,17 @@ Generated embeddings and compressed vector codes sync only when private iCloud s
 Chat attachment imports use user-selected files, stage local copies under app support storage, and reject empty or oversized files before request construction. HEIC/HEIF inputs are converted to JPEG at import time, so the original local file is not sent directly to providers. Message row actions can copy content, edit user-authored text while no run is active, or import local message attachments into Vault; Vault import follows the normal local ingestion and embedding-approval flow.
 
 MCP bearer tokens and OAuth access/refresh tokens follow the same Keychain-only rule as BYOK provider keys.
+
+## Security Reset
+
+The one-time `SecurityResetCoordinator` preserves chats, vault data, settings, models, and audit history, then deletes existing provider keys, MCP bearer/OAuth tokens, Brave Search keys, Hugging Face tokens, and legacy custom headers. Provider and MCP display names and URLs are kept only when they pass `EndpointSecurityPolicy`; otherwise the integration is disabled and a redacted audit event is recorded. Users must re-enter credentials after the reset.
+
+## Release Gates
+
+Every production release must pass:
+
+- `swift test --disable-automatic-resolution`
+- `scripts/ci/check-public-hygiene.sh`
+- encrypted-store migration verification against a plaintext fixture
+- CloudKit encrypted-zone verification showing no plaintext payload fields in `PinesPrivateEncryptedV1`
+- App Store privacy manifest review

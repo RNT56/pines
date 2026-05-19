@@ -102,7 +102,7 @@ struct MCPServerService: Sendable {
             try await unregisterTools(serverID: server.id)
             var failed = server
             failed.status = server.authMode == .none ? .failed : .requiresAuthentication
-            failed.lastError = error.localizedDescription
+            failed.lastError = Redactor().redact(error.localizedDescription)
             try await repository.upsertMCPServer(failed)
             throw error
         }
@@ -249,7 +249,7 @@ struct MCPServerService: Sendable {
         } catch {
             var degraded = server
             degraded.status = .degraded
-            degraded.lastError = error.localizedDescription
+            degraded.lastError = Redactor().redact(error.localizedDescription)
             do {
                 try await repository.upsertMCPServer(degraded)
             } catch {

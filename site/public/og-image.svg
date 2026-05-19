@@ -1,0 +1,32 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#07120F"/>
+  <path d="M0 0H1200V630H0V0Z" fill="url(#bg)"/>
+  <rect x="70" y="70" width="1060" height="490" rx="22" fill="#0B2F28" stroke="#285B50"/>
+  <rect x="780" y="116" width="238" height="390" rx="34" fill="#101918" stroke="#46655E" stroke-width="2"/>
+  <rect x="798" y="140" width="202" height="346" rx="24" fill="#07120F"/>
+  <rect x="822" y="174" width="96" height="20" rx="6" fill="#9FF4E3"/>
+  <rect x="822" y="216" width="138" height="58" rx="8" fill="#123F35" stroke="#285B50"/>
+  <rect x="852" y="292" width="108" height="58" rx="8" fill="#173D42" stroke="#285B50"/>
+  <rect x="822" y="368" width="126" height="58" rx="8" fill="#41351D" stroke="#6F5B2A"/>
+  <rect x="958" y="340" width="112" height="140" rx="30" fill="#101918" stroke="#46655E" stroke-width="2"/>
+  <rect x="970" y="354" width="88" height="112" rx="22" fill="#07120F"/>
+  <circle cx="990" cy="378" r="5" fill="#66D596"/>
+  <rect x="1004" y="372" width="38" height="10" rx="5" fill="#8FA39B"/>
+  <rect x="988" y="404" width="50" height="20" rx="6" fill="#123F35"/>
+  <rect x="988" y="432" width="42" height="18" rx="6" fill="#3C331E"/>
+  <rect x="120" y="126" width="92" height="92" rx="20" fill="#0B2F28"/>
+  <path d="M166 138C180 149 190 166 191 188C183 184 176 181 170 179C170 194 169 205 167 216H155C158 203 159 191 158 183C151 186 144 191 138 198C138 175 147 155 166 138Z" fill="#134C3F"/>
+  <path d="M166 147C176 158 183 170 185 184C179 181 174 179 170 179C170 193 169 204 167 214H160C162 200 162 188 160 180C155 183 150 187 146 192C147 175 154 160 166 147Z" fill="#9FF4E3" fill-opacity="0.88"/>
+  <path d="M178 192H190V204" stroke="#F5B84C" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="120" y="286" fill="#F8FBF8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="92" font-weight="800">Pines</text>
+  <text x="120" y="350" fill="#CBFFF4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="34" font-weight="700">The AI workbench you own.</text>
+  <text x="120" y="410" fill="#B8C7C1" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="28">Local models, cloud specialists, private context,</text>
+  <text x="120" y="448" fill="#B8C7C1" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="28">and tools in one iPhone and Apple Watch workspace.</text>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B2F28"/>
+      <stop offset="0.52" stop-color="#101918"/>
+      <stop offset="1" stop-color="#07120F"/>
+    </linearGradient>
+  </defs>
+</svg>

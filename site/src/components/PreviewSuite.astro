@@ -1,0 +1,86 @@
+---
+const previews = [
+  {
+    title: "Private Chat",
+    label: "Local route",
+    metric: "Stays on device",
+    lines: ["Choose an installed model", "Attach private notes", "Stream without cloud"],
+  },
+  {
+    title: "Model Library",
+    label: "MLX ready",
+    metric: "Know before install",
+    lines: ["Footprint and capability checks", "Verified local picks", "Runtime diagnostics"],
+  },
+  {
+    title: "Vault Context",
+    label: "Your material",
+    metric: "Searchable when needed",
+    lines: ["Import files and notes", "OCR and chunking", "Retrieval for chat"],
+  },
+  {
+    title: "Cloud Approval",
+    label: "Visible consent",
+    metric: "You choose the boundary",
+    lines: ["Send with context", "Send without context", "Keep it local"],
+  },
+];
+---
+
+<section class="section preview-suite" id="previews" aria-labelledby="previews-title">
+  <div class="section-copy">
+    <span class="section-kicker">App Previews</span>
+    <h2 id="previews-title">The iPhone app makes model choice and privacy boundaries visible.</h2>
+    <p>
+      Pines is built around the moments that matter in daily use: local chat,
+      model readiness, private context, cloud approval, and Watch continuity.
+    </p>
+  </div>
+
+  <div class="preview-stage">
+    <div class="preview-phone" aria-label="Pines iPhone app preview">
+      <div class="preview-phone-top">
+        <span>Pines</span>
+        <strong>Local route active</strong>
+      </div>
+      <div class="preview-route-flow" aria-hidden="true">
+        <span class="flow-node active">Local</span>
+        <span class="flow-line"></span>
+        <span class="flow-node">Vault</span>
+        <span class="flow-line delay"></span>
+        <span class="flow-node">Tools</span>
+      </div>
+      <div class="preview-transcript">
+        <div class="preview-message user">
+          <span>You</span>
+          <p>Summarize the project notes in my vault and keep this local.</p>
+        </div>
+        <div class="preview-message assistant">
+          <span>Pines</span>
+          <p>I found the relevant local context. No cloud provider is needed for this turn.</p>
+        </div>
+        <div class="token-stream" aria-hidden="true">
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview-grid">
+      {previews.map((preview, index) => (
+        <article class={`preview-card motion-${index + 1}`}>
+          <div>
+            <span>{preview.label}</span>
+            <h3>{preview.title}</h3>
+          </div>
+          <strong>{preview.metric}</strong>
+          <ul>
+            {preview.lines.map((line) => <li>{line}</li>)}
+          </ul>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>

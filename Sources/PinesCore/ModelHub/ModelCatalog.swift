@@ -222,6 +222,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
         baseURL: URL = URL(string: "https://huggingface.co")!,
         modelAuthor: String = Self.defaultModelAuthor
     ) {
+        precondition((try? EndpointSecurityPolicy().validate(baseURL, useCase: .modelCatalog)) != nil, "Model catalog base URL must use HTTPS.")
         self.client = client
         self.baseURL = baseURL
         self.modelAuthor = modelAuthor
@@ -263,7 +264,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
         }
 
         let url = components.url!
-        let (data, response) = try await client.data(for: authorizedRequest(url: url, accessToken: accessToken))
+        let (data, response) = try await client.data(for: try authorizedRequest(url: url, accessToken: accessToken))
         guard (200 ..< 300).contains(response.statusCode) else {
             throw URLError(.badServerResponse)
         }
@@ -291,7 +292,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
         var components = URLComponents(url: baseURL.appending(path: "/api/models/\(encodedRepository)"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "blobs", value: "true")]
         let url = components.url!
-        let (data, response) = try await client.data(for: authorizedRequest(url: url, accessToken: accessToken))
+        let (data, response) = try await client.data(for: try authorizedRequest(url: url, accessToken: accessToken))
         guard (200 ..< 300).contains(response.statusCode) else {
             throw URLError(.badServerResponse)
         }
@@ -319,7 +320,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
         var components = URLComponents(url: baseURL.appending(path: "/api/models/\(encodedRepository)"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "blobs", value: "true")]
         let infoURL = components.url!
-        let (infoData, infoResponse) = try await client.data(for: authorizedRequest(url: infoURL, accessToken: accessToken))
+        let (infoData, infoResponse) = try await client.data(for: try authorizedRequest(url: infoURL, accessToken: accessToken))
         guard (200 ..< 300).contains(infoResponse.statusCode) else {
             throw URLError(.badServerResponse)
         }
@@ -347,7 +348,7 @@ public struct HuggingFaceModelCatalogService: Sendable {
 
     private func optionalFile(repository: String, revision: String, path: String, accessToken: String?) async throws -> Data? {
         let url = baseURL.appending(path: "/\(repository)/resolve/\(revision)/\(Self.encodedPath(path))")
-        let (data, response) = try await client.data(for: authorizedRequest(url: url, accessToken: accessToken))
+        let (data, response) = try await client.data(for: try authorizedRequest(url: url, accessToken: accessToken))
         if response.statusCode == 404 {
             return nil
         }
@@ -357,7 +358,8 @@ public struct HuggingFaceModelCatalogService: Sendable {
         return data
     }
 
-    private func authorizedRequest(url: URL, accessToken: String?) -> URLRequest {
+    private func authorizedRequest(url: URL, accessToken: String?) throws -> URLRequest {
+        try EndpointSecurityPolicy().validate(url, useCase: .modelCatalog)
         var request = URLRequest(url: url)
         if let accessToken = accessToken?.trimmingCharacters(in: .whitespacesAndNewlines), !accessToken.isEmpty {
             request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")

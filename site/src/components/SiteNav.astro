@@ -1,0 +1,20 @@
+---
+const navItems = [
+  { href: "/#previews", label: "Previews" },
+  { href: "/#tour", label: "Tour" },
+  { href: "/#onboarding", label: "Setup" },
+  { href: "/#builders", label: "Builders" },
+  { href: "/status/", label: "Status" },
+];
+---
+
+<header class="site-header">
+  <a class="brand-lockup" href="/" aria-label="Pines home">
+    <img src="/brand/pines-mark.svg" alt="" class="brand-mark" />
+    <span>Pines</span>
+  </a>
+  <nav class="site-nav" aria-label="Primary navigation">
+    {navItems.map((item) => <a href={item.href}>{item.label}</a>)}
+  </nav>
+  <a class="nav-cta" href="https://github.com/RNT56/pines">GitHub</a>
+</header>

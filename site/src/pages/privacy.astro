@@ -1,0 +1,69 @@
+---
+import MarketingLayout from "../layouts/MarketingLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+
+const policies = [
+  {
+    title: "Local-first defaults",
+    body: "Chats, model state, vault documents, embeddings, attachments, and normal inference stay on device unless you configure a cloud provider and choose a cloud route.",
+  },
+  {
+    title: "Keychain-only secrets",
+    body: "API keys, bearer tokens, and OAuth access or refresh tokens belong in Keychain, not SQLite, UserDefaults, CloudKit, logs, or audit payloads.",
+  },
+  {
+    title: "Explicit cloud context",
+    body: "If local vault or MCP resource context would be sent to a BYOK provider, Pines presents a per-turn approval path so you can send without that context or include it knowingly.",
+  },
+  {
+    title: "Optional sync",
+    body: "CloudKit sync is opt-in and excludes API keys, model binaries, prompt caches, transient tool state, browser state, and generated embeddings by default.",
+  },
+  {
+    title: "Tool boundaries",
+    body: "Tools declare permissions, network policy, side-effect level, timeout, and explanation requirements. Private local data tools are scoped through app repositories.",
+  },
+];
+---
+
+<MarketingLayout
+  title="Privacy - Pines"
+  description="Privacy and security boundaries for Pines, a local-first iPhone and Apple Watch AI workbench."
+  path="/privacy/"
+>
+  <div class="page-shell">
+    <SiteNav />
+    <main class="content-page">
+      <section class="content-hero">
+        <span class="section-kicker">Privacy</span>
+        <h1>Local-first is the product boundary.</h1>
+        <p>
+          Pines is designed so private work stays close by default. Cloud providers,
+          sync, MCP resources, and tools are explicit configuration and consent points.
+        </p>
+      </section>
+
+      <section class="policy-list" aria-label="Privacy policies">
+        {policies.map((policy) => (
+          <article>
+            <h2>{policy.title}</h2>
+            <p>{policy.body}</p>
+          </article>
+        ))}
+      </section>
+
+      <section class="docs-callout">
+        <div>
+          <h2>Source details</h2>
+          <p>
+            The repository security notes, app privacy notes, MCP notes, and architecture
+            docs contain the implementation-level boundaries.
+          </p>
+        </div>
+        <a class="button secondary" href="https://github.com/RNT56/pines/blob/main/docs/SECURITY.md">Security notes</a>
+      </section>
+    </main>
+    <SiteFooter />
+  </div>
+</MarketingLayout>

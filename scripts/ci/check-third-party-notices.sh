@@ -12,6 +12,7 @@ required_terms=(
   "SwiftHuggingFace"
   "SwiftTransformers"
   "GRDB"
+  "SQLCipher"
   "Swift Markdown"
   "Swift CMark"
   "HighlightSwift"

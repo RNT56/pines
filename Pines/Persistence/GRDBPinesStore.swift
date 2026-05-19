@@ -4,6 +4,9 @@ import PinesCore
 #if canImport(GRDB)
 import GRDB
 import OSLog
+#if canImport(SQLCipher)
+import SQLCipher
+#endif
 
 actor GRDBPinesStore:
     ConversationRepository,
@@ -26,8 +29,10 @@ actor GRDBPinesStore:
         let url = try Self.databaseURL(fileName: configuration.databaseFileName)
         runtimeMetrics.recordStartupPhase("store_url", elapsedSeconds: Date().timeIntervalSince(urlStartedAt))
 
+        let databaseKey = try Self.prepareEncryptedDatabase(at: url, dataProtection: configuration.dataProtection)
+
         let openStartedAt = Date()
-        database = try DatabasePool(path: url.path)
+        database = try DatabasePool(path: url.path, configuration: Self.databaseConfiguration(databaseKey: databaseKey))
         runtimeMetrics.recordStartupPhase("store_open", elapsedSeconds: Date().timeIntervalSince(openStartedAt))
 
         let migrationStartedAt = Date()
@@ -49,6 +54,205 @@ actor GRDBPinesStore:
         let directory = base.appending(path: "Pines", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appending(path: fileName)
+    }
+
+    private static func prepareEncryptedDatabase(at url: URL, dataProtection: DataProtectionClass) throws -> Data {
+        #if canImport(SQLCipher)
+        let key = try SecureKeyStore.loadOrCreateDataKey(purpose: .encryptedDatabase, keyID: SecureKeyStore.databaseKeyID)
+        if isPlaintextSQLiteDatabase(at: url) {
+            try migratePlaintextDatabase(at: url, databaseKey: key)
+        }
+        try applyProtection(dataProtection, to: url)
+        try applyProtection(dataProtection, to: url.deletingLastPathComponent())
+        return key
+        #else
+        throw StoreSecurityError.sqlCipherUnavailable
+        #endif
+    }
+
+    private static func databaseConfiguration(databaseKey: Data) throws -> Configuration {
+        var configuration = Configuration()
+        #if canImport(SQLCipher)
+        let rawKey = databaseKey.map { String(format: "%02x", $0) }.joined()
+        configuration.prepareDatabase { db in
+            try db.execute(sql: #"PRAGMA key = "x'\#(rawKey)'""#)
+            guard let cipherVersion = try String.fetchOne(db, sql: "PRAGMA cipher_version"),
+                  !cipherVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
+                throw StoreSecurityError.sqlCipherUnavailable
+            }
+            try db.execute(sql: "PRAGMA cipher_memory_security = ON")
+            try db.execute(sql: "PRAGMA foreign_keys = ON")
+        }
+        #else
+        _ = databaseKey
+        #endif
+        return configuration
+    }
+
+    private static func isPlaintextSQLiteDatabase(at url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let handle = try? FileHandle(forReadingFrom: url)
+        else {
+            return false
+        }
+        defer { try? handle.close() }
+        let header = try? handle.read(upToCount: 16)
+        return header == Data("SQLite format 3\u{0}".utf8)
+    }
+
+    private static func migratePlaintextDatabase(at url: URL, databaseKey: Data) throws {
+        let fileManager = FileManager.default
+        let directory = url.deletingLastPathComponent()
+        let migrationID = UUID().uuidString
+        let encryptedURL = directory.appending(path: "\(url.lastPathComponent).encrypted-\(migrationID)")
+        let backupName = "\(url.lastPathComponent).plaintext-\(migrationID)"
+        let backupURL = directory.appending(path: backupName)
+
+        try removeDatabaseFiles(at: encryptedURL)
+        let queue = try DatabaseQueue(path: encryptedURL.path, configuration: databaseConfiguration(databaseKey: databaseKey))
+        try migrator.migrate(queue)
+        try queue.write { db in
+            try db.execute(sql: "PRAGMA journal_mode = DELETE")
+            try db.execute(sql: "PRAGMA foreign_keys = OFF")
+            try db.execute(sql: "ATTACH DATABASE ? AS plaintext KEY ''", arguments: [url.path])
+            defer { try? db.execute(sql: "DETACH DATABASE plaintext") }
+
+            for table in plaintextMigrationTables {
+                guard try tableExists(table, in: "main", db: db),
+                      try tableExists(table, in: "plaintext", db: db)
+                else {
+                    continue
+                }
+                let destinationColumns = try columnNames(table: table, schema: "main", db: db)
+                let sourceColumns = Set(try columnNames(table: table, schema: "plaintext", db: db))
+                let columns = destinationColumns.filter { sourceColumns.contains($0) && shouldMigrateColumn($0, table: table) }
+                guard !columns.isEmpty else { continue }
+                let columnSQL = columns.map(quotedIdentifier).joined(separator: ", ")
+                try db.execute(sql: """
+                    INSERT OR REPLACE INTO main.\(quotedIdentifier(table)) (\(columnSQL))
+                    SELECT \(columnSQL) FROM plaintext.\(quotedIdentifier(table))
+                    """)
+            }
+
+            try rebuildFTS("messages_fts", db: db)
+            try rebuildFTS("vault_chunks_fts", db: db)
+            try verifyMigratedRowCounts(db: db)
+            try db.execute(sql: "PRAGMA foreign_keys = ON")
+            try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+        }
+
+        try fileManager.replaceItemAt(url, withItemAt: encryptedURL, backupItemName: backupName)
+        try removeDatabaseFiles(at: backupURL)
+        try removeDatabaseFiles(at: encryptedURL)
+        try removeDatabaseSidecars(for: url)
+    }
+
+    private static let plaintextMigrationTables = [
+        "conversations",
+        "messages",
+        "attachments",
+        "model_installs",
+        "vault_documents",
+        "vault_chunks",
+        "audit_events",
+        "app_settings",
+        "cloud_providers",
+        "model_downloads",
+        "sync_records",
+        "chat_runs",
+        "agent_sessions",
+        "tool_runs",
+        "vault_import_jobs",
+        "browser_actions",
+        "vault_embeddings",
+        "mcp_servers",
+        "mcp_tools",
+        "mcp_resources",
+        "mcp_resource_templates",
+        "mcp_prompts",
+        "vault_embeddings_v2",
+        "vault_embedding_profiles",
+        "vault_embedding_jobs",
+        "vault_retrieval_events",
+        "vault_embeddings_v3",
+    ]
+
+    private static let criticalMigrationTables = [
+        "conversations",
+        "messages",
+        "vault_chunks",
+        "vault_embeddings_v3",
+        "app_settings",
+        "audit_events",
+    ]
+
+    private static func shouldMigrateColumn(_ column: String, table: String) -> Bool {
+        guard table == "cloud_providers" else { return true }
+        return column != "extra_headers_json" && column != "headers_json"
+    }
+
+    private static func tableExists(_ table: String, in schema: String, db: Database) throws -> Bool {
+        try String.fetchOne(
+            db,
+            sql: "SELECT name FROM \(quotedIdentifier(schema)).sqlite_master WHERE type = 'table' AND name = ?",
+            arguments: [table]
+        ) != nil
+    }
+
+    private static func columnNames(table: String, schema: String, db: Database) throws -> [String] {
+        let rows = try Row.fetchAll(db, sql: "PRAGMA \(quotedIdentifier(schema)).table_info(\(quotedIdentifier(table)))")
+        return rows.compactMap { row in row["name"] as String? }
+    }
+
+    private static func verifyMigratedRowCounts(db: Database) throws {
+        for table in criticalMigrationTables {
+            guard try tableExists(table, in: "main", db: db),
+                  try tableExists(table, in: "plaintext", db: db)
+            else {
+                continue
+            }
+            let sourceCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM plaintext.\(quotedIdentifier(table))") ?? 0
+            let destinationCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM main.\(quotedIdentifier(table))") ?? 0
+            guard sourceCount == destinationCount else {
+                throw StoreSecurityError.migrationVerificationFailed(table: table, expected: sourceCount, actual: destinationCount)
+            }
+        }
+    }
+
+    private static func rebuildFTS(_ table: String, db: Database) throws {
+        guard try tableExists(table, in: "main", db: db) else { return }
+        try db.execute(sql: "INSERT INTO \(quotedIdentifier(table))(\(quotedIdentifier(table))) VALUES('rebuild')")
+    }
+
+    private static func quotedIdentifier(_ identifier: String) -> String {
+        "\"\(identifier.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+
+    private static func removeDatabaseFiles(at url: URL) throws {
+        try removeIfPresent(url)
+        try removeDatabaseSidecars(for: url)
+    }
+
+    private static func removeDatabaseSidecars(for url: URL) throws {
+        try removeIfPresent(URL(fileURLWithPath: "\(url.path)-wal"))
+        try removeIfPresent(URL(fileURLWithPath: "\(url.path)-shm"))
+    }
+
+    private static func removeIfPresent(_ url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
+    }
+
+    private static func applyProtection(_ dataProtection: DataProtectionClass, to url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let protection: FileProtectionType = switch dataProtection {
+        case .complete:
+            .complete
+        case .completeUntilFirstUserAuthentication:
+            .completeUntilFirstUserAuthentication
+        }
+        try FileManager.default.setAttributes([.protectionKey: protection], ofItemAtPath: url.path)
     }
 
     private static var migrator: DatabaseMigrator {
@@ -1201,9 +1405,9 @@ actor GRDBPinesStore:
                 sql: """
                 INSERT INTO cloud_providers
                     (id, kind, display_name, base_url, default_model_id, validation_status, last_validation_error,
-                     extra_headers_json, keychain_service, keychain_account, enabled_for_agents,
+                     extra_headers_json, headers_json, keychain_service, keychain_account, allow_insecure_local_http, enabled_for_agents,
                      last_validated_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     kind = excluded.kind,
                     display_name = excluded.display_name,
@@ -1211,9 +1415,11 @@ actor GRDBPinesStore:
                     default_model_id = excluded.default_model_id,
                     validation_status = excluded.validation_status,
                     last_validation_error = excluded.last_validation_error,
-                    extra_headers_json = excluded.extra_headers_json,
+                    extra_headers_json = NULL,
+                    headers_json = excluded.headers_json,
                     keychain_service = excluded.keychain_service,
                     keychain_account = excluded.keychain_account,
+                    allow_insecure_local_http = excluded.allow_insecure_local_http,
                     enabled_for_agents = excluded.enabled_for_agents,
                     last_validated_at = excluded.last_validated_at,
                     updated_at = excluded.updated_at
@@ -1226,9 +1432,11 @@ actor GRDBPinesStore:
                     provider.defaultModelID?.rawValue,
                     provider.validationStatus.rawValue,
                     provider.lastValidationError,
-                    provider.extraHeadersJSON,
+                    nil,
+                    Self.encodeJSON(provider.headers),
                     provider.keychainService,
                     provider.keychainAccount,
+                    provider.allowInsecureLocalHTTP ? 1 : 0,
                     provider.enabledForAgents ? 1 : 0,
                     provider.lastValidatedAt?.timeIntervalSinceReferenceDate,
                     now.timeIntervalSinceReferenceDate,
@@ -1511,6 +1719,7 @@ actor GRDBPinesStore:
 
     func append(_ event: AuditEvent) async throws {
         try await database.write { db in
+            let redactor = Redactor()
             try db.execute(
                 sql: """
                 INSERT INTO audit_events
@@ -1521,8 +1730,8 @@ actor GRDBPinesStore:
                     event.id.uuidString,
                     event.createdAt.timeIntervalSinceReferenceDate,
                     event.category.rawValue,
-                    event.summary,
-                    event.redactedPayload,
+                    redactor.redact(event.summary),
+                    event.redactedPayload.map(redactor.redact),
                     event.providerID?.rawValue,
                     event.modelID?.rawValue,
                     event.toolName,
@@ -1802,6 +2011,20 @@ actor GRDBPinesStore:
             continuation.onTermination = { _ in
                 task.cancel()
             }
+        }
+    }
+}
+
+private enum StoreSecurityError: Error, LocalizedError {
+    case sqlCipherUnavailable
+    case migrationVerificationFailed(table: String, expected: Int, actual: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .sqlCipherUnavailable:
+            "SQLCipher is required for the encrypted local store but is not available."
+        case let .migrationVerificationFailed(table, expected, actual):
+            "Encrypted store migration failed verification for \(table): expected \(expected) rows, migrated \(actual)."
         }
     }
 }

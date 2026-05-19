@@ -1,0 +1,74 @@
+---
+const year = new Date().getFullYear();
+
+const productLinks = [
+  { href: "/#previews", label: "App previews" },
+  { href: "/#tour", label: "Product tour" },
+  { href: "/#onboarding", label: "Getting started" },
+  { href: "/privacy/", label: "Privacy" },
+  { href: "/status/", label: "Availability" },
+];
+
+const sourceLinks = [
+  { href: "https://github.com/RNT56/pines", label: "GitHub repository" },
+  { href: "https://github.com/RNT56/pines/blob/main/DEV_README.md", label: "Developer README" },
+  { href: "https://github.com/RNT56/pines/blob/main/docs/ARCHITECTURE.md", label: "Architecture" },
+  { href: "https://github.com/RNT56/pines/blob/main/docs/SECURITY.md", label: "Security model" },
+  { href: "https://github.com/RNT56/pines/blob/main/docs/MCP.md", label: "MCP support" },
+];
+
+const projectLinks = [
+  { href: "https://github.com/RNT56/pines/releases", label: "Releases" },
+  { href: "https://github.com/RNT56/pines/blob/main/models.md", label: "Model notes" },
+  { href: "https://github.com/RNT56/pines/blob/main/LICENSE", label: "License" },
+  { href: "https://github.com/RNT56/pines/blob/main/NOTICE", label: "Notice" },
+];
+---
+
+<footer class="site-footer">
+  <div class="footer-main">
+    <section class="footer-brand-panel" aria-label="Pines summary">
+      <div class="footer-brand">
+        <img src="/brand/pines-mark.svg" alt="" />
+        <div>
+          <strong>Pines</strong>
+          <p>Local models, optional cloud reach, private context, and Apple Watch access in one iPhone workspace.</p>
+        </div>
+      </div>
+      <div class="footer-status-card">
+        <span class="status-pill">Source available now</span>
+        <p>Public TestFlight or App Store availability will be announced when distribution is ready.</p>
+      </div>
+      <div class="footer-actions" aria-label="Footer actions">
+        <a class="button primary" href="https://github.com/RNT56/pines">View source</a>
+        <a class="button secondary" href="/status/">Read status</a>
+      </div>
+    </section>
+
+    <nav class="footer-links" aria-label="Footer navigation">
+      <div class="footer-column">
+        <h2>Product</h2>
+        {productLinks.map((link) => <a href={link.href}>{link.label}</a>)}
+      </div>
+      <div class="footer-column">
+        <h2>Source</h2>
+        {sourceLinks.map((link) => <a href={link.href}>{link.label}</a>)}
+      </div>
+      <div class="footer-column">
+        <h2>Project</h2>
+        {projectLinks.map((link) => <a href={link.href}>{link.label}</a>)}
+      </div>
+    </nav>
+  </div>
+
+  <div class="footer-bottom">
+    <p>
+      Copyright {year} Schtack and Pines contributors. Source-available for noncommercial use under PolyForm Noncommercial 1.0.0.
+    </p>
+    <div class="footer-bottom-links" aria-label="Legal links">
+      <a href="https://github.com/RNT56/pines/blob/main/LICENSE">License</a>
+      <a href="https://github.com/RNT56/pines/blob/main/NOTICE">Notice</a>
+      <a href="/privacy/">Privacy</a>
+    </div>
+  </div>
+</footer>

@@ -15,6 +15,7 @@ struct VaultIngestionService {
     let settingsRepository: (any SettingsRepository)?
     let inferenceProvider: any InferenceProvider
     let embeddingService: VaultEmbeddingService?
+    let encryptedBlobStore: EncryptedBlobStore
     let auditRepository: (any AuditEventRepository)?
     let chunker = VaultChunker()
     private let deviceMonitor = DeviceRuntimeMonitor()
@@ -22,9 +23,15 @@ struct VaultIngestionService {
 
     func importFile(url sourceURL: URL) async throws -> VaultDocumentRecord {
         let storedURL = try Self.copyIntoVault(sourceURL)
+        defer { try? FileManager.default.removeItem(at: storedURL) }
         try Task.checkCancellation()
         let text = try await Self.extractText(from: storedURL)
         try Task.checkCancellation()
+        let encryptedMetadata = try await encryptedBlobStore.write(
+            Data(contentsOf: storedURL),
+            contentType: Self.sourceType(for: storedURL)
+        )
+        let encryptedURL = try encryptedBlobStore.fileURL(for: encryptedMetadata)
         let document = VaultDocumentRecord(
             title: storedURL.deletingPathExtension().lastPathComponent,
             sourceType: Self.sourceType(for: storedURL),
@@ -32,7 +39,7 @@ struct VaultIngestionService {
             chunkCount: 0
         )
         let checksum = StableFileHash.hexDigest(for: text)
-        try await vaultRepository.upsertDocument(document, localURL: storedURL, checksum: checksum)
+        try await vaultRepository.upsertDocument(document, localURL: encryptedURL, checksum: checksum)
 
         let chunks = chunker.chunks(for: text, sourceID: document.id.uuidString)
         try Task.checkCancellation()
@@ -99,7 +106,7 @@ struct VaultIngestionService {
             } catch {
                 try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
                 job.status = .failed
-                job.lastError = error.localizedDescription
+                job.lastError = Redactor().redact(error.localizedDescription)
                 job.updatedAt = Date()
                 do {
                     try await vaultRepository.upsertEmbeddingJob(job)
@@ -133,7 +140,7 @@ struct VaultIngestionService {
         }
 
         try await auditRepository?.append(
-            AuditEvent(category: .vaultImport, summary: "Imported \(storedURL.lastPathComponent)")
+            AuditEvent(category: .vaultImport, summary: "Imported encrypted source \(storedURL.lastPathComponent)")
         )
         return VaultDocumentRecord(
             id: document.id,

@@ -1,0 +1,31 @@
+---
+const modules = [
+  "SwiftUI app shell",
+  "PinesCore contracts",
+  "GRDB persistence",
+  "MLX runtime bridge",
+  "Cloud providers",
+  "MCP client",
+  "Tool policy gate",
+  "Watch protocol",
+];
+---
+
+<section class="section builders" id="builders">
+  <div class="builder-copy">
+    <span class="section-kicker">Open To Inspect</span>
+    <h2>The product story is backed by a source-available Swift codebase.</h2>
+    <p>
+      Pines is not a black-box landing page. The repository includes the SwiftUI app,
+      shared core contracts, persistence, runtime bridges, model lifecycle services,
+      policy-gated tools, and Watch support.
+    </p>
+    <div class="builder-actions">
+      <a class="button primary" href="https://github.com/RNT56/pines">View source</a>
+      <a class="button secondary" href="https://github.com/RNT56/pines/blob/main/DEV_README.md">Developer README</a>
+    </div>
+  </div>
+  <div class="module-board" aria-label="Pines implementation modules">
+    {modules.map((module) => <span>{module}</span>)}
+  </div>
+</section>

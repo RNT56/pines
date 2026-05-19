@@ -1,0 +1,95 @@
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "37 6 * * 2"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift:
+    name: CodeQL Swift
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Initialize CodeQL
+        # github/codeql-action v4.35.5
+        uses: github/codeql-action/init@f25eda876ebb741d872b63b9f2c6dfdd77f14b83
+        with:
+          languages: swift
+          build-mode: manual
+          queries: security-and-quality
+
+      - name: Select Xcode with iPhoneOS SDK
+        run: |
+          selected=""
+          for xcode in /Applications/Xcode*.app; do
+            [ -d "$xcode" ] || continue
+            sudo xcode-select -s "$xcode"
+            if xcodebuild -showsdks | grep -q 'iphoneos'; then
+              selected="$xcode"
+              break
+            fi
+          done
+          if [ -z "$selected" ]; then
+            echo "No installed Xcode with an iPhoneOS SDK was found." >&2
+            exit 1
+          fi
+          echo "Selected $selected"
+          xcodebuild -version
+
+      - name: Prepare Xcode build inputs
+        run: |
+          bash scripts/ci/xcodegen.sh --version
+          bash scripts/ci/ensure-xcode-platforms.sh
+          bash scripts/ci/run-xcode-validation.sh prepare
+          bash scripts/ci/run-xcode-validation.sh generate
+          bash scripts/ci/run-xcode-validation.sh resolve
+
+      - name: Build app for CodeQL
+        run: bash scripts/ci/run-xcode-validation.sh build-app
+
+      - name: Analyze
+        # github/codeql-action v4.35.5
+        uses: github/codeql-action/analyze@f25eda876ebb741d872b63b9f2c6dfdd77f14b83
+
+  javascript-typescript:
+    name: CodeQL JavaScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Initialize CodeQL
+        # github/codeql-action v4.35.5
+        uses: github/codeql-action/init@f25eda876ebb741d872b63b9f2c6dfdd77f14b83
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+
+      - name: Analyze
+        # github/codeql-action v4.35.5
+        uses: github/codeql-action/analyze@f25eda876ebb741d872b63b9f2c6dfdd77f14b83

@@ -1,0 +1,49 @@
+---
+const steps = [
+  {
+    number: "01",
+    title: "Open a local chat",
+    body: "Start with an on-device route so the first experience is useful before any provider keys are involved.",
+  },
+  {
+    number: "02",
+    title: "Choose a model",
+    body: "Review local model size, capability, and readiness before downloading an MLX model for everyday use.",
+  },
+  {
+    number: "03",
+    title: "Add your context",
+    body: "Import notes, PDFs, images, Markdown, JSON, CSV, or plain text so Pines can retrieve what matters later.",
+  },
+  {
+    number: "04",
+    title: "Add cloud reach",
+    body: "Connect BYOK providers for harder tasks while keeping private-context approval visible per turn.",
+  },
+  {
+    number: "05",
+    title: "Bring it to your wrist",
+    body: "Use the Watch app for quick replies, conversation status, cancellation, and pending request recovery.",
+  },
+];
+---
+
+<section class="section onboarding" id="onboarding" aria-labelledby="onboarding-title">
+  <div class="onboarding-copy">
+    <span class="section-kicker">Getting Started</span>
+    <h2 id="onboarding-title">Designed so the first useful step does not require cloud setup.</h2>
+    <p>
+      Pines is meant to feel calm on day one: begin locally, add your own material,
+      then connect cloud providers and tools only when your workflow needs them.
+    </p>
+  </div>
+  <div class="onboarding-steps">
+    {steps.map((step) => (
+      <article>
+        <span>{step.number}</span>
+        <h3>{step.title}</h3>
+        <p>{step.body}</p>
+      </article>
+    ))}
+  </div>
+</section>

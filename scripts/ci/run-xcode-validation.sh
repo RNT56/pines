@@ -8,6 +8,8 @@ root="$(git rev-parse --show-toplevel)"
 xcodegen=(bash "$root/scripts/ci/xcodegen.sh")
 swiftpm_resolved_file="${PINES_SWIFTPM_PACKAGE_RESOLVED_FILE:-Package.resolved}"
 xcode_resolved_file="${PINES_XCODE_PACKAGE_RESOLVED_FILE:-$project/project.xcworkspace/xcshareddata/swiftpm/Package.resolved}"
+snapshot_dir="${PINES_XCODE_VALIDATION_SNAPSHOT:-build/xcode-validation-snapshot}"
+log_dir="${PINES_XCODE_BUILD_LOG_DIR:-build}"
 xcode_package_flags=(
   -skipMacroValidation
   -skipPackagePluginValidation
@@ -15,25 +17,40 @@ xcode_package_flags=(
   -disableAutomaticPackageResolution
 )
 
-mkdir -p build
+mkdir -p "$log_dir"
 
-generated_project_snapshot="$(mktemp -d "${TMPDIR:-/tmp}/pines-xcodegen-before.XXXXXX")"
-trap 'rm -rf "$generated_project_snapshot"' EXIT
+usage() {
+  cat <<'USAGE'
+usage: run-xcode-validation.sh [all|prepare|generate|resolve|build-app|build-tests|run-tests|finalize]
+
+Subcommands let GitHub Actions show granular Xcode validation phases while preserving
+the generated-project and package-lock drift checks used by the full local run.
+USAGE
+}
+
+require_snapshot() {
+  if [ ! -d "$snapshot_dir" ]; then
+    echo "::error::Xcode validation snapshot is missing. Run prepare first." >&2
+    exit 1
+  fi
+}
 
 snapshot_generated_project() {
+  echo "Snapshotting generated project and package locks..."
+  rm -rf "$snapshot_dir"
+  mkdir -p "$snapshot_dir"
+
   if [ -e "$project" ]; then
-    mkdir -p "$generated_project_snapshot/project"
+    mkdir -p "$snapshot_dir/project"
     rsync -a \
       --exclude 'xcuserdata/' \
       --exclude '*.xcuserstate' \
       --exclude 'project.xcworkspace/xcshareddata/swiftpm/configuration/' \
-      "$project/" "$generated_project_snapshot/project/"
+      "$project/" "$snapshot_dir/project/"
   else
-    touch "$generated_project_snapshot/project-missing"
+    touch "$snapshot_dir/project-missing"
   fi
-}
 
-snapshot_package_resolution_files() {
   if [ ! -f "$swiftpm_resolved_file" ]; then
     echo "::error::$swiftpm_resolved_file is required for deterministic SwiftPM package resolution."
     exit 1
@@ -42,15 +59,18 @@ snapshot_package_resolution_files() {
     echo "::error::$xcode_resolved_file is required for deterministic Xcode app package resolution."
     exit 1
   fi
-  cp "$swiftpm_resolved_file" "$generated_project_snapshot/Package.resolved"
-  mkdir -p "$generated_project_snapshot/xcode-swiftpm"
-  cp "$xcode_resolved_file" "$generated_project_snapshot/xcode-swiftpm/Package.resolved"
+
+  cp "$swiftpm_resolved_file" "$snapshot_dir/Package.resolved"
+  mkdir -p "$snapshot_dir/xcode-swiftpm"
+  cp "$xcode_resolved_file" "$snapshot_dir/xcode-swiftpm/Package.resolved"
 }
 
 check_generated_project_drift() {
+  require_snapshot
   echo "Checking generated project drift..."
   rm -rf "$project/project.xcworkspace/xcshareddata/swiftpm/configuration"
-  if [ -e "$generated_project_snapshot/project-missing" ]; then
+
+  if [ -e "$snapshot_dir/project-missing" ]; then
     if [ -e "$project" ]; then
       echo "::error::$project was generated but is not committed."
       exit 1
@@ -58,92 +78,161 @@ check_generated_project_drift() {
     return 0
   fi
 
-  if ! diff -qr -x xcuserdata -x '*.xcuserstate' "$generated_project_snapshot/project" "$project" >/dev/null; then
+  if ! diff -qr -x xcuserdata -x '*.xcuserstate' "$snapshot_dir/project" "$project" >/dev/null; then
     echo "::error::$project changed after pinned XcodeGen generation. Commit the generated project updates."
-    diff -ru -x xcuserdata -x '*.xcuserstate' "$generated_project_snapshot/project" "$project" || true
+    diff -ru -x xcuserdata -x '*.xcuserstate' "$snapshot_dir/project" "$project" || true
     exit 1
   fi
 }
 
 check_package_resolution_drift() {
+  require_snapshot
   echo "Checking package resolution drift..."
-  if ! cmp -s "$generated_project_snapshot/Package.resolved" "$swiftpm_resolved_file"; then
+
+  if ! cmp -s "$snapshot_dir/Package.resolved" "$swiftpm_resolved_file"; then
     echo "::error::$swiftpm_resolved_file changed during Xcode validation. Commit the resolved SwiftPM graph."
-    diff -u "$generated_project_snapshot/Package.resolved" "$swiftpm_resolved_file" || true
+    diff -u "$snapshot_dir/Package.resolved" "$swiftpm_resolved_file" || true
     exit 1
   fi
-  if ! cmp -s "$generated_project_snapshot/xcode-swiftpm/Package.resolved" "$xcode_resolved_file"; then
+
+  if ! cmp -s "$snapshot_dir/xcode-swiftpm/Package.resolved" "$xcode_resolved_file"; then
     echo "::error::$xcode_resolved_file changed during Xcode validation. Commit the resolved Xcode app graph."
-    diff -u "$generated_project_snapshot/xcode-swiftpm/Package.resolved" "$xcode_resolved_file" || true
+    diff -u "$snapshot_dir/xcode-swiftpm/Package.resolved" "$xcode_resolved_file" || true
     exit 1
   fi
 }
 
-restore_generated_project() {
-  echo "Restoring generated Xcode project..."
+generate_project() {
+  require_snapshot
+  echo "Generating Xcode project..."
   "${xcodegen[@]}" generate
   check_generated_project_drift
 }
 
-snapshot_generated_project
-snapshot_package_resolution_files
-
-echo "Generating Xcode project..."
-"${xcodegen[@]}" generate
-check_generated_project_drift
-
-echo "Resolving Xcode package dependencies..."
-xcodebuild \
-  -resolvePackageDependencies \
-  -project "$project" \
-  -scheme "$scheme" \
-  "${xcode_package_flags[@]}"
-
-echo "Building iOS app without signing..."
-set -o pipefail
-xcodebuild \
-  -project "$project" \
-  -scheme "$scheme" \
-  -destination 'generic/platform=iOS' \
-  -derivedDataPath "$derived_data" \
-  "${xcode_package_flags[@]}" \
-  CODE_SIGNING_ALLOWED=NO \
-  build | tee build/xcodebuild.log
-
-echo "Building iOS runtime smoke tests..."
-xcodebuild \
-  -project "$project" \
-  -scheme "$scheme" \
-  -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath "$derived_data" \
-  "${xcode_package_flags[@]}" \
-  CODE_SIGNING_ALLOWED=NO \
-  build-for-testing | tee build/xcodebuild-tests.log
-
-if [ "${PINES_SKIP_SIMULATOR_TEST_RUN:-0}" = "1" ]; then
-  echo "Skipping simulator test run because PINES_SKIP_SIMULATOR_TEST_RUN=1."
-  restore_generated_project
+resolve_packages() {
+  require_snapshot
+  echo "Resolving Xcode package dependencies..."
+  xcodebuild \
+    -resolvePackageDependencies \
+    -project "$project" \
+    -scheme "$scheme" \
+    "${xcode_package_flags[@]}"
   check_package_resolution_drift
-  exit 0
-fi
+}
 
-simulator_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
-if [ -z "$simulator_id" ]; then
-  echo "::warning::No available iPhone simulator was found; smoke tests were build-verified only."
-  restore_generated_project
+build_app() {
+  echo "Building iOS app without signing..."
+  set -o pipefail
+  xcodebuild \
+    -project "$project" \
+    -scheme "$scheme" \
+    -destination 'generic/platform=iOS' \
+    -derivedDataPath "$derived_data" \
+    "${xcode_package_flags[@]}" \
+    CODE_SIGNING_ALLOWED=NO \
+    build | tee "$log_dir/xcodebuild.log"
+}
+
+build_tests() {
+  echo "Building iOS runtime smoke tests..."
+  set -o pipefail
+  xcodebuild \
+    -project "$project" \
+    -scheme "$scheme" \
+    -destination 'generic/platform=iOS Simulator' \
+    -derivedDataPath "$derived_data" \
+    "${xcode_package_flags[@]}" \
+    CODE_SIGNING_ALLOWED=NO \
+    build-for-testing | tee "$log_dir/xcodebuild-tests.log"
+}
+
+simulator_required() {
+  local required="${PINES_REQUIRE_SIMULATOR_TEST_RUN:-}"
+  if [ -z "$required" ] && [ "${CI:-}" = "true" ]; then
+    required=1
+  fi
+  [ "$required" = "1" ] || [ "$required" = "true" ]
+}
+
+run_tests() {
+  if [ "${PINES_SKIP_SIMULATOR_TEST_RUN:-0}" = "1" ]; then
+    echo "Skipping simulator test run because PINES_SKIP_SIMULATOR_TEST_RUN=1."
+    return 0
+  fi
+
+  local simulator_id
+  simulator_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+  if [ -z "$simulator_id" ]; then
+    if simulator_required; then
+      echo "::error::No available iPhone simulator was found; CI requires runtime smoke tests."
+      xcrun simctl list devices available || true
+      exit 1
+    fi
+    echo "::warning::No available iPhone simulator was found; smoke tests were build-verified only."
+    return 0
+  fi
+
+  echo "Running iOS runtime smoke tests..."
+  set -o pipefail
+  xcodebuild \
+    -project "$project" \
+    -scheme "$scheme" \
+    -destination "id=$simulator_id" \
+    -derivedDataPath "$derived_data" \
+    "${xcode_package_flags[@]}" \
+    CODE_SIGNING_ALLOWED=NO \
+    test-without-building | tee "$log_dir/xcodebuild-test-run.log"
+}
+
+finalize_validation() {
+  require_snapshot
+  echo "Restoring generated Xcode project..."
+  "${xcodegen[@]}" generate
+  check_generated_project_drift
   check_package_resolution_drift
-  exit 0
-fi
+}
 
-echo "Running iOS runtime smoke tests..."
-xcodebuild \
-  -project "$project" \
-  -scheme "$scheme" \
-  -destination "id=$simulator_id" \
-  -derivedDataPath "$derived_data" \
-  "${xcode_package_flags[@]}" \
-  CODE_SIGNING_ALLOWED=NO \
-  test-without-building | tee build/xcodebuild-test-run.log
+run_all() {
+  snapshot_generated_project
+  generate_project
+  resolve_packages
+  build_app
+  build_tests
+  run_tests
+  finalize_validation
+}
 
-restore_generated_project
-check_package_resolution_drift
+command="${1:-all}"
+case "$command" in
+  all)
+    run_all
+    ;;
+  prepare)
+    snapshot_generated_project
+    ;;
+  generate)
+    generate_project
+    ;;
+  resolve)
+    resolve_packages
+    ;;
+  build-app)
+    build_app
+    ;;
+  build-tests)
+    build_tests
+    ;;
+  run-tests)
+    run_tests
+    ;;
+  finalize)
+    finalize_validation
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

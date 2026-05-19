@@ -8,11 +8,12 @@ This inventory was checked against `project.yml`, `Package.swift`, dependency ma
 
 | Package | Source | Version or revision | Products used | License | Notice |
 | --- | --- | --- | --- | --- | --- |
-| MLXSwift | <https://github.com/RNT56/mlx-swift> | `48375f1d8f0694dee2ce8aab7f46be50c5297aec` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
-| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `bb5f6f837896503b1f660eaeed2850fb0f232a64` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
+| MLXSwift | <https://github.com/RNT56/mlx-swift> | `8f0718404a323698c7b5730f2de3af2b5e21f854` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
+| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `2178543c34f6ff86989a485b60670f01f6c125a3` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
 | SwiftHuggingFace | <https://github.com/huggingface/swift-huggingface.git> | `0.9.0`, with `Xet` trait enabled through `PinesHubXetSupport` | `HuggingFace` | Apache-2.0 | See Apache-2.0 text below. |
 | SwiftTransformers | <https://github.com/huggingface/swift-transformers> | `1.3.2` | `Tokenizers` | Apache-2.0 | See Apache-2.0 text below. |
 | GRDB | <https://github.com/groue/GRDB.swift.git> | `7.10.0` | `GRDB` | MIT | Copyright (C) 2015-2025 Gwendal Roué |
+| SQLCipher | <https://github.com/sqlcipher/SQLCipher.swift.git> | `4.16.0` | `SQLCipher` | BSD-style | Copyright (c) 2025 Zetetic LLC |
 | Swift Markdown | <https://github.com/swiftlang/swift-markdown.git> | `0.8.0` | `Markdown` | Apache-2.0 | Includes Swift Markdown `NOTICE.txt` below. |
 | HighlightSwift | <https://github.com/appstefan/highlightswift.git> | `1.1.0` | `HighlightSwift` | MIT | Copyright (c) 2023 Stefan Britton |
 
@@ -80,6 +81,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 - Swift CMark / cmark-gfm: BSD-2-Clause.
 - Highlight.js: BSD-3-Clause. Copyright (c) 2006, Ivan Sagalaev.
+- SQLCipher: BSD-style. Copyright (c) 2025 Zetetic LLC.
 
 ### BSD-2-Clause License
 

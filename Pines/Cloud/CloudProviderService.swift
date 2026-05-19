@@ -30,7 +30,7 @@ struct CloudProviderService {
         var updated = provider
         updated.validationStatus = result.status
         updated.lastValidatedAt = result.validatedAt
-        updated.lastValidationError = result.status == .valid ? nil : result.message
+        updated.lastValidationError = result.status == .valid ? nil : result.message.map { Redactor().redact($0) }
         try await repository.upsertProvider(updated)
         try await auditRepository?.append(
             AuditEvent(

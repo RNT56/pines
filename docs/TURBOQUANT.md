@@ -10,10 +10,10 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 - iOS memory warnings stop the active local run and unload transient MLX containers through the runtime bridge.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `48375f1d8f0694dee2ce8aab7f46be50c5297aec`
-  - `RNT56/mlx-swift-lm`: `bb5f6f837896503b1f660eaeed2850fb0f232a64`
-  - Nested `mlx` inside `RNT56/mlx-swift`: `292c54b7bbf95a7061b3d70c05c1785dfb9b9a85`
-  - Nested `mlx-c` inside `RNT56/mlx-swift`: `f53f40c7a5d0db5cb2a8661e67e29a18470d8863`
+  - `RNT56/mlx-swift`: `8f0718404a323698c7b5730f2de3af2b5e21f854`
+  - `RNT56/mlx-swift-lm`: `2178543c34f6ff86989a485b60670f01f6c125a3`
+  - Nested `mlx` inside `RNT56/mlx-swift`: `8f13e02fa85252f2a569a43c6759f07490b816a5`
+  - Nested `mlx-c` inside `RNT56/mlx-swift`: `fff19671eed2e556bdf4552328a1791a8f37b651`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, a tiled online fused decode path, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
 - `mlx-swift-lm` exposes `KVCacheStrategy.turboQuant`, `TurboQuantKVCache`, a raw-free physical-slot `RotatingTurboQuantKVCache` for supported `.metalPolarQJL` `maxKVSize` paths, prompt-cache serialization hooks, `TurboQuantCompressedKVCacheProtocol`, the bundled `TurboQuantProfileRegistry`, and `GenerateParameters` fields for cache strategy, preset, requested backend selection, value bits, device-adaptive optimization policy, and compressed-attention diagnostics.
 - The app-level runtime smoke tests link MLX/MLXLMCommon, assert those fixed pins are present, validate high-bit TurboQuant seed propagation, and run a tiny Metal codec round trip when the executing device exposes the TurboQuant Metal codec.

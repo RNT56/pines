@@ -1,0 +1,29 @@
+[build]
+  command = "npm --prefix site ci && npm --prefix site run build"
+  publish = "site/dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/brand/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[redirects]]
+  from = "/github"
+  to = "https://github.com/RNT56/pines"
+  status = 302

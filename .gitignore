@@ -14,6 +14,13 @@ xcuserdata/
 .build/
 .swiftpm/
 
+# Node sites
+node_modules/
+site/node_modules/
+site/.astro/
+site/dist/
+.netlify/
+
 # macOS
 .DS_Store
 
@@ -30,3 +37,6 @@ xcuserdata/
 dist/
 tmp/
 Temp/
+
+# Local Netlify folder
+.netlify

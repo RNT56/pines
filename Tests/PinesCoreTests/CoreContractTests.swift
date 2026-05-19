@@ -278,14 +278,92 @@ struct CoreContractTests {
         let openAIKey = "sk-" + "1234567890abcdef"
         let huggingFaceKey = "hf_" + "1234567890abcdef"
         let bearerToken = "Bearer " + "abcdefghijklmnop"
-        let text = "openai=\(openAIKey) hf=\(huggingFaceKey) bearer=\(bearerToken)"
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwZW5lcyJ9.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"
+        let cookie = "Cookie: session=abcdef1234567890"
+        let pemKind = "PRIVATE KEY"
+        let pem = """
+        -----BEGIN \(pemKind)-----
+        abcdefghijklmnopqrstuvwxyz1234567890
+        -----END \(pemKind)-----
+        """
+        let generic = String(repeating: "a", count: 48)
+        let text = "openai=\(openAIKey) hf=\(huggingFaceKey) bearer=\(bearerToken) jwt=\(jwt) \(cookie) \(pem) generic=\(generic)"
         let redacted = Redactor().redact(text)
 
         #expect(!redacted.contains(openAIKey))
         #expect(!redacted.contains(huggingFaceKey))
         #expect(!redacted.contains(bearerToken))
+        #expect(!redacted.contains(jwt))
+        #expect(!redacted.contains(cookie))
+        #expect(!redacted.contains("BEGIN \(pemKind)"))
+        #expect(!redacted.contains(generic))
         #expect(redacted.contains("[redacted-key]"))
         #expect(redacted.contains("Bearer [redacted-token]"))
+        #expect(redacted.contains("[redacted-jwt]"))
+        #expect(redacted.contains("[redacted-private-key]"))
+    }
+
+    @Test
+    func endpointSecurityPolicyAllowsOnlyHTTPSOrExplicitLoopbackHTTP() throws {
+        let policy = EndpointSecurityPolicy()
+
+        try policy.validate(URL(string: "https://api.example.test/v1")!, useCase: .cloudProvider)
+        try policy.validate(
+            URL(string: "http://localhost:11434")!,
+            useCase: .mcpEndpoint,
+            allowsExplicitLocalHTTP: true
+        )
+        try policy.validate(
+            URL(string: "http://127.0.0.1:8080")!,
+            useCase: .mcpEndpoint,
+            allowsExplicitLocalHTTP: true
+        )
+        try policy.validate(
+            URL(string: "http://[::1]:8080")!,
+            useCase: .mcpEndpoint,
+            allowsExplicitLocalHTTP: true
+        )
+
+        #expect(throws: EndpointSecurityError.self) {
+            try policy.validate(URL(string: "http://api.example.test/v1")!, useCase: .cloudProvider)
+        }
+        #expect(throws: EndpointSecurityError.self) {
+            try policy.validate(
+                URL(string: "http://localhost:11434")!,
+                useCase: .mcpEndpoint,
+                allowsExplicitLocalHTTP: false
+            )
+        }
+        #expect(throws: EndpointSecurityError.self) {
+            try policy.validate(
+                URL(string: "http://192.168.1.10:8080")!,
+                useCase: .mcpEndpoint,
+                allowsExplicitLocalHTTP: true
+            )
+        }
+    }
+
+    @Test
+    func cloudProviderHeadersClassifySecretNames() {
+        #expect(CloudProviderHeader.isSecretLikeName("Authorization"))
+        #expect(CloudProviderHeader.isSecretLikeName("X-Api-Key"))
+        #expect(CloudProviderHeader.isSecretLikeName("x-session-token"))
+        #expect(CloudProviderHeader.isSecretLikeName("Cookie"))
+        #expect(!CloudProviderHeader.isSecretLikeName("X-Trace-ID"))
+
+        #expect(CloudProviderHeader(name: "Authorization", kind: .publicValue, value: "Bearer test").storesSecretInPlaintext)
+        #expect(!CloudProviderHeader(name: "X-Trace-ID", kind: .publicValue, value: "trace").storesSecretInPlaintext)
+        #expect(!CloudProviderHeader(name: "Authorization", kind: .secretReference, keychainService: "svc", keychainAccount: "acct").storesSecretInPlaintext)
+    }
+
+    @Test
+    func securityConfigurationDefaultsToEncryptedE2EModel() {
+        let configuration = SecurityConfiguration()
+
+        #expect(!configuration.appLockEnabled)
+        #expect(configuration.encryptedStoreVersion == SecurityConfiguration.currentEncryptedStoreVersion)
+        #expect(configuration.cloudKitE2EEnabled)
+        #expect(configuration.securityResetCompletedAt == nil)
     }
 
     @Test

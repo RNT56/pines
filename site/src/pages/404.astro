@@ -1,0 +1,23 @@
+---
+import MarketingLayout from "../layouts/MarketingLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+---
+
+<MarketingLayout title="Not Found - Pines" path="/404/">
+  <div class="page-shell">
+    <SiteNav />
+    <main class="content-page not-found">
+      <section class="content-hero">
+        <span class="section-kicker">404</span>
+        <h1>This page is not in the vault.</h1>
+        <p>Return to the Pines landing page or inspect the source repository.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="/">Home</a>
+          <a class="button secondary" href="https://github.com/RNT56/pines">GitHub</a>
+        </div>
+      </section>
+    </main>
+    <SiteFooter />
+  </div>
+</MarketingLayout>

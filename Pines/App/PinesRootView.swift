@@ -1,4 +1,5 @@
 import SwiftUI
+import LocalAuthentication
 import PinesCore
 
 #if canImport(WatchConnectivity)
@@ -7,6 +8,7 @@ import WatchConnectivity
 
 struct PinesRootView: View {
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appModel: PinesAppModel
     @StateObject private var chatState: PinesChatState
     @StateObject private var modelState: PinesModelState
@@ -24,6 +26,9 @@ struct PinesRootView: View {
     @State private var isBootstrapping = false
     @State private var bootstrapTask: Task<Void, Never>?
     @State private var rootCreatedAt = Date()
+    @State private var isPrivacyCoverVisible = false
+    @State private var isPrivacyLocked = false
+    @State private var appUnlockError: String?
 
     init() {
         let chatState = PinesChatState()
@@ -81,6 +86,11 @@ struct PinesRootView: View {
                     .ignoresSafeArea()
                     .zIndex(1)
             }
+
+            if isPrivacyCoverVisible || isPrivacyLocked {
+                privacyCover
+                    .zIndex(2)
+            }
         }
         .pinesHighRefreshRate()
         .preferredColorScheme(settingsState.interfaceMode.colorScheme)
@@ -125,6 +135,20 @@ struct PinesRootView: View {
         .onChange(of: workflowState.hapticSignal) { _, signal in
             guard let signal else { return }
             haptics.play(signal.event)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            handleScenePhase(phase)
+        }
+        .onChange(of: settingsState.securityConfiguration.appLockEnabled) { _, enabled in
+            guard enabled else {
+                isPrivacyLocked = false
+                isPrivacyCoverVisible = false
+                appUnlockError = nil
+                return
+            }
+            isPrivacyLocked = true
+            isPrivacyCoverVisible = true
+            Task { await authenticateAppUnlock() }
         }
         .onPinesMemoryWarning {
             appModel.stopCurrentRun()
@@ -215,6 +239,83 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+        }
+    }
+
+    private var privacyCover: some View {
+        ZStack {
+            theme.colors.appBackground.ignoresSafeArea()
+            VStack(spacing: theme.spacing.medium) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 44, weight: .semibold))
+                    .foregroundStyle(theme.colors.accent)
+                Text("Pines Locked")
+                    .font(theme.typography.title.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                if let appUnlockError {
+                    Text(appUnlockError)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, theme.spacing.large)
+                }
+                if isPrivacyLocked {
+                    Button {
+                        Task { await authenticateAppUnlock() }
+                    } label: {
+                        Label("Unlock", systemImage: "faceid")
+                    }
+                    .pinesButtonStyle(.primary)
+                }
+            }
+        }
+        .pinesTheme(theme)
+    }
+
+    private func handleScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            if settingsState.securityConfiguration.appLockEnabled, isPrivacyLocked {
+                Task { await authenticateAppUnlock() }
+            } else if !settingsState.securityConfiguration.appLockEnabled {
+                isPrivacyCoverVisible = false
+            }
+        case .inactive, .background:
+            isPrivacyCoverVisible = true
+            if settingsState.securityConfiguration.appLockEnabled {
+                isPrivacyLocked = true
+            }
+        @unknown default:
+            isPrivacyCoverVisible = true
+        }
+    }
+
+    @MainActor
+    private func authenticateAppUnlock() async {
+        guard settingsState.securityConfiguration.appLockEnabled else {
+            isPrivacyLocked = false
+            isPrivacyCoverVisible = false
+            appUnlockError = nil
+            return
+        }
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            appUnlockError = error?.localizedDescription ?? "Device authentication is unavailable."
+            return
+        }
+        do {
+            let approved = try await context.evaluatePolicy(
+                .deviceOwnerAuthentication,
+                localizedReason: "Unlock Pines"
+            )
+            if approved {
+                isPrivacyLocked = false
+                isPrivacyCoverVisible = false
+                appUnlockError = nil
+            }
+        } catch {
+            appUnlockError = "Authentication was not completed."
         }
     }
 

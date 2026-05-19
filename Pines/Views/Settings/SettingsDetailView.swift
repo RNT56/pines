@@ -333,6 +333,14 @@ struct SettingsDetailView: View {
             ))
             .disabled(!iCloudSyncAvailable)
 
+            Toggle("App lock", isOn: Binding(
+                get: { settingsState.securityConfiguration.appLockEnabled },
+                set: { value in
+                    settingsState.securityConfiguration.appLockEnabled = value
+                    Task { await appModel.saveSettings(services: services) }
+                }
+            ))
+
             Toggle("Sync source documents", isOn: Binding(
                 get: { settingsState.storeConfiguration.syncsSourceDocuments },
                 set: { value in

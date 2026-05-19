@@ -208,6 +208,11 @@ final class PinesAppModel: ObservableObject {
         set { settingsState.settingsSections = newValue }
     }
 
+    var securityConfiguration: SecurityConfiguration {
+        get { settingsState.securityConfiguration }
+        set { settingsState.securityConfiguration = newValue }
+    }
+
     var executionMode: AgentExecutionMode {
         get { settingsState.executionMode }
         set { settingsState.executionMode = newValue }
@@ -669,6 +674,7 @@ final class PinesAppModel: ObservableObject {
         models: [PinesModelPreview] = [],
         vaultItems: [PinesVaultItemPreview] = [],
         settingsSections: [PinesSettingsSection] = PinesStaticSettings.sections,
+        securityConfiguration: SecurityConfiguration = .init(),
         executionMode: AgentExecutionMode = .preferLocal,
         storeConfiguration: LocalStoreConfiguration = .init(),
         selectedThemeTemplate: PinesThemeTemplate = .evergreen,
@@ -687,6 +693,7 @@ final class PinesAppModel: ObservableObject {
         self.models = models
         self.vaultItems = vaultItems
         self.settingsSections = settingsSections
+        self.securityConfiguration = securityConfiguration
         self.executionMode = executionMode
         self.storeConfiguration = storeConfiguration
         self.selectedThemeTemplate = selectedThemeTemplate
@@ -739,6 +746,12 @@ final class PinesAppModel: ObservableObject {
 
     private func refreshStartupState(services: PinesAppServices) async {
         do {
+            if let settingsRepository = services.settingsRepository {
+                let settings = try await settingsRepository.loadSettings()
+                applySettings(settings)
+            }
+
+            await services.securityResetCoordinator.runIfNeeded()
             if let settingsRepository = services.settingsRepository {
                 let settings = try await settingsRepository.loadSettings()
                 applySettings(settings)
@@ -917,6 +930,7 @@ final class PinesAppModel: ObservableObject {
     }
 
     private func applySettings(_ settings: AppSettingsSnapshot) {
+        setIfChanged(\.securityConfiguration, settings.securityConfiguration)
         setIfChanged(\.executionMode, settings.executionMode)
         setIfChanged(\.storeConfiguration, settings.storeConfiguration)
         setIfChanged(\.defaultProviderID, settings.defaultProviderID)
@@ -2240,6 +2254,7 @@ final class PinesAppModel: ObservableObject {
             let resolvedProviderID = defaultProviderID
                 ?? resolvedDefaultModelID.flatMap { installedModel(for: $0) == nil ? nil : services.mlxRuntime.localProviderID }
             let snapshot = AppSettingsSnapshot(
+                securityConfiguration: securityConfiguration,
                 executionMode: executionMode,
                 storeConfiguration: storeConfiguration,
                 defaultProviderID: resolvedProviderID,
@@ -3009,7 +3024,7 @@ final class PinesAppModel: ObservableObject {
                     try await repository.upsertEmbeddingJob(job)
                 } catch {
                     job.status = .failed
-                    job.lastError = error.localizedDescription
+                    job.lastError = services.redactor.redact(error.localizedDescription)
                     job.updatedAt = Date()
                     try await repository.upsertEmbeddingJob(job)
                 }
@@ -3075,6 +3090,7 @@ final class PinesAppModel: ObservableObject {
                 serviceError = "Cloud provider base URL is invalid."
                 return
             }
+            try EndpointSecurityPolicy().validate(baseURL, useCase: .cloudProvider)
             let providerID = ProviderID(rawValue: trimmedDisplayName.lowercased().replacingOccurrences(of: " ", with: "-"))
             let existing = cloudProviders.first(where: { $0.id == providerID })
             let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3085,9 +3101,10 @@ final class PinesAppModel: ObservableObject {
                 baseURL: baseURL,
                 defaultModelID: existing?.defaultModelID,
                 validationStatus: .unvalidated,
-                extraHeadersJSON: existing?.extraHeadersJSON,
+                headers: existing?.headers ?? [],
                 keychainService: existing?.keychainService ?? "com.schtack.pines.cloud",
                 keychainAccount: existing?.keychainAccount ?? providerID.rawValue,
+                allowInsecureLocalHTTP: existing?.allowInsecureLocalHTTP ?? false,
                 enabledForAgents: kind == .voyageAI ? false : enabledForAgents
             )
             try await service.saveProvider(provider, apiKey: trimmedAPIKey.isEmpty ? nil : trimmedAPIKey)
@@ -3312,6 +3329,17 @@ final class PinesAppModel: ObservableObject {
             guard let endpointURL = URL(string: endpointURLString), endpointURL.scheme != nil else {
                 serviceError = "MCP endpoint URL is invalid."
                 return
+            }
+            try EndpointSecurityPolicy().validate(
+                endpointURL,
+                useCase: .mcpEndpoint,
+                allowsExplicitLocalHTTP: allowInsecureLocalHTTP
+            )
+            if let authorizationURL = URL(string: oauthAuthorizationURLString.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                try EndpointSecurityPolicy().validate(authorizationURL, useCase: .oauthAuthorization)
+            }
+            if let tokenURL = URL(string: oauthTokenURLString.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                try EndpointSecurityPolicy().validate(tokenURL, useCase: .oauthToken)
             }
             let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
             let serverID = existingID ?? MCPServerID(rawValue: MCPNameSanitizer.serverSlug(displayName: trimmedName, fallback: endpointURL.host(percentEncoded: false) ?? "mcp"))

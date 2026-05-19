@@ -1,0 +1,81 @@
+---
+const chatRows = [
+  { role: "You", text: "Summarize the field notes in my private vault and keep it local." },
+  { role: "Pines", text: "I found 4 relevant chunks. Local model route is ready." },
+  { role: "Tool", text: "Vault search: 4 matches, no cloud context shared." },
+];
+---
+
+<div class="device-showcase" aria-label="Pines iPhone and Apple Watch product preview">
+  <div class="signal-card route-card">
+    <span class="signal-dot"></span>
+    <div>
+      <strong>Route</strong>
+      <span>Local first</span>
+    </div>
+  </div>
+
+  <div class="phone-device">
+    <div class="device-speaker"></div>
+    <div class="phone-screen">
+      <div class="app-topbar">
+        <div>
+          <span class="eyebrow">Pines</span>
+          <h2>Chats</h2>
+        </div>
+        <img src="/brand/app-icon.png" alt="Pines app icon" />
+      </div>
+      <div class="model-pill-row">
+        <span>Qwen3 4B</span>
+        <span>MLX</span>
+        <span>Vault on</span>
+      </div>
+      <div class="chat-stack">
+        {chatRows.map((row) => (
+          <article class={`chat-bubble ${row.role.toLowerCase()}`}>
+            <span>{row.role}</span>
+            <p>{row.text}</p>
+          </article>
+        ))}
+      </div>
+      <div class="composer-bar">
+        <span>Ask Pines...</span>
+        <button aria-label="Send message"><span aria-hidden="true">&#8593;</span></button>
+      </div>
+      <div class="tab-rail" aria-hidden="true">
+        <span class="active">Chats</span>
+        <span>Models</span>
+        <span>Vault</span>
+        <span>Settings</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="watch-device">
+    <div class="watch-crown" aria-hidden="true"></div>
+    <div class="watch-screen">
+      <div class="watch-status">
+        <span></span>
+        <strong>Connected</strong>
+      </div>
+      <div class="watch-title">
+        <h3>Pines</h3>
+        <span>Live chat</span>
+      </div>
+      <div class="watch-card">
+        <span>Planning Notes</span>
+        <strong>Qwen3 4B</strong>
+      </div>
+      <div class="watch-card muted">
+        <span>Quick reply</span>
+        <strong>Summarize</strong>
+      </div>
+      <button>Stop run</button>
+    </div>
+  </div>
+
+  <div class="signal-card vault-card">
+    <strong>Vault</strong>
+    <span>Documents, chunks, OCR, embeddings</span>
+  </div>
+</div>

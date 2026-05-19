@@ -42,7 +42,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RNT56/mlx-swift",
       "state" : {
-        "revision" : "48375f1d8f0694dee2ce8aab7f46be50c5297aec"
+        "revision" : "8f0718404a323698c7b5730f2de3af2b5e21f854"
       }
     },
     {
@@ -50,7 +50,16 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RNT56/mlx-swift-lm",
       "state" : {
-        "revision" : "bb5f6f837896503b1f660eaeed2850fb0f232a64"
+        "revision" : "2178543c34f6ff86989a485b60670f01f6c125a3"
+      }
+    },
+    {
+      "identity" : "sqlcipher.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sqlcipher/SQLCipher.swift.git",
+      "state" : {
+        "revision" : "07bf6bc2191a063d6f1e7c3b5f276a3fadfe36b7",
+        "version" : "4.16.0"
       }
     },
     {

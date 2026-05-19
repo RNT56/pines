@@ -375,6 +375,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let defaultGeminiThinkingLevel: GeminiThinkingLevel = .medium
     public static let defaultCloudWebSearchMode: CloudWebSearchMode = .off
 
+    public var securityConfiguration: SecurityConfiguration
     public var executionMode: AgentExecutionMode
     public var storeConfiguration: LocalStoreConfiguration
     public var defaultProviderID: ProviderID?
@@ -395,6 +396,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var interfaceMode: String
 
     private enum CodingKeys: String, CodingKey {
+        case securityConfiguration
         case executionMode
         case storeConfiguration
         case defaultProviderID
@@ -416,6 +418,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     }
 
     public init(
+        securityConfiguration: SecurityConfiguration = .init(),
         executionMode: AgentExecutionMode = .preferLocal,
         storeConfiguration: LocalStoreConfiguration = .init(),
         defaultProviderID: ProviderID? = nil,
@@ -435,6 +438,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         themeTemplate: String = "evergreen",
         interfaceMode: String = "system"
     ) {
+        self.securityConfiguration = securityConfiguration
         self.executionMode = executionMode
         self.storeConfiguration = storeConfiguration
         self.defaultProviderID = defaultProviderID
@@ -457,6 +461,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        securityConfiguration = try container.decodeIfPresent(SecurityConfiguration.self, forKey: .securityConfiguration) ?? .init()
         executionMode = try container.decodeIfPresent(AgentExecutionMode.self, forKey: .executionMode) ?? .preferLocal
         storeConfiguration = try container.decodeIfPresent(LocalStoreConfiguration.self, forKey: .storeConfiguration) ?? .init()
         defaultProviderID = try container.decodeIfPresent(ProviderID.self, forKey: .defaultProviderID)
@@ -489,5 +494,26 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
 
     public static func normalizedLocalContextTokens(_ value: Int) -> Int {
         min(max(value, minLocalContextTokens), maxLocalContextTokens)
+    }
+}
+
+public struct SecurityConfiguration: Hashable, Codable, Sendable {
+    public static let currentEncryptedStoreVersion = 1
+
+    public var appLockEnabled: Bool
+    public var encryptedStoreVersion: Int
+    public var cloudKitE2EEnabled: Bool
+    public var securityResetCompletedAt: Date?
+
+    public init(
+        appLockEnabled: Bool = false,
+        encryptedStoreVersion: Int = Self.currentEncryptedStoreVersion,
+        cloudKitE2EEnabled: Bool = true,
+        securityResetCompletedAt: Date? = nil
+    ) {
+        self.appLockEnabled = appLockEnabled
+        self.encryptedStoreVersion = max(0, encryptedStoreVersion)
+        self.cloudKitE2EEnabled = cloudKitE2EEnabled
+        self.securityResetCompletedAt = securityResetCompletedAt
     }
 }

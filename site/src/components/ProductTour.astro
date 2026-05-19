@@ -1,0 +1,158 @@
+---
+const tabs = [
+  {
+    id: "chats",
+    label: "Chats",
+    kicker: "Daily workspace",
+    title: "Talk to the model that fits the moment.",
+    body: "Start with a local model, bring in files, choose a provider when a task needs outside reach, and keep private context decisions visible.",
+    facts: ["Model picker per thread", "Attachments with capability checks", "Cloud context approval"],
+    visualTitle: "Active Chat",
+    visualItems: ["Local model selected", "Vault context attached", "Cloud context off", "Streaming response"],
+  },
+  {
+    id: "models",
+    label: "Models",
+    kicker: "MLX on device",
+    title: "Install local models with practical guardrails.",
+    body: "Pines helps you review compatible MLX models, staged downloads, runtime shape, and device constraints before you rely on them.",
+    facts: ["Curated verified models", "Runtime diagnostics", "TurboQuant profile defaults"],
+    visualTitle: "Model Readiness",
+    visualItems: ["Verified MLX model", "Footprint review", "Device profile", "Download staged"],
+  },
+  {
+    id: "vault",
+    label: "Vault",
+    kicker: "Private context",
+    title: "Give your assistant a local place to remember.",
+    body: "Import documents and notes into a searchable vault with chunking, OCR, embeddings, vector search, and FTS fallback.",
+    facts: ["PDF, image, Markdown, JSON, CSV", "Compressed vector codes", "Cloud embedding approval"],
+    visualTitle: "Vault Search",
+    visualItems: ["Project notes", "PDF import", "OCR complete", "Relevant chunks"],
+  },
+  {
+    id: "agents",
+    label: "Agents",
+    kicker: "Approval-aware tools",
+    title: "Use tools without invisible authority.",
+    body: "Agent mode can call policy-gated tools, including local data reads, Brave Search, web fetch, and browser actions through approval-aware runtime boundaries.",
+    facts: ["Typed tool specs", "Audit events", "Human approval callbacks"],
+    visualTitle: "Tool Approval",
+    visualItems: ["Search request", "Network permission", "Browser action", "Audit recorded"],
+  },
+  {
+    id: "mcp",
+    label: "MCP",
+    kicker: "External systems",
+    title: "Connect remote tools, resources, prompts, and sampling.",
+    body: "Pines supports MCP Streamable HTTP with OAuth PKCE, resource previews, prompt arguments, subscriptions, and user-reviewed sampling.",
+    facts: ["Streamable HTTP", "Resources selected by user", "Sampling review before return"],
+    visualTitle: "MCP Server",
+    visualItems: ["Tools enabled", "Resources selected", "Prompt ready", "Sampling review"],
+  },
+  {
+    id: "watch",
+    label: "Watch",
+    kicker: "Close at hand",
+    title: "Keep chats reachable from your wrist.",
+    body: "The Watch companion can list conversations, open transcripts, send quick replies, stop active runs, retry pending requests, and manage chat state.",
+    facts: ["Reachability status", "Quick replies", "Conversation actions"],
+    visualTitle: "Watch Companion",
+    visualItems: ["Connected", "Quick reply", "Stop run", "Pending retry"],
+  },
+];
+---
+
+<section class="section product-tour" id="tour">
+  <div class="section-copy">
+    <span class="section-kicker">Product Tour</span>
+    <h2>One app surface for the AI work that usually gets scattered.</h2>
+    <p>
+      Pines gives the major pieces of modern AI work one coherent iPhone surface: model choice,
+      private context, cloud reach, tool use, MCP, and Watch access.
+    </p>
+  </div>
+
+  <div class="tour-shell" data-tour>
+    <div class="tour-tabs" role="tablist" aria-label="Pines product areas">
+      {tabs.map((tab, index) => (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={index === 0 ? "true" : "false"}
+          aria-controls={`pane-${tab.id}`}
+          id={`tab-${tab.id}`}
+          data-tour-tab={tab.id}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+
+    <div class="tour-stage">
+      {tabs.map((tab, index) => (
+        <article
+          class={`tour-pane ${index === 0 ? "active" : ""}`}
+          id={`pane-${tab.id}`}
+          role="tabpanel"
+          aria-labelledby={`tab-${tab.id}`}
+          data-tour-pane={tab.id}
+          hidden={index !== 0}
+        >
+          <div class="tour-copy">
+            <span>{tab.kicker}</span>
+            <h3>{tab.title}</h3>
+            <p>{tab.body}</p>
+            <ul>
+              {tab.facts.map((fact) => <li>{fact}</li>)}
+            </ul>
+          </div>
+          <div class={`tour-visual visual-${tab.id}`} aria-hidden="true">
+            <div class="mock-toolbar">
+              <span></span>
+              <span></span>
+              <span></span>
+              <strong>{tab.visualTitle}</strong>
+            </div>
+            <div class="mock-content">
+              <div class="mock-mainline">
+                <span>{tab.visualItems[0]}</span>
+                <strong>{tab.visualTitle}</strong>
+              </div>
+              <div class="mock-grid">
+                {tab.visualItems.slice(1).map((item) => <span>{item}</span>)}
+              </div>
+              <div class="mock-feed">
+                {tab.facts.map((fact) => <span>{fact}</span>)}
+              </div>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll("[data-tour]").forEach((tour) => {
+    const tabs = Array.from(tour.querySelectorAll("[data-tour-tab]"));
+    const panes = Array.from(tour.querySelectorAll("[data-tour-pane]"));
+
+    function activate(id) {
+      tabs.forEach((tab) => {
+        const selected = tab.getAttribute("data-tour-tab") === id;
+        tab.setAttribute("aria-selected", String(selected));
+      });
+
+      panes.forEach((pane) => {
+        const selected = pane.getAttribute("data-tour-pane") === id;
+        pane.toggleAttribute("hidden", !selected);
+        pane.classList.toggle("active", selected);
+      });
+    }
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => activate(tab.getAttribute("data-tour-tab")));
+    });
+  });
+</script>

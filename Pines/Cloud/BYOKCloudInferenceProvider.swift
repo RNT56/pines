@@ -35,7 +35,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
 
         let streamingFormat = self.streamingFormat(for: request)
-        let urlRequest = try buildStreamingRequest(apiKey: apiKey, chatRequest: request)
+        let urlRequest = try await buildStreamingRequest(apiKey: apiKey, chatRequest: request)
         let clientRequestID = urlRequest.value(forHTTPHeaderField: "X-Client-Request-Id")
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -118,11 +118,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         let urlRequest: URLRequest
         switch configuration.kind {
         case .openAI, .openAICompatible, .openRouter, .custom:
-            urlRequest = try openAICompatibleEmbeddingRequest(apiKey: apiKey, embeddingRequest: request)
+            urlRequest = try await openAICompatibleEmbeddingRequest(apiKey: apiKey, embeddingRequest: request)
         case .gemini:
-            urlRequest = try geminiEmbeddingRequest(apiKey: apiKey, embeddingRequest: request)
+            urlRequest = try await geminiEmbeddingRequest(apiKey: apiKey, embeddingRequest: request)
         case .voyageAI:
-            urlRequest = try voyageEmbeddingRequest(apiKey: apiKey, embeddingRequest: request)
+            urlRequest = try await voyageEmbeddingRequest(apiKey: apiKey, embeddingRequest: request)
         case .anthropic:
             throw InferenceError.unsupportedCapability("Anthropic does not provide a native embedding API. Configure Voyage AI, OpenAI, Gemini, OpenRouter, or a local embedding model.")
         }
@@ -207,7 +207,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             ])
         case .voyageAI:
             let defaults = VaultEmbeddingDefaults.defaults(for: .voyageAI)
-            request = try voyageEmbeddingRequest(
+            request = try await voyageEmbeddingRequest(
                 apiKey: apiKey,
                 embeddingRequest: EmbeddingRequest(
                     modelID: defaults.modelID,
@@ -218,7 +218,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             )
         }
 
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         let (data, response) = try await URLSession.shared.data(for: request)
         let http = try Self.httpResponse(from: response)
         if (200..<300).contains(http.statusCode) {
@@ -240,20 +240,20 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return ProviderValidationResult(providerID: configuration.id, status: .invalid, message: message, availableModels: availableModels)
     }
 
-    private func buildStreamingRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
+    private func buildStreamingRequest(apiKey: String, chatRequest: ChatRequest) async throws -> URLRequest {
         if usesOpenAIResponsesAPI(chatRequest: chatRequest) {
-            return try openAIResponsesRequest(apiKey: apiKey, chatRequest: chatRequest)
+            return try await openAIResponsesRequest(apiKey: apiKey, chatRequest: chatRequest)
         }
 
         switch configuration.kind {
         case .openAI, .openAICompatible, .openRouter, .custom:
-            return try openAICompatibleRequest(apiKey: apiKey, chatRequest: chatRequest)
+            return try await openAICompatibleRequest(apiKey: apiKey, chatRequest: chatRequest)
         case .anthropic:
-            return try anthropicRequest(apiKey: apiKey, chatRequest: chatRequest)
+            return try await anthropicRequest(apiKey: apiKey, chatRequest: chatRequest)
         case .gemini:
             return usesGeminiInteractionsAPI(chatRequest: chatRequest)
-                ? try geminiInteractionsRequest(apiKey: apiKey, chatRequest: chatRequest)
-                : try geminiRequest(apiKey: apiKey, chatRequest: chatRequest)
+                ? try await geminiInteractionsRequest(apiKey: apiKey, chatRequest: chatRequest)
+                : try await geminiRequest(apiKey: apiKey, chatRequest: chatRequest)
         case .voyageAI:
             throw InferenceError.unsupportedCapability("Voyage AI is configured for embeddings only.")
         }
@@ -282,7 +282,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return apiKey?.isEmpty == false ? apiKey : nil
     }
 
-    private func openAICompatibleEmbeddingRequest(apiKey: String, embeddingRequest: EmbeddingRequest) throws -> URLRequest {
+    private func openAICompatibleEmbeddingRequest(apiKey: String, embeddingRequest: EmbeddingRequest) async throws -> URLRequest {
         var request = URLRequest(url: apiBaseURL.appending(path: "embeddings"))
         request.httpMethod = "POST"
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -297,11 +297,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             inputType: embeddingRequest.inputType
         )
         request.httpBody = try JSONSerialization.data(withJSONObject: body.anySendable)
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         return request
     }
 
-    private func geminiEmbeddingRequest(apiKey: String, embeddingRequest: EmbeddingRequest) throws -> URLRequest {
+    private func geminiEmbeddingRequest(apiKey: String, embeddingRequest: EmbeddingRequest) async throws -> URLRequest {
         let plan = embeddingRequestBuilder.geminiBatchBody(
             modelID: embeddingRequest.modelID,
             inputs: embeddingRequest.inputs,
@@ -315,11 +315,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: plan.body.anySendable)
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         return request
     }
 
-    private func voyageEmbeddingRequest(apiKey: String, embeddingRequest: EmbeddingRequest) throws -> URLRequest {
+    private func voyageEmbeddingRequest(apiKey: String, embeddingRequest: EmbeddingRequest) async throws -> URLRequest {
         var request = URLRequest(url: configuration.baseURL.appending(path: "embeddings"))
         request.httpMethod = "POST"
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -331,11 +331,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             inputType: embeddingRequest.inputType
         )
         request.httpBody = try JSONSerialization.data(withJSONObject: body.anySendable)
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         return request
     }
 
-    private func openAICompatibleRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
+    private func openAICompatibleRequest(apiKey: String, chatRequest: ChatRequest) async throws -> URLRequest {
         let url = apiBaseURL.appending(path: "chat/completions")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -371,11 +371,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             body["parallel_tool_calls"] = false
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         return request
     }
 
-    private func openAIResponsesRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
+    private func openAIResponsesRequest(apiKey: String, chatRequest: ChatRequest) async throws -> URLRequest {
         let url = apiBaseURL.appending(path: "responses")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -430,7 +430,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             body["instructions"] = instructions
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         return request
     }
 
@@ -453,7 +453,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             return []
         }
 
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         let (data, response) = try await URLSession.shared.data(for: request)
         let http = try Self.httpResponse(from: response)
         guard (200..<300).contains(http.statusCode) else {
@@ -472,7 +472,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return Self.parseModels(json, providerKind: configuration.kind)
     }
 
-    private func anthropicRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
+    private func anthropicRequest(apiKey: String, chatRequest: ChatRequest) async throws -> URLRequest {
         let url = configuration.baseURL.appending(path: "v1/messages")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -522,7 +522,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             body["tool_choice"] = anthropicToolChoice(for: chatRequest, hasNativeSearch: !anthropicNativeTools.isEmpty)
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         return request
     }
 
@@ -753,7 +753,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             || CloudProviderModelEligibility.isOpenAIOSeries(modelName)
     }
 
-    private func geminiRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
+    private func geminiRequest(apiKey: String, chatRequest: ChatRequest) async throws -> URLRequest {
         let version = Self.geminiAPIVersion(for: chatRequest.modelID)
         var components = URLComponents(
             url: configuration.baseURL.appending(path: "\(version)/models/\(chatRequest.modelID.rawValue):streamGenerateContent"),
@@ -818,11 +818,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             body["tools"] = geminiTools
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         return request
     }
 
-    private func geminiInteractionsRequest(apiKey: String, chatRequest: ChatRequest) throws -> URLRequest {
+    private func geminiInteractionsRequest(apiKey: String, chatRequest: ChatRequest) async throws -> URLRequest {
         var components = URLComponents(url: configuration.baseURL.appending(path: "v1beta/interactions"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "alt", value: "sse"),
@@ -888,7 +888,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        try applyExtraHeaders(to: &request)
+        try await applyExtraHeaders(to: &request)
         return request
     }
 
@@ -914,26 +914,35 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
     }
 
-    private func applyExtraHeaders(to request: inout URLRequest) throws {
-        guard let json = configuration.extraHeadersJSON?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !json.isEmpty
-        else {
-            return
+    private func applyExtraHeaders(to request: inout URLRequest) async throws {
+        if let url = request.url {
+            try EndpointSecurityPolicy().validate(
+                url,
+                useCase: .cloudProvider,
+                allowsExplicitLocalHTTP: configuration.allowInsecureLocalHTTP
+            )
         }
-        guard let data = json.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            throw InferenceError.invalidRequest("Cloud provider extra headers must be a JSON object.")
-        }
-        let blockedHeaders = Set(["authorization", "content-type", "x-api-key"])
-        for (rawName, rawValue) in object {
-            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for header in configuration.headers {
+            let name = header.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { continue }
-            guard !blockedHeaders.contains(name.lowercased()) else {
-                throw InferenceError.invalidRequest("Cloud provider extra headers cannot override \(name).")
+            guard header.kind == .secretReference || !CloudProviderHeader.isSecretLikeName(name) else {
+                throw InferenceError.invalidRequest("Cloud provider header \(name) must be stored as a Keychain secret reference.")
             }
-            guard let value = rawValue as? String else {
-                throw InferenceError.invalidRequest("Cloud provider extra header \(name) must be a string.")
+            let value: String?
+            switch header.kind {
+            case .publicValue:
+                value = header.value
+            case .secretReference:
+                guard let service = header.keychainService,
+                      let account = header.keychainAccount
+                else {
+                    throw InferenceError.invalidRequest("Cloud provider header \(name) is missing its Keychain reference.")
+                }
+                value = try await secretStore.read(service: service, account: account)
+            }
+            guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                continue
             }
             request.setValue(value, forHTTPHeaderField: name)
         }

@@ -1,0 +1,94 @@
+---
+const capabilities = [
+  {
+    title: "Use capable models on iPhone",
+    body: "Install supported MLX models and use local inference for everyday work, private drafts, and context-heavy questions that should stay close.",
+    meta: "Local chat, vision, embeddings",
+  },
+  {
+    title: "Add cloud power only when you choose it",
+    body: "Bring your own provider keys for harder tasks. Pines keeps cloud routing explicit and never turns a local request into a cloud request silently.",
+    meta: "OpenAI-compatible, OpenRouter, Anthropic, Gemini",
+  },
+  {
+    title: "Keep useful context in a private vault",
+    body: "Import files and notes so Pines can retrieve the right material later instead of asking you to paste the same context again.",
+    meta: "PDF, images, Markdown, JSON, CSV",
+  },
+];
+
+const trustItems = [
+  "API keys stay in Keychain.",
+  "Normal inference remains local unless a cloud route is configured and chosen.",
+  "Private vault and MCP resource context require per-turn approval before cloud use.",
+  "Tool specs declare permissions, side effects, network policy, and timeout.",
+  "CloudKit sync is optional and deliberately excludes secrets and model binaries.",
+];
+---
+
+<section class="section capability-grid" aria-labelledby="capabilities-title">
+  <div class="section-copy">
+    <span class="section-kicker">Why Pines</span>
+    <h2>Your phone can be more than a remote control for cloud chat.</h2>
+    <p>
+      Pines brings local models, optional cloud providers, private context, and tools into
+      one iPhone workspace with an Apple Watch companion for quick access.
+    </p>
+  </div>
+  <div class="capability-cards">
+    {capabilities.map((item) => (
+      <article>
+        <span>{item.meta}</span>
+        <h3>{item.title}</h3>
+        <p>{item.body}</p>
+      </article>
+    ))}
+  </div>
+</section>
+
+<section class="section route-map" id="privacy">
+  <div class="route-panel local-panel">
+    <span class="section-kicker">Default Boundary</span>
+    <h2>On device until you decide otherwise.</h2>
+    <p>
+      Pines is local-first by default. Chats, model state, vault documents, embeddings,
+      attachments, and normal inference stay on device unless you configure a provider and choose a cloud route.
+    </p>
+    <div class="route-ladder" aria-label="Execution modes">
+      <span>Local only</span>
+      <span>Prefer local</span>
+      <span>Cloud allowed</span>
+      <span>Cloud required</span>
+    </div>
+  </div>
+  <div class="route-panel trust-panel">
+    <h3>Visible Consent Points</h3>
+    <ul>
+      {trustItems.map((item) => <li>{item}</li>)}
+    </ul>
+  </div>
+</section>
+
+<section class="section mcp-section">
+  <div class="mcp-terminal" aria-label="MCP capability preview">
+    <div class="terminal-bar">
+      <span></span>
+      <span></span>
+      <span></span>
+      <strong>MCP Streamable HTTP</strong>
+    </div>
+    <pre><code>tools/list        enabled per server
+resources/read    selected by user
+prompts/get       editable arguments
+sampling/create   reviewed before return</code></pre>
+  </div>
+  <div class="section-copy">
+    <span class="section-kicker">Tools And MCP</span>
+    <h2>Connect useful systems while keeping actions legible.</h2>
+    <p>
+      MCP servers can bring tools, resources, prompts, subscriptions, and sampling into Pines.
+      Network operations, private context, browser actions, and sampling results remain approval-aware.
+    </p>
+    <a class="text-link" href="https://github.com/RNT56/pines/blob/main/docs/MCP.md">Read the MCP notes</a>
+  </div>
+</section>

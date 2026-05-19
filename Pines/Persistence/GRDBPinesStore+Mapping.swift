@@ -348,9 +348,10 @@ extension GRDBPinesStore {
             defaultModelID: (row["default_model_id"] as String?).map(ModelID.init(rawValue:)),
             validationStatus: ProviderValidationStatus(rawValue: row["validation_status"]) ?? .unvalidated,
             lastValidationError: row["last_validation_error"] as String?,
-            extraHeadersJSON: row["extra_headers_json"] as String?,
+            headers: decodeJSON(row["headers_json"] as String?) ?? [],
             keychainService: row["keychain_service"],
             keychainAccount: row["keychain_account"],
+            allowInsecureLocalHTTP: ((row["allow_insecure_local_http"] as Int?) ?? 0) == 1,
             enabledForAgents: (row["enabled_for_agents"] as Int) == 1,
             lastValidatedAt: (row["last_validated_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
         )

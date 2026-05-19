@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -32,16 +34,20 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Resolve release tag
         id: release-tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
           else
             tag="${GITHUB_REF_NAME}"
           fi
@@ -76,6 +82,9 @@ jobs:
       - name: Ensure Apple platforms are installed
         run: bash scripts/ci/ensure-xcode-platforms.sh
 
+      - name: Validate CI shell scripts
+        run: bash -n scripts/ci/*.sh
+
       - name: Public repo hygiene
         run: bash scripts/ci/check-public-hygiene.sh
 
@@ -88,8 +97,27 @@ jobs:
       - name: Run core verification
         run: swift run --disable-automatic-resolution PinesCoreTestRunner
 
-      - name: Validate Xcode project
-        run: bash scripts/ci/run-xcode-validation.sh
+      - name: Prepare Xcode validation snapshot
+        run: bash scripts/ci/run-xcode-validation.sh prepare
+
+      - name: Generate project and verify drift
+        run: bash scripts/ci/run-xcode-validation.sh generate
+
+      - name: Resolve Xcode package dependencies
+        run: bash scripts/ci/run-xcode-validation.sh resolve
+
+      - name: Build unsigned iOS app
+        run: bash scripts/ci/run-xcode-validation.sh build-app
+
+      - name: Build simulator smoke tests
+        run: bash scripts/ci/run-xcode-validation.sh build-tests
+
+      - name: Run simulator smoke tests
+        run: bash scripts/ci/run-xcode-validation.sh run-tests
+
+      - name: Check final Xcode drift
+        if: always()
+        run: bash scripts/ci/run-xcode-validation.sh finalize
 
       - name: Build unsigned iOS archive
         run: |
@@ -112,7 +140,8 @@ jobs:
         run: bash scripts/ci/package-release.sh "${{ steps.release-tag.outputs.tag }}"
 
       - name: Upload release validation artifacts
-        uses: actions/upload-artifact@v7.0.1
+        # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pines-${{ steps.release-tag.outputs.tag }}-validation
           path: |
@@ -122,24 +151,68 @@ jobs:
             build/archive.log
             dist/pines-${{ steps.release-tag.outputs.tag }}-source.tar.gz
             dist/pines-${{ steps.release-tag.outputs.tag }}-source.tar.gz.sha256
+            dist/pines-${{ steps.release-tag.outputs.tag }}-sbom.cdx.json
           if-no-files-found: error
           retention-days: 30
 
-  github-release:
-    name: Publish GitHub Release
+      - name: Attest release artifacts
+        # actions/attest-build-provenance v4.1.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
+        with:
+          subject-path: |
+            dist/pines-${{ steps.release-tag.outputs.tag }}-source.tar.gz
+            dist/pines-${{ steps.release-tag.outputs.tag }}-source.tar.gz.sha256
+            dist/pines-${{ steps.release-tag.outputs.tag }}-sbom.cdx.json
+
+  site:
+    name: Validate release site
     runs-on: ubuntu-latest
-    needs: validate
     timeout-minutes: 15
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Setup Node
+        # actions/setup-node v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install site dependencies
+        run: npm --prefix site ci
+
+      - name: Build site
+        run: npm --prefix site run build
+
+      - name: Verify site artifact
+        run: test -f site/dist/index.html
+
+  github-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - validate
+      - site
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        # actions/checkout v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Download validation artifacts
-        uses: actions/download-artifact@v4
+        # actions/download-artifact v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: pines-${{ needs.validate.outputs.tag }}-validation
           path: release-artifacts
