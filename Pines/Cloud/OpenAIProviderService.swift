@@ -253,12 +253,33 @@ struct OpenAIProviderService {
         try await rawJSON(method: .post, path: "responses", body: request.openAIResponsesBody)
     }
 
+    func createDeepResearchRunRecord(_ request: OpenAIDeepResearchRequest) async throws -> (response: OpenAIProviderResponse, run: ProviderResearchRunRecord) {
+        let response = try await createDeepResearchRun(request)
+        return (response, OpenAIProviderRecordMapper.providerResearchRun(from: request, response: response.json))
+    }
+
     func retrieveDeepResearchRun(responseID: OpenAIResponseID) async throws -> OpenAIProviderResponse {
         try await retrieveResponse(responseID.rawValue)
     }
 
+    func retrieveDeepResearchRunRecord(_ run: ProviderResearchRunRecord) async throws -> (response: OpenAIProviderResponse, run: ProviderResearchRunRecord) {
+        guard let responseID = run.responseID, !responseID.isEmpty else {
+            throw InferenceError.invalidRequest("OpenAI Deep Research run \(run.id) does not have a provider response ID.")
+        }
+        let response = try await retrieveResponse(responseID)
+        return (response, OpenAIProviderRecordMapper.providerResearchRun(updating: run, response: response.json))
+    }
+
     func cancelDeepResearchRun(responseID: OpenAIResponseID) async throws -> OpenAIProviderResponse {
         try await cancelResponse(responseID.rawValue)
+    }
+
+    func cancelDeepResearchRunRecord(_ run: ProviderResearchRunRecord) async throws -> (response: OpenAIProviderResponse, run: ProviderResearchRunRecord) {
+        guard let responseID = run.responseID, !responseID.isEmpty else {
+            throw InferenceError.invalidRequest("OpenAI Deep Research run \(run.id) does not have a provider response ID.")
+        }
+        let response = try await cancelResponse(responseID)
+        return (response, OpenAIProviderRecordMapper.providerResearchRun(updating: run, response: response.json))
     }
 
     private func send(
@@ -842,6 +863,7 @@ private extension OpenAIDeepResearchRequest {
             "service_tier": .string(serviceTier.rawValue),
             "metadata": .object(metadata.mapValues(JSONValue.string)),
             "reasoning": .object([
+                "effort": .string(reasoningEffort),
                 "summary": .string(reasoningSummary),
             ]),
             "input": .array([
@@ -879,6 +901,17 @@ private extension OpenAIDeepResearchRequest {
             return "auto"
         case .standard, .deep:
             return "detailed"
+        }
+    }
+
+    private var reasoningEffort: String {
+        switch depth {
+        case .quick:
+            return "medium"
+        case .standard:
+            return "high"
+        case .deep:
+            return "xhigh"
         }
     }
 

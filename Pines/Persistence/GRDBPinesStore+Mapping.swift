@@ -487,6 +487,32 @@ extension GRDBPinesStore {
         )
     }
 
+    static func providerResearchRun(from row: Row) -> ProviderResearchRunRecord {
+        ProviderResearchRunRecord(
+            id: row["id"],
+            providerID: ProviderID(rawValue: row["provider_id"]),
+            providerKind: CloudProviderKind(rawValue: row["provider_kind"]) ?? .custom,
+            modelID: ModelID(rawValue: row["model_id"]),
+            title: row["title"],
+            prompt: row["prompt"],
+            depth: row["depth"],
+            sourcePolicy: decodeJSON(row["source_policy_json"] as String?) ?? .object([:]),
+            reportFormat: row["report_format"],
+            includeCodeInterpreter: (row["include_code_interpreter"] as Int) == 1,
+            serviceTier: row["service_tier"],
+            responseID: row["response_id"] as String?,
+            status: row["status"],
+            finalReportArtifactID: row["final_report_artifact_id"] as String?,
+            citationCount: row["citation_count"],
+            toolCallCount: row["tool_call_count"],
+            providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?),
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
+            completedAt: (row["completed_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
+            lastError: row["last_error"] as String?
+        )
+    }
+
     static func mcpServer(from row: Row) -> MCPServerConfiguration {
         MCPServerConfiguration(
             id: MCPServerID(rawValue: row["id"]),

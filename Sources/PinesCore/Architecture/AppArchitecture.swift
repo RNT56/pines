@@ -750,6 +750,76 @@ public struct ProviderStructuredOutputRecord: Identifiable, Hashable, Codable, S
     }
 }
 
+public struct ProviderResearchRunRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var providerID: ProviderID
+    public var providerKind: CloudProviderKind
+    public var modelID: ModelID
+    public var title: String
+    public var prompt: String
+    public var depth: String
+    public var sourcePolicy: JSONValue
+    public var reportFormat: String
+    public var includeCodeInterpreter: Bool
+    public var serviceTier: String
+    public var responseID: String?
+    public var status: String
+    public var finalReportArtifactID: String?
+    public var citationCount: Int
+    public var toolCallCount: Int
+    public var providerMetadata: [String: String]
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var completedAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: String,
+        providerID: ProviderID,
+        providerKind: CloudProviderKind,
+        modelID: ModelID,
+        title: String,
+        prompt: String,
+        depth: String,
+        sourcePolicy: JSONValue,
+        reportFormat: String,
+        includeCodeInterpreter: Bool = true,
+        serviceTier: String,
+        responseID: String? = nil,
+        status: String,
+        finalReportArtifactID: String? = nil,
+        citationCount: Int = 0,
+        toolCallCount: Int = 0,
+        providerMetadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        completedAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.modelID = modelID
+        self.title = title
+        self.prompt = prompt
+        self.depth = depth
+        self.sourcePolicy = sourcePolicy
+        self.reportFormat = reportFormat
+        self.includeCodeInterpreter = includeCodeInterpreter
+        self.serviceTier = serviceTier
+        self.responseID = responseID
+        self.status = status
+        self.finalReportArtifactID = finalReportArtifactID
+        self.citationCount = citationCount
+        self.toolCallCount = toolCallCount
+        self.providerMetadata = providerMetadata
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.completedAt = completedAt
+        self.lastError = lastError
+    }
+}
+
 public struct ProviderModelCapabilityRecord: Identifiable, Hashable, Codable, Sendable {
     public var id: String { "\(providerID.rawValue)::\(modelID.rawValue)" }
     public var providerID: ProviderID
@@ -830,6 +900,12 @@ public protocol ProviderModelCapabilityRepository: Sendable {
     func deleteProviderModelCapability(providerID: ProviderID, modelID: ModelID) async throws
 }
 
+public protocol ProviderResearchRunRepository: Sendable {
+    func listProviderResearchRuns(providerID: ProviderID?, status: String?) async throws -> [ProviderResearchRunRecord]
+    func upsertProviderResearchRun(_ run: ProviderResearchRunRecord) async throws
+    func deleteProviderResearchRun(id: String) async throws
+}
+
 public extension ProviderFileRepository {
     func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord] { [] }
     func upsertProviderFile(_ file: ProviderFileRecord) async throws {}
@@ -870,6 +946,12 @@ public extension ProviderModelCapabilityRepository {
     func listProviderModelCapabilities(providerID: ProviderID?) async throws -> [ProviderModelCapabilityRecord] { [] }
     func upsertProviderModelCapability(_ capability: ProviderModelCapabilityRecord) async throws {}
     func deleteProviderModelCapability(providerID: ProviderID, modelID: ModelID) async throws {}
+}
+
+public extension ProviderResearchRunRepository {
+    func listProviderResearchRuns(providerID: ProviderID?, status: String?) async throws -> [ProviderResearchRunRecord] { [] }
+    func upsertProviderResearchRun(_ run: ProviderResearchRunRecord) async throws {}
+    func deleteProviderResearchRun(id: String) async throws {}
 }
 
 public typealias RemoteMCPServerRepository = MCPServerRepository

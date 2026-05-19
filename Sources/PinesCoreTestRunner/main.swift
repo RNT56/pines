@@ -525,6 +525,7 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS provider_live_sessions"), "missing generic provider live sessions table")
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS provider_structured_outputs"), "missing generic provider structured outputs table")
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS provider_model_capabilities"), "missing generic provider model capabilities table")
+        try expect(sql.contains("CREATE TABLE IF NOT EXISTS provider_research_runs"), "missing generic provider research runs table")
         try expect(sql.contains("INSERT OR IGNORE INTO provider_files"), "missing OpenAI provider file migration copy")
         try expect(sql.contains("INSERT OR IGNORE INTO provider_caches"), "missing OpenAI vector store migration copy")
         try expect(sql.contains("INSERT OR IGNORE INTO provider_batches"), "missing OpenAI batch migration copy")

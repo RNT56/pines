@@ -1373,14 +1373,162 @@ struct CoreContractTests {
             toolCallCount: 2,
             providerMetadata: [CloudProviderMetadataKeys.openAIResponseID: "resp_123"]
         )
+        let providerRun = ProviderResearchRunRecord(
+            id: run.id.uuidString,
+            providerID: request.providerID,
+            providerKind: .openAI,
+            modelID: request.modelID,
+            title: request.title,
+            prompt: request.prompt,
+            depth: request.depth.rawValue,
+            sourcePolicy: .object([
+                "scope": .string(request.sourcePolicy.scope.rawValue),
+                "vector_store_ids": .array(request.sourcePolicy.vectorStoreIDs.map { .string($0.rawValue) }),
+            ]),
+            reportFormat: request.reportFormat.rawValue,
+            includeCodeInterpreter: request.includeCodeInterpreter,
+            serviceTier: request.serviceTier.rawValue,
+            responseID: run.responseID?.rawValue,
+            status: run.status.rawValue,
+            citationCount: run.citationCount,
+            toolCallCount: run.toolCallCount,
+            providerMetadata: run.providerMetadata
+        )
 
         let decodedRequest = try JSONDecoder().decode(OpenAIDeepResearchRequest.self, from: JSONEncoder().encode(request))
         let decodedRun = try JSONDecoder().decode(OpenAIDeepResearchRun.self, from: JSONEncoder().encode(run))
+        let decodedProviderRun = try JSONDecoder().decode(ProviderResearchRunRecord.self, from: JSONEncoder().encode(providerRun))
 
         #expect(decodedRequest == request)
         #expect(decodedRun == run)
+        #expect(decodedProviderRun == providerRun)
         #expect(decodedRun.request.modelID == "gpt-5.5-pro")
         #expect(decodedRun.request.sourcePolicy.vectorStoreIDs == ["vs_123"])
+        #expect(decodedProviderRun.responseID == "resp_123")
+    }
+
+    @Test
+    func openAIProviderRecordMapperMaterializesLifecycleRecords() throws {
+        let providerID = ProviderID(rawValue: "openai")
+        let file = OpenAIProviderRecordMapper.providerFile(
+            from: .object([
+                "id": .string("file_123"),
+                "object": .string("file"),
+                "purpose": .string("assistants"),
+                "filename": .string("brief.pdf"),
+                "bytes": .number(2048),
+                "status": .string("processed"),
+                "created_at": .number(1_700_000_000),
+                "metadata": .object(["workspace": .string("pines")]),
+            ]),
+            providerID: providerID
+        )
+        let vectorStore = OpenAIProviderRecordMapper.providerCache(
+            fromVectorStore: .object([
+                "id": .string("vs_123"),
+                "name": .string("Research"),
+                "status": .string("completed"),
+                "usage_bytes": .number(4096),
+                "file_counts": .object(["completed": .number(2), "total": .number(2)]),
+                "expires_after": .object(["anchor": .string("last_active_at"), "days": .number(7)]),
+                "created_at": .number(1_700_000_001),
+            ]),
+            providerID: providerID
+        )
+        let batch = OpenAIProviderRecordMapper.providerBatch(
+            from: .object([
+                "id": .string("batch_123"),
+                "endpoint": .string("/v1/responses"),
+                "status": .string("in_progress"),
+                "input_file_id": .string("file_123"),
+                "completion_window": .string("24h"),
+                "request_counts": .object(["total": .number(10), "completed": .number(2)]),
+                "created_at": .number(1_700_000_002),
+            ]),
+            providerID: providerID
+        )
+        let live = OpenAIProviderRecordMapper.providerLiveSession(
+            from: .object([
+                "id": .string("sess_123"),
+                "model": .string("gpt-realtime"),
+                "status": .string("created"),
+                "modalities": .array([.string("audio"), .string("text")]),
+                "expires_at": .number(1_700_003_600),
+            ]),
+            providerID: providerID
+        )
+        let researchRequest = OpenAIDeepResearchRequest(
+            providerID: providerID,
+            title: "Market map",
+            prompt: "Map the market.",
+            sourcePolicy: .init(scope: .webAndProviderFiles, vectorStoreIDs: ["vs_123"]),
+            metadata: ["local": "true"]
+        )
+        let researchRun = OpenAIProviderRecordMapper.providerResearchRun(
+            from: researchRequest,
+            response: .object([
+                "id": .string("resp_123"),
+                "status": .string("in_progress"),
+                "created_at": .number(1_700_000_003),
+                "metadata": .object(["provider": .string("openai")]),
+                "output": .array([
+                    .object(["type": .string("web_search_call")]),
+                    .object([
+                        "type": .string("message"),
+                        "content": .array([
+                            .object([
+                                "type": .string("output_text"),
+                                "annotations": .array([
+                                    .object(["type": .string("url_citation"), "url": .string("https://example.com")]),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                ]),
+            ])
+        )
+        let refreshedResearchRun = OpenAIProviderRecordMapper.providerResearchRun(
+            updating: researchRun,
+            response: .object([
+                "id": .string("resp_123"),
+                "status": .string("completed"),
+                "metadata": .object(["provider": .string("openai"), "final": .bool(true)]),
+                "output": .array([
+                    .object(["type": .string("code_interpreter_call")]),
+                    .object([
+                        "type": .string("message"),
+                        "content": .array([
+                            .object([
+                                "type": .string("output_text"),
+                                "annotations": .array([
+                                    .object(["type": .string("url_citation"), "url": .string("https://example.org")]),
+                                    .object(["type": .string("url_citation"), "url": .string("https://example.net")]),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                ]),
+            ])
+        )
+
+        #expect(file?.id == "file_123")
+        #expect(file?.byteCount == 2048)
+        #expect(file?.providerMetadata["workspace"] == "pines")
+        #expect(vectorStore?.id == "vs_123")
+        #expect(vectorStore?.configuration?.objectValue?["expires_after"] != nil)
+        #expect(batch?.status == OpenAIBackgroundResponseStatus.inProgress.rawValue)
+        #expect(batch?.requestCounts?.objectValue?["total"]?.intValue == 10)
+        #expect(live?.modalities == ["audio", "text"])
+        #expect(researchRun.responseID == "resp_123")
+        #expect(researchRun.status == OpenAIBackgroundResponseStatus.inProgress.rawValue)
+        #expect(researchRun.citationCount == 1)
+        #expect(researchRun.toolCallCount == 1)
+        #expect(researchRun.providerMetadata["provider"] == "openai")
+        #expect(researchRun.providerMetadata["local"] == "true")
+        #expect(refreshedResearchRun.status == "completed")
+        #expect(refreshedResearchRun.citationCount == 2)
+        #expect(refreshedResearchRun.toolCallCount == 1)
+        #expect(refreshedResearchRun.providerMetadata["final"] == "true")
     }
 
     private func decodedCitations(_ metadata: [String: String]) throws -> [WebSearchCitation] {

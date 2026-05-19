@@ -21,6 +21,7 @@ actor GRDBPinesStore:
     ProviderLiveSessionRepository,
     ProviderStructuredOutputRepository,
     ProviderModelCapabilityRepository,
+    ProviderResearchRunRepository,
     MCPServerRepository,
     ModelDownloadRepository,
     AuditEventRepository
@@ -1473,6 +1474,536 @@ actor GRDBPinesStore:
     func deleteProvider(id: ProviderID) async throws {
         try await database.write { db in
             try db.execute(sql: "DELETE FROM cloud_providers WHERE id = ?", arguments: [id.rawValue])
+        }
+    }
+
+    // MARK: - Provider Lifecycle Records
+
+    func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord] {
+        try await database.read { db in
+            if let providerID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_files WHERE provider_id = ? ORDER BY created_at DESC",
+                    arguments: [providerID.rawValue]
+                ).map(Self.providerFile(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM provider_files ORDER BY created_at DESC").map(Self.providerFile(from:))
+        }
+    }
+
+    func upsertProviderFile(_ file: ProviderFileRecord) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO provider_files
+                    (id, provider_id, provider_kind, purpose, file_name, content_type, byte_count, status, sha256,
+                     local_path, provider_object, provider_metadata_json, created_at, expires_at, last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    provider_id = excluded.provider_id,
+                    provider_kind = excluded.provider_kind,
+                    purpose = excluded.purpose,
+                    file_name = excluded.file_name,
+                    content_type = excluded.content_type,
+                    byte_count = excluded.byte_count,
+                    status = excluded.status,
+                    sha256 = excluded.sha256,
+                    local_path = excluded.local_path,
+                    provider_object = excluded.provider_object,
+                    provider_metadata_json = excluded.provider_metadata_json,
+                    expires_at = excluded.expires_at,
+                    last_error = excluded.last_error
+                """,
+                arguments: [
+                    file.id,
+                    file.providerID.rawValue,
+                    file.providerKind.rawValue,
+                    file.purpose,
+                    file.fileName,
+                    file.contentType,
+                    file.byteCount,
+                    file.status,
+                    file.sha256,
+                    file.localURL?.path,
+                    file.providerObject,
+                    Self.encodeProviderMetadata(file.providerMetadata),
+                    file.createdAt.timeIntervalSinceReferenceDate,
+                    file.expiresAt?.timeIntervalSinceReferenceDate,
+                    file.lastError,
+                ]
+            )
+        }
+    }
+
+    func deleteProviderFile(id: String) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM provider_files WHERE id = ?", arguments: [id])
+        }
+    }
+
+    func listProviderArtifacts(responseID: String?) async throws -> [ProviderArtifactRecord] {
+        try await database.read { db in
+            if let responseID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_artifacts WHERE response_id = ? ORDER BY created_at ASC",
+                    arguments: [responseID]
+                ).map(Self.providerArtifact(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM provider_artifacts ORDER BY created_at DESC").map(Self.providerArtifact(from:))
+        }
+    }
+
+    func upsertProviderArtifact(_ artifact: ProviderArtifactRecord) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO provider_artifacts
+                    (id, provider_id, provider_kind, response_id, tool_call_id, provider_file_id, kind, file_name,
+                     content_type, byte_count, text, content_json, local_path, remote_url, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    provider_id = excluded.provider_id,
+                    provider_kind = excluded.provider_kind,
+                    response_id = excluded.response_id,
+                    tool_call_id = excluded.tool_call_id,
+                    provider_file_id = excluded.provider_file_id,
+                    kind = excluded.kind,
+                    file_name = excluded.file_name,
+                    content_type = excluded.content_type,
+                    byte_count = excluded.byte_count,
+                    text = excluded.text,
+                    content_json = excluded.content_json,
+                    local_path = excluded.local_path,
+                    remote_url = excluded.remote_url
+                """,
+                arguments: [
+                    artifact.id,
+                    artifact.providerID?.rawValue,
+                    artifact.providerKind.rawValue,
+                    artifact.responseID,
+                    artifact.toolCallID,
+                    artifact.providerFileID,
+                    artifact.kind,
+                    artifact.fileName,
+                    artifact.contentType,
+                    artifact.byteCount,
+                    artifact.text,
+                    Self.encodeJSON(artifact.content),
+                    artifact.localURL?.path,
+                    artifact.remoteURL?.absoluteString,
+                    artifact.createdAt.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func deleteProviderArtifact(id: String) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM provider_artifacts WHERE id = ?", arguments: [id])
+        }
+    }
+
+    func listProviderCaches(providerID: ProviderID?, kind: String?) async throws -> [ProviderCacheRecord] {
+        try await database.read { db in
+            switch (providerID, kind) {
+            case let (providerID?, kind?):
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_caches WHERE provider_id = ? AND kind = ? ORDER BY created_at DESC",
+                    arguments: [providerID.rawValue, kind]
+                ).map(Self.providerCache(from:))
+            case let (providerID?, nil):
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_caches WHERE provider_id = ? ORDER BY created_at DESC",
+                    arguments: [providerID.rawValue]
+                ).map(Self.providerCache(from:))
+            case let (nil, kind?):
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_caches WHERE kind = ? ORDER BY created_at DESC",
+                    arguments: [kind]
+                ).map(Self.providerCache(from:))
+            case (nil, nil):
+                return try Row.fetchAll(db, sql: "SELECT * FROM provider_caches ORDER BY created_at DESC").map(Self.providerCache(from:))
+            }
+        }
+    }
+
+    func upsertProviderCache(_ cache: ProviderCacheRecord) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO provider_caches
+                    (id, provider_id, provider_kind, kind, name, model_id, status, usage_bytes, item_counts_json,
+                     configuration_json, metadata_json, created_at, expires_at, last_active_at, last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    provider_id = excluded.provider_id,
+                    provider_kind = excluded.provider_kind,
+                    kind = excluded.kind,
+                    name = excluded.name,
+                    model_id = excluded.model_id,
+                    status = excluded.status,
+                    usage_bytes = excluded.usage_bytes,
+                    item_counts_json = excluded.item_counts_json,
+                    configuration_json = excluded.configuration_json,
+                    metadata_json = excluded.metadata_json,
+                    expires_at = excluded.expires_at,
+                    last_active_at = excluded.last_active_at,
+                    last_error = excluded.last_error
+                """,
+                arguments: [
+                    cache.id,
+                    cache.providerID.rawValue,
+                    cache.providerKind.rawValue,
+                    cache.kind,
+                    cache.name,
+                    cache.modelID?.rawValue,
+                    cache.status,
+                    cache.usageBytes,
+                    Self.encodeJSON(cache.itemCounts),
+                    Self.encodeJSON(cache.configuration),
+                    Self.encodeJSON(cache.metadata),
+                    cache.createdAt.timeIntervalSinceReferenceDate,
+                    cache.expiresAt?.timeIntervalSinceReferenceDate,
+                    cache.lastActiveAt?.timeIntervalSinceReferenceDate,
+                    cache.lastError,
+                ]
+            )
+        }
+    }
+
+    func deleteProviderCache(id: String) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM provider_caches WHERE id = ?", arguments: [id])
+        }
+    }
+
+    func listProviderBatches(providerID: ProviderID?) async throws -> [ProviderBatchRecord] {
+        try await database.read { db in
+            if let providerID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_batches WHERE provider_id = ? ORDER BY created_at DESC",
+                    arguments: [providerID.rawValue]
+                ).map(Self.providerBatch(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM provider_batches ORDER BY created_at DESC").map(Self.providerBatch(from:))
+        }
+    }
+
+    func upsertProviderBatch(_ batch: ProviderBatchRecord) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO provider_batches
+                    (id, provider_id, provider_kind, endpoint, status, input_file_id, output_file_id, error_file_id,
+                     completion_window, request_counts_json, metadata_json, created_at, completed_at, expires_at, last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    provider_id = excluded.provider_id,
+                    provider_kind = excluded.provider_kind,
+                    endpoint = excluded.endpoint,
+                    status = excluded.status,
+                    input_file_id = excluded.input_file_id,
+                    output_file_id = excluded.output_file_id,
+                    error_file_id = excluded.error_file_id,
+                    completion_window = excluded.completion_window,
+                    request_counts_json = excluded.request_counts_json,
+                    metadata_json = excluded.metadata_json,
+                    completed_at = excluded.completed_at,
+                    expires_at = excluded.expires_at,
+                    last_error = excluded.last_error
+                """,
+                arguments: [
+                    batch.id,
+                    batch.providerID.rawValue,
+                    batch.providerKind.rawValue,
+                    batch.endpoint,
+                    batch.status,
+                    batch.inputFileID,
+                    batch.outputFileID,
+                    batch.errorFileID,
+                    batch.completionWindow,
+                    Self.encodeJSON(batch.requestCounts),
+                    Self.encodeJSON(batch.metadata),
+                    batch.createdAt.timeIntervalSinceReferenceDate,
+                    batch.completedAt?.timeIntervalSinceReferenceDate,
+                    batch.expiresAt?.timeIntervalSinceReferenceDate,
+                    batch.lastError,
+                ]
+            )
+        }
+    }
+
+    func deleteProviderBatch(id: String) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM provider_batches WHERE id = ?", arguments: [id])
+        }
+    }
+
+    func listProviderLiveSessions(providerID: ProviderID?) async throws -> [ProviderLiveSessionRecord] {
+        try await database.read { db in
+            if let providerID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_live_sessions WHERE provider_id = ? ORDER BY created_at DESC",
+                    arguments: [providerID.rawValue]
+                ).map(Self.providerLiveSession(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM provider_live_sessions ORDER BY created_at DESC").map(Self.providerLiveSession(from:))
+        }
+    }
+
+    func upsertProviderLiveSession(_ session: ProviderLiveSessionRecord) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO provider_live_sessions
+                    (id, provider_id, provider_kind, model_id, status, modalities_json, client_secret_keychain_account,
+                     expires_at, provider_metadata_json, created_at, closed_at, last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    provider_id = excluded.provider_id,
+                    provider_kind = excluded.provider_kind,
+                    model_id = excluded.model_id,
+                    status = excluded.status,
+                    modalities_json = excluded.modalities_json,
+                    client_secret_keychain_account = excluded.client_secret_keychain_account,
+                    expires_at = excluded.expires_at,
+                    provider_metadata_json = excluded.provider_metadata_json,
+                    closed_at = excluded.closed_at,
+                    last_error = excluded.last_error
+                """,
+                arguments: [
+                    session.id,
+                    session.providerID.rawValue,
+                    session.providerKind.rawValue,
+                    session.modelID.rawValue,
+                    session.status,
+                    Self.encodeJSON(session.modalities),
+                    session.clientSecretKeychainAccount,
+                    session.expiresAt?.timeIntervalSinceReferenceDate,
+                    Self.encodeProviderMetadata(session.providerMetadata),
+                    session.createdAt.timeIntervalSinceReferenceDate,
+                    session.closedAt?.timeIntervalSinceReferenceDate,
+                    session.lastError,
+                ]
+            )
+        }
+    }
+
+    func deleteProviderLiveSession(id: String) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM provider_live_sessions WHERE id = ?", arguments: [id])
+        }
+    }
+
+    func listProviderStructuredOutputs(responseID: String?) async throws -> [ProviderStructuredOutputRecord] {
+        try await database.read { db in
+            if let responseID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_structured_outputs WHERE response_id = ? ORDER BY created_at ASC",
+                    arguments: [responseID]
+                ).map(Self.providerStructuredOutput(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM provider_structured_outputs ORDER BY created_at DESC").map(Self.providerStructuredOutput(from:))
+        }
+    }
+
+    func upsertProviderStructuredOutput(_ output: ProviderStructuredOutputRecord) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO provider_structured_outputs
+                    (id, provider_id, provider_kind, response_id, message_id, schema_name, schema_json, content_json,
+                     refusal, incomplete_reason, validation_errors_json, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    provider_id = excluded.provider_id,
+                    provider_kind = excluded.provider_kind,
+                    response_id = excluded.response_id,
+                    message_id = excluded.message_id,
+                    schema_name = excluded.schema_name,
+                    schema_json = excluded.schema_json,
+                    content_json = excluded.content_json,
+                    refusal = excluded.refusal,
+                    incomplete_reason = excluded.incomplete_reason,
+                    validation_errors_json = excluded.validation_errors_json,
+                    status = excluded.status
+                """,
+                arguments: [
+                    output.id.uuidString,
+                    output.providerID?.rawValue,
+                    output.providerKind.rawValue,
+                    output.responseID,
+                    output.messageID?.uuidString,
+                    output.schemaName,
+                    Self.encodeJSON(output.schema),
+                    Self.encodeJSON(output.content),
+                    output.refusal,
+                    output.incompleteReason,
+                    Self.encodeJSON(output.validationErrors),
+                    output.status,
+                    output.createdAt.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func deleteProviderStructuredOutput(id: UUID) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM provider_structured_outputs WHERE id = ?", arguments: [id.uuidString])
+        }
+    }
+
+    func listProviderModelCapabilities(providerID: ProviderID?) async throws -> [ProviderModelCapabilityRecord] {
+        try await database.read { db in
+            if let providerID {
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_model_capabilities WHERE provider_id = ? ORDER BY fetched_at DESC",
+                    arguments: [providerID.rawValue]
+                ).map(Self.providerModelCapability(from:))
+            }
+            return try Row.fetchAll(db, sql: "SELECT * FROM provider_model_capabilities ORDER BY fetched_at DESC").map(Self.providerModelCapability(from:))
+        }
+    }
+
+    func upsertProviderModelCapability(_ capability: ProviderModelCapabilityRecord) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO provider_model_capabilities
+                    (provider_id, provider_kind, model_id, capabilities_json, context_window_tokens,
+                     input_modalities_json, output_modalities_json, metadata_json, fetched_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(provider_id, model_id) DO UPDATE SET
+                    provider_kind = excluded.provider_kind,
+                    capabilities_json = excluded.capabilities_json,
+                    context_window_tokens = excluded.context_window_tokens,
+                    input_modalities_json = excluded.input_modalities_json,
+                    output_modalities_json = excluded.output_modalities_json,
+                    metadata_json = excluded.metadata_json,
+                    fetched_at = excluded.fetched_at,
+                    expires_at = excluded.expires_at
+                """,
+                arguments: [
+                    capability.providerID.rawValue,
+                    capability.providerKind.rawValue,
+                    capability.modelID.rawValue,
+                    Self.encodeJSON(capability.capabilities),
+                    capability.contextWindowTokens,
+                    Self.encodeJSON(capability.inputModalities),
+                    Self.encodeJSON(capability.outputModalities),
+                    Self.encodeJSON(capability.metadata),
+                    capability.fetchedAt.timeIntervalSinceReferenceDate,
+                    capability.expiresAt?.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func deleteProviderModelCapability(providerID: ProviderID, modelID: ModelID) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "DELETE FROM provider_model_capabilities WHERE provider_id = ? AND model_id = ?",
+                arguments: [providerID.rawValue, modelID.rawValue]
+            )
+        }
+    }
+
+    func listProviderResearchRuns(providerID: ProviderID?, status: String?) async throws -> [ProviderResearchRunRecord] {
+        try await database.read { db in
+            switch (providerID, status) {
+            case let (providerID?, status?):
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_research_runs WHERE provider_id = ? AND status = ? ORDER BY updated_at DESC",
+                    arguments: [providerID.rawValue, status]
+                ).map(Self.providerResearchRun(from:))
+            case let (providerID?, nil):
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_research_runs WHERE provider_id = ? ORDER BY updated_at DESC",
+                    arguments: [providerID.rawValue]
+                ).map(Self.providerResearchRun(from:))
+            case let (nil, status?):
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_research_runs WHERE status = ? ORDER BY updated_at DESC",
+                    arguments: [status]
+                ).map(Self.providerResearchRun(from:))
+            case (nil, nil):
+                return try Row.fetchAll(db, sql: "SELECT * FROM provider_research_runs ORDER BY updated_at DESC").map(Self.providerResearchRun(from:))
+            }
+        }
+    }
+
+    func upsertProviderResearchRun(_ run: ProviderResearchRunRecord) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO provider_research_runs
+                    (id, provider_id, provider_kind, model_id, title, prompt, depth, source_policy_json, report_format,
+                     include_code_interpreter, service_tier, response_id, status, final_report_artifact_id,
+                     citation_count, tool_call_count, provider_metadata_json, created_at, updated_at, completed_at, last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    provider_id = excluded.provider_id,
+                    provider_kind = excluded.provider_kind,
+                    model_id = excluded.model_id,
+                    title = excluded.title,
+                    prompt = excluded.prompt,
+                    depth = excluded.depth,
+                    source_policy_json = excluded.source_policy_json,
+                    report_format = excluded.report_format,
+                    include_code_interpreter = excluded.include_code_interpreter,
+                    service_tier = excluded.service_tier,
+                    response_id = excluded.response_id,
+                    status = excluded.status,
+                    final_report_artifact_id = excluded.final_report_artifact_id,
+                    citation_count = excluded.citation_count,
+                    tool_call_count = excluded.tool_call_count,
+                    provider_metadata_json = excluded.provider_metadata_json,
+                    updated_at = excluded.updated_at,
+                    completed_at = excluded.completed_at,
+                    last_error = excluded.last_error
+                """,
+                arguments: [
+                    run.id,
+                    run.providerID.rawValue,
+                    run.providerKind.rawValue,
+                    run.modelID.rawValue,
+                    run.title,
+                    run.prompt,
+                    run.depth,
+                    Self.encodeJSON(run.sourcePolicy),
+                    run.reportFormat,
+                    run.includeCodeInterpreter ? 1 : 0,
+                    run.serviceTier,
+                    run.responseID,
+                    run.status,
+                    run.finalReportArtifactID,
+                    run.citationCount,
+                    run.toolCallCount,
+                    Self.encodeProviderMetadata(run.providerMetadata),
+                    run.createdAt.timeIntervalSinceReferenceDate,
+                    run.updatedAt.timeIntervalSinceReferenceDate,
+                    run.completedAt?.timeIntervalSinceReferenceDate,
+                    run.lastError,
+                ]
+            )
+        }
+    }
+
+    func deleteProviderResearchRun(id: String) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM provider_research_runs WHERE id = ?", arguments: [id])
         }
     }
 
