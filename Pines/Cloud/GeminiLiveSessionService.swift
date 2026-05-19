@@ -734,7 +734,7 @@ private extension Array where Element == String {
     }
 }
 
-private extension JSONValue {
+extension JSONValue {
     var arrayValue: [JSONValue]? {
         if case let .array(value) = self {
             return value
