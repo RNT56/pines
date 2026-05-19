@@ -513,6 +513,9 @@ private struct VaultDetailView: View {
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var vaultState: PinesVaultState
+    @EnvironmentObject private var settingsState: PinesSettingsState
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    @State private var providerStorageExportInFlightID: ProviderID?
     let item: PinesVaultItemPreview
 
     var body: some View {
@@ -549,6 +552,44 @@ private struct VaultDetailView: View {
                     }
                 }
                 .pinesSurface(.elevated)
+
+                if !providerStorageExportProviders.isEmpty {
+                    VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                        HStack {
+                            Label("Provider storage", systemImage: "cloud")
+                                .font(theme.typography.section)
+
+                            Spacer(minLength: theme.spacing.small)
+
+                            Menu {
+                                ForEach(providerStorageExportProviders) { provider in
+                                    Button(provider.displayName) {
+                                        Task { await exportToProviderStorage(provider) }
+                                    }
+                                }
+                            } label: {
+                                Label(
+                                    providerStorageExportInFlightID == nil ? "Export" : "Exporting",
+                                    systemImage: providerStorageExportInFlightID == nil ? "square.and.arrow.up" : "hourglass"
+                                )
+                            }
+                            .disabled(providerStorageExportInFlightID != nil)
+                        }
+
+                        Text("Exported Vault documents become provider-hosted files and can be deleted from the shared Provider Storage views.")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if let error = providerState.providerLifecycleError {
+                            Text(error)
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.danger)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .pinesSurface(.panel)
+                }
 
                 VStack(alignment: .leading, spacing: theme.spacing.medium) {
                     Text("Index activity")
@@ -589,6 +630,58 @@ private struct VaultDetailView: View {
             return "\(item.activeProfileEmbeddedChunks)/\(item.activeProfileTotalChunks) chunks are embedded with \(active.displayName). Text search covers all chunks."
         }
         return "\(item.chunks.count) chunks are available for text search. Add an embedding provider for semantic retrieval."
+    }
+
+    private var providerStorageExportProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.filter { provider in
+            provider.kind == .openAI || provider.kind == .anthropic
+        }
+    }
+
+    private var providerStorageByteCount: Int64 {
+        Int64(item.chunks.reduce(0) { partial, chunk in
+            partial + chunk.text.utf8.count
+        })
+    }
+
+    @MainActor
+    private func exportToProviderStorage(_ provider: CloudProviderConfiguration) async {
+        providerStorageExportInFlightID = provider.id
+        defer { providerStorageExportInFlightID = nil }
+        do {
+            switch provider.kind {
+            case .openAI:
+                let consent = PinesOpenAIProviderStorageConsent(
+                    isGranted: true,
+                    sourceDescription: "Vault document \(item.title)",
+                    destinationDescription: "OpenAI Files API for \(provider.displayName)",
+                    byteCount: providerStorageByteCount
+                )
+                _ = try await appModel.uploadOpenAIVaultDocument(
+                    providerID: provider.id,
+                    documentID: item.id,
+                    consent: consent,
+                    services: services
+                )
+            case .anthropic:
+                let consent = PinesAnthropicProviderStorageConsent(
+                    isGranted: true,
+                    sourceDescription: "Vault document \(item.title)",
+                    destinationDescription: "Anthropic Files API for \(provider.displayName)",
+                    byteCount: providerStorageByteCount
+                )
+                _ = try await appModel.uploadAnthropicVaultDocument(
+                    providerID: provider.id,
+                    documentID: item.id,
+                    consent: consent,
+                    services: services
+                )
+            default:
+                throw InferenceError.invalidRequest("\(provider.kind.rawValue) Vault export is not supported.")
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
     }
 
     private var activityRows: [(title: String, image: String)] {

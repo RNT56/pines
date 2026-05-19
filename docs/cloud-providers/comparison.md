@@ -13,31 +13,31 @@ This comparison is about provider API features that matter to Pines, not every p
 | Model listing | Yes | Yes | Yes | Yes | No/limited | Current except Voyage returns no text models |
 | Function/tool calling | Yes | Yes | Yes | Yes | No | Current for chat providers |
 | Native/provider web search | Yes | Yes | Yes | Yes via server tool/plugin | No | Current only OpenAI/Anthropic/Gemini; OpenRouter gap |
-| URL fetch/context tool | Partial via tools/MCP/custom | Yes, web fetch | Yes, URL context | Possible via tools/plugins | No | Gap |
-| File upload/reuse API | Yes | Yes | Yes | Provider/model dependent | No general file API | Gap |
+| URL fetch/context tool | Partial via tools/MCP/custom | Yes, web fetch | Yes, URL context | Possible via tools/plugins | No | Current for Anthropic/Gemini metadata paths; OpenAI/OpenRouter provider-native gaps remain |
+| File upload/reuse API | Yes | Yes | Yes | Provider/model dependent | No general file API | Current for OpenAI/Anthropic/Gemini provider lifecycle; OpenRouter gap |
 | Inline image input | Yes | Yes | Yes | Yes | Multimodal embeddings only | Current for chat providers |
-| Inline PDF/document input | Yes | Yes | Yes | Yes/PDF plugin | No chat | Current for selected chat providers; no hosted file reuse |
+| Inline PDF/document input | Yes | Yes | Yes | Yes/PDF plugin | No chat | Current for selected chat providers; hosted file reuse current for OpenAI/Anthropic/Gemini |
 | Audio input | Yes | Not primary Messages feature | Yes | Model dependent | No | Gap |
 | Video input | No/limited by model/API | No | Yes | Model dependent | No | Gap |
 | Text embeddings | Yes | No native embedding API | Yes | Yes | Yes | Current except Anthropic |
 | Multimodal embeddings | No primary embedding API | No | Limited/model dependent | Yes for some models | Yes | Gap |
 | Reranking API | No primary API | No | No primary API | Some routed models possible | Yes | Gap; Voyage highest priority |
-| Structured outputs / JSON schema | Yes | Yes/guidance and tool schemas | Yes | Yes | No | Gap |
-| Reasoning/thinking controls | Yes | Yes | Yes | Yes normalized | No | Current partly; OpenRouter gap |
-| Reasoning summaries/visibility | Yes | Yes | Yes | Model dependent | No | Gap/partial |
-| Prompt/context caching controls | Yes | Yes | Yes | Yes | No | Gap/partial |
-| Hosted code execution | Yes | Yes | Yes | Provider/model dependent | No | Gap |
-| Hosted file search/RAG | Yes | Search-result/citations patterns | Yes on newer models/tools | Provider/model dependent | Retrieval primitives only | Gap |
-| Deep research / long-running research agent | Yes, Responses/Deep Research | No direct equivalent | Yes, Interactions Deep Research Agent | Model/provider dependent | No | Gap/partial; Gemini has early routing |
-| Remote MCP/provider-hosted connectors | Yes | Yes | No primary public equivalent | Server tools, OpenAI-compatible tools | No | Gap |
-| Computer use | Yes | Yes | No primary Gemini API equivalent | Model/provider dependent | No | Gap |
-| Image generation/editing | Yes | No primary Messages output | Yes/Imagen | Yes via routed models | No | Gap |
-| Video generation | Yes/Sora | No | Yes/Veo | Yes via routed models | No | Gap |
-| Speech generation | Yes | No primary Messages output | Yes | Yes via routed models | No | Gap |
-| Realtime voice/audio session API | Yes | No comparable public Messages API | Yes Live API | Model/provider dependent | No | Gap |
-| Batch API | Yes | Yes | Yes | Provider/model dependent | Yes | Gap |
-| Token counting/preflight | Yes/tokenization usage | Yes | Yes | Metadata/usage | Yes | Gap/partial |
-| Usage/cost accounting | Yes usage | Yes usage | Yes usage | Yes detailed cost/cached/reasoning | Yes tokens | Partial; OpenRouter cost gap |
+| Structured outputs / JSON schema | Yes | Yes/guidance and tool schemas | Yes | Yes | No | Provider-neutral request shape remains a gap |
+| Reasoning/thinking controls | Yes | Yes | Yes | Yes normalized | No | Current for OpenAI/Anthropic/Gemini; OpenRouter still partial |
+| Reasoning summaries/visibility | Yes | Yes | Yes | Model dependent | No | Partial; safe summary display and provider parity still need hardening |
+| Prompt/context caching controls | Yes | Yes | Yes | Yes | No | Current for Anthropic prompt cache and Gemini context cache lifecycle; OpenAI/OpenRouter controls remain gaps |
+| Hosted code execution | Yes | Yes | Yes | Provider/model dependent | No | Parser/artifact/policy groundwork current for OpenAI/Anthropic/Gemini; broad enablement still gated |
+| Hosted file search/RAG | Yes | Search-result/citations patterns | Yes on newer models/tools | Provider/model dependent | Retrieval primitives only | OpenAI vector-store lifecycle current; per-chat hosted search remains a gap |
+| Deep research / long-running research agent | Yes, Responses/Deep Research | No direct equivalent | Yes, Interactions Deep Research Agent | Model/provider dependent | No | Current run records/workspaces for OpenAI and Gemini; production source UX still partial |
+| Remote MCP/provider-hosted connectors | Yes | Yes | No primary public equivalent | Server tools, OpenAI-compatible tools | No | Local MCP current; provider-hosted MCP remains gated/partial |
+| Computer use | Yes | Yes | No primary Gemini API equivalent | Model/provider dependent | No | Surfaced as high-risk capability; disabled pending dedicated safety UX |
+| Image generation/editing | Yes | No primary Messages output | Yes/Imagen | Yes via routed models | No | Current artifact workflows for OpenAI/Gemini generated media; editing depth remains partial |
+| Video generation | Yes/Sora | No | Yes/Veo | Yes via routed models | No | Current job/artifact records for OpenAI/Gemini; production viewer/cost UX partial |
+| Speech generation | Yes | No primary Messages output | Yes | Yes via routed models | No | Current artifact workflows for OpenAI/Gemini speech/audio outputs |
+| Realtime voice/audio session API | Yes | No comparable public Messages API | Yes Live API | Model/provider dependent | No | Current OpenAI/Gemini session records/services; dedicated realtime UX still partial |
+| Batch API | Yes | Yes | Yes | Provider/model dependent | Yes | Current for OpenAI/Anthropic/Gemini lifecycle; Voyage/OpenRouter gaps |
+| Token counting/preflight | Yes/tokenization usage | Yes | Yes | Metadata/usage | Yes | Current for Anthropic/Gemini preflight paths; broader routing/cost integration partial |
+| Usage/cost accounting | Yes usage | Yes usage | Yes usage | Yes detailed cost/cached/reasoning | Yes tokens | Partial; cache/tool/detail coverage varies by provider |
 | Moderation/safety classification | Yes | Safety via model/policies | Safety settings | Routed/provider dependent | No | Gap/lower priority |
 | Fine-tuning/evals | Yes, but changing availability | No public equivalent in same form | Tuning/eval options vary | Routed/provider dependent | No | Gap/lower priority |
 
@@ -57,6 +57,13 @@ Across the four chat providers only, excluding Voyage AI:
 - Function/tool calling.
 - Image input on capable models.
 - Provider-specific request IDs and token usage metadata.
+
+Across OpenAI, Anthropic, and Gemini:
+
+- Provider-hosted file records and storage views are represented through shared provider lifecycle types.
+- Batch/job state is represented through shared `ProviderBatchRecord` previews with refresh/cancel/import hooks where supported.
+- Provider artifact records are used for generated media, generated files, transcripts, and imported batch outputs.
+- Provider capabilities, run provenance, citations, hosted tool events, and file references are surfaced through shared metadata rather than provider-only persistence tables.
 
 Across OpenAI, Gemini, OpenRouter, and Voyage AI:
 
@@ -80,22 +87,22 @@ Add a schema-bearing request type and map it to:
 
 This would immediately improve extraction, automation, and settings-driven workflows across providers.
 
-### 2. Provider-hosted file lifecycle abstraction
+### 2. Provider-hosted file lifecycle hardening
 
-Define a `CloudProviderFile` abstraction with upload/list/delete/reference capabilities where supported:
+Pines now has shared provider file/cache/batch/artifact records for the major providers. The next work is production hardening:
 
 - OpenAI Files/vector stores.
 - Anthropic Files API.
 - Gemini Files API.
 - OpenRouter provider/model-specific files or plugins where available.
 
-Keep this separate from local Vault because retention, privacy, and billing differ.
+Keep these resources separate from local Vault because retention, privacy, and billing differ. Add stronger upload progress, retry/cancellation, orphan cleanup, and per-chat reuse controls.
 
 ### 3. Retrieval quality pipeline
 
 Pines already has Vault embeddings. High-value next steps:
 
-- Add provider token counting for chunk budgets.
+- Use provider token counting consistently for chunk budgets.
 - Add Voyage rerankers as a post-retrieval rerank phase.
 - Add contextualized and multimodal embedding profiles.
 - Add optional provider-hosted file search only when the user chooses cloud persistence.
@@ -140,12 +147,12 @@ This is especially important for OpenRouter and hosted tools.
 
 1. Make official OpenAI Responses the default path.
 2. Add provider-neutral structured outputs.
-3. Add provider-hosted files with explicit consent and retention UX.
+3. Harden provider-hosted file/caching/batch lifecycle UX with progress, retry, cancellation, and cleanup.
 4. Add Voyage reranking and richer embedding profiles.
 5. Add OpenRouter routing/cost controls.
-6. Add hosted code execution for OpenAI, Anthropic, and Gemini behind agent-only approval.
-7. Add audio/video/realtime as a separate mode.
-8. Add generated media output support after artifact persistence is ready.
+6. Finish hosted code execution approvals and artifact import for OpenAI, Anthropic, and Gemini.
+7. Finish audio/video/realtime as separate modes, not normal chat variants.
+8. Expand generated media viewers and provider provenance on top of the artifact library.
 
 ## Questions To Resolve With Product Review
 

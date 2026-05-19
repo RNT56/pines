@@ -324,6 +324,11 @@ final class PinesAppModel: ObservableObject {
         set { settingsState.anthropicCitationsEnabled = newValue }
     }
 
+    var anthropicTokenCountPreflightEnabled: Bool {
+        get { settingsState.anthropicTokenCountPreflightEnabled }
+        set { settingsState.anthropicTokenCountPreflightEnabled = newValue }
+    }
+
     var geminiThinkingLevel: GeminiThinkingLevel {
         get { settingsState.geminiThinkingLevel }
         set { settingsState.geminiThinkingLevel = newValue }
@@ -1490,6 +1495,7 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.anthropicPromptCachingEnabled, settings.anthropicPromptCachingEnabled)
         setIfChanged(\.anthropicPromptCacheTTL, settings.anthropicPromptCacheTTL)
         setIfChanged(\.anthropicCitationsEnabled, settings.anthropicCitationsEnabled)
+        setIfChanged(\.anthropicTokenCountPreflightEnabled, settings.anthropicTokenCountPreflightEnabled)
         setIfChanged(\.geminiThinkingLevel, settings.geminiThinkingLevel)
         setIfChanged(\.cloudWebSearchMode, settings.cloudWebSearchMode)
         setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
@@ -2075,12 +2081,23 @@ final class PinesAppModel: ObservableObject {
         var lastRenderedAt = Date.distantPast
         var lastPersistedAt = Date.distantPast
         let isAgentMode = mode == .agent
+        var runProviderMetadata = [String: String]()
 
         func providerMetadataForRun(
             assistantMessageID: UUID?,
             merging providerMetadata: [String: String]? = nil
         ) -> [String: String]? {
-            var metadata = providerMetadata
+            var metadata: [String: String]?
+            if !runProviderMetadata.isEmpty {
+                metadata = runProviderMetadata
+            }
+            if let providerMetadata {
+                if metadata == nil {
+                    metadata = providerMetadata
+                } else {
+                    metadata?.merge(providerMetadata) { _, new in new }
+                }
+            }
             if isLocalRun {
                 metadata = ChatLocalGenerationPerformance.metadata(
                     merging: metadata,
@@ -2381,6 +2398,23 @@ final class PinesAppModel: ObservableObject {
                 executionContext: isAgentMode ? .agent : .chat,
                 anthropicOptions: anthropicRequestOptions(for: selectedProviderID, settings: settings, services: services)
             )
+            if request.resolvedAnthropicOptions.countTokensBeforeSend {
+                let body = Self.anthropicTokenCountPreflightBody(for: request)
+                let preflight = try await preflightAnthropicCountTokens(
+                    providerID: selectedProviderID,
+                    modelID: selectedModelID,
+                    body: body,
+                    services: services
+                )
+                runProviderMetadata[CloudProviderMetadataKeys.anthropicCountTokensInputTokens] = "\(preflight.inputTokens)"
+                try await flushAssistantUpdate(
+                    content: accumulated,
+                    messageStatus: .streaming,
+                    threadStatus: .streaming,
+                    force: true,
+                    providerMetadata: runProviderMetadata
+                )
+            }
             let session = AgentSession(
                 title: isAgentMode ? "Agent" : "Chat",
                 policy: AgentPolicy(
@@ -2882,6 +2916,7 @@ final class PinesAppModel: ObservableObject {
                 anthropicPromptCachingEnabled: anthropicPromptCachingEnabled,
                 anthropicPromptCacheTTL: anthropicPromptCacheTTL,
                 anthropicCitationsEnabled: anthropicCitationsEnabled,
+                anthropicTokenCountPreflightEnabled: anthropicTokenCountPreflightEnabled,
                 geminiThinkingLevel: geminiThinkingLevel,
                 cloudWebSearchMode: cloudWebSearchMode,
                 requireToolApproval: true,
@@ -2950,7 +2985,58 @@ final class PinesAppModel: ObservableObject {
                 effort: settings?.anthropicEffort ?? anthropicEffort,
                 showSummaries: true
             ),
-            citations: AnthropicCitationOptions(enabled: settings?.anthropicCitationsEnabled ?? anthropicCitationsEnabled)
+            citations: AnthropicCitationOptions(enabled: settings?.anthropicCitationsEnabled ?? anthropicCitationsEnabled),
+            countTokensBeforeSend: settings?.anthropicTokenCountPreflightEnabled ?? anthropicTokenCountPreflightEnabled
+        )
+    }
+
+    private static func anthropicTokenCountPreflightBody(for request: ChatRequest) -> JSONValue {
+        var systemBlocks = [JSONValue]()
+        var messageBlocks = [JSONValue]()
+
+        for message in request.messages {
+            var contentBlocks = [JSONValue]()
+            let trimmedContent = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedContent.isEmpty {
+                contentBlocks.append(.object([
+                    "type": .string("text"),
+                    "text": .string(trimmedContent),
+                ]))
+            }
+            for attachment in message.attachments {
+                contentBlocks.append(.object([
+                    "type": .string("text"),
+                    "text": .string("Attachment: \(attachment.fileName) (\(attachment.contentType), \(attachment.byteCount) bytes)"),
+                ]))
+            }
+            guard !contentBlocks.isEmpty else { continue }
+
+            if message.role == .system {
+                systemBlocks.append(contentsOf: contentBlocks)
+            } else {
+                messageBlocks.append(.object([
+                    "role": .string(message.role == .assistant ? "assistant" : "user"),
+                    "content": .array(contentBlocks),
+                ]))
+            }
+        }
+
+        var toolBlocks = [JSONValue]()
+        if request.allowsTools {
+            toolBlocks = request.availableTools.map { tool in
+                .object([
+                    "name": .string(tool.name),
+                    "description": .string(tool.description),
+                    "input_schema": tool.inputJSONSchema ?? .objectSchema(),
+                ])
+            }
+        }
+
+        let system: JSONValue? = systemBlocks.isEmpty ? nil : .array(systemBlocks)
+        return AnthropicProviderLifecycleCoordinator.countTokensBody(
+            messages: messageBlocks,
+            system: system,
+            tools: toolBlocks
         )
     }
 
@@ -4351,6 +4437,7 @@ final class PinesAppModel: ObservableObject {
                         self?.setIfChanged(\.anthropicPromptCachingEnabled, settings.anthropicPromptCachingEnabled)
                         self?.setIfChanged(\.anthropicPromptCacheTTL, settings.anthropicPromptCacheTTL)
                         self?.setIfChanged(\.anthropicCitationsEnabled, settings.anthropicCitationsEnabled)
+                        self?.setIfChanged(\.anthropicTokenCountPreflightEnabled, settings.anthropicTokenCountPreflightEnabled)
                         if let theme = PinesThemeTemplate(rawValue: settings.themeTemplate) {
                             self?.setIfChanged(\.selectedThemeTemplate, theme)
                         }

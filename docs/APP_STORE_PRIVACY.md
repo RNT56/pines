@@ -10,6 +10,8 @@
 - Optional CloudKit sync stores E2E-encrypted user content only in the user's private iCloud database after opt-in. The CloudKit content key is stored in synchronizable iCloud Keychain.
 - Optional BYOK providers send prompts only when the user selects or enables cloud execution for the current chat, agent, or MCP sampling flow.
 - Local vault and selected MCP resource context is sent to a BYOK provider only after per-turn approval.
+- Optional provider-hosted files, vector stores, context caches, batches, generated artifacts, realtime/live sessions, and research runs are stored by the selected provider, not in Pines' local Vault. Pines labels these resources separately and exposes delete/import actions where the provider supports them.
+- Provider-hosted search, web fetch, code execution, remote MCP, text editor/bash, token counting, batch, generated media, and research features may send user prompts, attachments, provider file references, or derived context to the configured BYOK provider after the relevant feature is enabled.
 - Remote provider, MCP, OAuth, model catalog, web fetch, and provider-native web search endpoints must use HTTPS. Localhost HTTP is allowed only for explicitly marked local-development integrations.
 - Chat attachments are stored as protected local files excluded from backup. HEIC/HEIF selections are converted to JPEG during local staging. If cloud execution is selected, supported image, PDF, or text attachments can be encoded into the provider request for that turn.
 - Vault source documents are encrypted locally with AES-GCM and excluded from backup; extracted vault chunks and metadata live in the encrypted SQLite store.

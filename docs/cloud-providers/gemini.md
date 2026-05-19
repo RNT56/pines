@@ -1,4 +1,4 @@
-# Gemini Provider Gaps
+# Gemini Provider Status And Gaps
 
 Last verified: 2026-05-19.
 
@@ -17,210 +17,119 @@ Primary sources:
 ## What Pines Supports Today
 
 - Gemini Generate Content streaming with `alt=sse`.
-- Gemini Interactions for recognized thinking/deep-research paths.
+- Gemini Interactions for recognized thinking and deep-research paths.
 - Model listing from `v1beta/models` and validation via `generateContent`.
 - System instruction mapping.
-- Image, PDF, and UTF-8 text-document inputs on user messages.
+- Image, PDF, and UTF-8 text-document inputs on user messages, plus GIF-to-PNG conversion for Gemini image compatibility.
+- Gemini Files API lifecycle through shared provider records: upload local files, list, refresh metadata, poll processing state, delete, and reference provider file URIs from request parts.
+- Gemini context cache lifecycle through shared provider cache records: create from inline data or file data, list/refresh, delete, and display cache TTL/model/token metadata.
+- Token counting through Gemini request bodies for preflight and cache creation.
 - Function declarations and function response handling.
-- Native Google Search grounding for supported model/tool combinations.
+- Native Google Search grounding for supported model/tool combinations, with grounding/source metadata captured in provider metadata.
+- URL context metadata parsing for Generate Content and Interactions responses.
+- Code execution tool mapping for Gemini request payloads and stream/parser metadata for executable code, execution results, and generated file/image references.
 - Thinking levels for recognized models.
-- Deep Research agent ID routing when model IDs contain `deep-research`.
+- Gemini Deep Research records through Interactions: start, refresh, cancel, resume, follow up, and show research runs in the shared long-running job UI.
+- Gemini Live session service and session records for realtime-capable workflows.
+- Gemini generated media workflows for image, video, and audio-style artifacts, stored as shared provider artifact records.
+- Gemini Batch lifecycle records: create/import operations, refresh, cancel, and shared batch previews.
 - Gemini embeddings through `batchEmbedContents`, including task type and output dimensionality handling.
-- GIF-to-PNG conversion for Gemini image compatibility.
+- Settings/lifecycle UI for Gemini file media, context caches, generated media, Deep Research, realtime sessions, batches, and model capabilities.
 
-## High-Value Unsupported Or Partial Features
+## Remaining High-Value Gaps
 
-### 1. Files API and reusable file URIs
+### 1. Audio and video attachment depth
 
-Pines inlines Gemini images/PDFs/text documents. Gemini recommends the Files API when request size exceeds 20 MB and supports media reuse across prompts.
+Pines can upload Gemini-hosted media files and represent file URIs, but ordinary chat attachment mapping is still strongest for images, PDFs, and text documents.
 
-Value:
+Needed work:
 
-- Large audio, video, PDF, image, and document handling.
-- Reuse large files across multiple turns without inlining.
-- Better long-document and media workflows.
+- Extend first-class chat attachment handling for audio/video with duration, size, MIME, and token preflight.
+- Choose inline versus Files API automatically only when provider capability and user consent are clear.
+- Add media-specific error handling for processing, expiry, and unsupported model combinations.
 
-Implementation notes:
+### 2. Structured outputs
 
-- Add resumable upload, file metadata, delete/list, and file URI references.
-- Add consent UI because provider-hosted files persist outside local storage.
-- Use Files API when attachments exceed current inline limits or when user chooses cloud persistence.
+Pines does not yet expose a provider-neutral structured-output request shape that maps to Gemini `response_mime_type`, `response_schema`, or `response_json_schema`.
 
-### 2. Audio and video inputs
+Needed work:
 
-Gemini models can accept audio and video, but Pines cloud attachment support only maps images, PDFs, and text documents.
+- Add shared schema request support.
+- Validate streamed/final JSON separately from markdown text.
+- Handle built-in tool combinations and model-specific schema subsets.
 
-Value:
+### 3. Source attribution UI for grounding and URL context
 
-- Meeting/audio summarization, video analysis, lecture review, media QA, and accessibility workflows.
+Pines captures Google Search grounding and URL context metadata, but the chat/source panel still needs production detail.
 
-Implementation notes:
+Needed work:
 
-- Extend `AttachmentKind` cloud mapping to audio/video for provider-capable models.
-- Prefer Files API for larger media.
-- Add media duration/size/token preflight.
+- Show grounding chunks, search queries, URLs, rendered suggestions where required, and provider attribution text.
+- Merge Gemini sources into the shared source/citation panel without losing Google-specific requirements.
+- Distinguish Google Search grounding from URL Context and local Vault context.
 
-### 3. Structured outputs
+### 4. Code execution artifact workflow
 
-Pines does not set Gemini `response_mime_type`, `response_schema`, or `response_json_schema`.
+Gemini code execution mapping and parser metadata exist, but a complete artifact workflow for generated charts/files is still partial.
 
-Value:
+Needed work:
 
-- Typed extraction, local automations, table generation, and structured tool handoffs.
-- Gemini 3 structured outputs can combine with built-in tools such as search, URL context, code execution, and file search.
+- Persist generated charts/files as provider artifacts.
+- Add approval and environment labels before enabling code execution broadly.
+- Support attach/import/export/delete actions from the artifact library.
 
-Implementation notes:
+### 5. Live API production UX
 
-- Add provider-neutral schema request support.
-- Stream partial JSON separately from normal markdown/text.
+Gemini Live session service and records exist, but the dedicated realtime surface is not complete.
 
-### 4. Code execution
+Needed work:
 
-Gemini code execution lets the model generate and run Python, with file input and graph output on supported models.
+- Add audio/video capture, playback, interruption handling, VAD status, transcripts, reconnect/cancel, and tool approval overlays.
+- Keep Live API flows separate from SSE text chat.
 
-Value:
+### 6. Deep Research production hardening
 
-- Calculations, CSV/text analysis, chart generation, and code-based reasoning without a local runtime.
+Gemini Deep Research records and workspace actions exist, but the preview agent still needs stronger source/progress handling.
 
-Implementation notes:
+Needed work:
 
-- Add `code_execution` tool config.
-- Parse executable code parts, execution results, and inline image outputs.
-- Decide how generated charts become chat attachments or artifacts.
+- Persist richer event IDs, progress/thought summaries, source panels, and final report actions.
+- Expose preview limitations, background/store requirements, source policy, and follow-up state.
+- Add File Search data-source controls only with explicit provider-hosted file consent.
 
-### 5. URL context
+### 7. Generated media viewer and controls
 
-Pines supports its own web tools and Gemini Google Search grounding, but not Gemini URL Context.
+Gemini generated media artifact records exist, but the media viewer and edit/reuse flow needs product polish.
 
-Value:
+Needed work:
 
-- Users can ask about specific URLs without relying on search ranking.
-- Strong fit for documentation, articles, and issue pages.
+- Add dedicated viewers for image, video, and audio outputs.
+- Show model, prompt, operation status, dimensions/duration, safety/retention labels, and provider metadata.
+- Add clear import/export/reuse/delete paths.
 
-Implementation notes:
+### 8. Batch and model capability hardening
 
-- Add provider-specific URL context tool.
-- Preserve source metadata/citations in message metadata.
+Gemini batch and capability records exist, but capability-driven model selection is still partial.
 
-### 6. Context caching
+Needed work:
 
-Gemini supports prompt/context caching on eligible models. Pines does not create or reference cached content.
-
-Value:
-
-- Lower cost and latency for repeated large system prompts, tool definitions, and document context.
-
-Implementation notes:
-
-- Add cache creation/list/delete lifecycle and TTL/cost display.
-- Use cache IDs in follow-up Generate Content requests.
-
-### 7. Gemini Deep Research Agent
-
-Gemini exposes a Deep Research Agent through the Interactions API. It is currently preview, requires `background=true`, is not available through `generate_content`, uses web search and URL context by default, can use File Search for user data experimentally, supports streaming progress, and can continue follow-ups with `previous_interaction_id`.
-
-Value:
-
-- Long-running cited reports, market analysis, due diligence, literature reviews, comparative research, and "analyst-in-a-box" workflows.
-- Directly relevant to Pines because the app already has a Gemini Interactions path and local Vault context that could be bridged with consent.
-
-Implementation notes:
-
-- Pines currently has model-ID-based Deep Research routing, but production parity needs background execution, polling, resumable streams, event IDs, thinking summaries, citations, File Search integration, and a dedicated research UI.
-- Must expose limitations: preview status, no `generate_content`, max research time, no custom function tools/MCP currently, no structured output/plan approval, store requirement, and no audio input.
-
-### 8. Live API and realtime audio/video
-
-Pines does not use Gemini Live API.
-
-Value:
-
-- Low-latency spoken conversations, streaming audio/video interaction, voice activity detection, session management, tool use, and ephemeral tokens.
-
-Implementation notes:
-
-- Requires WebSocket/WebRTC style session orchestration, not SSE.
-- Separate normal chat from live sessions in UI and persistence.
-
-### 9. Image, video, speech, and music generation
-
-Pines only consumes Gemini text output today. It does not expose Imagen, Veo, speech generation, or Lyria/music generation.
-
-Value:
-
-- Creative generation, marketing assets, video prototyping, voice output, and media workflows.
-
-Implementation notes:
-
-- Add output modality types beyond text.
-- Add generated media persistence and safety policy display.
-- Consider separate workflows instead of mixing every media type into normal chat.
-
-### 10. Batch API
-
-Pines does not use Gemini Batch API.
-
-Value:
-
-- Cost-effective async summarization, extraction, evaluation, and embedding jobs over many documents.
-
-Implementation notes:
-
-- Add batch job records, result import, cancellation, and status polling.
-
-### 11. Advanced grounding and citation controls
-
-Pines toggles Google Search but does not expose detailed grounding metadata, source display controls, or search retrieval configuration beyond mode.
-
-Value:
-
-- Verifiable answers and search auditability.
-
-Implementation notes:
-
-- Parse grounding chunks, search queries, and rendered suggestions consistently.
-- Expose search requirement and source filters where available.
-
-### 12. Thinking budgets and summaries
-
-Pines maps thinking level, but not detailed thinking budget/summaries and model-specific controls.
-
-Value:
-
-- Better user control of latency, cost, and reasoning transparency.
-
-Implementation notes:
-
-- Add per-model controls and display only provider-approved summaries.
-
-### 13. Token counting and request preflight
-
-Pines does not use Gemini token-counting endpoints before cloud requests.
-
-Value:
-
-- Better attachment/context limits, cost estimates, and routing decisions.
-
-Implementation notes:
-
-- Integrate token count into Vault context packing and cloud attachment preflight.
+- Replace more model-name heuristics with refreshed model capability records.
+- Add partial failure/result import handling for batches.
+- Tie token counts and cache eligibility into routing and Vault context packing.
 
 ## Suggested Priority
 
-1. Files API with audio/video inputs.
-2. Structured outputs.
-3. Code execution and URL context.
-4. Context caching.
-5. Grounding citation metadata.
-6. Deep Research Agent as a dedicated long-running research workflow.
-7. Live API/realtime.
-8. Generated media.
-9. Batch and token counting.
+1. Finish audio/video attachment and media preflight UX.
+2. Add provider-neutral structured outputs.
+3. Complete source attribution for grounding and URL context.
+4. Harden code execution artifacts.
+5. Complete Live API and generated media UX.
+6. Harden Deep Research, batches, context caches, and model capability refresh.
 
 ## Review Checklist
 
-- Should Gemini Files API become automatic over 20 MB, opt-in, or both?
-- Should audio/video inputs be normal chat attachments or separate media-analysis workflows?
-- Should Gemini generated media appear in chat or in an artifact gallery?
-- Should Gemini Live API be part of Pines chat or a separate voice mode?
-- Should Google Search grounding be source-first, with visible citations by default?
+- Should Gemini Files API become automatic over size limits, opt-in, or both?
+- Should audio/video inputs be normal chat attachments or a media-analysis workspace?
+- Should Gemini generated media appear in chat, an artifact gallery, or both?
+- Should Gemini Live API be part of chat or a separate voice mode?
+- Are Google Search grounding attribution requirements visible enough in source panels?

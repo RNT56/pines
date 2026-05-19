@@ -100,6 +100,9 @@ struct ChatComposerBar: View {
             .onChange(of: settingsState.anthropicCitationsEnabled) { _, _ in
                 Task { await appModel.saveSettings(services: services) }
             }
+            .onChange(of: settingsState.anthropicTokenCountPreflightEnabled) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
             .onChange(of: settingsState.geminiThinkingLevel) { _, _ in
                 Task { await appModel.saveSettings(services: services) }
             }

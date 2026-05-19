@@ -795,6 +795,7 @@ struct PinesCoreTestRunner {
             cloudMaxCompletionTokens: 32768,
             localMaxCompletionTokens: 2048,
             localMaxContextTokens: 32768,
+            anthropicTokenCountPreflightEnabled: true,
             requireToolApproval: true,
             braveSearchEnabled: true,
             onboardingCompleted: true,
@@ -807,6 +808,7 @@ struct PinesCoreTestRunner {
         try expectEqual(decoded.cloudMaxCompletionTokens, 32768)
         try expectEqual(decoded.localMaxCompletionTokens, 2048)
         try expectEqual(decoded.localMaxContextTokens, 32768)
+        try expectEqual(decoded.anthropicTokenCountPreflightEnabled, true)
 
         let runtimeProfile = RuntimeProfile()
         try expectEqual(runtimeProfile.quantization.algorithm, .turboQuant)

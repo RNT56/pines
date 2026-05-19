@@ -189,6 +189,7 @@ final class PinesSettingsState: ObservableObject {
     @Published var anthropicPromptCachingEnabled: Bool
     @Published var anthropicPromptCacheTTL: AnthropicPromptCacheTTL
     @Published var anthropicCitationsEnabled: Bool
+    @Published var anthropicTokenCountPreflightEnabled: Bool
     @Published var geminiThinkingLevel: GeminiThinkingLevel
     @Published var cloudWebSearchMode: CloudWebSearchMode
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]]
@@ -223,6 +224,7 @@ final class PinesSettingsState: ObservableObject {
         anthropicPromptCachingEnabled: Bool = false,
         anthropicPromptCacheTTL: AnthropicPromptCacheTTL = .fiveMinutes,
         anthropicCitationsEnabled: Bool = true,
+        anthropicTokenCountPreflightEnabled: Bool = false,
         geminiThinkingLevel: GeminiThinkingLevel = AppSettingsSnapshot.defaultGeminiThinkingLevel,
         cloudWebSearchMode: CloudWebSearchMode = AppSettingsSnapshot.defaultCloudWebSearchMode,
         cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:],
@@ -256,6 +258,7 @@ final class PinesSettingsState: ObservableObject {
         self.anthropicPromptCachingEnabled = anthropicPromptCachingEnabled
         self.anthropicPromptCacheTTL = anthropicPromptCacheTTL
         self.anthropicCitationsEnabled = anthropicCitationsEnabled
+        self.anthropicTokenCountPreflightEnabled = anthropicTokenCountPreflightEnabled
         self.geminiThinkingLevel = geminiThinkingLevel
         self.cloudWebSearchMode = cloudWebSearchMode
         self.cloudModelCatalog = cloudModelCatalog

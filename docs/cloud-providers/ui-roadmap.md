@@ -8,6 +8,17 @@ This document defines the shared UI work required by the provider parity roadmap
 
 Add advanced cloud-provider capabilities without turning Pines into a dashboard clone. The UI should make provider power visible, controllable, and auditable while preserving the local-first mental model: local by default, explicit cloud context, clear storage boundaries, and readable run provenance.
 
+## Implementation Status
+
+Updated 2026-05-19:
+
+- Pines has a shared provider lifecycle dashboard with previews for files, artifacts, caches/vector stores, batches, research runs, live sessions, and model capabilities.
+- Vault/provider storage views show OpenAI, Anthropic, and Gemini provider-hosted files separately from local Vault items, with refresh/delete/export/import paths where supported.
+- Anthropic now has Settings capability rows, prompt/thinking quick settings, file management, batch create/count/refresh/cancel/import flows, citations/source panels, hosted-tool timeline rows, and run provenance pills.
+- Gemini now has file/media management, context cache management, generated media workspace, Deep Research workspace, realtime session records, batch rows, and capability previews.
+- OpenAI now has file/vector-store management, artifact previews, batch rows, Deep Research workspace, realtime session records, and media/audio artifact workflows.
+- Remaining UI work is production hardening: durable upload progress, retry/cancellation, richer provider-hosted approval sheets, media viewers, realtime controls, source highlighting, compact-width polish, and provider-specific cost/retention detail.
+
 ## Design Principles
 
 - Dense, scannable, professional surfaces instead of marketing-style pages.

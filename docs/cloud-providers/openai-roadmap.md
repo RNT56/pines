@@ -19,6 +19,19 @@ Make the official OpenAI provider in Pines feel like a first-class OpenAI API cl
 - Usage/cost/governance metadata: service tier, safety identifier, prompt cache, cached/reasoning tokens, request IDs.
 - Themed UI for capability management, hosted tools, provider files/vector stores, generated artifacts, realtime sessions, and run provenance.
 
+## Implementation Status
+
+Updated 2026-05-19:
+
+- Pines already supports official OpenAI and OpenAI-compatible BYOK providers, Chat Completions fallback, conditional official Responses routing, reasoning effort, verbosity, native web search, inline images/PDF/text files, stateful `previous_response_id`, and stateless encrypted reasoning replay.
+- OpenAI Files, vector stores, vector-store file batches, provider batches, Deep Research runs, realtime session records, and generated artifacts now use the shared provider lifecycle record model.
+- OpenAI storage workflows can upload/list/refresh/delete files, create/list/update/delete vector stores, attach/detach vector-store files, poll vector-store file batches, and keep provider-hosted records separate from local Vault.
+- OpenAI batch workflows can create batches from JSONL/provider files, refresh/cancel jobs, and import result artifacts.
+- OpenAI Deep Research has start/refresh/cancel/resume/summarize flows through provider research run records.
+- OpenAI media/audio workflow plumbing can create image/video/speech/transcription/translation artifacts and present them through shared artifact previews.
+- OpenAI hosted tool request mapping exists for web search, file search, code interpreter, image generation, computer use, remote MCP, tool search, and custom hosted tool configurations, with agent-context gating for high-risk tools.
+- OpenAI realtime session workflow plumbing exists, but the dedicated realtime transport/UI still needs production hardening.
+
 ## Explicitly Out Of Scope
 
 - Managing OpenAI billing, projects, organization membership, or API keys beyond Pines BYOK storage.
@@ -107,14 +120,15 @@ Goal: Let users choose provider-hosted knowledge when it beats inline attachment
 
 Todos:
 
-- Add `CloudProviderFile` and `CloudProviderKnowledgeStore` records.
-- Implement upload, list, retrieve metadata, delete, and reference file IDs.
-- Implement vector store create/list/update/delete and file attach/detach where supported.
+- Harden existing shared provider file/cache records for OpenAI files and vector stores.
+- Continue using upload, list, retrieve metadata, delete, and reference file IDs through the OpenAI lifecycle coordinator.
+- Continue using vector store create/list/update/delete and file attach/detach where supported.
 - Add File Search tool configuration and parse file-search results/citations.
 - Add import path from local Vault document to OpenAI-hosted file/vector store with explicit consent.
 - Add retention, billing, and provider-storage warnings.
 - Add cleanup UX for orphaned hosted files.
 - Build themed file/vector store management screens and source chips for File Search results.
+- Add durable upload progress, retry, cancellation, and background-safe transfer state.
 
 Possible hiccups:
 
@@ -182,11 +196,11 @@ Goal: Add OpenAI Deep Research as a first-class research workflow.
 
 Todos:
 
-- Add a Deep Research run type backed by Responses/background mode.
+- Harden the existing Deep Research run type backed by Responses/background-style provider state.
 - Support deep-research model selection and high/xhigh reasoning web-research mode where appropriate.
 - Add research scope controls: web only, web plus hosted files, web plus user-approved Vault export, domain filters, source count/depth, and report format.
 - Parse progress events, web-search calls, code-execution calls, citations, final report, and usage/cost.
-- Add resume/poll/cancel for long-running research tasks.
+- Continue supporting resume/poll/cancel for long-running research tasks and expand partial-progress handling.
 - Add final report actions: attach to chat, save to Vault, export, and create follow-up chat.
 - Add tests for completed, failed, cancelled, reconnect/resume, citation parsing, and partial progress.
 
@@ -206,12 +220,11 @@ Goal: Add OpenAI media workflows without overloading text chat.
 
 Todos:
 
-- Add speech-to-text for audio attachments and dictation.
-- Add text-to-speech for assistant responses.
-- Add realtime voice sessions with ephemeral credentials, audio capture/playback, interruption handling, transcripts, and tool gating.
+- Harden existing speech/transcription/translation artifact workflows for audio attachments, dictation, and assistant speech output.
+- Complete realtime voice sessions with ephemeral credentials, audio capture/playback, interruption handling, transcripts, and tool gating.
 - Add realtime translation/transcription modes.
-- Add Sora video generation/editing job lifecycle and media viewer.
-- Add generated media library and per-artifact retention controls.
+- Harden existing Sora/video artifact records with generation/editing job lifecycle and media viewer controls.
+- Complete generated media library and per-artifact retention controls.
 - Add dedicated realtime session UI and generated media artifact gallery.
 
 Possible hiccups:
@@ -231,7 +244,7 @@ Goal: Support advanced workflows only where they fit Pines.
 
 Todos:
 
-- Add Batch API for bulk vault summarization, extraction, embedding-adjacent tasks, and eval runs.
+- Harden the existing Batch API lifecycle for bulk vault summarization, extraction, embedding-adjacent tasks, and eval runs.
 - Add optional moderation classification for user-controlled safety checks.
 - Add eval harness integration for prompt/provider regression testing.
 

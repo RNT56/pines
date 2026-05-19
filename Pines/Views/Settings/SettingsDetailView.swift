@@ -517,7 +517,7 @@ struct SettingsDetailView: View {
             ], minimumWidth: 112)
 
             Text(provider.kind == .anthropic
-                ? "Anthropic Messages: prompt cache \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off"), citations \(settingsState.anthropicCitationsEnabled ? "on" : "off"), provider storage opt-in."
+                ? "Anthropic Messages: prompt cache \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off"), citations \(settingsState.anthropicCitationsEnabled ? "on" : "off"), token preflight \(settingsState.anthropicTokenCountPreflightEnabled ? "on" : "off"), provider storage opt-in."
                 : "Advanced Responses: web search \(settingsState.cloudWebSearchMode.rawValue), provider storage opt-in, structured output records persisted.")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.secondaryText)
@@ -692,6 +692,7 @@ struct SettingsDetailView: View {
                         .init("Thinking", value: settingsState.anthropicThinkingMode.rawValue, systemImage: "brain", tone: .accent),
                         .init("Cache", value: settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off", systemImage: "memorychip", tone: .warning),
                         .init("Citations", value: settingsState.anthropicCitationsEnabled ? "on" : "off", systemImage: "quote.bubble", tone: .info),
+                        .init("Tokens", value: settingsState.anthropicTokenCountPreflightEnabled ? "preflight" : "manual", systemImage: "number", tone: .accent),
                     ]
                 ),
                 .init(

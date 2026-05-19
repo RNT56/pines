@@ -883,6 +883,10 @@ private struct ChatBubble: View {
                 if let searchSuggestionsHTML = ChatWebSearchSuggestionsView.html(from: message.providerMetadata) {
                     ChatWebSearchSuggestionsView(html: searchSuggestionsHTML)
                 }
+                let hostedToolEntries = message.providerMetadata.hostedToolAuditEntries
+                if !hostedToolEntries.isEmpty {
+                    ChatHostedToolTimeline(entries: hostedToolEntries)
+                }
                 ChatProviderProvenancePills(metadata: message.providerMetadata)
 
                 let agentActivities = PinesAppModel.agentActivities(from: message.providerMetadata)
@@ -1018,6 +1022,9 @@ private struct ChatProviderProvenancePills: View {
         }
         if let cacheWrite = metadata[CloudProviderMetadataKeys.anthropicCacheCreationInputTokens], cacheWrite != "0" {
             values.append(.init("Cache write", value: cacheWrite, systemImage: "memorychip.fill", tone: .warning))
+        }
+        if let countedTokens = metadata[CloudProviderMetadataKeys.anthropicCountTokensInputTokens], countedTokens != "0" {
+            values.append(.init("Token preflight", value: countedTokens, systemImage: "number", tone: .accent))
         }
         if metadata[CloudProviderMetadataKeys.openAIResponseStored] == "true" {
             values.append(.init("Stored", value: "provider", systemImage: "cloud", tone: .warning))
@@ -1274,6 +1281,170 @@ private extension ProviderCitationSourceType {
             "Vault"
         case .unknown:
             "Source"
+        }
+    }
+}
+
+private struct ChatHostedToolTimeline: View {
+    @Environment(\.pinesTheme) private var theme
+    let entries: [HostedToolAuditEntry]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            HStack(spacing: theme.spacing.xsmall) {
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.warning)
+                    .frame(width: 16, height: 16)
+                Text("Hosted tool timeline")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+            }
+
+            ForEach(entries.prefix(6)) { entry in
+                HStack(alignment: .top, spacing: theme.spacing.xsmall) {
+                    Image(systemName: entry.kind.chatSystemImage)
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(entry.requiresApproval ? theme.colors.warning : theme.colors.accent)
+                        .frame(width: 16, height: 16)
+
+                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                        HStack(spacing: theme.spacing.xxsmall) {
+                            Text(entry.chatTitle)
+                                .font(theme.typography.caption.weight(.semibold))
+                                .foregroundStyle(theme.colors.primaryText)
+                                .lineLimit(1)
+
+                            if let status = entry.status {
+                                Text(status.chatTitle)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(theme.colors.secondaryText)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Text(entry.chatDetail)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, theme.spacing.xsmall)
+                .padding(.horizontal, theme.spacing.small)
+                .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                        .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
+                }
+            }
+        }
+        .accessibilityLabel("\(entries.count) provider-hosted tool events")
+    }
+}
+
+private extension HostedToolAuditEntry {
+    var chatTitle: String {
+        if let name, !name.isEmpty {
+            return name
+        }
+        if let serverLabel, !serverLabel.isEmpty {
+            return serverLabel
+        }
+        return kind.chatTitle
+    }
+
+    var chatDetail: String {
+        var parts = ["Provider-hosted \(type.replacingOccurrences(of: "_", with: " "))"]
+        if let serverURL, !serverURL.isEmpty {
+            parts.append(serverURL)
+        }
+        if let containerID, !containerID.isEmpty {
+            parts.append("container \(containerID)")
+        }
+        if requiresAgentExecution {
+            parts.append("agent context")
+        }
+        if requiresApproval {
+            parts.append("approval required")
+        }
+        return parts.joined(separator: " - ")
+    }
+}
+
+private extension OpenAIHostedToolKind {
+    var chatTitle: String {
+        switch self {
+        case .webSearch:
+            "Web search"
+        case .webFetch:
+            "Web fetch"
+        case .fileSearch:
+            "File search"
+        case .computerUse:
+            "Computer use"
+        case .codeInterpreter:
+            "Code execution"
+        case .imageGeneration:
+            "Image generation"
+        case .mcp:
+            "Remote MCP"
+        case .textEditor:
+            "Text editor"
+        case .bash:
+            "Bash"
+        case .toolSearch:
+            "Tool search"
+        case .custom:
+            "Hosted tool"
+        }
+    }
+
+    var chatSystemImage: String {
+        switch self {
+        case .webSearch:
+            "globe"
+        case .webFetch:
+            "link"
+        case .fileSearch:
+            "doc.text.magnifyingglass"
+        case .computerUse:
+            "display"
+        case .codeInterpreter:
+            "terminal"
+        case .imageGeneration:
+            "photo"
+        case .mcp:
+            "network"
+        case .textEditor:
+            "doc.text"
+        case .bash:
+            "terminal"
+        case .toolSearch:
+            "magnifyingglass"
+        case .custom:
+            "wrench.and.screwdriver"
+        }
+    }
+}
+
+private extension OpenAIHostedToolCallStatus {
+    var chatTitle: String {
+        switch self {
+        case .queued:
+            "queued"
+        case .inProgress:
+            "running"
+        case .completed:
+            "complete"
+        case .failed:
+            "failed"
+        case .cancelled:
+            "cancelled"
+        case .requiresAction:
+            "needs approval"
         }
     }
 }
@@ -1888,6 +2059,7 @@ struct ChatQuickSettingsButton: View {
                         }
                     }
                     Toggle("Citations", isOn: anthropicCitationsEnabledSelection)
+                    Toggle("Token preflight", isOn: anthropicTokenCountPreflightSelection)
                 }
             }
 
@@ -2054,6 +2226,15 @@ struct ChatQuickSettingsButton: View {
         }
     }
 
+    private var anthropicTokenCountPreflightSelection: Binding<Bool> {
+        Binding {
+            settingsState.anthropicTokenCountPreflightEnabled
+        } set: { enabled in
+            settingsState.anthropicTokenCountPreflightEnabled = enabled
+            haptics.play(.primaryAction)
+        }
+    }
+
     private var geminiThinkingSelection: Binding<GeminiThinkingLevel> {
         Binding {
             availability.geminiThinkingLevels.contains(settingsState.geminiThinkingLevel)
@@ -2125,6 +2306,9 @@ struct ChatQuickSettingsButton: View {
         if !availability.anthropicThinkingModes.isEmpty {
             parts.append("Anthropic thinking \(anthropicThinkingModeSelection.wrappedValue.shortTitle)")
             parts.append("Anthropic cache \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off")")
+            if settingsState.anthropicTokenCountPreflightEnabled {
+                parts.append("Anthropic token preflight on")
+            }
         }
         if !availability.anthropicEfforts.isEmpty, anthropicThinkingModeSelection.wrappedValue == .effort {
             parts.append("Anthropic effort \(anthropicEffortSelection.wrappedValue.shortTitle)")

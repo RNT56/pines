@@ -1411,6 +1411,7 @@ struct CoreContractTests {
         #expect(decoded.openAIReasoningEffort == .low)
         #expect(decoded.openAITextVerbosity == .low)
         #expect(decoded.anthropicEffort == .medium)
+        #expect(decoded.anthropicTokenCountPreflightEnabled == false)
         #expect(decoded.geminiThinkingLevel == .medium)
         #expect(decoded.cloudWebSearchMode == .off)
 
@@ -1421,6 +1422,7 @@ struct CoreContractTests {
             openAIReasoningEffort: .high,
             openAITextVerbosity: .medium,
             anthropicEffort: .xhigh,
+            anthropicTokenCountPreflightEnabled: true,
             geminiThinkingLevel: .high,
             cloudWebSearchMode: .automatic
         )
@@ -1430,6 +1432,7 @@ struct CoreContractTests {
         #expect(clamped.openAIReasoningEffort == .high)
         #expect(clamped.openAITextVerbosity == .medium)
         #expect(clamped.anthropicEffort == .xhigh)
+        #expect(clamped.anthropicTokenCountPreflightEnabled == true)
         #expect(clamped.geminiThinkingLevel == .high)
         #expect(clamped.cloudWebSearchMode == .automatic)
 

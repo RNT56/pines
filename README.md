@@ -15,7 +15,7 @@
 
 AI is becoming too important to live inside one company's box.
 
-The best model for a job might be local. The next one might be Anthropic, Gemini, OpenRouter, or an OpenAI-compatible endpoint you run yourself. Your notes might belong in a private vault. Your tools might come from MCP servers. Your phone might be powerful enough to do more than forward every thought to somebody else's cloud.
+The best model for a job might be local. The next one might be OpenAI, Anthropic, Gemini, OpenRouter, or an OpenAI-compatible endpoint you run yourself. Your notes might belong in a private vault. Your tools might come from MCP servers. Your phone might be powerful enough to do more than forward every thought to somebody else's cloud.
 
 Pines is built for that future.
 
@@ -27,11 +27,19 @@ It is for new AI users who want one clear place to start. It is for power users 
 
 Pines gives you a center of gravity.
 
-Local MLX models can live on device. BYOK cloud providers can be added when you want outside reach. OpenAI-compatible services, OpenRouter, Anthropic, and Gemini can sit beside local inference instead of replacing it. The point is not to pick a religion. The point is to pick the right route.
+Local MLX models can live on device. BYOK cloud providers can be added when you want outside reach. OpenAI, OpenAI-compatible services, OpenRouter, Anthropic, and Gemini can sit beside local inference instead of replacing it. The point is not to pick a religion. The point is to pick the right route.
 
 Ask a small local model to work through private notes. Bring in a stronger remote model when the job needs more reach. Keep vendor choice open. Keep the boundary visible.
 
 That is the promise: multi-vendor AI without turning your workflow into a pile of tabs, keys, pasted files, and half-remembered settings.
+
+## Cloud Providers, Explicitly Managed
+
+Pines treats the major cloud providers as specialists with visible capabilities, not interchangeable text boxes.
+
+OpenAI uses official Responses features for reasoning controls, native web search, attachments, and state when those paths are needed, and Pines tracks OpenAI files, vector stores, batches, Deep Research, realtime/session records, and generated artifacts as provider resources. Anthropic brings Claude Messages, prompt caching, thinking controls, citations, hosted files, web search/fetch, batches, token counting, and provider-hosted tool provenance. Gemini brings Generate Content, Interactions, Google Search grounding, URL context metadata, Files API media flows, context caches, Live session records, Deep Research, generated media records, batches, and token counting.
+
+Provider-hosted files, vector stores, caches, batches, research runs, live sessions, generated artifacts, citations, and hosted tool calls are shown as provider resources. They are not confused with your local Vault, and they carry the same local-first rule: use cloud when you choose it, show what left the device, and keep deletion/import paths explicit.
 
 ## Local Mobile AI, Treated Like It Matters
 

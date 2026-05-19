@@ -688,6 +688,8 @@ private struct ProviderWorkspaceView: View {
 
                     AnthropicFileManager()
 
+                    AnthropicBatchCreator()
+
                     GeminiFileMediaManager()
 
                     GeminiCacheManager()
@@ -925,6 +927,148 @@ private struct AnthropicFileManager: View {
         guard let provider = selectedProvider else { return }
         do {
             _ = try await appModel.refreshAnthropicProviderStorage(providerID: provider.id, services: services)
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
+private struct AnthropicBatchCreator: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    @State private var selectedProviderID: ProviderID?
+    @State private var modelID = "claude-sonnet-4-5"
+    @State private var customID = ""
+    @State private var prompt = ""
+    @State private var maxTokens = "1024"
+    @State private var lastTokenCount: Int?
+    @State private var isCounting = false
+    @State private var isCreating = false
+
+    private var anthropicProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.filter { $0.kind == .anthropic }
+    }
+
+    private var selectedProvider: CloudProviderConfiguration? {
+        if let selectedProviderID, let provider = anthropicProviders.first(where: { $0.id == selectedProviderID }) {
+            return provider
+        }
+        return anthropicProviders.first
+    }
+
+    var body: some View {
+        PinesCardSection("Anthropic Batches", subtitle: "Create message batches with token preflight and import results back as provider artifacts.", systemImage: "tray.full") {
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                HStack(spacing: theme.spacing.small) {
+                    if !anthropicProviders.isEmpty {
+                        Picker("Provider", selection: Binding(
+                            get: { selectedProvider?.id },
+                            set: { selectedProviderID = $0 }
+                        )) {
+                            ForEach(anthropicProviders) { provider in
+                                Text(provider.displayName).tag(Optional(provider.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    TextField("Model", text: $modelID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .pinesFieldChrome()
+                        .frame(maxWidth: 210)
+
+                    TextField("Max tokens", text: $maxTokens)
+                        .pinesFieldChrome()
+                        .frame(maxWidth: 110)
+                }
+
+                TextField("Custom ID", text: $customID)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .pinesFieldChrome()
+
+                TextField("Batch prompt", text: $prompt, axis: .vertical)
+                    .lineLimit(2...6)
+                    .pinesFieldChrome()
+                    .onChange(of: prompt) { _, _ in
+                        lastTokenCount = nil
+                    }
+
+                HStack(spacing: theme.spacing.small) {
+                    Button {
+                        Task { await countTokens() }
+                    } label: {
+                        Label(isCounting ? "Counting" : "Count tokens", systemImage: isCounting ? "hourglass" : "number")
+                    }
+                    .disabled(isCounting || selectedProvider == nil || trimmedPrompt.isEmpty)
+
+                    Button {
+                        Task { await createBatch() }
+                    } label: {
+                        Label(isCreating ? "Creating" : "Create batch", systemImage: isCreating ? "hourglass" : "plus.circle")
+                    }
+                    .disabled(isCreating || selectedProvider == nil || trimmedPrompt.isEmpty)
+                    .pinesButtonStyle(.primary)
+
+                    Spacer(minLength: theme.spacing.small)
+
+                    if let lastTokenCount {
+                        Text("\(lastTokenCount) input tokens")
+                            .font(theme.typography.caption.weight(.semibold))
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .monospacedDigit()
+                    }
+                }
+            }
+        }
+    }
+
+    private var trimmedPrompt: String {
+        prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var resolvedMaxTokens: Int {
+        min(max(Int(maxTokens.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1024, 1), 8192)
+    }
+
+    @MainActor
+    private func countTokens() async {
+        guard let provider = selectedProvider else { return }
+        isCounting = true
+        defer { isCounting = false }
+        do {
+            lastTokenCount = try await appModel.countAnthropicTokens(
+                providerID: provider.id,
+                modelID: ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines)),
+                text: trimmedPrompt,
+                services: services
+            )
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func createBatch() async {
+        guard let provider = selectedProvider else { return }
+        isCreating = true
+        defer { isCreating = false }
+        do {
+            _ = try await appModel.createAnthropicMessageBatch(
+                providerID: provider.id,
+                modelID: ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines)),
+                prompt: trimmedPrompt,
+                customID: customID,
+                maxTokens: resolvedMaxTokens,
+                services: services
+            )
+            prompt = ""
+            customID = ""
+            lastTokenCount = nil
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -1670,6 +1814,12 @@ private struct ProviderFileRow: View {
         )
         HStack {
             Spacer()
+            if file.providerKind == .anthropic {
+                Button("Download") {
+                    Task { await downloadFile() }
+                }
+                .buttonStyle(.borderless)
+            }
             Button("Refresh") {
                 Task { await refreshFile() }
             }
@@ -1678,6 +1828,25 @@ private struct ProviderFileRow: View {
                 Task { await deleteFile() }
             }
             .buttonStyle(.borderless)
+        }
+    }
+
+    @MainActor
+    private func downloadFile() async {
+        do {
+            switch file.providerKind {
+            case .anthropic:
+                _ = try await appModel.downloadAnthropicProviderFileContent(
+                    providerID: file.providerID,
+                    fileID: file.id,
+                    fileName: file.title,
+                    services: services
+                )
+            default:
+                throw InferenceError.invalidRequest("\(file.providerKind.pinesLifecycleTitle) file download is not supported here.")
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
         }
     }
 

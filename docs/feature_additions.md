@@ -2,6 +2,13 @@
 
 This document captures adjacent, high-value feature additions for Pines. The emphasis is on turning the current local model, vault, cloud provider, MCP, tool, sync, and audit foundations into durable user workflows.
 
+## Recently Landed Foundation
+
+- Shared provider lifecycle records and dashboards for OpenAI, Anthropic, and Gemini files, artifacts, caches/vector stores, batches, model capabilities, live sessions, and research runs.
+- Provider-hosted storage managers for OpenAI Files/vector stores, Anthropic Files, and Gemini Files/context caches, with local Vault separation.
+- Provider provenance in chat for citations, hosted tool events, file references, request/message IDs, cache metrics, thinking mode, and generated artifacts.
+- Long-running provider job records for OpenAI/Gemini Deep Research, OpenAI/Anthropic/Gemini batches, OpenAI/Gemini realtime/live sessions, and generated media workflows.
+
 ## Priority Recommendations
 
 ### 1. Project Spaces
@@ -118,13 +125,14 @@ Initial scope:
 
 ### 9. Run Artifacts
 
-Let users save outputs and tool results as durable Vault items.
+Let users save outputs, tool results, and provider artifacts as durable Vault items.
 
 Initial scope:
 
-- Save an assistant answer, selected message range, tool result, browser observation, or MCP resource preview into Vault.
+- Save an assistant answer, selected message range, tool result, browser observation, MCP resource preview, provider-generated file, media artifact, batch output, or research report into Vault.
 - Preserve provenance back to the source thread and run.
 - Make saved artifacts retrievable in future chats.
+- Keep local artifact import separate from provider-side deletion.
 
 ### 10. Watch Capture
 

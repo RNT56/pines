@@ -48,6 +48,7 @@ SwiftUI views receive services via environment values. This keeps views from con
 - Vault owns documents, chunks, vault FTS, and source attachments.
 - Agents own the runtime boundary, tool/audit policy, approval callbacks, activity reporting, and opt-in cloud permissions.
 - Settings owns user preferences and service configuration.
+- Cloud provider lifecycle owns provider-hosted files, artifacts, caches/vector stores, batches, model capabilities, live sessions, and research runs. These records are explicit provider resources, not Vault replacements.
 
 Repository protocols separate UI from storage:
 
@@ -56,6 +57,11 @@ Repository protocols separate UI from storage:
 - `VaultRepository`
 - `SettingsRepository`
 - `CloudProviderRepository`
+- `ProviderFileRepository`
+- `ProviderArtifactRepository`
+- `ProviderCacheRepository`
+- `ProviderBatchRepository`
+- `ProviderModelCapabilityRepository`
 - `MCPServerRepository`
 - `ModelDownloadRepository`
 - `AuditEventRepository`
@@ -67,6 +73,8 @@ The production local store is GRDB on SQLCipher with optional E2E-encrypted Clou
 Chat attachments are staged under app support storage with complete file protection and backup exclusion, capped at eight files per draft, and limited to inline-safe sizes before they can enter provider requests. Supported user-selected files include PNG, JPEG, WebP, GIF, HEIC/HEIF, PDF, plain text, Markdown, JSON, and CSV. HEIC/HEIF and sequence variants are decoded through ImageIO and staged as JPEG attachments so downstream provider capability checks can use the existing image path. Attachment-only sends and edits normalize empty text into explicit prompts such as image or file analysis instructions before persistence and routing.
 
 Vault source files are copied only long enough for extraction, then encrypted through `EncryptedBlobStore`; SQLite stores the encrypted blob path and source checksum.
+
+Provider-hosted files and artifacts are tracked separately from local Vault documents. OpenAI Files/vector stores, Anthropic Files, Gemini Files/context caches, provider batches, generated media, generated files, realtime/live sessions, and Deep Research runs all map into generic provider lifecycle records before the UI renders them. Provider raw IDs remain strings at the persistence boundary; typed wrappers are used at API edges so provider-specific IDs do not leak into shared storage. Importing a provider artifact into Vault is an explicit workflow and does not imply provider-side deletion.
 
 The GRDB implementation is split by repository concern: encrypted local-store opening, plaintext-to-SQLCipher migration, and base repository operations remain in `GRDBPinesStore.swift`, while CloudKit snapshot/apply/delete merge support lives in `GRDBPinesStore+CloudKit.swift`.
 
@@ -160,3 +168,4 @@ Large app files are intentionally split by responsibility:
 - Startup boot and lazy service creation: `PinesRootView.swift`; live service composition: `PinesAppServices.swift`.
 - Model installer orchestration: `ModelLifecycleService.swift`; background download coordination and install-mode support: `ModelDownloadSupport.swift`.
 - Settings and Models screen shells remain small; their detail/component surfaces live in `SettingsDetailView.swift` and `ModelsViewComponents.swift`.
+- Provider lifecycle coordinators and record mappers live under `Pines/Cloud/` and `Sources/PinesCore/Cloud/`; shared previews are assembled by `PinesAppModel` for Settings, Vault, lifecycle dashboard, artifact, batch, realtime, and research surfaces.

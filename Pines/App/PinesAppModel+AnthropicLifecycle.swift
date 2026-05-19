@@ -103,6 +103,50 @@ extension PinesAppModel {
     }
 
     @discardableResult
+    func uploadAnthropicVaultDocument(
+        providerID: ProviderID,
+        documentID: UUID,
+        consent: PinesAnthropicProviderStorageConsent,
+        services: PinesAppServices
+    ) async throws -> PinesAnthropicProviderUploadResult {
+        do {
+            try validateAnthropicProviderStorageConsent(consent)
+            guard let vaultRepository = services.vaultRepository else {
+                throw InferenceError.invalidRequest("Vault storage is unavailable.")
+            }
+            let coordinator = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
+            let documents = try await vaultRepository.listDocuments()
+            guard let document = documents.first(where: { $0.id == documentID }) else {
+                throw InferenceError.invalidRequest("Vault document \(documentID.uuidString) was not found.")
+            }
+            let chunks = try await vaultRepository.chunks(documentID: documentID)
+            let text = chunks
+                .sorted { $0.ordinal < $1.ordinal }
+                .map(\.text)
+                .joined(separator: "\n\n")
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw InferenceError.invalidRequest("Vault document \(document.title) has no text to upload.")
+            }
+
+            let data = Data(text.utf8)
+            let file = try await coordinator.uploadFile(
+                fileName: Self.providerStorageSafeFileName(document.title, fallbackExtension: "txt"),
+                contentType: "text/plain; charset=utf-8",
+                data: data,
+                localURL: nil
+            )
+            try await auditAnthropicProviderStorageConsent(consent, providerID: coordinator.providerID, services: services)
+            await refreshProviderLifecycleState(services: services)
+            providerLifecycleError = nil
+            return PinesAnthropicProviderUploadResult(file: file)
+        } catch {
+            providerLifecycleError = error.localizedDescription
+            recordRecoverableIssue("anthropic_provider_storage.upload_vault_document", error: error, services: services)
+            throw error
+        }
+    }
+
+    @discardableResult
     func refreshAnthropicProviderFile(
         providerID: ProviderID,
         fileID: String,
@@ -137,6 +181,27 @@ extension PinesAppModel {
     }
 
     @discardableResult
+    func downloadAnthropicProviderFileContent(
+        providerID: ProviderID,
+        fileID: String,
+        fileName: String? = nil,
+        contentType: String? = nil,
+        services: PinesAppServices
+    ) async throws -> ProviderArtifactRecord {
+        do {
+            let record = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
+                .downloadFileContent(id: fileID, fileName: fileName, contentType: contentType)
+            await refreshProviderLifecycleState(services: services)
+            providerLifecycleError = nil
+            return record
+        } catch {
+            providerLifecycleError = error.localizedDescription
+            recordRecoverableIssue("anthropic_provider_storage.download_file", error: error, services: services)
+            throw error
+        }
+    }
+
+    @discardableResult
     func createAnthropicBatch(
         providerID: ProviderID,
         body: JSONValue,
@@ -153,6 +218,57 @@ extension PinesAppModel {
             recordRecoverableIssue("anthropic_provider_storage.create_batch", error: error, services: services)
             throw error
         }
+    }
+
+    @discardableResult
+    func createAnthropicMessageBatch(
+        providerID: ProviderID,
+        modelID: ModelID,
+        prompt: String,
+        customID: String? = nil,
+        maxTokens: Int = 1024,
+        services: PinesAppServices
+    ) async throws -> ProviderBatchRecord {
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else {
+            throw InferenceError.invalidRequest("Anthropic batch prompt cannot be empty.")
+        }
+        let normalizedMaxTokens = min(max(maxTokens, 1), 8192)
+        let requestID = customID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedCustomID: String
+        if let requestID, !requestID.isEmpty {
+            resolvedCustomID = requestID
+        } else {
+            resolvedCustomID = "pines-\(UUID().uuidString)"
+        }
+        let params: JSONValue = .object([
+            "model": .string(modelID.rawValue),
+            "max_tokens": .number(Double(normalizedMaxTokens)),
+            "messages": .array([
+                .object([
+                    "role": .string("user"),
+                    "content": .array([
+                        .object([
+                            "type": .string("text"),
+                            "text": .string(trimmedPrompt),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        ])
+        let request = AnthropicMessageBatchCreateRequest(
+            requests: [
+                AnthropicMessageBatchRequest(
+                    customID: resolvedCustomID,
+                    params: params
+                ),
+            ],
+            metadata: [
+                "source": "pines",
+                "workflow": "manual_provider_batch",
+            ]
+        )
+        return try await createAnthropicBatch(providerID: providerID, body: request.body, services: services)
     }
 
     @discardableResult

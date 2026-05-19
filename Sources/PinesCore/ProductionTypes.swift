@@ -1498,6 +1498,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var anthropicPromptCachingEnabled: Bool
     public var anthropicPromptCacheTTL: AnthropicPromptCacheTTL
     public var anthropicCitationsEnabled: Bool
+    public var anthropicTokenCountPreflightEnabled: Bool
     public var geminiThinkingLevel: GeminiThinkingLevel
     public var cloudWebSearchMode: CloudWebSearchMode
     public var requireToolApproval: Bool
@@ -1524,6 +1525,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         case anthropicPromptCachingEnabled
         case anthropicPromptCacheTTL
         case anthropicCitationsEnabled
+        case anthropicTokenCountPreflightEnabled
         case geminiThinkingLevel
         case cloudWebSearchMode
         case requireToolApproval
@@ -1551,6 +1553,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         anthropicPromptCachingEnabled: Bool = false,
         anthropicPromptCacheTTL: AnthropicPromptCacheTTL = .fiveMinutes,
         anthropicCitationsEnabled: Bool = true,
+        anthropicTokenCountPreflightEnabled: Bool = false,
         geminiThinkingLevel: GeminiThinkingLevel = Self.defaultGeminiThinkingLevel,
         cloudWebSearchMode: CloudWebSearchMode = Self.defaultCloudWebSearchMode,
         requireToolApproval: Bool = true,
@@ -1576,6 +1579,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         self.anthropicPromptCachingEnabled = anthropicPromptCachingEnabled
         self.anthropicPromptCacheTTL = anthropicPromptCacheTTL
         self.anthropicCitationsEnabled = anthropicCitationsEnabled
+        self.anthropicTokenCountPreflightEnabled = anthropicTokenCountPreflightEnabled
         self.geminiThinkingLevel = geminiThinkingLevel
         self.cloudWebSearchMode = cloudWebSearchMode
         self.requireToolApproval = requireToolApproval
@@ -1612,6 +1616,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         anthropicPromptCachingEnabled = try container.decodeIfPresent(Bool.self, forKey: .anthropicPromptCachingEnabled) ?? false
         anthropicPromptCacheTTL = try container.decodeIfPresent(AnthropicPromptCacheTTL.self, forKey: .anthropicPromptCacheTTL) ?? .fiveMinutes
         anthropicCitationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .anthropicCitationsEnabled) ?? true
+        anthropicTokenCountPreflightEnabled = try container.decodeIfPresent(Bool.self, forKey: .anthropicTokenCountPreflightEnabled) ?? false
         geminiThinkingLevel = try container.decodeIfPresent(GeminiThinkingLevel.self, forKey: .geminiThinkingLevel) ?? Self.defaultGeminiThinkingLevel
         cloudWebSearchMode = try container.decodeIfPresent(CloudWebSearchMode.self, forKey: .cloudWebSearchMode) ?? Self.defaultCloudWebSearchMode
         requireToolApproval = try container.decodeIfPresent(Bool.self, forKey: .requireToolApproval) ?? true

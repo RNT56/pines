@@ -29,6 +29,7 @@ public enum CloudProviderMetadataKeys {
     public static let anthropicCacheUsageJSON = "anthropic.cache_usage_json"
     public static let anthropicCacheReadInputTokens = "anthropic.cache_read_input_tokens"
     public static let anthropicCacheCreationInputTokens = "anthropic.cache_creation_input_tokens"
+    public static let anthropicCountTokensInputTokens = "anthropic.count_tokens.input_tokens"
     public static let anthropicHostedToolCallsJSON = "anthropic.hosted_tool_calls_json"
     public static let anthropicArtifactsJSON = "anthropic.artifacts_json"
     public static let anthropicFileReferencesJSON = "anthropic.file_references_json"
