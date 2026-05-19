@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Pines/Assets.xcassets/AppIcon.appiconset/AppIcon-Light-1024.png" alt="Pines logo" width="144" height="144">
+  <img src="assets/pines_logo_light-Photoroom.png" alt="Pines logo" width="144" height="144">
 </p>
 
 <h1 align="center">Pines</h1>
