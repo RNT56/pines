@@ -34,37 +34,50 @@ for xcode in /Applications/Xcode*.app; do
     continue
   fi
 
-  if ! metal="$(find_developer_tool metal)"; then
-    echo "Skipping $xcode because xcrun cannot find the Metal compiler." >&2
-    continue
-  fi
-
-  if ! metallib="$(find_developer_tool metallib)"; then
-    echo "Skipping $xcode because xcrun cannot find metallib." >&2
-    continue
-  fi
-
   selected="$xcode"
-  selected_metal="$metal"
-  selected_metallib="$metallib"
+
+  if metal="$(find_developer_tool metal)"; then
+    selected_metal="$metal"
+  else
+    echo "Warning: xcrun cannot find the Metal compiler for $xcode." >&2
+  fi
+
+  if metallib="$(find_developer_tool metallib)"; then
+    selected_metallib="$metallib"
+  else
+    echo "Warning: xcrun cannot find metallib for $xcode." >&2
+  fi
+
   break
 done
 
 if [ -z "$selected" ]; then
-  echo "No installed Xcode with an iPhoneOS SDK and Metal command-line tools was found." >&2
+  echo "No installed Xcode with an iPhoneOS SDK was found." >&2
   exit 1
 fi
 
 echo "Selected $selected"
 xcodebuild -version
 xcodebuild -showsdks
-echo "metal: $selected_metal"
-echo "metallib: $selected_metallib"
+
+if [ -n "$selected_metal" ]; then
+  echo "metal: $selected_metal"
+else
+  echo "metal: not found by xcrun during Xcode selection"
+fi
+
+if [ -n "$selected_metallib" ]; then
+  echo "metallib: $selected_metallib"
+else
+  echo "metallib: not found by xcrun during Xcode selection"
+fi
 
 if [ -n "${GITHUB_ENV:-}" ]; then
-  {
-    echo "DEVELOPER_DIR=$selected/Contents/Developer"
-    echo "PINES_METAL_PATH=$selected_metal"
-    echo "PINES_METALLIB_PATH=$selected_metallib"
-  } >>"$GITHUB_ENV"
+  echo "DEVELOPER_DIR=$selected/Contents/Developer" >>"$GITHUB_ENV"
+  if [ -n "$selected_metal" ]; then
+    echo "PINES_METAL_PATH=$selected_metal" >>"$GITHUB_ENV"
+  fi
+  if [ -n "$selected_metallib" ]; then
+    echo "PINES_METALLIB_PATH=$selected_metallib" >>"$GITHUB_ENV"
+  fi
 fi

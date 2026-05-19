@@ -34,95 +34,125 @@ struct ChatComposerBar: View {
     }
 
     var body: some View {
+        composerLifecycle
+    }
+
+    private var composerLifecycle: some View {
+        composerFocusHandlers
+            .onAppear {
+                refreshAgentToolsIfNeeded()
+            }
+            .onChange(of: runMode) { _, _ in
+                refreshAgentToolsIfNeeded()
+            }
+            .onChange(of: settingsState.mcpTools) { _, _ in
+                refreshAgentToolsIfNeeded(force: true)
+            }
+            .onChange(of: settingsState.braveSearchCredentialStatus) { _, _ in
+                refreshAgentToolsIfNeeded(force: true)
+            }
+            .onChange(of: modelState.defaultProviderID) { _, _ in
+                refreshAgentToolsIfNeeded(force: true)
+            }
+            .onChange(of: modelState.defaultModelID) { _, _ in
+                refreshAgentToolsIfNeeded(force: true)
+            }
+            .onChange(of: currentAgentToolSelectionID) { _, _ in
+                refreshAgentToolsIfNeeded(force: true)
+            }
+    }
+
+    private var composerFocusHandlers: some View {
+        composerPersistenceHandlers
+            .onChange(of: isInputFocused) { _, focused in
+                guard isFocused != focused else { return }
+                isFocused = focused
+            }
+            .onChange(of: isFocused) { _, focused in
+                guard isInputFocused != focused else { return }
+                isInputFocused = focused
+            }
+    }
+
+    private var composerPersistenceHandlers: some View {
+        composerInputHandlers
+            .onChange(of: settingsState.openAIReasoningEffort) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+            .onChange(of: settingsState.openAITextVerbosity) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+            .onChange(of: settingsState.anthropicEffort) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+            .onChange(of: settingsState.geminiThinkingLevel) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+            .onChange(of: settingsState.cloudWebSearchMode) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+    }
+
+    private var composerInputHandlers: some View {
+        composerSurface
+            .fileImporter(
+                isPresented: $showingAttachmentImporter,
+                allowedContentTypes: Self.allowedAttachmentTypes,
+                allowsMultipleSelection: true,
+                onCompletion: importAttachments
+            )
+            .animation(theme.motion.fast, value: draft.isEmpty)
+            .animation(theme.motion.fast, value: attachments)
+            .animation(theme.motion.fast, value: attachmentError)
+            .animation(theme.motion.fast, value: quickSettingsAvailability)
+    }
+
+    private var composerSurface: some View {
+        composerLayout
+            .sheet(item: $selectedMCPPrompt) { prompt in
+                promptInvocationSheet(for: prompt)
+            }
+            .pinesSurface(.chrome, padding: chromePadding)
+            .contentShape(RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
+            .onTapGesture {
+                setFocus(true)
+            }
+    }
+
+    private var composerLayout: some View {
         VStack(alignment: .leading, spacing: layoutSpacing) {
-            if !attachments.isEmpty || attachmentError != nil || isImportingAttachments {
+            if showsAttachmentTray {
                 attachmentTray
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
-            Group {
-                if horizontalSizeClass == .compact {
-                    compactLayout
-                } else {
-                    regularLayout
-                }
+            if horizontalSizeClass == .compact {
+                compactLayout
+            } else {
+                regularLayout
             }
         }
-        .sheet(item: $selectedMCPPrompt) { prompt in
-            MCPPromptInvocationSheet(
-                prompt: prompt,
-                arguments: $mcpPromptArguments,
-                cancel: { selectedMCPPrompt = nil },
-                invoke: {
-                    let values = promptArguments(for: prompt)
-                    selectedMCPPrompt = nil
-                    Task {
-                        await appModel.useMCPPrompt(prompt, arguments: values, services: services)
-                    }
+    }
+
+    private var showsAttachmentTray: Bool {
+        !attachments.isEmpty || attachmentError != nil || isImportingAttachments
+    }
+
+    private func promptInvocationSheet(for prompt: MCPPromptRecord) -> some View {
+        MCPPromptInvocationSheet(
+            prompt: prompt,
+            arguments: $mcpPromptArguments,
+            cancel: { selectedMCPPrompt = nil },
+            invoke: {
+                let values = promptArguments(for: prompt)
+                selectedMCPPrompt = nil
+                Task {
+                    await appModel.useMCPPrompt(prompt, arguments: values, services: services)
                 }
-            )
-            .environmentObject(haptics)
-            .pinesTheme(theme)
-        }
-        .pinesSurface(.chrome, padding: chromePadding)
-        .contentShape(RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
-        .onTapGesture {
-            setFocus(true)
-        }
-        .fileImporter(
-            isPresented: $showingAttachmentImporter,
-            allowedContentTypes: Self.allowedAttachmentTypes,
-            allowsMultipleSelection: true,
-            onCompletion: importAttachments
+            }
         )
-        .animation(theme.motion.fast, value: draft.isEmpty)
-        .animation(theme.motion.fast, value: attachments)
-        .animation(theme.motion.fast, value: attachmentError)
-        .animation(theme.motion.fast, value: quickSettingsAvailability)
-        .onChange(of: settingsState.openAIReasoningEffort) { _, _ in
-            Task { await appModel.saveSettings(services: services) }
-        }
-        .onChange(of: settingsState.openAITextVerbosity) { _, _ in
-            Task { await appModel.saveSettings(services: services) }
-        }
-        .onChange(of: settingsState.anthropicEffort) { _, _ in
-            Task { await appModel.saveSettings(services: services) }
-        }
-        .onChange(of: settingsState.geminiThinkingLevel) { _, _ in
-            Task { await appModel.saveSettings(services: services) }
-        }
-        .onChange(of: settingsState.cloudWebSearchMode) { _, _ in
-            Task { await appModel.saveSettings(services: services) }
-        }
-        .onChange(of: isInputFocused) { _, focused in
-            guard isFocused != focused else { return }
-            isFocused = focused
-        }
-        .onChange(of: isFocused) { _, focused in
-            guard isInputFocused != focused else { return }
-            isInputFocused = focused
-        }
-        .onAppear {
-            refreshAgentToolsIfNeeded()
-        }
-        .onChange(of: runMode) { _, _ in
-            refreshAgentToolsIfNeeded()
-        }
-        .onChange(of: settingsState.mcpTools) { _, _ in
-            refreshAgentToolsIfNeeded(force: true)
-        }
-        .onChange(of: settingsState.braveSearchCredentialStatus) { _, _ in
-            refreshAgentToolsIfNeeded(force: true)
-        }
-        .onChange(of: modelState.defaultProviderID) { _, _ in
-            refreshAgentToolsIfNeeded(force: true)
-        }
-        .onChange(of: modelState.defaultModelID) { _, _ in
-            refreshAgentToolsIfNeeded(force: true)
-        }
-        .onChange(of: currentAgentToolSelectionID) { _, _ in
-            refreshAgentToolsIfNeeded(force: true)
-        }
+        .environmentObject(haptics)
+        .pinesTheme(theme)
     }
 
     private var regularLayout: some View {
