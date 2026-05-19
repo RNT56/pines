@@ -22,7 +22,7 @@ let package = Package(
             traits: [.defaults, "Xet"]
         ),
         // EventSource 1.4.x enables AsyncHTTPClient traits that currently break Xcode's simulator build.
-        .package(url: "https://github.com/mattt/EventSource.git", exact: "1.3.0"),
+        .package(url: "https://github.com/mattt/EventSource.git", exact: "1.4.1"),
         .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0"),
     ],
     targets: [
