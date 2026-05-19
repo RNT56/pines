@@ -466,21 +466,84 @@ struct SettingsDetailView: View {
                 .pinesButtonStyle(.icon)
             }
 
-            PinesMetricPillGroup(items: [
-                .init("Agents", value: provider.enabledForAgents ? "enabled" : "off", systemImage: "person.2.badge.gearshape", tone: provider.enabledForAgents ? .success : .neutral),
-                .init("Models", value: capabilities.textGeneration ? "chat" : "retrieval", systemImage: capabilities.textGeneration ? "text.bubble" : "square.stack.3d.up", tone: capabilities.textGeneration ? .accent : .info),
-                .init("Tools", value: capabilities.toolCalling ? "available" : "off", systemImage: "wrench.and.screwdriver", tone: capabilities.toolCalling ? .success : .neutral)
-            ])
+            PinesMetricPillGroup(items: providerMetricItems(for: provider))
 
             HStack(spacing: theme.spacing.xsmall) {
-                PinesProviderStorageBadge(kind: .localOnly, compact: true)
-                if capabilities.textDocumentInputs || capabilities.pdfInputs || capabilities.imageInputs {
-                    PinesProviderStorageBadge(kind: .inlineThisTurn, compact: true)
+                ForEach(providerStorageKinds(for: capabilities), id: \.self) { kind in
+                    PinesProviderStorageBadge(kind: kind, compact: true)
                 }
             }
         }
         .frame(minHeight: theme.row.minHeight)
         .pinesSurface(.inset, padding: theme.spacing.small)
+    }
+
+    private func providerMetricItems(for provider: CloudProviderConfiguration) -> [PinesMetricPillGroup.Item] {
+        let capabilities = provider.capabilities
+        var items: [PinesMetricPillGroup.Item] = [
+            .init("Agents", value: provider.enabledForAgents ? "enabled" : "off", systemImage: "person.2.badge.gearshape", tone: provider.enabledForAgents ? .success : .neutral),
+            .init("Models", value: capabilities.textGeneration ? "chat" : "retrieval", systemImage: capabilities.textGeneration ? "text.bubble" : "square.stack.3d.up", tone: capabilities.textGeneration ? .accent : .info),
+            .init("Tools", value: capabilities.toolCalling ? "available" : "off", systemImage: "wrench.and.screwdriver", tone: capabilities.toolCalling ? .success : .neutral),
+        ]
+        let inputLabels = providerInputLabels(for: capabilities)
+        if !inputLabels.isEmpty {
+            items.append(.init("Inputs", value: inputLabels.joined(separator: "/"), systemImage: "paperclip", tone: .info))
+        }
+        if capabilities.contextCache || capabilities.tokenCounting {
+            items.append(.init("Context", value: capabilities.contextCache ? "cache" : "count", systemImage: capabilities.contextCache ? "memorychip" : "number", tone: capabilities.contextCache ? .warning : .accent))
+        }
+        if capabilities.generatedImages || capabilities.generatedAudio || capabilities.generatedVideo {
+            items.append(.init("Media", value: providerGeneratedMediaLabel(for: capabilities), systemImage: "sparkles", tone: .warning))
+        }
+        if capabilities.live || capabilities.batch {
+            items.append(.init("Jobs", value: providerJobLabel(for: capabilities), systemImage: capabilities.live ? "dot.radiowaves.left.and.right" : "tray.full", tone: .warning))
+        }
+        return items
+    }
+
+    private func providerInputLabels(for capabilities: ProviderCapabilities) -> [String] {
+        var labels = [String]()
+        if capabilities.imageInputs { labels.append("image") }
+        if capabilities.audioInputs { labels.append("audio") }
+        if capabilities.videoInputs { labels.append("video") }
+        if capabilities.pdfInputs { labels.append("PDF") }
+        if capabilities.textDocumentInputs { labels.append("text") }
+        return labels
+    }
+
+    private func providerGeneratedMediaLabel(for capabilities: ProviderCapabilities) -> String {
+        var labels = [String]()
+        if capabilities.generatedImages { labels.append("image") }
+        if capabilities.generatedAudio { labels.append("audio") }
+        if capabilities.generatedVideo { labels.append("video") }
+        return labels.joined(separator: "/")
+    }
+
+    private func providerJobLabel(for capabilities: ProviderCapabilities) -> String {
+        switch (capabilities.live, capabilities.batch) {
+        case (true, true):
+            "live/batch"
+        case (true, false):
+            "live"
+        case (false, true):
+            "batch"
+        case (false, false):
+            "off"
+        }
+    }
+
+    private func providerStorageKinds(for capabilities: ProviderCapabilities) -> [PinesProviderStorageKind] {
+        var kinds: [PinesProviderStorageKind] = [.localOnly]
+        if capabilities.textDocumentInputs || capabilities.pdfInputs || capabilities.imageInputs || capabilities.audioInputs || capabilities.videoInputs {
+            kinds.append(.inlineThisTurn)
+        }
+        if capabilities.files || capabilities.generatedImages || capabilities.generatedAudio || capabilities.generatedVideo || capabilities.batch || capabilities.live {
+            kinds.append(.providerHosted)
+        }
+        if capabilities.contextCache {
+            kinds.append(.cachedContext)
+        }
+        return kinds
     }
 
     private func providerCapabilityPreview(for kind: CloudProviderKind) -> some View {
@@ -504,7 +567,7 @@ struct SettingsDetailView: View {
     }
 
     private func providerCapabilityRows(for kind: CloudProviderKind) -> [ProviderCapabilityPreviewRow] {
-        [
+        var rows: [ProviderCapabilityPreviewRow] = [
             .init(
                 title: "Chat and Responses",
                 detail: kind == .voyageAI ? "Retrieval provider; chat generation stays unavailable." : "Text generation, streaming, and provider response metadata scaffolding.",
@@ -530,6 +593,47 @@ struct SettingsDetailView: View {
                 metrics: [.init("Storage", value: "opt-in", systemImage: "lock.shield", tone: .warning)]
             )
         ]
+        if kind == .gemini {
+            rows.append(contentsOf: [
+                .init(
+                    title: "Gemini Media Inputs",
+                    detail: "Images, PDFs, text, audio, and video use explicit inline or provider-hosted state with visible retention wording.",
+                    systemImage: "photo.stack",
+                    status: .supported,
+                    secondaryStatus: .custom("No hidden uploads", .warning),
+                    metrics: [
+                        .init("Audio", value: "input", systemImage: "waveform", tone: .info),
+                        .init("Video", value: "input", systemImage: "film", tone: .info),
+                        .init("Files", value: "48h", systemImage: "cloud", tone: .warning),
+                    ]
+                ),
+                .init(
+                    title: "Gemini Tools and Grounding",
+                    detail: "Code execution, URL context, Google Search grounding, citations, and generated tool artifacts are parsed into durable metadata.",
+                    systemImage: "safari",
+                    status: .supported,
+                    secondaryStatus: .needsValidation,
+                    metrics: [
+                        .init("Code", value: "exec", systemImage: "chevron.left.forwardslash.chevron.right", tone: .success),
+                        .init("URLs", value: "context", systemImage: "link", tone: .success),
+                        .init("Search", value: "grounded", systemImage: "magnifyingglass", tone: .success),
+                    ]
+                ),
+                .init(
+                    title: "Gemini Operations",
+                    detail: "Context caches, token counting, Live sessions, generated media jobs, and batches use provider operation records.",
+                    systemImage: "rectangle.stack.badge.play",
+                    status: .accountGated,
+                    secondaryStatus: .custom("Provider-hosted", .warning),
+                    metrics: [
+                        .init("Cache", value: "TTL", systemImage: "memorychip", tone: .warning),
+                        .init("Live", value: "separate", systemImage: "dot.radiowaves.left.and.right", tone: .warning),
+                        .init("Batch", value: "jobs", systemImage: "tray.full", tone: .warning),
+                    ]
+                ),
+            ])
+        }
+        return rows
     }
 
     @ViewBuilder

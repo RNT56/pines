@@ -514,7 +514,10 @@ struct ChatComposerBar: View {
     nonisolated private static let maxInlineFileBytes = 50 * 1024 * 1024
 
     private static let allowedAttachmentTypes: [UTType] = [
-        "png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "heics", "heifs", "pdf", "txt", "md", "markdown", "json", "csv",
+        "png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "heics", "heifs",
+        "pdf", "txt", "md", "markdown", "json", "csv",
+        "mp3", "m4a", "wav", "wave", "aac", "flac", "ogg", "oga", "opus", "aif", "aiff",
+        "mp4", "m4v", "mov", "qt", "webm", "mpeg", "mpg", "avi", "mkv",
     ].compactMap { UTType(filenameExtension: $0) }
 
     private struct AttachmentImportOutcome: Sendable {
@@ -616,6 +619,34 @@ struct ChatComposerBar: View {
             return "application/json"
         case "csv":
             return "text/csv"
+        case "mp3":
+            return "audio/mpeg"
+        case "m4a":
+            return "audio/mp4"
+        case "wav", "wave":
+            return "audio/wav"
+        case "aac":
+            return "audio/aac"
+        case "flac":
+            return "audio/flac"
+        case "ogg", "oga":
+            return "audio/ogg"
+        case "opus":
+            return "audio/opus"
+        case "aif", "aiff":
+            return "audio/aiff"
+        case "mp4", "m4v":
+            return "video/mp4"
+        case "mov", "qt":
+            return "video/quicktime"
+        case "webm":
+            return "video/webm"
+        case "mpeg", "mpg":
+            return "video/mpeg"
+        case "avi":
+            return "video/x-msvideo"
+        case "mkv":
+            return "video/x-matroska"
         default:
             do {
                 let values = try url.resourceValues(forKeys: [.contentTypeKey])
@@ -635,6 +666,10 @@ struct ChatComposerBar: View {
             return .image
         case "application/pdf", "text/plain", "text/markdown", "text/x-markdown", "application/json", "text/csv":
             return .document
+        case let value where value.hasPrefix("audio/"):
+            return .audio
+        case let value where value.hasPrefix("video/"):
+            return .video
         default:
             return nil
         }
@@ -660,6 +695,34 @@ struct ChatComposerBar: View {
             "json"
         case "text/csv":
             "csv"
+        case "audio/mpeg":
+            "mp3"
+        case "audio/mp4":
+            "m4a"
+        case "audio/wav":
+            "wav"
+        case "audio/aac":
+            "aac"
+        case "audio/flac":
+            "flac"
+        case "audio/ogg":
+            "ogg"
+        case "audio/opus":
+            "opus"
+        case "audio/aiff":
+            "aiff"
+        case "video/mp4":
+            "mp4"
+        case "video/quicktime":
+            "mov"
+        case "video/webm":
+            "webm"
+        case "video/mpeg":
+            "mpeg"
+        case "video/x-msvideo":
+            "avi"
+        case "video/x-matroska":
+            "mkv"
         default:
             "txt"
         }

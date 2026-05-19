@@ -51,6 +51,7 @@
 		667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */; };
 		69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */; };
 		6F2B60A874B79E3B73C27624 /* CloudProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */; };
+		A1E9D9226A4B4C5D8E9F0012 /* GeminiProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E9D9216A4B4C5D8E9F0012 /* GeminiProviderService.swift */; };
 		74762C61D2E73B7909039286 /* SQLCipher in Frameworks */ = {isa = PBXBuildFile; productRef = 47290C155F603BA3AA043C93 /* SQLCipher */; };
 		75BAD67E75A276A731EF918B /* PinesLiveActivities.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2EC8BB0262D2F49A7518608A /* PinesLiveActivities.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		78A1D2B0783CF04BAE99BC62 /* WatchTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC95D2DA4ED0AE5A971C6BA3 /* WatchTranscriptView.swift */; };
@@ -201,6 +202,7 @@
 		ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitRecordCipher.swift; sourceTree = "<group>"; };
 		AEC56EEE76C86B70FF02D9AF /* GRDBPinesStore+Mapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GRDBPinesStore+Mapping.swift"; sourceTree = "<group>"; };
 		AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRuntimeMetrics.swift; sourceTree = "<group>"; };
+		A1E9D9216A4B4C5D8E9F0012 /* GeminiProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiProviderService.swift; sourceTree = "<group>"; };
 		B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProviderService.swift; sourceTree = "<group>"; };
 		C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
 		C4BAE1B582D05CB5B511A886 /* EncryptedBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptedBlobStore.swift; sourceTree = "<group>"; };
@@ -520,6 +522,7 @@
 				ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */,
 				443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */,
 				4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */,
+				A1E9D9216A4B4C5D8E9F0012 /* GeminiProviderService.swift */,
 				B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */,
 			);
 			path = Cloud;
@@ -732,6 +735,7 @@
 				368944A065D96B6F78A3E0E6 /* GRDBPinesStore+CloudKit.swift in Sources */,
 				0101B36D3B132435D7763B4A /* GRDBPinesStore+Mapping.swift in Sources */,
 				8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */,
+				A1E9D9226A4B4C5D8E9F0012 /* GeminiProviderService.swift in Sources */,
 				2AA5EBBAD5AC8336B9F3DD0D /* HuggingFaceCredentialService.swift in Sources */,
 				FF4D60F77559E9389E312BD7 /* KeychainSecretStore.swift in Sources */,
 				1A048AEA62053C4EE5E0F694 /* MCPOAuthService.swift in Sources */,
