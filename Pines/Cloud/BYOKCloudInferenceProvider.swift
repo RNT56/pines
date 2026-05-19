@@ -774,6 +774,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 object["require_approval"] = approval
             }
             return (object, [])
+        case .toolSearch:
+            try requireAgentContext(executionContext, toolName: "Tool Search")
+            return (["type": "tool_search"], [])
         case .custom:
             guard let configuration = tool.configuration else {
                 throw InferenceError.invalidRequest("Custom hosted tools require a provider configuration object.")
