@@ -14,6 +14,7 @@ struct SettingsDetailView: View {
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var settingsState: PinesSettingsState
+    @EnvironmentObject private var providerLifecycleState: PinesProviderLifecycleState
     @EnvironmentObject private var haptics: PinesHaptics
     let section: PinesSettingsSection
     let executionMode: AgentExecutionMode
@@ -468,6 +469,10 @@ struct SettingsDetailView: View {
 
             PinesMetricPillGroup(items: providerMetricItems(for: provider))
 
+            if provider.kind == .openAI {
+                openAIProviderLifecycleSummary(for: provider)
+            }
+
             HStack(spacing: theme.spacing.xsmall) {
                 ForEach(providerStorageKinds(for: capabilities), id: \.self) { kind in
                     PinesProviderStorageBadge(kind: kind, compact: true)
@@ -476,6 +481,46 @@ struct SettingsDetailView: View {
         }
         .frame(minHeight: theme.row.minHeight)
         .pinesSurface(.inset, padding: theme.spacing.small)
+    }
+
+    private func openAIProviderLifecycleSummary(for provider: CloudProviderConfiguration) -> some View {
+        let files = providerLifecycleState.providerFiles.filter { $0.providerID == provider.id }
+        let vectorStores = providerLifecycleState.providerVectorStores.filter { $0.providerID == provider.id }
+        let artifacts = providerLifecycleState.providerArtifacts.filter { $0.providerID == provider.id }
+        let batches = providerLifecycleState.providerBatches.filter { $0.providerID == provider.id }
+        let live = providerLifecycleState.providerLiveSessions.filter { $0.providerID == provider.id }
+        let research = providerLifecycleState.providerResearchRuns.filter { $0.providerID == provider.id }
+
+        return VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("OpenAI Dashboard")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                Spacer()
+                Button {
+                    Task { await appModel.refreshProviderLifecycleState(services: services) }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.borderless)
+                .font(theme.typography.caption)
+            }
+
+            PinesMetricPillGroup(items: [
+                .init("Responses", value: "\(settingsState.openAIReasoningEffort.rawValue)/\(settingsState.openAITextVerbosity.rawValue)", systemImage: "slider.horizontal.3", tone: .accent),
+                .init("Storage", value: "\(files.count) files", systemImage: "doc", tone: .warning),
+                .init("Vectors", value: "\(vectorStores.count)", systemImage: "square.stack.3d.up", tone: .warning),
+                .init("Artifacts", value: "\(artifacts.count)", systemImage: "sparkles", tone: .accent),
+                .init("Batches", value: "\(batches.count)", systemImage: "tray.full", tone: .info),
+                .init("Live", value: "\(live.count)", systemImage: "dot.radiowaves.left.and.right", tone: .info),
+                .init("Research", value: "\(research.count)", systemImage: "doc.text.magnifyingglass", tone: .success),
+            ], minimumWidth: 112)
+
+            Text("Advanced Responses: web search \(settingsState.cloudWebSearchMode.rawValue), provider storage opt-in, structured output records persisted.")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func providerMetricItems(for provider: CloudProviderConfiguration) -> [PinesMetricPillGroup.Item] {

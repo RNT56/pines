@@ -879,6 +879,7 @@ private struct ChatBubble: View {
                 if let searchSuggestionsHTML = ChatWebSearchSuggestionsView.html(from: message.providerMetadata) {
                     ChatWebSearchSuggestionsView(html: searchSuggestionsHTML)
                 }
+                ChatProviderProvenancePills(metadata: message.providerMetadata)
 
                 let agentActivities = PinesAppModel.agentActivities(from: message.providerMetadata)
                 if !agentActivities.isEmpty {
@@ -987,6 +988,60 @@ private struct ChatLocalTokenRateView: View {
         }
         .foregroundStyle(theme.colors.secondaryText)
         .accessibilityLabel("\(performance.displayValue) tokens per second")
+    }
+}
+
+private struct ChatProviderProvenancePills: View {
+    @Environment(\.pinesTheme) private var theme
+    let metadata: [String: String]
+
+    private var items: [PinesMetricPillGroup.Item] {
+        var values = [PinesMetricPillGroup.Item]()
+        if let responseID = metadata[CloudProviderMetadataKeys.openAIResponseID]?.pinesCompactMetadataValue {
+            values.append(.init("Response", value: responseID, systemImage: "number", tone: .info))
+        }
+        if let requestID = metadata[CloudProviderMetadataKeys.openAIRequestID]?.pinesCompactMetadataValue {
+            values.append(.init("Request", value: requestID, systemImage: "arrow.left.arrow.right", tone: .neutral))
+        }
+        if metadata[CloudProviderMetadataKeys.openAIResponseStored] == "true" {
+            values.append(.init("Stored", value: "provider", systemImage: "cloud", tone: .warning))
+        }
+        if let status = metadata[CloudProviderMetadataKeys.openAIResponseStatus]?.pinesCompactMetadataValue {
+            values.append(.init("Status", value: status, systemImage: "clock", tone: .accent))
+        }
+        let artifactCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.openAIArtifactsJSON])
+        if artifactCount > 0 {
+            values.append(.init("Artifacts", value: "\(artifactCount)", systemImage: "sparkles", tone: .accent))
+        }
+        let fileSearchCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON])
+        if fileSearchCount > 0 {
+            values.append(.init("File search", value: "\(fileSearchCount)", systemImage: "doc.text.magnifyingglass", tone: .success))
+        }
+        return values
+    }
+
+    var body: some View {
+        if !items.isEmpty {
+            PinesMetricPillGroup(items: items, minimumWidth: 112)
+                .padding(.top, theme.spacing.xxsmall)
+        }
+    }
+
+    private static func jsonArrayCount(_ raw: String?) -> Int {
+        guard let raw,
+              let data = raw.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [Any]
+        else { return 0 }
+        return array.count
+    }
+}
+
+private extension String {
+    var pinesCompactMetadataValue: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.count <= 18 { return trimmed }
+        return "\(trimmed.prefix(8))...\(trimmed.suffix(6))"
     }
 }
 

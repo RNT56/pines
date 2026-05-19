@@ -892,6 +892,9 @@ private extension OpenAIDeepResearchRequest {
         if let maxToolCalls {
             fields["max_tool_calls"] = .number(Double(maxToolCalls))
         }
+        if let responseOutputTokenBudget {
+            fields["max_output_tokens"] = .number(Double(responseOutputTokenBudget))
+        }
         return .object(fields)
     }
 
@@ -981,7 +984,9 @@ private extension OpenAIDeepResearchRequest {
         if !filters.isEmpty {
             tool["filters"] = .object(filters)
         }
-        if depth == .deep {
+        if let budget = sourcePolicy.webSearchReturnTokenBudget {
+            tool["return_token_budget"] = .number(Double(budget))
+        } else if depth == .deep {
             tool["return_token_budget"] = .string("unlimited")
         }
         return tool

@@ -703,7 +703,7 @@ public enum HostedToolConfiguration: Hashable, Codable, Sendable {
             self = .remoteMCP(
                 serverLabel: try container.decode(String.self, forKey: .serverLabel),
                 serverURL: try container.decode(String.self, forKey: .serverURL),
-                requireApproval: try container.decodeIfPresent(String.self, forKey: .requireApproval) ?? "never"
+                requireApproval: try container.decodeIfPresent(String.self, forKey: .requireApproval) ?? "always"
             )
         case .toolSearch:
             self = .toolSearch
@@ -740,6 +740,37 @@ public enum HostedToolConfiguration: Hashable, Codable, Sendable {
             try container.encode(requireApproval, forKey: .requireApproval)
         case .toolSearch:
             try container.encode(ToolType.toolSearch, forKey: .type)
+        }
+    }
+
+    public var requiresAgentExecution: Bool {
+        switch self {
+        case .computerUse, .remoteMCP:
+            return true
+        case .webSearch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch:
+            return false
+        }
+    }
+
+    public var requiresApproval: Bool {
+        switch self {
+        case .computerUse:
+            return true
+        case let .remoteMCP(_, _, requireApproval):
+            return requireApproval != "never"
+        case .webSearch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch:
+            return false
+        }
+    }
+
+    public var approvalPolicy: String {
+        switch self {
+        case .computerUse:
+            return "always"
+        case let .remoteMCP(_, _, requireApproval):
+            return requireApproval.isEmpty ? "always" : requireApproval
+        case .webSearch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch:
+            return "never"
         }
     }
 }
@@ -953,6 +984,7 @@ public enum OpenAIHostedToolKind: String, Hashable, Codable, Sendable, CaseItera
     case codeInterpreter
     case imageGeneration
     case mcp
+    case toolSearch
     case custom
 }
 
@@ -1121,6 +1153,66 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         executionContext = try container.decodeIfPresent(ExecutionContext.self, forKey: .executionContext) ?? .chat
         openAIResponseOptions = try container.decodeIfPresent(OpenAIResponseRequestOptions.self, forKey: .openAIResponseOptions)
         geminiOptions = try container.decodeIfPresent(GeminiRequestOptions.self, forKey: .geminiOptions)
+    }
+
+    public func replacing(
+        messages: [ChatMessage]? = nil,
+        allowsTools: Bool? = nil,
+        availableTools: [AnyToolSpec]? = nil,
+        executionContext: ExecutionContext? = nil
+    ) -> ChatRequest {
+        ChatRequest(
+            id: id,
+            modelID: modelID,
+            messages: messages ?? self.messages,
+            sampling: sampling,
+            webSearchOptions: webSearchOptions,
+            structuredOutput: structuredOutput,
+            hostedTools: hostedTools,
+            openAIOptions: openAIOptions,
+            allowsTools: allowsTools ?? self.allowsTools,
+            availableTools: availableTools ?? self.availableTools,
+            vaultContextIDs: vaultContextIDs,
+            executionContext: executionContext ?? self.executionContext,
+            openAIResponseOptions: openAIResponseOptions,
+            geminiOptions: geminiOptions
+        )
+    }
+
+    public var hasAgentOnlyHostedTools: Bool {
+        hostedTools.contains { $0.requiresAgentExecution }
+            || openAIResponseOptions?.hostedTools.contains { $0.requiresAgentExecution } == true
+    }
+
+    public var hasApprovalGatedHostedTools: Bool {
+        hostedTools.contains { $0.requiresApproval }
+            || openAIResponseOptions?.hostedTools.contains { $0.requiresApproval } == true
+    }
+
+    public func hostedToolsAreAllowedForExecutionContext() -> Bool {
+        !hasAgentOnlyHostedTools || executionContext == .agent
+    }
+}
+
+public extension OpenAIHostedToolRequest {
+    var requiresAgentExecution: Bool {
+        switch kind {
+        case .computerUse, .mcp:
+            return true
+        case .webSearch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch, .custom:
+            return false
+        }
+    }
+
+    var requiresApproval: Bool {
+        switch kind {
+        case .computerUse:
+            return true
+        case .mcp:
+            return configuration?.objectValue?["require_approval"]?.stringValue != "never"
+        case .webSearch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch, .custom:
+            return false
+        }
     }
 }
 

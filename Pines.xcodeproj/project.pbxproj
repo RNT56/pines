@@ -34,18 +34,21 @@
 		38172F301F9B09B3CBA85F97 /* PinesWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C379B46E87980ED73F59DCD /* PinesWatchApp.swift */; };
 		39CF2E229241A26056922251 /* ChatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F090D0FF64498C5E03C0CA /* ChatsView.swift */; };
 		45E76EAAE862C883439A1A7E /* SettingsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413251F8572CA2D6F3D0BD30 /* SettingsDetailView.swift */; };
+		47623D156F0438C9C37D545F /* OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3707ADF58DFE724BF12B2B2F /* OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift */; };
 		4A8B7ADED7E800D30BC296A1 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 2F62656B16557CFACC3CBFF7 /* PinesCore */; };
 		515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = 85E4D304B541EE6A90CEFD6F /* MLXEmbedders */; };
 		5177468AEE90F3F5B0176C01 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 95DFE02F2971CD6781ED862B /* MLXLMCommon */; };
 		51F0003C051BEA5B35753F1D /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 79453BB5651564170C3A0B1C /* Markdown */; };
 		52B797063FB95D83A2D63E7A /* PinesAppModel+MCP.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE279F766D8B0CC93D1D150 /* PinesAppModel+MCP.swift */; };
 		55937CA552490AEA6ED46131 /* PinesDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45C618F4FAB69FDDE0FC788B /* PinesDesignSystem.swift */; };
+		560B1F88E54F9B6F3B855960 /* PinesAppModel+DeepResearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A13BF92952B097508CCADE95 /* PinesAppModel+DeepResearch.swift */; };
 		56FB9E2B958AE80AB1CB0856 /* MarkdownMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD9A00CA54B90E791E77F56 /* MarkdownMessageView.swift */; };
 		57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */; };
 		5A73B2F9FA959A8D2A6173EF /* BYOKCloudInferenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */; };
 		5DEFA11F0FB695B117D0E944 /* PinesHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103EAAA54824744E18DB139D /* PinesHaptics.swift */; };
 		5FD69B3226A215FF6D6C5A48 /* ModelsViewComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E832CA92705405D1734D955 /* ModelsViewComponents.swift */; };
 		603860ECCF6BEE2F45D305E4 /* OpenAIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */; };
+		622414EEA3FC85D97066E52E /* OpenAIDeepResearchOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBFDDEACE5D7B83908CBE7C5 /* OpenAIDeepResearchOrchestrator.swift */; };
 		62BBB7D1AE85A01EA319E717 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 94F08BBEEA508DB04384B5C9 /* MLX */; };
 		63FEE590833F723DE49DFE36 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 7BFC7BFFCF2A7F677A7E215F /* MLX */; };
 		667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */; };
@@ -70,6 +73,7 @@
 		A23582944454AFA76540B625 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500C1CF070133DCF6885979F /* ModelsView.swift */; };
 		A4A6874199B926262EDBC80B /* PinesWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 1E1D28BDF947E8721585572A /* PinesWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A710B3F4F7869D3FBAC38A93 /* MLXEmbeddingRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6395FE07FF217EF3444678FA /* MLXEmbeddingRuntime.swift */; };
+		A9753F68411A3E16284D04EF /* PinesAppModel+OpenAIProviderStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99ABB45AA2309B6667A25016 /* PinesAppModel+OpenAIProviderStorage.swift */; };
 		A98FB291F3056FD1DF91BEF1 /* CloudKitRecordCipher.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */; };
 		B11DDE4F6B5FAC4D4C811660 /* BYOKCloudInferenceProvider+Payloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB2DDD7A0B86BB137BF397A /* BYOKCloudInferenceProvider+Payloads.swift */; };
 		B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8627F9808A76C0F0A91729 /* SettingsView.swift */; };
@@ -90,10 +94,13 @@
 		E96F244C6E13B6BBAD411CE0 /* WKWebViewBrowserRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */; };
 		EF023CED82C75823EC051432 /* VaultEmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46107CC67D229C2D05C33A59 /* VaultEmbeddingService.swift */; };
 		EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */; };
+		F00643F235FF10B3F267D0EA /* OpenAIProviderLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5111BF39FD0BF9D28CDB406D /* OpenAIProviderLifecycleCoordinator.swift */; };
+		F1B000C00F6C469627311858 /* OpenAIProviderStorageWorkflows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BD8C13D0473641034075F8C /* OpenAIProviderStorageWorkflows.swift */; };
 		F1BB293494A6B2AA162BD7D9 /* MLXRuntimeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */; };
 		F2465549DA286C8B1EE82D75 /* PinesAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */; };
 		F3D59B7E54F622FED196570C /* PinesAppModel+Presentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27F8A15281AD531830EEBB98 /* PinesAppModel+Presentation.swift */; };
 		F726DC5360EC760DFADDE5FE /* ModelLifecycleService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */; };
+		F7B13175B183F946D3F5ABAB /* PinesAppModel+OpenAIMediaWorkflows.swift in Sources */ = {isa = PBXBuildFile; fileRef = F57763E1BB7A0DD285BE66BC /* PinesAppModel+OpenAIMediaWorkflows.swift */; };
 		FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */; };
 		FF4D60F77559E9389E312BD7 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92870571C6D3C4FD5605CB7E /* KeychainSecretStore.swift */; };
 		FF7A2AF24CE204653E49DD36 /* SecureKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EBAE2CAEBA893A441A679F0 /* SecureKeyStore.swift */; };
@@ -156,6 +163,7 @@
 		2CE279F766D8B0CC93D1D150 /* PinesAppModel+MCP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+MCP.swift"; sourceTree = "<group>"; };
 		2EB6A8EFD9FE940BEFE80119 /* ModelDownloadLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadLiveActivityController.swift; sourceTree = "<group>"; };
 		2EC8BB0262D2F49A7518608A /* PinesLiveActivities.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PinesLiveActivities.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		3707ADF58DFE724BF12B2B2F /* OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift"; sourceTree = "<group>"; };
 		3777534B3E27910D84F4EA38 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		385CEF8800BD8942B61831AC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		395137944039334A88058625 /* MLXCompatibleModels+DeepseekV4.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MLXCompatibleModels+DeepseekV4.swift"; sourceTree = "<group>"; };
@@ -172,6 +180,7 @@
 		48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WKWebViewBrowserRuntime.swift; sourceTree = "<group>"; };
 		4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProviderService.swift; sourceTree = "<group>"; };
 		500C1CF070133DCF6885979F /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
+		5111BF39FD0BF9D28CDB406D /* OpenAIProviderLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProviderLifecycleCoordinator.swift; sourceTree = "<group>"; };
 		54110781FB02FBE823BC3F9C /* GRDBPinesStore+CloudKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GRDBPinesStore+CloudKit.swift"; sourceTree = "<group>"; };
 		5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GRDBPinesStore.swift; sourceTree = "<group>"; };
 		58FC276317CB9F908EE2727B /* WatchChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchChatViewModel.swift; sourceTree = "<group>"; };
@@ -187,6 +196,7 @@
 		6A7C4EBAAC5E84277A718C17 /* HuggingFaceCredentialService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HuggingFaceCredentialService.swift; sourceTree = "<group>"; };
 		77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRootView.swift; sourceTree = "<group>"; };
 		7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BYOKCloudInferenceProvider.swift; sourceTree = "<group>"; };
+		7BD8C13D0473641034075F8C /* OpenAIProviderStorageWorkflows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProviderStorageWorkflows.swift; sourceTree = "<group>"; };
 		7C379B46E87980ED73F59DCD /* PinesWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesWatchApp.swift; sourceTree = "<group>"; };
 		82DE8010D019802F630AAF0B /* PinesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesApp.swift; sourceTree = "<group>"; };
 		8BD9A00CA54B90E791E77F56 /* MarkdownMessageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownMessageView.swift; sourceTree = "<group>"; };
@@ -195,8 +205,10 @@
 		948132DFF2EAF4B9D92CE805 /* BraveSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchTool.swift; sourceTree = "<group>"; };
 		95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppState.swift; sourceTree = "<group>"; };
 		989263AE706043656C31B580 /* CoreSurfaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSurfaceTests.swift; sourceTree = "<group>"; };
+		99ABB45AA2309B6667A25016 /* PinesAppModel+OpenAIProviderStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+OpenAIProviderStorage.swift"; sourceTree = "<group>"; };
 		9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
 		9CB6251B36A1F706D8884A9E /* ModelDownloadSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadSupport.swift; sourceTree = "<group>"; };
+		A13BF92952B097508CCADE95 /* PinesAppModel+DeepResearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+DeepResearch.swift"; sourceTree = "<group>"; };
 		A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHaptics.swift; sourceTree = "<group>"; };
 		A790E0D7CCFB1AF34B214B13 /* PinesHuggingFaceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHuggingFaceBridge.swift; sourceTree = "<group>"; };
 		ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitRecordCipher.swift; sourceTree = "<group>"; };
@@ -210,11 +222,13 @@
 		D8CF846797DB3246FDC4FE5F /* SecurityResetCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityResetCoordinator.swift; sourceTree = "<group>"; };
 		DA300803A417F81AEA21D094 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DBFD4B9944462E78CF1A28A2 /* ModelLifecycleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelLifecycleService.swift; sourceTree = "<group>"; };
+		DBFDDEACE5D7B83908CBE7C5 /* OpenAIDeepResearchOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIDeepResearchOrchestrator.swift; sourceTree = "<group>"; };
 		DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppServices.swift; sourceTree = "<group>"; };
 		DC95D2DA4ED0AE5A971C6BA3 /* WatchTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTranscriptView.swift; sourceTree = "<group>"; };
 		DC9FA9E25B03EF1B185466EA /* MLXCompatibleModels+Llama4.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MLXCompatibleModels+Llama4.swift"; sourceTree = "<group>"; };
 		E77223EE304350F39F109139 /* PinesLiveActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesLiveActivities.swift; sourceTree = "<group>"; };
 		EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXRuntimeBridge.swift; sourceTree = "<group>"; };
+		F57763E1BB7A0DD285BE66BC /* PinesAppModel+OpenAIMediaWorkflows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+OpenAIMediaWorkflows.swift"; sourceTree = "<group>"; };
 		F70C871149DDD6846E8A71E4 /* PhoneWatchSessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneWatchSessionService.swift; sourceTree = "<group>"; };
 		F9114B5CA23ED60D86D72253 /* DeviceRuntimeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRuntimeMonitor.swift; sourceTree = "<group>"; };
 		FF525EBBEA1C9D3330E352F3 /* MLXTurboQuantRuntimeSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXTurboQuantRuntimeSmokeTests.swift; sourceTree = "<group>"; };
@@ -504,7 +518,10 @@
 			children = (
 				82DE8010D019802F630AAF0B /* PinesApp.swift */,
 				9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */,
+				A13BF92952B097508CCADE95 /* PinesAppModel+DeepResearch.swift */,
 				2CE279F766D8B0CC93D1D150 /* PinesAppModel+MCP.swift */,
+				F57763E1BB7A0DD285BE66BC /* PinesAppModel+OpenAIMediaWorkflows.swift */,
+				99ABB45AA2309B6667A25016 /* PinesAppModel+OpenAIProviderStorage.swift */,
 				27F8A15281AD531830EEBB98 /* PinesAppModel+Presentation.swift */,
 				0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */,
 				DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */,
@@ -523,7 +540,11 @@
 				443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */,
 				4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */,
 				BD4AAEA18A8AFE76C3844F9A /* GeminiProviderService.swift */,
+				DBFDDEACE5D7B83908CBE7C5 /* OpenAIDeepResearchOrchestrator.swift */,
+				5111BF39FD0BF9D28CDB406D /* OpenAIProviderLifecycleCoordinator.swift */,
+				3707ADF58DFE724BF12B2B2F /* OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift */,
 				B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */,
+				7BD8C13D0473641034075F8C /* OpenAIProviderStorageWorkflows.swift */,
 			);
 			path = Cloud;
 			sourceTree = "<group>";
@@ -754,10 +775,17 @@
 				F726DC5360EC760DFADDE5FE /* ModelLifecycleService.swift in Sources */,
 				A23582944454AFA76540B625 /* ModelsView.swift in Sources */,
 				5FD69B3226A215FF6D6C5A48 /* ModelsViewComponents.swift in Sources */,
+				622414EEA3FC85D97066E52E /* OpenAIDeepResearchOrchestrator.swift in Sources */,
+				47623D156F0438C9C37D545F /* OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift in Sources */,
+				F00643F235FF10B3F267D0EA /* OpenAIProviderLifecycleCoordinator.swift in Sources */,
 				603860ECCF6BEE2F45D305E4 /* OpenAIProviderService.swift in Sources */,
+				F1B000C00F6C469627311858 /* OpenAIProviderStorageWorkflows.swift in Sources */,
 				18C03354C01E800E9DF94E48 /* PhoneWatchSessionService.swift in Sources */,
 				C05BF46FDF47D9D3C4831915 /* PinesApp.swift in Sources */,
+				560B1F88E54F9B6F3B855960 /* PinesAppModel+DeepResearch.swift in Sources */,
 				52B797063FB95D83A2D63E7A /* PinesAppModel+MCP.swift in Sources */,
+				F7B13175B183F946D3F5ABAB /* PinesAppModel+OpenAIMediaWorkflows.swift in Sources */,
+				A9753F68411A3E16284D04EF /* PinesAppModel+OpenAIProviderStorage.swift in Sources */,
 				F3D59B7E54F622FED196570C /* PinesAppModel+Presentation.swift in Sources */,
 				E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */,
 				2DC7F4355DC8D047D2D5460C /* PinesAppModelTypes.swift in Sources */,

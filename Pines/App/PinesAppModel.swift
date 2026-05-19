@@ -121,6 +121,7 @@ final class PinesAppModel: ObservableObject {
     let modelState: PinesModelState
     let vaultState: PinesVaultState
     let settingsState: PinesSettingsState
+    let providerLifecycleState: PinesProviderLifecycleState
     let workflowState: PinesWorkflowState
 
     var threads: [PinesThreadPreview] {
@@ -336,6 +337,106 @@ final class PinesAppModel: ObservableObject {
     var braveSearchCredentialStatus: String {
         get { settingsState.braveSearchCredentialStatus }
         set { settingsState.braveSearchCredentialStatus = newValue }
+    }
+
+    var providerFiles: [ProviderFileRecord] {
+        get { providerLifecycleState.providerFiles }
+        set { providerLifecycleState.providerFiles = newValue }
+    }
+
+    var providerFilePreviews: [PinesProviderFilePreview] {
+        get { providerLifecycleState.providerFilePreviews }
+        set { providerLifecycleState.providerFilePreviews = newValue }
+    }
+
+    var providerArtifacts: [ProviderArtifactRecord] {
+        get { providerLifecycleState.providerArtifacts }
+        set { providerLifecycleState.providerArtifacts = newValue }
+    }
+
+    var providerArtifactPreviews: [PinesProviderArtifactPreview] {
+        get { providerLifecycleState.providerArtifactPreviews }
+        set { providerLifecycleState.providerArtifactPreviews = newValue }
+    }
+
+    var providerCaches: [ProviderCacheRecord] {
+        get { providerLifecycleState.providerCaches }
+        set { providerLifecycleState.providerCaches = newValue }
+    }
+
+    var providerCachePreviews: [PinesProviderCachePreview] {
+        get { providerLifecycleState.providerCachePreviews }
+        set { providerLifecycleState.providerCachePreviews = newValue }
+    }
+
+    var providerVectorStores: [ProviderCacheRecord] {
+        get { providerLifecycleState.providerVectorStores }
+        set { providerLifecycleState.providerVectorStores = newValue }
+    }
+
+    var providerVectorStorePreviews: [PinesProviderCachePreview] {
+        get { providerLifecycleState.providerVectorStorePreviews }
+        set { providerLifecycleState.providerVectorStorePreviews = newValue }
+    }
+
+    var providerBatches: [ProviderBatchRecord] {
+        get { providerLifecycleState.providerBatches }
+        set { providerLifecycleState.providerBatches = newValue }
+    }
+
+    var providerBatchPreviews: [PinesProviderBatchPreview] {
+        get { providerLifecycleState.providerBatchPreviews }
+        set { providerLifecycleState.providerBatchPreviews = newValue }
+    }
+
+    var providerLiveSessions: [ProviderLiveSessionRecord] {
+        get { providerLifecycleState.providerLiveSessions }
+        set { providerLifecycleState.providerLiveSessions = newValue }
+    }
+
+    var providerLiveSessionPreviews: [PinesProviderLiveSessionPreview] {
+        get { providerLifecycleState.providerLiveSessionPreviews }
+        set { providerLifecycleState.providerLiveSessionPreviews = newValue }
+    }
+
+    var providerStructuredOutputs: [ProviderStructuredOutputRecord] {
+        get { providerLifecycleState.providerStructuredOutputs }
+        set { providerLifecycleState.providerStructuredOutputs = newValue }
+    }
+
+    var providerStructuredOutputPreviews: [PinesProviderStructuredOutputPreview] {
+        get { providerLifecycleState.providerStructuredOutputPreviews }
+        set { providerLifecycleState.providerStructuredOutputPreviews = newValue }
+    }
+
+    var providerModelCapabilities: [ProviderModelCapabilityRecord] {
+        get { providerLifecycleState.providerModelCapabilities }
+        set { providerLifecycleState.providerModelCapabilities = newValue }
+    }
+
+    var providerModelCapabilityPreviews: [PinesProviderModelCapabilityPreview] {
+        get { providerLifecycleState.providerModelCapabilityPreviews }
+        set { providerLifecycleState.providerModelCapabilityPreviews = newValue }
+    }
+
+    var providerResearchRuns: [ProviderResearchRunRecord] {
+        get { providerLifecycleState.providerResearchRuns }
+        set { providerLifecycleState.providerResearchRuns = newValue }
+    }
+
+    var providerResearchRunPreviews: [PinesProviderResearchRunPreview] {
+        get { providerLifecycleState.providerResearchRunPreviews }
+        set { providerLifecycleState.providerResearchRunPreviews = newValue }
+    }
+
+    var isRefreshingProviderLifecycle: Bool {
+        get { providerLifecycleState.isRefreshingProviderLifecycle }
+        set { providerLifecycleState.isRefreshingProviderLifecycle = newValue }
+    }
+
+    var providerLifecycleError: String? {
+        get { providerLifecycleState.providerLifecycleError }
+        set { providerLifecycleState.providerLifecycleError = newValue }
     }
 
     var serviceError: String? {
@@ -669,6 +770,7 @@ final class PinesAppModel: ObservableObject {
         modelState: PinesModelState = PinesModelState(),
         vaultState: PinesVaultState = PinesVaultState(),
         settingsState: PinesSettingsState = PinesSettingsState(),
+        providerLifecycleState: PinesProviderLifecycleState = PinesProviderLifecycleState(),
         workflowState: PinesWorkflowState = PinesWorkflowState(),
         threads: [PinesThreadPreview] = [],
         models: [PinesModelPreview] = [],
@@ -688,6 +790,7 @@ final class PinesAppModel: ObservableObject {
         self.modelState = modelState
         self.vaultState = vaultState
         self.settingsState = settingsState
+        self.providerLifecycleState = providerLifecycleState
         self.workflowState = workflowState
         self.threads = threads
         self.models = models
@@ -761,6 +864,7 @@ final class PinesAppModel: ObservableObject {
                 setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
             }
 
+            await refreshProviderLifecycleState(services: services)
             try await refreshModelPreviews(services: services, enrichRuntime: false)
             setIfChanged(\.serviceError, nil)
         } catch {
@@ -791,6 +895,7 @@ final class PinesAppModel: ObservableObject {
             await refreshCloudModelCatalog(services: services)
             await refreshVaultEmbeddingState(services: services)
             await normalizeDefaultModelIfNeeded(services: services)
+            await refreshProviderLifecycleState(services: services)
             await refreshCredentialStatuses(services: services)
             setIfChanged(\.serviceError, nil)
         } catch {
@@ -826,6 +931,7 @@ final class PinesAppModel: ObservableObject {
                 setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
             }
 
+            await refreshProviderLifecycleState(services: services)
             await refreshCloudModelCatalog(services: services)
 
             if let mcpServerRepository = services.mcpServerRepository {
@@ -866,6 +972,301 @@ final class PinesAppModel: ObservableObject {
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    func refreshProviderLifecycleState(services: PinesAppServices) async {
+        isRefreshingProviderLifecycle = true
+        defer { isRefreshingProviderLifecycle = false }
+
+        do {
+            if let repository = services.providerFileRepository {
+                let records = try await repository.listProviderFiles(providerID: nil)
+                setIfChanged(\.providerFiles, records)
+                setIfChanged(\.providerFilePreviews, records.map(Self.providerFilePreview(from:)))
+            }
+
+            if let repository = services.providerArtifactRepository {
+                let records = try await repository.listProviderArtifacts(responseID: nil)
+                setIfChanged(\.providerArtifacts, records)
+                setIfChanged(\.providerArtifactPreviews, records.map(Self.providerArtifactPreview(from:)))
+            }
+
+            if let repository = services.providerCacheRepository {
+                let records = try await repository.listProviderCaches(providerID: nil, kind: nil)
+                let vectorStores = records.filter { $0.kind == "vector_store" }
+                setIfChanged(\.providerCaches, records)
+                setIfChanged(\.providerCachePreviews, records.map(Self.providerCachePreview(from:)))
+                setIfChanged(\.providerVectorStores, vectorStores)
+                setIfChanged(\.providerVectorStorePreviews, vectorStores.map(Self.providerCachePreview(from:)))
+            }
+
+            if let repository = services.providerBatchRepository {
+                let records = try await repository.listProviderBatches(providerID: nil)
+                setIfChanged(\.providerBatches, records)
+                setIfChanged(\.providerBatchPreviews, records.map(Self.providerBatchPreview(from:)))
+            }
+
+            if let repository = services.providerLiveSessionRepository {
+                let records = try await repository.listProviderLiveSessions(providerID: nil)
+                setIfChanged(\.providerLiveSessions, records)
+                setIfChanged(\.providerLiveSessionPreviews, records.map(Self.providerLiveSessionPreview(from:)))
+            }
+
+            if let repository = services.providerStructuredOutputRepository {
+                let records = try await repository.listProviderStructuredOutputs(responseID: nil)
+                setIfChanged(\.providerStructuredOutputs, records)
+                setIfChanged(\.providerStructuredOutputPreviews, records.map(Self.providerStructuredOutputPreview(from:)))
+            }
+
+            if let repository = services.providerModelCapabilityRepository {
+                let records = try await repository.listProviderModelCapabilities(providerID: nil)
+                setIfChanged(\.providerModelCapabilities, records)
+                setIfChanged(\.providerModelCapabilityPreviews, records.map(Self.providerModelCapabilityPreview(from:)))
+            }
+
+            if let repository = services.providerResearchRunRepository {
+                let records = try await repository.listProviderResearchRuns(providerID: nil, status: nil)
+                setIfChanged(\.providerResearchRuns, records)
+                setIfChanged(\.providerResearchRunPreviews, records.map(Self.providerResearchRunPreview(from:)))
+            }
+
+            setIfChanged(\.providerLifecycleError, nil)
+        } catch {
+            setIfChanged(\.providerLifecycleError, error.localizedDescription)
+            recordRecoverableIssue("provider_lifecycle.refresh", error: error, services: services)
+        }
+    }
+
+    private func persistProviderLifecycleOutputs(
+        providerID: ProviderID,
+        modelID _: ModelID,
+        messageID: UUID,
+        content: String,
+        providerMetadata: [String: String],
+        request: ChatRequest,
+        services: PinesAppServices
+    ) async {
+        let responseID = providerMetadata[CloudProviderMetadataKeys.openAIResponseID]
+            ?? providerMetadata[CloudProviderMetadataKeys.openAIChatCompletionID]
+        let hasOpenAIRecords = responseID != nil
+            || providerMetadata[CloudProviderMetadataKeys.openAIArtifactsJSON] != nil
+            || providerMetadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON] != nil
+            || providerMetadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON] != nil
+        guard hasOpenAIRecords || Self.usesStructuredOutput(request) else { return }
+
+        do {
+            if let repository = services.providerStructuredOutputRepository,
+               let record = Self.providerStructuredOutputRecord(
+                providerID: providerID,
+                responseID: responseID,
+                messageID: messageID,
+                content: content,
+                providerMetadata: providerMetadata,
+                request: request
+               ) {
+                try await repository.upsertProviderStructuredOutput(record)
+            }
+
+            if let repository = services.providerArtifactRepository {
+                let records = Self.providerArtifactRecords(
+                    providerID: providerID,
+                    responseID: responseID,
+                    providerMetadata: providerMetadata
+                )
+                for record in records {
+                    try await repository.upsertProviderArtifact(record)
+                }
+            }
+
+            await refreshProviderLifecycleState(services: services)
+        } catch {
+            recordRecoverableIssue("provider_lifecycle.persist_chat_outputs", error: error, services: services)
+        }
+    }
+
+    private static func providerStructuredOutputRecord(
+        providerID: ProviderID,
+        responseID: String?,
+        messageID: UUID,
+        content: String,
+        providerMetadata: [String: String],
+        request: ChatRequest
+    ) -> ProviderStructuredOutputRecord? {
+        let schemaName: String?
+        let schema: JSONValue?
+        switch request.structuredOutput {
+        case let .jsonSchema(name, value, _):
+            schemaName = request.openAIResponseOptions?.structuredOutput?.name ?? name
+            schema = request.openAIResponseOptions?.structuredOutput?.schema ?? value
+        case .jsonObject:
+            schemaName = request.openAIResponseOptions?.structuredOutput?.name ?? "json_object"
+            schema = request.openAIResponseOptions?.structuredOutput?.schema
+        case .text:
+            schemaName = request.openAIResponseOptions?.structuredOutput?.name
+            schema = request.openAIResponseOptions?.structuredOutput?.schema
+        }
+        guard schemaName != nil || schema != nil else { return nil }
+
+        let parsed = jsonValue(from: content)
+        let result: OpenAIStructuredOutputResult
+        if let parsed {
+            result = OpenAIStructuredOutputResult(
+                messageID: messageID,
+                schemaName: schemaName,
+                schema: schema,
+                content: parsed,
+                providerMetadata: providerMetadata
+            ).locallyValidated()
+        } else {
+            result = OpenAIStructuredOutputResult(
+                responseID: responseID.map(OpenAIResponseID.init(rawValue:)),
+                messageID: messageID,
+                schemaName: schemaName,
+                schema: schema,
+                content: nil,
+                validationErrors: ["Output was not valid JSON."],
+                status: .invalid
+            )
+        }
+        return ProviderStructuredOutputRecord(
+            id: result.id,
+            providerID: providerID,
+            providerKind: .openAI,
+            responseID: result.responseID?.rawValue ?? responseID,
+            messageID: messageID,
+            schemaName: result.schemaName,
+            schema: result.schema,
+            content: result.content,
+            refusal: result.refusal,
+            incompleteReason: result.incompleteReason,
+            validationErrors: result.validationErrors,
+            status: result.status.rawValue,
+            createdAt: result.createdAt
+        )
+    }
+
+    private static func providerArtifactRecords(
+        providerID: ProviderID,
+        responseID: String?,
+        providerMetadata: [String: String]
+    ) -> [ProviderArtifactRecord] {
+        var records = [ProviderArtifactRecord]()
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                responseID: responseID,
+                object: object,
+                fallbackID: "hosted-tool-\(responseID ?? "response")-\(index)",
+                fallbackKind: "hosted_tool_call"
+            )
+        })
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.openAIArtifactsJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                responseID: responseID,
+                object: object,
+                fallbackID: "artifact-\(responseID ?? "response")-\(index)",
+                fallbackKind: object["type"] as? String ?? "artifact"
+            )
+        })
+        records.append(contentsOf: jsonObjects(from: providerMetadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON]).enumerated().map { index, object in
+            providerArtifactRecord(
+                providerID: providerID,
+                responseID: responseID,
+                object: object,
+                fallbackID: "file-search-\(responseID ?? "response")-\(index)",
+                fallbackKind: "file_search_result"
+            )
+        })
+        return records
+    }
+
+    private static func providerArtifactRecord(
+        providerID: ProviderID,
+        responseID: String?,
+        object: [String: Any],
+        fallbackID: String,
+        fallbackKind: String
+    ) -> ProviderArtifactRecord {
+        let content = jsonValue(fromJSONObject: object)
+        let providerItemID = stringValue(object["provider_item_id"])
+            ?? stringValue(object["id"])
+            ?? stringValue(object["file_id"])
+        let kind = stringValue(object["type"]) ?? fallbackKind
+        return ProviderArtifactRecord(
+            id: providerItemID.map { "\(fallbackKind)-\($0)" } ?? fallbackID,
+            providerID: providerID,
+            providerKind: .openAI,
+            responseID: responseID,
+            toolCallID: providerItemID,
+            providerFileID: stringValue(object["file_id"]),
+            kind: kind,
+            fileName: stringValue(object["filename"]) ?? stringValue(object["file_name"]),
+            contentType: stringValue(object["content_type"]) ?? stringValue(object["mime_type"]),
+            byteCount: int64Value(object["bytes"]) ?? int64Value(object["byte_hint"]),
+            text: stringValue(object["prompt"])
+                ?? stringValue(object["status"])
+                ?? stringValue(object["text"])
+                ?? stringValue(object["filename"]),
+            content: content,
+            remoteURL: stringValue(object["url"]).flatMap(URL.init(string:))
+        )
+    }
+
+    private static func usesStructuredOutput(_ request: ChatRequest) -> Bool {
+        if request.openAIResponseOptions?.structuredOutput != nil { return true }
+        switch request.structuredOutput {
+        case .text:
+            return false
+        case .jsonObject, .jsonSchema(_, _, _):
+            return true
+        }
+    }
+
+    private static func jsonObjects(from raw: String?) -> [[String: Any]] {
+        guard let raw,
+              let data = raw.data(using: .utf8),
+              let objects = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return [] }
+        return objects
+    }
+
+    private static func jsonValue(from text: String) -> JSONValue? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let data = trimmed.data(using: .utf8)
+        else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    private static func jsonValue(fromJSONObject object: [String: Any]) -> JSONValue? {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object)
+        else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        if let value = value as? String, !value.isEmpty {
+            return value
+        }
+        if let value = value as? NSNumber {
+            return value.stringValue
+        }
+        return nil
+    }
+
+    private static func int64Value(_ value: Any?) -> Int64? {
+        if let value = value as? Int64 {
+            return value
+        }
+        if let value = value as? Int {
+            return Int64(value)
+        }
+        if let value = value as? NSNumber {
+            return value.int64Value
+        }
+        return nil
     }
 
     private func upsertCloudProvider(_ provider: CloudProviderConfiguration) {
@@ -1840,7 +2241,8 @@ final class PinesAppModel: ObservableObject {
                     maxWallTimeSeconds: isAgentMode ? 180 : 120,
                     requiresConsentForNetwork: false,
                     requiresConsentForBrowser: false,
-                    allowsCloudContext: includePrivateContext
+                    allowsCloudContext: includePrivateContext,
+                    cloudContextScope: selectedProviderID == services.mlxRuntime.localProviderID ? .unrestricted : .selectedRequestContext
                 ),
                 providerID: selectedProviderID
             )
@@ -1956,6 +2358,15 @@ final class PinesAppModel: ObservableObject {
                 modelID: selectedModelID,
                 outputTokens: tokenCount,
                 elapsedSeconds: Date().timeIntervalSince(generationStartedAt)
+            )
+            await persistProviderLifecycleOutputs(
+                providerID: selectedProviderID,
+                modelID: selectedModelID,
+                messageID: assistantMessage.id,
+                content: accumulated,
+                providerMetadata: providerMetadataForRun(assistantMessageID: assistantMessage.id, merging: finalProviderMetadata) ?? finalProviderMetadata,
+                request: request,
+                services: services
             )
             removeLiveThreadMessage(assistantMessage.id)
             clearRunStateIfCurrent(runToken)
@@ -3893,6 +4304,132 @@ final class PinesAppModel: ObservableObject {
             enrichRuntime: shouldEnrichRuntime
         )
         return (downloads, previews)
+    }
+
+    private static func providerFilePreview(from record: ProviderFileRecord) -> PinesProviderFilePreview {
+        PinesProviderFilePreview(
+            id: record.id,
+            providerID: record.providerID,
+            providerKind: record.providerKind,
+            title: record.fileName,
+            detail: "\(record.providerID.rawValue) - \(record.purpose)",
+            purpose: record.purpose,
+            status: record.status,
+            byteCountLabel: providerByteCountLabel(record.byteCount),
+            createdLabel: RelativeDateTimeFormatter.shortLabel(for: record.createdAt),
+            expiresLabel: record.expiresAt.map { RelativeDateTimeFormatter.shortLabel(for: $0) }
+        )
+    }
+
+    private static func providerArtifactPreview(from record: ProviderArtifactRecord) -> PinesProviderArtifactPreview {
+        PinesProviderArtifactPreview(
+            id: record.id,
+            providerID: record.providerID,
+            providerKind: record.providerKind,
+            title: record.fileName ?? record.kind,
+            detail: record.responseID ?? record.toolCallID ?? record.providerFileID ?? record.providerKind.rawValue,
+            kind: record.kind,
+            status: record.responseID == nil ? "stored" : "linked",
+            byteCountLabel: record.byteCount.map { providerByteCountLabel($0) },
+            createdLabel: RelativeDateTimeFormatter.shortLabel(for: record.createdAt)
+        )
+    }
+
+    private static func providerCachePreview(from record: ProviderCacheRecord) -> PinesProviderCachePreview {
+        PinesProviderCachePreview(
+            id: record.id,
+            providerID: record.providerID,
+            providerKind: record.providerKind,
+            title: record.name ?? record.id,
+            detail: record.modelID?.rawValue ?? record.providerID.rawValue,
+            kind: record.kind,
+            status: record.status,
+            usageLabel: providerByteCountLabel(record.usageBytes),
+            createdLabel: RelativeDateTimeFormatter.shortLabel(for: record.createdAt),
+            expiresLabel: record.expiresAt.map { RelativeDateTimeFormatter.shortLabel(for: $0) }
+        )
+    }
+
+    private static func providerBatchPreview(from record: ProviderBatchRecord) -> PinesProviderBatchPreview {
+        let files = [record.inputFileID, record.outputFileID, record.errorFileID].compactMap { $0 }
+        return PinesProviderBatchPreview(
+            id: record.id,
+            providerID: record.providerID,
+            providerKind: record.providerKind,
+            title: record.endpoint,
+            endpoint: record.endpoint,
+            status: record.status,
+            fileSummary: files.isEmpty ? "No files" : files.joined(separator: ", "),
+            createdLabel: RelativeDateTimeFormatter.shortLabel(for: record.createdAt),
+            completedLabel: record.completedAt.map { RelativeDateTimeFormatter.shortLabel(for: $0) }
+        )
+    }
+
+    private static func providerLiveSessionPreview(from record: ProviderLiveSessionRecord) -> PinesProviderLiveSessionPreview {
+        PinesProviderLiveSessionPreview(
+            id: record.id,
+            providerID: record.providerID,
+            providerKind: record.providerKind,
+            title: record.modelID.rawValue,
+            modelID: record.modelID,
+            status: record.status,
+            modalitySummary: record.modalities.isEmpty ? "Unspecified" : record.modalities.joined(separator: ", "),
+            createdLabel: RelativeDateTimeFormatter.shortLabel(for: record.createdAt),
+            expiresLabel: record.expiresAt.map { RelativeDateTimeFormatter.shortLabel(for: $0) }
+        )
+    }
+
+    private static func providerStructuredOutputPreview(
+        from record: ProviderStructuredOutputRecord
+    ) -> PinesProviderStructuredOutputPreview {
+        PinesProviderStructuredOutputPreview(
+            id: record.id,
+            providerID: record.providerID,
+            providerKind: record.providerKind,
+            title: record.schemaName ?? record.responseID ?? "Structured output",
+            detail: record.responseID ?? record.messageID?.uuidString ?? record.providerKind.rawValue,
+            status: record.status,
+            validationSummary: record.validationErrors.isEmpty ? "Valid" : "\(record.validationErrors.count) validation errors",
+            createdLabel: RelativeDateTimeFormatter.shortLabel(for: record.createdAt)
+        )
+    }
+
+    private static func providerModelCapabilityPreview(
+        from record: ProviderModelCapabilityRecord
+    ) -> PinesProviderModelCapabilityPreview {
+        let capabilities = record.capabilities.modelCapabilities
+            .map(\.rawValue)
+            .sorted()
+        let context = record.contextWindowTokens.map { "\($0.formatted()) context" }
+        return PinesProviderModelCapabilityPreview(
+            id: record.id,
+            providerID: record.providerID,
+            providerKind: record.providerKind,
+            modelID: record.modelID,
+            title: record.modelID.rawValue,
+            detail: context ?? record.providerID.rawValue,
+            capabilitySummary: capabilities.isEmpty ? "No capabilities" : capabilities.joined(separator: ", "),
+            fetchedLabel: RelativeDateTimeFormatter.shortLabel(for: record.fetchedAt),
+            expiresLabel: record.expiresAt.map { RelativeDateTimeFormatter.shortLabel(for: $0) }
+        )
+    }
+
+    private static func providerResearchRunPreview(from record: ProviderResearchRunRecord) -> PinesProviderResearchRunPreview {
+        PinesProviderResearchRunPreview(
+            id: record.id,
+            providerID: record.providerID,
+            providerKind: record.providerKind,
+            title: record.title,
+            modelID: record.modelID,
+            status: record.status,
+            detail: "\(record.depth) - \(record.reportFormat)",
+            activitySummary: "\(record.citationCount) citations, \(record.toolCallCount) tool calls",
+            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt)
+        )
+    }
+
+    private static func providerByteCountLabel(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
 }

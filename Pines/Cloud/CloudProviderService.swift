@@ -46,6 +46,16 @@ struct CloudProviderService {
         OpenAIProviderService(configuration: provider, secretStore: secretStore)
     }
 
+    func openAILifecycleCoordinator(
+        for provider: CloudProviderConfiguration,
+        repositories: OpenAIProviderLifecycleRepositories
+    ) -> OpenAIProviderLifecycleCoordinator {
+        OpenAIProviderLifecycleCoordinator(
+            service: openAIProviderService(for: provider),
+            repositories: repositories
+        )
+    }
+
     func geminiProviderService(for provider: CloudProviderConfiguration) -> GeminiProviderService {
         GeminiProviderService(configuration: provider, secretStore: secretStore)
     }

@@ -4,6 +4,30 @@ import Testing
 
 @Suite("Core contracts")
 struct CoreContractTests {
+    private static func vaultChunk(id: String, documentID: UUID, text: String) -> VaultChunk {
+        VaultChunk(
+            id: id,
+            sourceID: documentID.uuidString,
+            ordinal: 0,
+            text: text,
+            startOffset: 0,
+            endOffset: text.count,
+            checksum: id
+        )
+    }
+
+    private static func vaultSearchItem(documentID: UUID, title: String, text: String) -> VaultSearchItem {
+        VaultSearchItem(
+            documentID: documentID.uuidString,
+            documentTitle: title,
+            sourceType: "text",
+            chunkID: "\(documentID.uuidString)-0",
+            ordinal: 0,
+            score: 1,
+            snippet: text
+        )
+    }
+
     @Test
     func executionRouterDoesNotSilentlyFallbackToCloudInLocalOnlyMode() {
         let decision = ExecutionRouter().routeChat(
@@ -1298,6 +1322,88 @@ struct CoreContractTests {
     }
 
     @Test
+    func chatRequestReplacingPreservesProviderParityFields() {
+        let request = ChatRequest(
+            modelID: "gpt-5.5",
+            messages: [ChatMessage(role: .user, content: "Search")],
+            sampling: ChatSampling(maxTokens: 128),
+            webSearchOptions: CloudWebSearchOptions(allowedDomains: ["example.com"]),
+            structuredOutput: .jsonSchema(
+                name: "answer",
+                schema: .object(["type": .string("object")]),
+                strict: true
+            ),
+            hostedTools: [.fileSearch(vectorStoreIDs: ["vs_1"], maxResults: 3)],
+            openAIOptions: OpenAIResponsesRequestOptions(maxToolCalls: 7, metadata: ["trace": "root"]),
+            allowsTools: true,
+            availableTools: [],
+            vaultContextIDs: [UUID()],
+            executionContext: .chat,
+            openAIResponseOptions: OpenAIResponseRequestOptions(
+                previousResponseID: "resp_previous",
+                hostedTools: [OpenAIHostedToolRequest(kind: .fileSearch, vectorStoreIDs: ["vs_1"])]
+            ),
+            geminiOptions: GeminiRequestOptions(cachedContentName: "cachedContents/1")
+        )
+
+        let rebuilt = request.replacing(
+            messages: [ChatMessage(role: .user, content: "Next")],
+            allowsTools: false,
+            availableTools: [],
+            executionContext: .agent
+        )
+
+        #expect(rebuilt.messages.map(\.content) == ["Next"])
+        #expect(rebuilt.allowsTools == false)
+        #expect(rebuilt.executionContext == .agent)
+        #expect(rebuilt.structuredOutput == request.structuredOutput)
+        #expect(rebuilt.hostedTools == request.hostedTools)
+        #expect(rebuilt.openAIOptions?.maxToolCalls == 7)
+        #expect(rebuilt.openAIResponseOptions?.previousResponseID == "resp_previous")
+        #expect(rebuilt.openAIResponseOptions?.hostedTools.first?.vectorStoreIDs == ["vs_1"])
+        #expect(rebuilt.geminiOptions?.cachedContentName == "cachedContents/1")
+        #expect(rebuilt.webSearchOptions?.allowedDomains == ["example.com"])
+        #expect(rebuilt.vaultContextIDs == request.vaultContextIDs)
+    }
+
+    @Test
+    func structuredOutputResultsValidateLocallyAndHydrateResponseMetadata() {
+        let schema: JSONValue = .object([
+            "type": .string("object"),
+            "required": .array([.string("answer")]),
+            "additionalProperties": .bool(false),
+            "properties": .object([
+                "answer": .object(["type": .string("string")]),
+            ]),
+        ])
+        let invalid = OpenAIStructuredOutputResult(
+            responseID: "resp_1",
+            schemaName: "answer",
+            schema: schema,
+            content: .object(["extra": .bool(true)])
+        ).locallyValidated()
+
+        #expect(invalid.status == .invalid)
+        #expect(invalid.validationErrors.contains("$.answer is required"))
+        #expect(invalid.validationErrors.contains("$.extra is not allowed"))
+
+        let hydrated = OpenAIStructuredOutputResult(
+            schemaName: "answer",
+            schema: schema,
+            content: .object(["answer": .string("ok")]),
+            providerMetadata: [
+                CloudProviderMetadataKeys.openAIResponseID: "resp_from_parser",
+                CloudProviderMetadataKeys.openAIResponseIncompleteReason: "max_output_tokens",
+            ]
+        )
+
+        #expect(hydrated.responseID == "resp_from_parser")
+        #expect(hydrated.incompleteReason == "max_output_tokens")
+        #expect(hydrated.status == .incomplete)
+        #expect(hydrated.validationErrors.isEmpty)
+    }
+
+    @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
         #expect(PinesDatabaseSchema.currentVersion == 15)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
@@ -1407,6 +1513,75 @@ struct CoreContractTests {
         #expect(decodedRun.request.modelID == "gpt-5.5-pro")
         #expect(decodedRun.request.sourcePolicy.vectorStoreIDs == ["vs_123"])
         #expect(decodedProviderRun.responseID == "resp_123")
+    }
+
+    @Test
+    func openAIDeepResearchSourcePolicyHelpersPreserveProviderConstraints() throws {
+        let webOnly = OpenAIDeepResearchSourcePolicy.webOnly(
+            allowedDomains: ["example.com"],
+            blockedDomains: ["ads.example"],
+            webSearchReturnTokenBudget: 12_000
+        )
+        let webAndFiles = OpenAIDeepResearchSourcePolicy.webAndFiles(
+            vectorStoreIDs: ["vs_1"],
+            providerFileIDs: ["file_1"],
+            allowedDomains: ["docs.example"]
+        )
+        let mcpURL = try #require(URL(string: "https://mcp.example.test"))
+        let webAndMCP = OpenAIDeepResearchSourcePolicy.webAndMCP(
+            serverLabel: "docs",
+            serverURL: mcpURL,
+            requireApproval: "always",
+            blockedDomains: ["blocked.example"]
+        )
+        let request = OpenAIDeepResearchRequest(
+            providerID: "openai",
+            title: "Token budget",
+            prompt: "Research with explicit budgets.",
+            sourcePolicy: webOnly,
+            responseOutputTokenBudget: 24_000
+        )
+
+        let decodedRequest = try JSONDecoder().decode(OpenAIDeepResearchRequest.self, from: JSONEncoder().encode(request))
+        let providerRun = ProviderResearchRunRecord(
+            id: "run_1",
+            providerID: "openai",
+            providerKind: .openAI,
+            modelID: request.modelID,
+            title: request.title,
+            prompt: request.prompt,
+            depth: request.depth.rawValue,
+            sourcePolicy: .object([
+                "scope": .string(webOnly.scope.rawValue),
+                "allowed_domains": .array(webOnly.allowedDomains.map(JSONValue.string)),
+                "blocked_domains": .array(webOnly.blockedDomains.map(JSONValue.string)),
+                "web_search_return_token_budget": .number(Double(webOnly.webSearchReturnTokenBudget ?? 0)),
+            ]),
+            reportFormat: request.reportFormat.rawValue,
+            serviceTier: request.serviceTier.rawValue,
+            status: OpenAIBackgroundResponseStatus.queued.rawValue
+        )
+
+        #expect(webOnly.scope == .webOnly)
+        #expect(webOnly.allowedDomains == ["example.com"])
+        #expect(webOnly.webSearchReturnTokenBudget == 12_000)
+        #expect(webAndFiles.scope == .webAndProviderFiles)
+        #expect(webAndFiles.vectorStoreIDs == ["vs_1"])
+        #expect(webAndFiles.providerFileIDs == ["file_1"])
+        #expect(webAndMCP.scope == .webAndMCP)
+        #expect(webAndMCP.mcpServerLabel == "docs")
+        #expect(webAndMCP.mcpServerURL == mcpURL)
+        #expect(decodedRequest.responseOutputTokenBudget == 24_000)
+        #expect(providerRun.sourcePolicy.objectValue?["web_search_return_token_budget"]?.intValue == 12_000)
+    }
+
+    @Test
+    func openAIBackgroundResponseStatusNormalizesTerminalStates() {
+        #expect(OpenAIBackgroundResponseStatus(providerStatus: "in_progress") == .inProgress)
+        #expect(OpenAIBackgroundResponseStatus(providerStatus: "requires_action") == .requiresAction)
+        #expect(OpenAIBackgroundResponseStatus(providerStatus: "completed").isTerminal)
+        #expect(OpenAIBackgroundResponseStatus.failed.isTerminal)
+        #expect(!OpenAIBackgroundResponseStatus.inProgress.isTerminal)
     }
 
     @Test
@@ -1533,6 +1708,370 @@ struct CoreContractTests {
         #expect(refreshedResearchRun.providerMetadata["final"] == "true")
     }
 
+    @Test
+    func providerLifecycleRepositoriesSupportFilteredCRUD() async throws {
+        let repository = InMemoryProviderLifecycleRepository()
+        let openAI = ProviderID(rawValue: "openai")
+        let anthropic = ProviderID(rawValue: "anthropic")
+        let structuredID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+
+        try await repository.upsertProviderFile(ProviderFileRecord(
+            id: "file_1",
+            providerID: openAI,
+            providerKind: .openAI,
+            purpose: "assistants",
+            fileName: "brief.pdf",
+            status: "processed"
+        ))
+        try await repository.upsertProviderFile(ProviderFileRecord(
+            id: "file_2",
+            providerID: anthropic,
+            providerKind: .anthropic,
+            purpose: "messages",
+            fileName: "notes.txt",
+            status: "processed"
+        ))
+        try await repository.upsertProviderArtifact(ProviderArtifactRecord(
+            id: "artifact_1",
+            providerID: openAI,
+            providerKind: .openAI,
+            responseID: "resp_1",
+            kind: "image",
+            fileName: "chart.png"
+        ))
+        try await repository.upsertProviderArtifact(ProviderArtifactRecord(
+            id: "artifact_2",
+            providerID: openAI,
+            providerKind: .openAI,
+            responseID: "resp_2",
+            kind: "code_interpreter"
+        ))
+        try await repository.upsertProviderCache(ProviderCacheRecord(
+            id: "vs_1",
+            providerID: openAI,
+            providerKind: .openAI,
+            kind: "vector_store",
+            name: "Docs",
+            status: "completed",
+            usageBytes: 128
+        ))
+        try await repository.upsertProviderBatch(ProviderBatchRecord(
+            id: "batch_1",
+            providerID: openAI,
+            providerKind: .openAI,
+            endpoint: "/v1/responses",
+            status: "in_progress",
+            inputFileID: "file_1"
+        ))
+        try await repository.upsertProviderLiveSession(ProviderLiveSessionRecord(
+            id: "sess_1",
+            providerID: openAI,
+            providerKind: .openAI,
+            modelID: "gpt-realtime",
+            status: "created",
+            modalities: ["audio", "text"]
+        ))
+        try await repository.upsertProviderStructuredOutput(ProviderStructuredOutputRecord(
+            id: structuredID,
+            providerID: openAI,
+            providerKind: .openAI,
+            responseID: "resp_1",
+            schemaName: "answer",
+            content: .object(["ok": .bool(true)]),
+            status: "parsed"
+        ))
+
+        #expect(try await repository.listProviderFiles(providerID: openAI).map(\.id) == ["file_1"])
+        #expect(try await repository.listProviderArtifacts(responseID: "resp_1").map(\.id) == ["artifact_1"])
+        #expect(try await repository.listProviderCaches(providerID: openAI, kind: "vector_store").map(\.id) == ["vs_1"])
+        #expect(try await repository.listProviderBatches(providerID: openAI).map(\.id) == ["batch_1"])
+        #expect(try await repository.listProviderLiveSessions(providerID: openAI).map(\.id) == ["sess_1"])
+        #expect(try await repository.listProviderStructuredOutputs(responseID: "resp_1").map(\.id) == [structuredID])
+
+        try await repository.deleteProviderArtifact(id: "artifact_1")
+        try await repository.deleteProviderStructuredOutput(id: structuredID)
+
+        #expect(try await repository.listProviderArtifacts(responseID: "resp_1").isEmpty)
+        #expect(try await repository.listProviderStructuredOutputs(responseID: "resp_1").isEmpty)
+    }
+
+    @Test
+    func openAIResponsesParserCapturesHostedArtifactsBackgroundAndUsageMetadata() throws {
+        var parser = CloudProviderStreamParser()
+        parser.recordRequestMetadata(providerKind: .openAI, serverRequestID: "req_header", clientRequestID: "client_1")
+        let payload = #"""
+        {
+          "type": "response.completed",
+          "response": {
+            "id": "resp_background",
+            "status": "completed",
+            "previous_response_id": "resp_previous",
+            "service_tier": "priority",
+            "store": true,
+            "_request_id": "req_body",
+            "metadata": { "pines_prompt_cache_key": "cache-key-1" },
+            "usage": {
+              "input_tokens": 20,
+              "output_tokens": 7,
+              "output_tokens_details": { "reasoning_tokens": 3 },
+              "input_tokens_details": { "cached_tokens": 5 }
+            },
+            "output": [
+              {
+                "id": "fs_1",
+                "type": "file_search_call",
+                "status": "completed",
+                "results": [{ "file_id": "file_1", "filename": "brief.pdf", "score": 0.98 }]
+              },
+              {
+                "id": "img_1",
+                "type": "image_generation_call",
+                "status": "completed",
+                "revised_prompt": "A chart",
+                "result": "aW1hZ2U="
+              },
+              {
+                "id": "ci_1",
+                "type": "code_interpreter_call",
+                "status": "completed",
+                "container_id": "cntr_1",
+                "outputs": [{ "type": "logs", "logs": "done" }]
+              },
+              {
+                "type": "message",
+                "content": [{
+                  "type": "output_text",
+                  "text": "Done",
+                  "annotations": [{
+                    "type": "container_file_citation",
+                    "container_id": "cntr_1",
+                    "file_id": "file_out",
+                    "filename": "report.csv"
+                  }]
+                }]
+              }
+            ]
+          }
+        }
+        """#
+        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+        let finish = try #require(output.finish)
+        let metadata = finish.providerMetadata
+        let hostedToolCalls = try decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON])
+        let artifacts = try decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIArtifactsJSON])
+        let fileSearchResults = try decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON])
+
+        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "Done", tokenCount: 1))))
+        #expect(output.events.contains(.metrics(InferenceMetrics(promptTokens: 20, completionTokens: 7))))
+        #expect(metadata[CloudProviderMetadataKeys.openAIRequestID] == "req_body")
+        #expect(metadata[CloudProviderMetadataKeys.openAIClientRequestID] == "client_1")
+        #expect(metadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_background")
+        #expect(metadata[CloudProviderMetadataKeys.openAIResponsePreviousID] == "resp_previous")
+        #expect(metadata[CloudProviderMetadataKeys.openAIResponseStatus] == "completed")
+        #expect(metadata[CloudProviderMetadataKeys.openAIResponseServiceTier] == "priority")
+        #expect(metadata[CloudProviderMetadataKeys.openAIResponseStored] == "true")
+        #expect(metadata[CloudProviderMetadataKeys.openAIReasoningTokens] == "3")
+        #expect(metadata[CloudProviderMetadataKeys.openAICachedInputTokens] == "5")
+        #expect(metadata[CloudProviderMetadataKeys.openAIPromptCacheKey] == "cache-key-1")
+        #expect(hostedToolCalls.contains { $0["type"] as? String == "file_search_call" })
+        #expect(hostedToolCalls.contains { $0["type"] as? String == "code_interpreter_call" })
+        #expect(artifacts.contains { $0["type"] as? String == "image" && $0["byte_hint"] as? Int == 8 })
+        #expect(artifacts.contains { $0["type"] as? String == "container_file" && $0["file_id"] as? String == "file_out" })
+        #expect(fileSearchResults.first?["file_id"] as? String == "file_1")
+    }
+
+    @Test
+    func openAIResponsesParserCapturesCodeInterpreterStreamingLogsAndFiles() throws {
+        var parser = CloudProviderStreamParser()
+        let payloads = [
+            #"{"type":"response.code_interpreter_call.in_progress","item_id":"ci_stream","container_id":"cntr_stream"}"#,
+            #"{"type":"response.code_interpreter_call_code.delta","item_id":"ci_stream","container_id":"cntr_stream","delta":"print(1)\n"}"#,
+            #"{"type":"response.code_interpreter_call.completed","item_id":"ci_stream","container_id":"cntr_stream","output":{"type":"logs","logs":"created report","generated_files":[{"file_id":"file_generated","filename":"report.csv"}]}}"#,
+            #"{"type":"response.completed","response":{"id":"resp_ci","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done","annotations":[{"type":"container_file_citation","container_id":"cntr_stream","file_id":"file_generated","filename":"report.csv"}]}]}]}}"#,
+        ]
+
+        var finish: InferenceFinish?
+        for payload in payloads {
+            let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+            finish = output.finish ?? finish
+        }
+
+        let metadata = try #require(finish?.providerMetadata)
+        let audit = metadata.hostedToolAuditEntries
+        let artifacts = metadata.providerArtifactMaterializations
+
+        #expect(audit.contains { $0.id == "ci_stream" && $0.kind == .codeInterpreter && $0.status == .completed })
+        #expect(artifacts.contains { $0.kind == .toolOutput && $0.text?.contains("created report") == true })
+        #expect(artifacts.contains { $0.providerFileID == "file_generated" && $0.fileName == "report.csv" })
+    }
+
+    @Test
+    func openAIResponsesParserCapturesImagePartialsRemoteMCPToolSearchAndComputerUseState() throws {
+        var parser = CloudProviderStreamParser()
+        let payloads = [
+            #"{"type":"response.image_generation_call.partial_image","item_id":"img_stream","partial_image_index":0,"partial_image_b64":"aW1n"}"#,
+            #"{"type":"response.mcp_list_tools.in_progress","item_id":"mcp_tools","server_label":"docs","server_url":"https://mcp.example.test","require_approval":"always"}"#,
+            #"{"type":"response.tool_search_call.completed","item_id":"tool_search_1","query":"calendar"}"#,
+            #"{"type":"response.computer_call.requires_action","item_id":"computer_1","action":{"type":"click","x":12,"y":34},"pending_safety_checks":[{"code":"external_navigation"}]}"#,
+            #"{"type":"response.completed","response":{"id":"resp_hosted","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ready"}]}]}}"#,
+        ]
+
+        var finish: InferenceFinish?
+        for payload in payloads {
+            let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+            finish = output.finish ?? finish
+        }
+
+        let metadata = try #require(finish?.providerMetadata)
+        let audit = metadata.hostedToolAuditEntries
+        let artifacts = metadata.providerArtifactMaterializations
+
+        #expect(artifacts.contains { $0.type == "partial_image" && $0.byteCount == 4 })
+        #expect(audit.contains { $0.id == "mcp_tools" && $0.kind == .mcp && $0.requiresAgentExecution && $0.requiresApproval })
+        #expect(audit.contains { $0.id == "tool_search_1" && $0.kind == .toolSearch && $0.status == .completed })
+        #expect(audit.contains { $0.id == "computer_1" && $0.kind == .computerUse && $0.status == .requiresAction && $0.requiresApproval })
+    }
+
+    @Test
+    func hostedToolRequestModelGatesComputerUseAndRemoteMCPToAgentApprovedRuns() throws {
+        let chatRequest = ChatRequest(
+            modelID: "gpt-5.5",
+            messages: [ChatMessage(role: .user, content: "Use desktop and MCP")],
+            hostedTools: [
+                .computerUse(displayWidth: 1280, displayHeight: 720),
+                .remoteMCP(serverLabel: "docs", serverURL: "https://mcp.example.test", requireApproval: "always"),
+            ],
+            executionContext: .chat
+        )
+        let agentRequest = chatRequest.replacing(executionContext: .agent)
+        let legacyRemoteMCP = try JSONDecoder().decode(
+            HostedToolConfiguration.self,
+            from: Data(#"{"type":"remoteMCP","serverLabel":"docs","serverURL":"https://mcp.example.test"}"#.utf8)
+        )
+
+        #expect(chatRequest.hasAgentOnlyHostedTools)
+        #expect(chatRequest.hasApprovalGatedHostedTools)
+        #expect(!chatRequest.hostedToolsAreAllowedForExecutionContext())
+        #expect(agentRequest.hostedToolsAreAllowedForExecutionContext())
+        #expect(legacyRemoteMCP.requiresAgentExecution)
+        #expect(legacyRemoteMCP.requiresApproval)
+    }
+
+    @Test
+    func structuredOutputValidationResultRecordsPreserveInvalidState() throws {
+        let resultID = UUID(uuidString: "00000000-0000-0000-0000-000000000202")!
+        let messageID = UUID(uuidString: "00000000-0000-0000-0000-000000000303")!
+        let schema: JSONValue = .object([
+            "type": .string("object"),
+            "required": .array([.string("answer")]),
+        ])
+        let result = OpenAIStructuredOutputResult(
+            id: resultID,
+            responseID: "resp_invalid",
+            messageID: messageID,
+            schemaName: "answer",
+            schema: schema,
+            content: .object(["answer": .number(42)]),
+            validationErrors: ["$.answer expected string"],
+            status: .invalid
+        )
+        let providerRecord = ProviderStructuredOutputRecord(
+            id: result.id,
+            providerID: ProviderID(rawValue: "openai"),
+            providerKind: .openAI,
+            responseID: result.responseID?.rawValue,
+            messageID: result.messageID,
+            schemaName: result.schemaName,
+            schema: result.schema,
+            content: result.content,
+            refusal: result.refusal,
+            incompleteReason: result.incompleteReason,
+            validationErrors: result.validationErrors,
+            status: result.status.rawValue,
+            createdAt: result.createdAt
+        )
+
+        let decodedResult = try JSONDecoder().decode(OpenAIStructuredOutputResult.self, from: JSONEncoder().encode(result))
+        let decodedRecord = try JSONDecoder().decode(ProviderStructuredOutputRecord.self, from: JSONEncoder().encode(providerRecord))
+
+        #expect(decodedResult == result)
+        #expect(decodedRecord == providerRecord)
+        #expect(decodedRecord.status == OpenAIStructuredOutputResultStatus.invalid.rawValue)
+        #expect(decodedRecord.validationErrors == ["$.answer expected string"])
+        #expect(decodedRecord.schema == schema)
+    }
+
+    @Test
+    func chatRequestPreservesOpenAIResponseOptionsStructuredOutputAndHostedTools() throws {
+        let request = ChatRequest(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000404")!,
+            modelID: "gpt-5.5",
+            messages: [ChatMessage(role: .user, content: "Use files and return JSON.")],
+            sampling: ChatSampling(
+                maxTokens: 2048,
+                openAIReasoningEffort: .medium,
+                openAITextVerbosity: .high,
+                openAIResponseStorage: .statelessEncrypted,
+                cloudWebSearchMode: .required
+            ),
+            structuredOutput: .jsonSchema(
+                name: "summary",
+                schema: .object(["type": .string("object")]),
+                strict: false
+            ),
+            hostedTools: [
+                .fileSearch(vectorStoreIDs: ["vs_surface"], maxResults: 5),
+                .codeInterpreter(containerID: "cntr_surface", memoryLimit: "2g"),
+                .remoteMCP(serverLabel: "docs", serverURL: "https://mcp.example.test", requireApproval: "always"),
+            ],
+            openAIOptions: OpenAIResponsesRequestOptions(
+                store: .statelessEncrypted,
+                background: true,
+                serviceTier: .priority,
+                promptCacheRetention: .twentyFourHours,
+                safetyIdentifier: "safe_1",
+                promptCacheKey: "cache_1",
+                maxToolCalls: 8,
+                conversationID: "conv_1",
+                metadata: ["trace": "chat-options"],
+                include: ["output[*].file_search_call.results"]
+            ),
+            openAIResponseOptions: OpenAIResponseRequestOptions(
+                previousResponseID: "resp_previous",
+                background: true,
+                store: .statelessEncrypted,
+                structuredOutput: OpenAIStructuredOutputRequest(
+                    name: "summary",
+                    description: "A structured summary.",
+                    schema: .object(["type": .string("object")]),
+                    strictness: .disabled
+                ),
+                hostedTools: [
+                    OpenAIHostedToolRequest(
+                        kind: .fileSearch,
+                        vectorStoreIDs: ["vs_surface"],
+                        configuration: .object(["max_num_results": .number(5)])
+                    ),
+                ],
+                providerFileIDs: ["file_surface"],
+                vectorStoreIDs: ["vs_surface"],
+                metadata: ["trace": "response-options"]
+            )
+        )
+
+        let roundTripped = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(request))
+
+        #expect(roundTripped.sampling.openAIResponseStorage == .statelessEncrypted)
+        #expect(roundTripped.sampling.cloudWebSearchMode == .required)
+        #expect(roundTripped.structuredOutput == request.structuredOutput)
+        #expect(roundTripped.hostedTools == request.hostedTools)
+        #expect(roundTripped.openAIOptions == request.openAIOptions)
+        #expect(roundTripped.openAIResponseOptions == request.openAIResponseOptions)
+        #expect(roundTripped.openAIResponseOptions?.structuredOutput?.strictness == .disabled)
+        #expect(roundTripped.openAIResponseOptions?.providerFileIDs == ["file_surface"])
+        #expect(roundTripped.openAIResponseOptions?.hostedTools.first?.configuration?.objectValue?["max_num_results"]?.intValue == 5)
+    }
+
     private func decodedCitations(_ metadata: [String: String]) throws -> [WebSearchCitation] {
         let raw = try #require(metadata[CloudProviderMetadataKeys.webSearchCitationsJSON])
         return try JSONDecoder().decode([WebSearchCitation].self, from: Data(raw.utf8))
@@ -1541,6 +2080,11 @@ struct CoreContractTests {
     private func decodedQueries(_ metadata: [String: String]) throws -> [String] {
         let raw = try #require(metadata[CloudProviderMetadataKeys.webSearchQueriesJSON])
         return try JSONDecoder().decode([String].self, from: Data(raw.utf8))
+    }
+
+    private func decodedJSONArray(_ raw: String?) throws -> [[String: Any]] {
+        let raw = try #require(raw)
+        return try #require(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [[String: Any]])
     }
 
     @Test
@@ -1871,6 +2415,117 @@ struct CoreContractTests {
     }
 
     @Test
+    func agentPolicyDecodesMissingCloudContextScopeAsUnrestricted() throws {
+        let data = Data(
+            """
+            {
+              "executionMode": "cloudAllowed",
+              "maxSteps": 3,
+              "maxToolCalls": 2,
+              "maxWallTimeSeconds": 30,
+              "allowedDomains": [],
+              "requiresConsentForNetwork": false,
+              "requiresConsentForBrowser": false,
+              "allowsCloudContext": true
+            }
+            """.utf8
+        )
+
+        let policy = try JSONDecoder().decode(AgentPolicy.self, from: data)
+
+        #expect(policy.allowsCloudContext)
+        #expect(policy.cloudContextScope == .unrestricted)
+    }
+
+    @Test
+    func vaultSearchFiltersResultsToAllowedCloudContextDocuments() async throws {
+        let approvedID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let secretID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let approved = Self.vaultSearchItem(documentID: approvedID, title: "Approved", text: "approved context")
+        let secret = Self.vaultSearchItem(documentID: secretID, title: "Secret", text: "TOP_SECRET_TOKEN")
+        let registry = ToolRegistry()
+        let spec = try VaultSearchTool.spec(allowedDocumentIDs: { [approvedID] }) { query, _ in
+            VaultSearchOutput(query: query, searchMode: "lexical", results: [approved, secret])
+        }
+        try await registry.register(spec)
+
+        let output: VaultSearchOutput = try await registry.call(
+            VaultSearchTool.name,
+            input: VaultSearchInput(query: "token")
+        )
+
+        #expect(output.results.map(\.documentID) == [approvedID.uuidString])
+        #expect(!output.resultsJSON.contains("TOP_SECRET_TOKEN"))
+    }
+
+    @Test
+    func vaultReadRejectsDocumentsOutsideAllowedCloudContext() async throws {
+        let approvedID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let secretID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let repository = FixtureVaultRepository(
+            documents: [
+                VaultDocumentRecord(id: approvedID, title: "Approved", sourceType: "text", chunkCount: 1),
+                VaultDocumentRecord(id: secretID, title: "Secret", sourceType: "text", chunkCount: 1),
+            ],
+            chunksByDocument: [
+                approvedID: [Self.vaultChunk(id: "approved-0", documentID: approvedID, text: "approved context")],
+                secretID: [Self.vaultChunk(id: "secret-0", documentID: secretID, text: "TOP_SECRET_TOKEN")],
+            ]
+        )
+        let registry = ToolRegistry()
+        try await registry.register(
+            try VaultReadTool.spec(repository: repository, allowedDocumentIDs: { [approvedID] })
+        )
+
+        let output: VaultReadOutput = try await registry.call(
+            VaultReadTool.name,
+            input: VaultReadInput(documentID: approvedID.uuidString)
+        )
+        #expect(output.text.contains("approved context"))
+
+        do {
+            let _: VaultReadOutput = try await registry.call(
+                VaultReadTool.name,
+                input: VaultReadInput(documentID: secretID.uuidString)
+            )
+            Issue.record("vault.read should reject unapproved documents")
+        } catch AgentError.permissionDenied {
+        } catch {
+            Issue.record("vault.read failed with unexpected error: \(error)")
+        }
+
+        do {
+            let _: VaultReadOutput = try await registry.call(
+                VaultReadTool.name,
+                input: VaultReadInput(chunkID: "secret-0")
+            )
+            Issue.record("vault.read should reject unapproved chunks")
+        } catch AgentError.permissionDenied {
+        } catch {
+            Issue.record("vault.read failed with unexpected error: \(error)")
+        }
+    }
+
+    @Test
+    func conversationSearchCanBeDisabledForSelectedCloudContextRuns() async throws {
+        let registry = ToolRegistry()
+        try await registry.register(
+            try ConversationSearchTool.spec(repository: EmptyConversationRepository(), allowsSearch: { false })
+        )
+
+        do {
+            let _: ConversationSearchOutput = try await registry.call(
+                ConversationSearchTool.name,
+                input: ConversationSearchInput(query: "secret")
+            )
+            Issue.record("conversation.search should reject selected cloud-context runs")
+        } catch AgentError.permissionDenied {
+        } catch {
+            Issue.record("conversation.search failed with unexpected error: \(error)")
+        }
+    }
+
+    @Test
     func toolRegistryEnforcesDeclaredTimeouts() async throws {
         let registry = ToolRegistry()
         let spec = try ToolSpec<CalculatorInput, CalculatorOutput>(
@@ -1941,6 +2596,127 @@ struct CoreContractTests {
             keychainService: "test",
             keychainAccount: "test"
         )
+    }
+}
+
+private actor InMemoryProviderLifecycleRepository:
+    ProviderFileRepository,
+    ProviderArtifactRepository,
+    ProviderCacheRepository,
+    ProviderBatchRepository,
+    ProviderLiveSessionRepository,
+    ProviderStructuredOutputRepository
+{
+    private var files = [String: ProviderFileRecord]()
+    private var artifacts = [String: ProviderArtifactRecord]()
+    private var caches = [String: ProviderCacheRecord]()
+    private var batches = [String: ProviderBatchRecord]()
+    private var liveSessions = [String: ProviderLiveSessionRecord]()
+    private var structuredOutputs = [UUID: ProviderStructuredOutputRecord]()
+
+    func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord] {
+        sorted(files.values.filter { providerID == nil || $0.providerID == providerID })
+    }
+
+    func upsertProviderFile(_ file: ProviderFileRecord) async throws {
+        files[file.id] = file
+    }
+
+    func deleteProviderFile(id: String) async throws {
+        files[id] = nil
+    }
+
+    func listProviderArtifacts(responseID: String?) async throws -> [ProviderArtifactRecord] {
+        sorted(artifacts.values.filter { responseID == nil || $0.responseID == responseID })
+    }
+
+    func upsertProviderArtifact(_ artifact: ProviderArtifactRecord) async throws {
+        artifacts[artifact.id] = artifact
+    }
+
+    func deleteProviderArtifact(id: String) async throws {
+        artifacts[id] = nil
+    }
+
+    func listProviderCaches(providerID: ProviderID?, kind: String?) async throws -> [ProviderCacheRecord] {
+        sorted(caches.values.filter { cache in
+            (providerID == nil || cache.providerID == providerID) && (kind == nil || cache.kind == kind)
+        })
+    }
+
+    func upsertProviderCache(_ cache: ProviderCacheRecord) async throws {
+        caches[cache.id] = cache
+    }
+
+    func deleteProviderCache(id: String) async throws {
+        caches[id] = nil
+    }
+
+    func listProviderBatches(providerID: ProviderID?) async throws -> [ProviderBatchRecord] {
+        sorted(batches.values.filter { providerID == nil || $0.providerID == providerID })
+    }
+
+    func upsertProviderBatch(_ batch: ProviderBatchRecord) async throws {
+        batches[batch.id] = batch
+    }
+
+    func deleteProviderBatch(id: String) async throws {
+        batches[id] = nil
+    }
+
+    func listProviderLiveSessions(providerID: ProviderID?) async throws -> [ProviderLiveSessionRecord] {
+        sorted(liveSessions.values.filter { providerID == nil || $0.providerID == providerID })
+    }
+
+    func upsertProviderLiveSession(_ session: ProviderLiveSessionRecord) async throws {
+        liveSessions[session.id] = session
+    }
+
+    func deleteProviderLiveSession(id: String) async throws {
+        liveSessions[id] = nil
+    }
+
+    func listProviderStructuredOutputs(responseID: String?) async throws -> [ProviderStructuredOutputRecord] {
+        structuredOutputs.values
+            .filter { responseID == nil || $0.responseID == responseID }
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+    }
+
+    func upsertProviderStructuredOutput(_ output: ProviderStructuredOutputRecord) async throws {
+        structuredOutputs[output.id] = output
+    }
+
+    func deleteProviderStructuredOutput(id: UUID) async throws {
+        structuredOutputs[id] = nil
+    }
+
+    private func sorted<T: Identifiable>(_ values: some Sequence<T>) -> [T] where T.ID == String {
+        values.sorted { $0.id < $1.id }
+    }
+}
+
+private struct FixtureVaultRepository: VaultRepository {
+    let documents: [VaultDocumentRecord]
+    let chunksByDocument: [UUID: [VaultChunk]]
+
+    func listDocuments() async throws -> [VaultDocumentRecord] { documents }
+    func observeDocuments() -> AsyncStream<[VaultDocumentRecord]> {
+        AsyncStream { continuation in
+            continuation.yield(documents)
+            continuation.finish()
+        }
+    }
+
+    func upsertDocument(_ document: VaultDocumentRecord, localURL: URL?, checksum: String?) async throws {}
+    func deleteDocument(id: UUID) async throws {}
+    func chunks(documentID: UUID) async throws -> [VaultChunk] { chunksByDocument[documentID] ?? [] }
+    func replaceChunks(_ chunks: [VaultChunk], documentID: UUID, embeddingModelID: ModelID?) async throws {}
+
+    func search(query: String, embedding: [Float]?, limit: Int) async throws -> [VaultSearchResult] {
+        documents.prefix(max(1, limit)).compactMap { document in
+            guard let chunk = chunksByDocument[document.id]?.first else { return nil }
+            return VaultSearchResult(document: document, chunk: chunk, score: 1, snippet: chunk.text)
+        }
     }
 }
 

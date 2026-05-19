@@ -428,6 +428,7 @@ public struct CloudProviderStreamParser {
         let type = json["type"] as? String
         if let type {
             state.openAIResponsesEventTypes.insert(type)
+            state.recordOpenAIResponseEvent(json, eventType: type)
         }
         if let response = json["response"] as? [String: Any] {
             state.recordOpenAIResponse(response)
@@ -1038,6 +1039,66 @@ public struct CloudProviderStreamState {
         return summary
     }
 
+    private static func openAIHostedToolCallSummary(fromStreamingEvent event: [String: Any], eventType: String) -> [String: Any]? {
+        guard let toolType = openAIHostedToolType(fromStreamingEventType: eventType) else { return nil }
+        let id = stringValue(event["item_id"])
+            ?? stringValue(event["output_item_id"])
+            ?? stringValue(event["call_id"])
+            ?? stringValue(event["id"])
+            ?? ""
+        var summary: [String: Any] = [
+            "id": id,
+            "type": toolType,
+            "status": stringValue(event["status"]) ?? openAIToolStatus(fromStreamingEventType: eventType),
+        ]
+        for key in [
+            "action",
+            "pending_safety_checks",
+            "output",
+            "input",
+            "arguments",
+        ] where event[key] != nil {
+            summary[key] = event[key]
+        }
+        for key in [
+            "container_id",
+            "server_label",
+            "server_url",
+            "require_approval",
+            "name",
+        ] {
+            if let value = stringValue(event[key]) {
+                summary[key] = value
+            }
+        }
+        return summary
+    }
+
+    private static func openAIHostedToolType(fromStreamingEventType eventType: String) -> String? {
+        if eventType.contains("web_search_call") { return "web_search_call" }
+        if eventType.contains("file_search_call") { return "file_search_call" }
+        if eventType.contains("code_interpreter_call") { return "code_interpreter_call" }
+        if eventType.contains("image_generation_call") { return "image_generation_call" }
+        if eventType.contains("computer_call") { return "computer_call" }
+        if eventType.contains("mcp_call") { return "mcp_call" }
+        if eventType.contains("mcp_list_tools") { return "mcp_list_tools" }
+        if eventType.contains("tool_search_call") { return "tool_search_call" }
+        return nil
+    }
+
+    private static func openAIToolStatus(fromStreamingEventType eventType: String) -> String {
+        if eventType.hasSuffix(".completed") || eventType.hasSuffix(".done") {
+            return "completed"
+        }
+        if eventType.hasSuffix(".failed") {
+            return "failed"
+        }
+        if eventType.hasSuffix(".requires_action") {
+            return "requires_action"
+        }
+        return "in_progress"
+    }
+
     private static let openAIHostedToolTypes: Set<String> = [
         "web_search_call",
         "file_search_call",
@@ -1070,6 +1131,7 @@ public struct CloudProviderStreamState {
             if let artifact = openAIArtifactSummary(from: item) {
                 artifacts.append(artifact)
             }
+            artifacts.append(contentsOf: openAIArtifacts(fromCodeInterpreterOutputs: item))
             for content in item["content"] as? [[String: Any]] ?? [] {
                 artifacts.append(contentsOf: openAIArtifacts(fromAnnotations: content["annotations"]))
             }
@@ -1111,14 +1173,107 @@ public struct CloudProviderStreamState {
         return nil
     }
 
+    private static func openAIArtifacts(fromStreamingEvent event: [String: Any], eventType: String) -> [[String: Any]] {
+        var artifacts = [[String: Any]]()
+        let providerItemID = stringValue(event["item_id"])
+            ?? stringValue(event["output_item_id"])
+            ?? stringValue(event["id"])
+            ?? ""
+        let containerID = stringValue(event["container_id"]) ?? ""
+
+        if eventType.contains("image_generation_call"),
+           eventType.contains("partial_image") || event["partial_image_b64"] != nil || event["partial_image"] != nil {
+            let image = stringValue(event["partial_image_b64"])
+                ?? stringValue(event["partial_image"])
+                ?? stringValue(event["b64_json"])
+                ?? stringValue(event["result"])
+            var artifact: [String: Any] = [
+                "type": "partial_image",
+                "provider_item_id": providerItemID,
+                "status": stringValue(event["status"]) ?? openAIToolStatus(fromStreamingEventType: eventType),
+            ]
+            if event["partial_image_index"] != nil {
+                artifact["index"] = intValue(event["partial_image_index"])
+            }
+            if let image, !image.isEmpty {
+                artifact["encoding"] = "base64"
+                artifact["byte_hint"] = image.count
+            }
+            artifacts.append(artifact)
+        }
+
+        if eventType.contains("code_interpreter_call") {
+            if let logs = stringValue(event["logs"]) ?? stringValue(event["delta"]) ?? stringValue(event["output"]), !logs.isEmpty {
+                artifacts.append([
+                    "type": "code_interpreter_logs",
+                    "provider_item_id": providerItemID,
+                    "container_id": containerID,
+                    "logs": logs,
+                ])
+            }
+            artifacts.append(contentsOf: openAIContainerFileArtifacts(from: event["files"], providerItemID: providerItemID, containerID: containerID))
+            artifacts.append(contentsOf: openAIContainerFileArtifacts(from: event["generated_files"], providerItemID: providerItemID, containerID: containerID))
+        }
+
+        if let output = event["output"] as? [String: Any] {
+            artifacts.append(contentsOf: openAIArtifacts(fromCodeInterpreterOutputs: [
+                "id": providerItemID,
+                "type": "code_interpreter_call",
+                "container_id": containerID,
+                "outputs": [output],
+            ]))
+        } else if let outputs = event["output"] as? [[String: Any]] {
+            artifacts.append(contentsOf: openAIArtifacts(fromCodeInterpreterOutputs: [
+                "id": providerItemID,
+                "type": "code_interpreter_call",
+                "container_id": containerID,
+                "outputs": outputs,
+            ]))
+        }
+        return artifacts
+    }
+
     private static func openAIArtifacts(fromAnnotations value: Any?) -> [[String: Any]] {
         (value as? [[String: Any]] ?? []).compactMap { annotation in
-            guard annotation["type"] as? String == "container_file_citation" else { return nil }
+            guard ["container_file_citation", "file_citation"].contains(annotation["type"] as? String) else { return nil }
             return [
                 "type": "container_file",
                 "container_id": stringValue(annotation["container_id"]) ?? "",
                 "file_id": stringValue(annotation["file_id"]) ?? "",
-                "filename": stringValue(annotation["filename"]) ?? "",
+                "filename": stringValue(annotation["filename"]) ?? stringValue(annotation["file_name"]) ?? "",
+            ]
+        }
+    }
+
+    private static func openAIArtifacts(fromCodeInterpreterOutputs item: [String: Any]) -> [[String: Any]] {
+        guard item["type"] as? String == "code_interpreter_call" else { return [] }
+        let providerItemID = stringValue(item["id"]) ?? ""
+        let containerID = stringValue(item["container_id"]) ?? ""
+        return (item["outputs"] as? [[String: Any]] ?? []).flatMap { output -> [[String: Any]] in
+            var artifacts = [[String: Any]]()
+            if let logs = stringValue(output["logs"]) ?? stringValue(output["output"]), !logs.isEmpty {
+                artifacts.append([
+                    "type": "code_interpreter_logs",
+                    "provider_item_id": providerItemID,
+                    "container_id": containerID,
+                    "logs": logs,
+                ])
+            }
+            artifacts.append(contentsOf: openAIContainerFileArtifacts(from: output["files"], providerItemID: providerItemID, containerID: containerID))
+            artifacts.append(contentsOf: openAIContainerFileArtifacts(from: output["generated_files"], providerItemID: providerItemID, containerID: containerID))
+            return artifacts
+        }
+    }
+
+    private static func openAIContainerFileArtifacts(from value: Any?, providerItemID: String, containerID: String) -> [[String: Any]] {
+        (value as? [[String: Any]] ?? []).compactMap { file in
+            guard let fileID = stringValue(file["file_id"]) ?? stringValue(file["id"]), !fileID.isEmpty else { return nil }
+            return [
+                "type": "container_file",
+                "provider_item_id": providerItemID,
+                "container_id": stringValue(file["container_id"]) ?? containerID,
+                "file_id": fileID,
+                "filename": stringValue(file["filename"]) ?? stringValue(file["file_name"]) ?? "",
             ]
         }
     }
@@ -1454,6 +1609,17 @@ public struct CloudProviderStreamState {
         if let fingerprint = chunk["system_fingerprint"] as? String, !fingerprint.isEmpty {
             openAIProviderMetadata[CloudProviderMetadataKeys.openAISystemFingerprint] = fingerprint
         }
+    }
+
+    public mutating func recordOpenAIResponseEvent(_ event: [String: Any], eventType: String) {
+        if let item = event["item"] as? [String: Any] {
+            recordOpenAIHostedToolCalls([Self.openAIHostedToolCallSummary(from: item)].compactMap { $0 })
+            recordOpenAIArtifacts(Self.openAIArtifacts(from: ["output": [item]]))
+        }
+        if let summary = Self.openAIHostedToolCallSummary(fromStreamingEvent: event, eventType: eventType) {
+            recordOpenAIHostedToolCalls([summary])
+        }
+        recordOpenAIArtifacts(Self.openAIArtifacts(fromStreamingEvent: event, eventType: eventType))
     }
 
     public mutating func recordOpenAIResponse(_ response: [String: Any]) {

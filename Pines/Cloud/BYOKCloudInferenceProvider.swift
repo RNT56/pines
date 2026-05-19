@@ -396,81 +396,15 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         let storageMode = responseOptions?.store ?? requestOptions?.store ?? chatRequest.sampling.openAIResponseStorage
         let promptCacheKey = requestOptions?.promptCacheKey ?? openAIPromptCacheKey(for: chatRequest, instructions: instructions)
         let usesReasoningControls = Self.isOpenAIReasoningModelID(chatRequest.modelID)
-        var textConfiguration: [String: Any] = [
-            "format": responseOptions?.structuredOutput.map(Self.openAITextFormatObject)
-                ?? Self.openAITextFormatObject(from: chatRequest.structuredOutput),
-        ]
-        var body: [String: Any] = [
-            "model": chatRequest.modelID.rawValue,
-            "stream": true,
-            "store": storageMode == .stateful,
-            "input": payload.input,
-            "max_output_tokens": openAICompletionTokenLimit(for: chatRequest, usesReasoningParameters: usesReasoningControls),
-            "truncation": "auto",
-            "text": textConfiguration,
-        ]
-        var includeValues = Set(requestOptions?.include ?? [])
-        if openAINativeWebSearchEnabled(for: chatRequest) {
-            includeValues.insert("web_search_call.action.sources")
-        }
-        if usesReasoningControls {
-            body["reasoning"] = [
-                "effort": CloudProviderModelEligibility.openAIReasoningEffort(
-                    for: chatRequest.modelID,
-                    requested: chatRequest.sampling.openAIReasoningEffort
-                ).rawValue,
-            ]
-            textConfiguration["verbosity"] = chatRequest.sampling.openAITextVerbosity.rawValue
-            body["text"] = textConfiguration
-            if storageMode == .statelessEncrypted {
-                includeValues.insert("reasoning.encrypted_content")
-            }
-        } else {
-            body["temperature"] = chatRequest.sampling.temperature
-            body["top_p"] = chatRequest.sampling.topP
-        }
-        let previousResponseID = responseOptions?.previousResponseID?.rawValue ?? payload.previousResponseID
-        if storageMode == .stateful, let previousResponseID, !previousResponseID.isEmpty {
-            body["previous_response_id"] = previousResponseID
-        }
-        var metadata = requestOptions?.metadata ?? [:]
-        metadata.merge(responseOptions?.metadata ?? [:], uniquingKeysWith: { _, new in new })
-        metadata.merge([
-            "pines_request_id": chatRequest.id.uuidString,
-            "pines_execution_context": chatRequest.executionContext.rawValue,
-            "pines_prompt_cache_key": promptCacheKey,
-        ], uniquingKeysWith: { _, new in new })
-        body["metadata"] = metadata
-        body["prompt_cache_key"] = promptCacheKey
-        if let retention = requestOptions?.promptCacheRetention, retention != .standard {
-            body["prompt_cache_retention"] = retention.rawValue
-        }
-        body["safety_identifier"] = requestOptions?.safetyIdentifier ?? openAISafetyIdentifier(for: chatRequest)
-        body["service_tier"] = requestOptions?.serviceTier.rawValue ?? OpenAIServiceTier.auto.rawValue
-        body["background"] = responseOptions?.background ?? requestOptions?.background ?? false
-        body["max_tool_calls"] = requestOptions?.maxToolCalls ?? (chatRequest.executionContext == .agent ? 8 : 4)
-        if let conversationID = requestOptions?.conversationID, !conversationID.isEmpty {
-            body["conversation"] = conversationID
-        }
-        let functionTools = chatRequest.allowsTools ? chatRequest.availableTools.map(Self.openAIResponsesFunctionToolObject) : []
-        let nativeSearchTools = openAINativeWebSearchEnabled(for: chatRequest) ? [Self.openAIWebSearchToolObject(options: chatRequest.webSearchOptions)] : []
-        var hostedTools = try openAIHostedTools(for: chatRequest, includeValues: &includeValues)
-        if hostedTools.isEmpty, let vectorStoreIDs = responseOptions?.vectorStoreIDs, !vectorStoreIDs.isEmpty {
-            hostedTools.append(Self.openAIFileSearchToolObject(vectorStoreIDs: vectorStoreIDs.map(\.rawValue), maxResults: nil))
-            includeValues.insert("file_search_call.results")
-        }
-        let responseTools = functionTools + nativeSearchTools + hostedTools
-        if !responseTools.isEmpty {
-            body["tools"] = responseTools
-            body["tool_choice"] = openAIToolChoice(for: chatRequest, hasFunctionTools: !functionTools.isEmpty, hasNativeSearch: !nativeSearchTools.isEmpty)
-            body["parallel_tool_calls"] = false
-        }
-        if !includeValues.isEmpty {
-            body["include"] = includeValues.sorted()
-        }
-        if !instructions.isEmpty {
-            body["instructions"] = instructions
-        }
+        let body = try Self.openAIResponsesRequestBody(
+            chatRequest: chatRequest,
+            payload: payload,
+            storageMode: storageMode,
+            promptCacheKey: promptCacheKey,
+            safetyIdentifier: requestOptions?.safetyIdentifier ?? openAISafetyIdentifier(for: chatRequest),
+            maxOutputTokens: openAICompletionTokenLimit(for: chatRequest, usesReasoningParameters: usesReasoningControls),
+            nativeWebSearchEnabled: openAINativeWebSearchEnabled(for: chatRequest)
+        )
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try await applyExtraHeaders(to: &request)
         return request
@@ -583,7 +517,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return !hasFunctionTools || Self.supportsGeminiBuiltInAndFunctionToolCombination(chatRequest.modelID)
     }
 
-    private func openAIToolChoice(for chatRequest: ChatRequest, hasFunctionTools: Bool, hasNativeSearch: Bool) -> Any {
+    private static func openAIToolChoice(for chatRequest: ChatRequest, hasFunctionTools: Bool, hasNativeSearch: Bool) -> Any {
         guard hasNativeSearch else { return "auto" }
         guard chatRequest.sampling.cloudWebSearchMode == .required else { return "auto" }
         return ["type": "web_search"]
@@ -644,7 +578,98 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return format
     }
 
-    private func openAIHostedTools(for chatRequest: ChatRequest, includeValues: inout Set<String>) throws -> [[String: Any]] {
+    static func openAIResponsesRequestBody(
+        chatRequest: ChatRequest,
+        payload: OpenAIResponsesPayload,
+        storageMode: OpenAIResponseStorage,
+        promptCacheKey: String,
+        safetyIdentifier: String,
+        maxOutputTokens: Int,
+        nativeWebSearchEnabled: Bool
+    ) throws -> [String: Any] {
+        let responseOptions = chatRequest.openAIResponseOptions
+        let requestOptions = chatRequest.openAIOptions
+        let usesReasoningControls = isOpenAIReasoningModelID(chatRequest.modelID)
+        var textConfiguration: [String: Any] = [
+            "format": responseOptions?.structuredOutput.map { openAITextFormatObject(from: $0) }
+                ?? openAITextFormatObject(from: chatRequest.structuredOutput),
+        ]
+        var body: [String: Any] = [
+            "model": chatRequest.modelID.rawValue,
+            "stream": true,
+            "store": storageMode == .stateful,
+            "input": payload.input,
+            "max_output_tokens": maxOutputTokens,
+            "truncation": "auto",
+            "text": textConfiguration,
+        ]
+        var includeValues = Set(requestOptions?.include ?? [])
+        if nativeWebSearchEnabled {
+            includeValues.insert("web_search_call.action.sources")
+        }
+        if usesReasoningControls {
+            body["reasoning"] = [
+                "effort": CloudProviderModelEligibility.openAIReasoningEffort(
+                    for: chatRequest.modelID,
+                    requested: chatRequest.sampling.openAIReasoningEffort
+                ).rawValue,
+            ]
+            textConfiguration["verbosity"] = chatRequest.sampling.openAITextVerbosity.rawValue
+            body["text"] = textConfiguration
+            if storageMode == .statelessEncrypted {
+                includeValues.insert("reasoning.encrypted_content")
+            }
+        } else {
+            body["temperature"] = chatRequest.sampling.temperature
+            body["top_p"] = chatRequest.sampling.topP
+        }
+        let previousResponseID = responseOptions?.previousResponseID?.rawValue ?? payload.previousResponseID
+        if storageMode == .stateful, let previousResponseID, !previousResponseID.isEmpty {
+            body["previous_response_id"] = previousResponseID
+        }
+        var metadata = requestOptions?.metadata ?? [:]
+        metadata.merge(responseOptions?.metadata ?? [:], uniquingKeysWith: { _, new in new })
+        metadata.merge([
+            "pines_request_id": chatRequest.id.uuidString,
+            "pines_execution_context": chatRequest.executionContext.rawValue,
+            "pines_prompt_cache_key": promptCacheKey,
+        ], uniquingKeysWith: { _, new in new })
+        body["metadata"] = metadata
+        body["prompt_cache_key"] = promptCacheKey
+        if let retention = requestOptions?.promptCacheRetention, retention != .standard {
+            body["prompt_cache_retention"] = retention.rawValue
+        }
+        body["safety_identifier"] = safetyIdentifier
+        body["service_tier"] = requestOptions?.serviceTier.rawValue ?? OpenAIServiceTier.auto.rawValue
+        body["background"] = responseOptions?.background ?? requestOptions?.background ?? false
+        body["max_tool_calls"] = requestOptions?.maxToolCalls ?? (chatRequest.executionContext == .agent ? 8 : 4)
+        if let conversationID = requestOptions?.conversationID, !conversationID.isEmpty {
+            body["conversation"] = conversationID
+        }
+
+        let functionTools = chatRequest.allowsTools ? chatRequest.availableTools.map(openAIResponsesFunctionToolObject) : []
+        let nativeSearchTools = nativeWebSearchEnabled ? [openAIWebSearchToolObject(options: chatRequest.webSearchOptions)] : []
+        var hostedTools = try openAIHostedTools(for: chatRequest, includeValues: &includeValues)
+        if hostedTools.isEmpty, let vectorStoreIDs = responseOptions?.vectorStoreIDs, !vectorStoreIDs.isEmpty {
+            hostedTools.append(openAIFileSearchToolObject(vectorStoreIDs: vectorStoreIDs.map(\.rawValue), maxResults: nil))
+            includeValues.insert("file_search_call.results")
+        }
+        let responseTools = functionTools + nativeSearchTools + hostedTools
+        if !responseTools.isEmpty {
+            body["tools"] = responseTools
+            body["tool_choice"] = openAIToolChoice(for: chatRequest, hasFunctionTools: !functionTools.isEmpty, hasNativeSearch: !nativeSearchTools.isEmpty)
+            body["parallel_tool_calls"] = false
+        }
+        if !includeValues.isEmpty {
+            body["include"] = includeValues.sorted()
+        }
+        if !payload.instructions.isEmpty {
+            body["instructions"] = payload.instructions
+        }
+        return body
+    }
+
+    private static func openAIHostedTools(for chatRequest: ChatRequest, includeValues: inout Set<String>) throws -> [[String: Any]] {
         var tools = [[String: Any]]()
         for tool in chatRequest.hostedTools {
             let mapped = try Self.openAIHostedToolObject(tool, executionContext: chatRequest.executionContext)
