@@ -156,10 +156,12 @@ jobs:
           fi
 
           if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --prerelease
             gh release upload "$TAG" "${release_files[@]}" --clobber
           else
             gh release create "$TAG" \
               --title "pines $TAG" \
+              --prerelease \
               --generate-notes \
               "${release_files[@]}"
           fi
