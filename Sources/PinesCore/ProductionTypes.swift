@@ -32,10 +32,23 @@ public struct ChatRun: Identifiable, Hashable, Codable, Sendable {
     public var requestID: UUID
     public var status: ChatRunStatus
     public var providerID: ProviderID?
+    public var providerKind: CloudProviderKind?
+    public var providerBaseURL: URL?
     public var modelID: ModelID
     public var startedAt: Date?
     public var finishedAt: Date?
     public var errorMessage: String?
+    public var providerRequestID: String?
+    public var providerResponseID: String?
+    public var parentResponseID: OpenAIResponseID?
+    public var backgroundResponseID: OpenAIResponseID?
+    public var batchID: OpenAIBatchID?
+    public var realtimeSessionID: OpenAIRealtimeSessionID?
+    public var structuredOutputResultID: UUID?
+    public var usedResponsesAPI: Bool
+    public var responseStorage: OpenAIResponseStorage?
+    public var webSearchMode: CloudWebSearchMode?
+    public var providerMetadata: [String: String]
 
     public init(
         id: UUID = UUID(),
@@ -43,20 +56,97 @@ public struct ChatRun: Identifiable, Hashable, Codable, Sendable {
         requestID: UUID,
         status: ChatRunStatus = .queued,
         providerID: ProviderID? = nil,
+        providerKind: CloudProviderKind? = nil,
+        providerBaseURL: URL? = nil,
         modelID: ModelID,
         startedAt: Date? = nil,
         finishedAt: Date? = nil,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        providerRequestID: String? = nil,
+        providerResponseID: String? = nil,
+        parentResponseID: OpenAIResponseID? = nil,
+        backgroundResponseID: OpenAIResponseID? = nil,
+        batchID: OpenAIBatchID? = nil,
+        realtimeSessionID: OpenAIRealtimeSessionID? = nil,
+        structuredOutputResultID: UUID? = nil,
+        usedResponsesAPI: Bool = false,
+        responseStorage: OpenAIResponseStorage? = nil,
+        webSearchMode: CloudWebSearchMode? = nil,
+        providerMetadata: [String: String] = [:]
     ) {
         self.id = id
         self.conversationID = conversationID
         self.requestID = requestID
         self.status = status
         self.providerID = providerID
+        self.providerKind = providerKind
+        self.providerBaseURL = providerBaseURL
         self.modelID = modelID
         self.startedAt = startedAt
         self.finishedAt = finishedAt
         self.errorMessage = errorMessage
+        self.providerRequestID = providerRequestID
+        self.providerResponseID = providerResponseID
+        self.parentResponseID = parentResponseID
+        self.backgroundResponseID = backgroundResponseID
+        self.batchID = batchID
+        self.realtimeSessionID = realtimeSessionID
+        self.structuredOutputResultID = structuredOutputResultID
+        self.usedResponsesAPI = usedResponsesAPI
+        self.responseStorage = responseStorage
+        self.webSearchMode = webSearchMode
+        self.providerMetadata = providerMetadata
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case conversationID
+        case requestID
+        case status
+        case providerID
+        case providerKind
+        case providerBaseURL
+        case modelID
+        case startedAt
+        case finishedAt
+        case errorMessage
+        case providerRequestID
+        case providerResponseID
+        case parentResponseID
+        case backgroundResponseID
+        case batchID
+        case realtimeSessionID
+        case structuredOutputResultID
+        case usedResponsesAPI
+        case responseStorage
+        case webSearchMode
+        case providerMetadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        conversationID = try container.decode(UUID.self, forKey: .conversationID)
+        requestID = try container.decode(UUID.self, forKey: .requestID)
+        status = try container.decodeIfPresent(ChatRunStatus.self, forKey: .status) ?? .queued
+        providerID = try container.decodeIfPresent(ProviderID.self, forKey: .providerID)
+        providerKind = try container.decodeIfPresent(CloudProviderKind.self, forKey: .providerKind)
+        providerBaseURL = try container.decodeIfPresent(URL.self, forKey: .providerBaseURL)
+        modelID = try container.decode(ModelID.self, forKey: .modelID)
+        startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
+        finishedAt = try container.decodeIfPresent(Date.self, forKey: .finishedAt)
+        errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+        providerRequestID = try container.decodeIfPresent(String.self, forKey: .providerRequestID)
+        providerResponseID = try container.decodeIfPresent(String.self, forKey: .providerResponseID)
+        parentResponseID = try container.decodeIfPresent(OpenAIResponseID.self, forKey: .parentResponseID)
+        backgroundResponseID = try container.decodeIfPresent(OpenAIResponseID.self, forKey: .backgroundResponseID)
+        batchID = try container.decodeIfPresent(OpenAIBatchID.self, forKey: .batchID)
+        realtimeSessionID = try container.decodeIfPresent(OpenAIRealtimeSessionID.self, forKey: .realtimeSessionID)
+        structuredOutputResultID = try container.decodeIfPresent(UUID.self, forKey: .structuredOutputResultID)
+        usedResponsesAPI = try container.decodeIfPresent(Bool.self, forKey: .usedResponsesAPI) ?? false
+        responseStorage = try container.decodeIfPresent(OpenAIResponseStorage.self, forKey: .responseStorage)
+        webSearchMode = try container.decodeIfPresent(CloudWebSearchMode.self, forKey: .webSearchMode)
+        providerMetadata = try container.decodeIfPresent([String: String].self, forKey: .providerMetadata) ?? [:]
     }
 }
 

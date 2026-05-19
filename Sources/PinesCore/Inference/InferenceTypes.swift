@@ -368,6 +368,143 @@ public enum OpenAIResponseStorage: String, Hashable, Codable, Sendable {
     case statelessEncrypted
 }
 
+public enum OpenAIServiceTier: String, Hashable, Codable, Sendable, CaseIterable {
+    case auto
+    case `default`
+    case flex
+    case priority
+}
+
+public enum OpenAIPromptCacheRetention: String, Hashable, Codable, Sendable, CaseIterable {
+    case standard
+    case twentyFourHours = "24h"
+}
+
+public enum StructuredOutputFormat: Hashable, Codable, Sendable {
+    case text
+    case jsonObject
+    case jsonSchema(name: String, schema: JSONValue, strict: Bool)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case name
+        case schema
+        case strict
+    }
+
+    private enum FormatType: String, Codable {
+        case text
+        case jsonObject
+        case jsonSchema
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decodeIfPresent(FormatType.self, forKey: .type) ?? .text
+        switch type {
+        case .text:
+            self = .text
+        case .jsonObject:
+            self = .jsonObject
+        case .jsonSchema:
+            self = .jsonSchema(
+                name: try container.decode(String.self, forKey: .name),
+                schema: try container.decode(JSONValue.self, forKey: .schema),
+                strict: try container.decodeIfPresent(Bool.self, forKey: .strict) ?? true
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text:
+            try container.encode(FormatType.text, forKey: .type)
+        case .jsonObject:
+            try container.encode(FormatType.jsonObject, forKey: .type)
+        case let .jsonSchema(name, schema, strict):
+            try container.encode(FormatType.jsonSchema, forKey: .type)
+            try container.encode(name, forKey: .name)
+            try container.encode(schema, forKey: .schema)
+            try container.encode(strict, forKey: .strict)
+        }
+    }
+}
+
+public enum HostedToolConfiguration: Hashable, Codable, Sendable {
+    case webSearch
+    case fileSearch(vectorStoreIDs: [String], maxResults: Int?)
+    case codeInterpreter(containerID: String?, memoryLimit: String?)
+    case imageGeneration(action: String?, quality: String?, size: String?, partialImages: Int?)
+    case computerUse(displayWidth: Int?, displayHeight: Int?)
+    case remoteMCP(serverLabel: String, serverURL: String, requireApproval: String)
+    case toolSearch
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case vectorStoreIDs
+        case maxResults
+        case containerID
+        case memoryLimit
+        case action
+        case quality
+        case size
+        case partialImages
+        case displayWidth
+        case displayHeight
+        case serverLabel
+        case serverURL
+        case requireApproval
+    }
+
+    private enum ToolType: String, Codable {
+        case webSearch
+        case fileSearch
+        case codeInterpreter
+        case imageGeneration
+        case computerUse
+        case remoteMCP
+        case toolSearch
+    }
+}
+
+public struct OpenAIResponsesRequestOptions: Hashable, Codable, Sendable {
+    public var store: OpenAIResponseStorage
+    public var background: Bool
+    public var serviceTier: OpenAIServiceTier
+    public var promptCacheRetention: OpenAIPromptCacheRetention
+    public var safetyIdentifier: String?
+    public var promptCacheKey: String?
+    public var maxToolCalls: Int?
+    public var conversationID: String?
+    public var metadata: [String: String]
+    public var include: [String]
+
+    public init(
+        store: OpenAIResponseStorage = .stateful,
+        background: Bool = false,
+        serviceTier: OpenAIServiceTier = .auto,
+        promptCacheRetention: OpenAIPromptCacheRetention = .standard,
+        safetyIdentifier: String? = nil,
+        promptCacheKey: String? = nil,
+        maxToolCalls: Int? = nil,
+        conversationID: String? = nil,
+        metadata: [String: String] = [:],
+        include: [String] = []
+    ) {
+        self.store = store
+        self.background = background
+        self.serviceTier = serviceTier
+        self.promptCacheRetention = promptCacheRetention
+        self.safetyIdentifier = safetyIdentifier
+        self.promptCacheKey = promptCacheKey
+        self.maxToolCalls = maxToolCalls
+        self.conversationID = conversationID
+        self.metadata = metadata
+        self.include = include
+    }
+}
+
 public enum CloudWebSearchMode: String, Hashable, Codable, Sendable, CaseIterable {
     case off
     case automatic
@@ -509,15 +646,110 @@ public struct WebSearchCitation: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public enum OpenAIStructuredOutputStrictness: String, Hashable, Codable, Sendable, CaseIterable {
+    case disabled
+    case strict
+}
+
+public struct OpenAIStructuredOutputRequest: Hashable, Codable, Sendable {
+    public var name: String
+    public var description: String?
+    public var schema: JSONValue
+    public var strictness: OpenAIStructuredOutputStrictness
+
+    public init(
+        name: String,
+        description: String? = nil,
+        schema: JSONValue,
+        strictness: OpenAIStructuredOutputStrictness = .strict
+    ) {
+        self.name = name
+        self.description = description
+        self.schema = schema
+        self.strictness = strictness
+    }
+}
+
+public enum OpenAIHostedToolKind: String, Hashable, Codable, Sendable, CaseIterable {
+    case webSearch
+    case fileSearch
+    case computerUse
+    case codeInterpreter
+    case imageGeneration
+    case mcp
+    case custom
+}
+
+public struct OpenAIHostedToolRequest: Identifiable, Hashable, Codable, Sendable {
+    public var id: String { name ?? kind.rawValue }
+    public var kind: OpenAIHostedToolKind
+    public var name: String?
+    public var vectorStoreIDs: [OpenAIVectorStoreID]
+    public var configuration: JSONValue?
+
+    public init(
+        kind: OpenAIHostedToolKind,
+        name: String? = nil,
+        vectorStoreIDs: [OpenAIVectorStoreID] = [],
+        configuration: JSONValue? = nil
+    ) {
+        self.kind = kind
+        self.name = name
+        self.vectorStoreIDs = vectorStoreIDs
+        self.configuration = configuration
+    }
+}
+
+public struct OpenAIResponseRequestOptions: Hashable, Codable, Sendable {
+    public var previousResponseID: OpenAIResponseID?
+    public var background: Bool
+    public var store: OpenAIResponseStorage?
+    public var structuredOutput: OpenAIStructuredOutputRequest?
+    public var hostedTools: [OpenAIHostedToolRequest]
+    public var providerFileIDs: [OpenAIProviderFileID]
+    public var vectorStoreIDs: [OpenAIVectorStoreID]
+    public var metadata: [String: String]
+
+    public init(
+        previousResponseID: OpenAIResponseID? = nil,
+        background: Bool = false,
+        store: OpenAIResponseStorage? = nil,
+        structuredOutput: OpenAIStructuredOutputRequest? = nil,
+        hostedTools: [OpenAIHostedToolRequest] = [],
+        providerFileIDs: [OpenAIProviderFileID] = [],
+        vectorStoreIDs: [OpenAIVectorStoreID] = [],
+        metadata: [String: String] = [:]
+    ) {
+        self.previousResponseID = previousResponseID
+        self.background = background
+        self.store = store
+        self.structuredOutput = structuredOutput
+        self.hostedTools = hostedTools
+        self.providerFileIDs = providerFileIDs
+        self.vectorStoreIDs = vectorStoreIDs
+        self.metadata = metadata
+    }
+}
+
 public struct ChatRequest: Hashable, Codable, Sendable {
+    public enum ExecutionContext: String, Hashable, Codable, Sendable {
+        case chat
+        case agent
+    }
+
     public var id: UUID
     public var modelID: ModelID
     public var messages: [ChatMessage]
     public var sampling: ChatSampling
     public var webSearchOptions: CloudWebSearchOptions?
+    public var structuredOutput: StructuredOutputFormat
+    public var hostedTools: [HostedToolConfiguration]
+    public var openAIOptions: OpenAIResponsesRequestOptions?
     public var allowsTools: Bool
     public var availableTools: [AnyToolSpec]
     public var vaultContextIDs: [UUID]
+    public var executionContext: ExecutionContext
+    public var openAIResponseOptions: OpenAIResponseRequestOptions?
 
     public init(
         id: UUID = UUID(),
@@ -525,18 +757,28 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         messages: [ChatMessage],
         sampling: ChatSampling = .init(),
         webSearchOptions: CloudWebSearchOptions? = nil,
+        structuredOutput: StructuredOutputFormat = .text,
+        hostedTools: [HostedToolConfiguration] = [],
+        openAIOptions: OpenAIResponsesRequestOptions? = nil,
         allowsTools: Bool = false,
         availableTools: [AnyToolSpec] = [],
-        vaultContextIDs: [UUID] = []
+        vaultContextIDs: [UUID] = [],
+        executionContext: ExecutionContext = .chat,
+        openAIResponseOptions: OpenAIResponseRequestOptions? = nil
     ) {
         self.id = id
         self.modelID = modelID
         self.messages = messages
         self.sampling = sampling
         self.webSearchOptions = webSearchOptions
+        self.structuredOutput = structuredOutput
+        self.hostedTools = hostedTools
+        self.openAIOptions = openAIOptions
         self.allowsTools = allowsTools
         self.availableTools = availableTools
         self.vaultContextIDs = vaultContextIDs
+        self.executionContext = executionContext
+        self.openAIResponseOptions = openAIResponseOptions
     }
 
     enum CodingKeys: String, CodingKey {
@@ -545,9 +787,14 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         case messages
         case sampling
         case webSearchOptions
+        case structuredOutput
+        case hostedTools
+        case openAIOptions
         case allowsTools
         case availableTools
         case vaultContextIDs
+        case executionContext
+        case openAIResponseOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -557,9 +804,14 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         messages = try container.decode([ChatMessage].self, forKey: .messages)
         sampling = try container.decodeIfPresent(ChatSampling.self, forKey: .sampling) ?? .init()
         webSearchOptions = try container.decodeIfPresent(CloudWebSearchOptions.self, forKey: .webSearchOptions)
+        structuredOutput = try container.decodeIfPresent(StructuredOutputFormat.self, forKey: .structuredOutput) ?? .text
+        hostedTools = try container.decodeIfPresent([HostedToolConfiguration].self, forKey: .hostedTools) ?? []
+        openAIOptions = try container.decodeIfPresent(OpenAIResponsesRequestOptions.self, forKey: .openAIOptions)
         allowsTools = try container.decodeIfPresent(Bool.self, forKey: .allowsTools) ?? false
         availableTools = try container.decodeIfPresent([AnyToolSpec].self, forKey: .availableTools) ?? []
         vaultContextIDs = try container.decodeIfPresent([UUID].self, forKey: .vaultContextIDs) ?? []
+        executionContext = try container.decodeIfPresent(ExecutionContext.self, forKey: .executionContext) ?? .chat
+        openAIResponseOptions = try container.decodeIfPresent(OpenAIResponseRequestOptions.self, forKey: .openAIResponseOptions)
     }
 }
 

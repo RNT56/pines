@@ -23,7 +23,7 @@ The Xcode job uses the `macos-26` GitHub-hosted runner and verifies the full iOS
 
 The CodeQL workflow runs separately from the main CI gate on pull requests, pushes to `main`, a weekly schedule, and manual dispatch. Swift analysis uses a manual Xcode build so the database is built from the app target, while JavaScript/TypeScript analysis covers the Netlify/Astro site.
 
-The release workflow uses the same Xcode validation phases as CI, verifies the iOS and watchOS scheme destinations before installing missing platforms, runs SwiftPM and Xcode with automatic package resolution disabled, validates the site build, builds an unsigned iOS archive from the committed deployment graph, and packages source artifacts. Keep both package lockfiles, `scripts/ci/run-xcode-validation.sh`, `scripts/ci/ensure-xcode-platforms.sh`, `ci.yml`, and `release.yml` aligned when adding required checks.
+The release workflow uses the same Xcode validation phases as CI, verifies the iOS and watchOS scheme destinations before installing missing platforms, runs SwiftPM and Xcode with automatic package resolution disabled, validates the site build, builds an unsigned iOS archive from the committed deployment graph, and packages source artifacts. Keep both package lockfiles, `scripts/ci/select-xcode.sh`, `scripts/ci/run-xcode-validation.sh`, `scripts/ci/ensure-xcode-platforms.sh`, `ci.yml`, `codeql.yml`, and `release.yml` aligned when adding required checks.
 
 Release artifacts include a CycloneDX SBOM generated from SwiftPM and npm lockfiles. The release workflow also creates GitHub artifact attestations for the source bundle, checksum, and SBOM.
 
@@ -46,7 +46,7 @@ git push origin v0.1.0
 
 The release workflow validates the app, creates a source bundle, writes a SHA-256 checksum, and publishes a GitHub prerelease with generated release notes.
 
-Release bundles must include the repository `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES.md` files. Pines is source-available under the PolyForm Noncommercial License 1.0.0 (`PolyForm-Noncommercial-1.0.0`), and commercial use requires a separate written license from Schtack. Third-party dependencies keep their own licenses.
+Release bundles must include the repository `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES.md` files. Pines is source-available under the PolyForm Noncommercial License 1.0.0 (`PolyForm-Noncommercial-1.0.0`), and commercial use requires a separate written license from RNT56. Third-party dependencies keep their own licenses.
 
 ## Manual Release
 

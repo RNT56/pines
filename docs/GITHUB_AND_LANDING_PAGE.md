@@ -330,7 +330,7 @@ Options:
 - `Read the developer README`
 - `Follow releases`
 - `Join TestFlight` once available
-- `Contact Schtack for commercial licensing`
+- `Contact RNT56 for commercial licensing`
 
 ## Visual Direction
 

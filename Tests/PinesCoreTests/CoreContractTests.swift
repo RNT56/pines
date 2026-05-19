@@ -1348,6 +1348,86 @@ struct CoreContractTests {
     }
 
     @Test
+    func chatRequestExecutionContextDefaultsToChatAndRoundTripsAgent() throws {
+        let legacy = """
+        {"modelID":"local","messages":[{"id":"00000000-0000-0000-0000-000000000001","role":"user","content":"hi"}]}
+        """
+        let decoded = try JSONDecoder().decode(ChatRequest.self, from: Data(legacy.utf8))
+        #expect(decoded.executionContext == .chat)
+
+        let request = ChatRequest(
+            modelID: "local",
+            messages: [ChatMessage(role: .user, content: "search")],
+            executionContext: .agent
+        )
+        let roundTripped = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(request))
+        #expect(roundTripped.executionContext == .agent)
+    }
+
+    @Test
+    func agentEvidenceFormatterProducesReadableWebEvidence() throws {
+        let resultsData = try JSONSerialization.data(withJSONObject: [
+            ["title": "Pines Source", "url": "https://example.com/pines", "snippet": "Useful context."],
+        ])
+        let rawData = try JSONSerialization.data(withJSONObject: [
+            "resultsJSON": String(decoding: resultsData, as: UTF8.self),
+        ])
+        let evidence = AgentEvidenceFormatter.modelVisibleOutput(
+            toolName: "web.search",
+            rawOutputJSON: String(decoding: rawData, as: UTF8.self)
+        )
+
+        #expect(evidence.contains("Tool evidence from web.search"))
+        #expect(evidence.contains("Pines Source"))
+        #expect(evidence.contains("https://example.com/pines"))
+        #expect(!evidence.contains("resultsJSON"))
+    }
+
+    @Test
+    func agentEvidenceFormatterTruncatesLargeFetches() throws {
+        let rawData = try JSONSerialization.data(withJSONObject: [
+            "url": "https://example.com",
+            "finalURL": "https://example.com/final",
+            "statusCode": 200,
+            "title": "Large",
+            "text": String(repeating: "x", count: 5_000),
+            "truncated": true,
+        ] as [String: Any])
+        let evidence = AgentEvidenceFormatter.modelVisibleOutput(
+            toolName: WebFetchTool.name,
+            rawOutputJSON: String(decoding: rawData, as: UTF8.self),
+            textLimit: 1_000
+        )
+
+        #expect(evidence.contains("Tool evidence from web.fetch"))
+        #expect(evidence.contains("https://example.com/final"))
+        #expect(evidence.contains("[Evidence truncated.]"))
+        #expect(evidence.count < 1_100)
+    }
+
+    @Test
+    func agentEvidenceFormatterDoesNotExposeRawJSONOnSchemaMismatch() throws {
+        let rawData = try JSONSerialization.data(withJSONObject: [
+            "unexpected": [
+                "title": "Fallback Title",
+                "url": "https://example.com/fallback",
+                "snippet": "Readable fallback field.",
+            ],
+        ])
+        let evidence = AgentEvidenceFormatter.modelVisibleOutput(
+            toolName: "web.search",
+            rawOutputJSON: String(decoding: rawData, as: UTF8.self)
+        )
+
+        #expect(evidence.contains("Tool evidence from web.search"))
+        #expect(evidence.contains("The tool output did not match the expected schema."))
+        #expect(evidence.contains("Fallback Title"))
+        #expect(evidence.contains("https://example.com/fallback"))
+        #expect(!evidence.contains("\"unexpected\""))
+        #expect(!evidence.contains("{"))
+    }
+
+    @Test
     func privateLocalToolsAreMarkedAsCloudContext() throws {
         let attachmentSpec = try AnyToolSpec(AttachmentReadTool.spec { _ in nil })
         let vaultSpec = try AnyToolSpec(VaultSearchTool.spec { query, _ in

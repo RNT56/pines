@@ -549,7 +549,8 @@ private actor MLXRuntimeState {
             throw InferenceError.unsupportedCapability("Audio input is disabled for this local runtime profile.")
         }
         let partitionSummary = activePartitionSummary
-        let historyMessages = Array(request.messages[..<latestUserIndex])
+        let usesAgentTranscript = request.executionContext == .agent
+        let historyMessages = usesAgentTranscript ? request.messages : Array(request.messages[..<latestUserIndex])
         let parameters = Self.generateParameters(from: request, profile: profile, install: activeInstall)
         let toolSpecs = request.allowsTools ? Self.mlxToolSpecs(from: request.availableTools) : nil
         let stopStrings = activeStopStrings
@@ -560,15 +561,25 @@ private actor MLXRuntimeState {
                     let result = try await container.perform { context in
                         let images = imageURLs.map(UserInput.Image.url)
                         let audio = audioURLs.map(UserInput.Audio.url)
-                        let history = Self.chatHistory(from: historyMessages[...])
                         var tokenCount = 0
                         var finish: InferenceFinish?
                         var messages = [Chat.Message]()
                         if !instructions.isEmpty {
                             messages.append(.system(instructions))
                         }
-                        messages.append(contentsOf: history)
-                        messages.append(.user(latestPrompt, images: images, videos: [], audio: audio))
+                        if usesAgentTranscript {
+                            messages.append(
+                                contentsOf: Self.agentChatHistory(
+                                    from: historyMessages[...],
+                                    latestUserID: latestUser.id,
+                                    latestUserImages: images,
+                                    latestUserAudio: audio
+                                )
+                            )
+                        } else {
+                            messages.append(contentsOf: Self.chatHistory(from: historyMessages[...]))
+                            messages.append(.user(latestPrompt, images: images, videos: [], audio: audio))
+                        }
 
                         let userInput = UserInput(
                             chat: messages,
@@ -1075,6 +1086,67 @@ private actor MLXRuntimeState {
         }
 
         return selected.reversed()
+    }
+
+    private static func agentChatHistory(
+        from messages: ArraySlice<ChatMessage>,
+        latestUserID: UUID,
+        latestUserImages: [UserInput.Image],
+        latestUserAudio: [UserInput.Audio]
+    ) -> [Chat.Message] {
+        let maxCharacters = 24_000
+        let latestUserMaxCharacters = 8_000
+        let indexed = messages.enumerated().map { (offset: $0.offset, message: $0.element) }
+        let latestUser = indexed.first { $0.message.id == latestUserID }
+        let latestUserContent = latestUser?.message.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var selected = [(offset: Int, message: ChatMessage)]()
+        let clippedLatestUserContent = clippedAgentContent(latestUserContent, maxCharacters: latestUserMaxCharacters)
+        var remaining = max(0, maxCharacters - clippedLatestUserContent.count)
+
+        for item in indexed.reversed() where item.message.id != latestUserID {
+            let content = item.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty, item.message.role != .system else { continue }
+            guard remaining > 0 else { break }
+            var message = item.message
+            if content.count > remaining {
+                message.content = String(content.suffix(remaining))
+                remaining = 0
+            } else {
+                message.content = content
+                remaining -= content.count
+            }
+            selected.append((offset: item.offset, message: message))
+        }
+        if let latestUser {
+            var message = latestUser.message
+            message.content = clippedLatestUserContent
+            selected.append((offset: latestUser.offset, message: message))
+        }
+
+        return selected
+            .sorted { $0.offset < $1.offset }
+            .compactMap { item in
+                let content = item.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !content.isEmpty else { return nil }
+                switch item.message.role {
+                case .assistant:
+                    return .assistant(content)
+                case .tool:
+                    return .tool(content)
+                case .user:
+                    if item.message.id == latestUserID {
+                        return .user(content, images: latestUserImages, videos: [], audio: latestUserAudio)
+                    }
+                    return .user(content)
+                case .system:
+                    return nil
+                }
+            }
+    }
+
+    private static func clippedAgentContent(_ content: String, maxCharacters: Int) -> String {
+        guard content.count > maxCharacters else { return content }
+        return String(content.suffix(maxCharacters))
     }
 
     private static func finishReason(from reason: GenerateStopReason) -> InferenceFinishReason {

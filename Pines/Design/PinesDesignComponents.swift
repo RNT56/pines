@@ -443,6 +443,540 @@ struct PinesMetricPill: View {
     }
 }
 
+enum PinesCloudStatus: Hashable {
+    case supported
+    case enabled
+    case needsValidation
+    case unavailable
+    case unknown
+    case accountGated
+    case running
+    case complete
+    case failed
+    case pending
+    case warning(String)
+    case custom(String, PinesCloudStatusTone)
+
+    var title: String {
+        switch self {
+        case .supported:
+            "Supported"
+        case .enabled:
+            "Enabled"
+        case .needsValidation:
+            "Needs validation"
+        case .unavailable:
+            "Unavailable"
+        case .unknown:
+            "Unknown"
+        case .accountGated:
+            "Account gated"
+        case .running:
+            "Running"
+        case .complete:
+            "Complete"
+        case .failed:
+            "Failed"
+        case .pending:
+            "Pending"
+        case .warning(let value), .custom(let value, _):
+            value
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .supported:
+            "checkmark.seal"
+        case .enabled:
+            "checkmark.circle"
+        case .needsValidation:
+            "questionmark.key.filled"
+        case .unavailable:
+            "slash.circle"
+        case .unknown:
+            "questionmark.circle"
+        case .accountGated:
+            "person.badge.key"
+        case .running:
+            "arrow.triangle.2.circlepath"
+        case .complete:
+            "checkmark.circle.fill"
+        case .failed:
+            "exclamationmark.triangle"
+        case .pending:
+            "clock"
+        case .warning:
+            "exclamationmark.triangle"
+        case .custom:
+            "circle.fill"
+        }
+    }
+
+    var tone: PinesCloudStatusTone {
+        switch self {
+        case .supported, .enabled, .complete:
+            .success
+        case .needsValidation, .accountGated, .running:
+            .info
+        case .unavailable, .failed:
+            .danger
+        case .unknown, .pending, .warning:
+            .warning
+        case .custom(_, let tone):
+            tone
+        }
+    }
+}
+
+enum PinesCloudStatusTone: Hashable {
+    case accent
+    case success
+    case warning
+    case danger
+    case info
+    case neutral
+
+    func color(in theme: PinesTheme) -> Color {
+        switch self {
+        case .accent:
+            theme.colors.accent
+        case .success:
+            theme.colors.success
+        case .warning:
+            theme.colors.warning
+        case .danger:
+            theme.colors.danger
+        case .info:
+            theme.colors.info
+        case .neutral:
+            theme.colors.secondaryText
+        }
+    }
+}
+
+struct PinesStatusChip: View {
+    @Environment(\.pinesTheme) private var theme
+    let status: PinesCloudStatus
+    var compact = false
+
+    var body: some View {
+        let tint = status.tone.color(in: theme)
+        Label {
+            Text(status.title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        } icon: {
+            Image(systemName: status.systemImage)
+                .font(.system(size: compact ? 10 : 11, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+        }
+        .font(theme.typography.caption.weight(.semibold))
+        .foregroundStyle(tint)
+        .labelStyle(.titleAndIcon)
+        .padding(.horizontal, compact ? theme.spacing.xsmall : theme.spacing.small)
+        .padding(.vertical, compact ? 3 : theme.spacing.xsmall)
+        .frame(minHeight: compact ? 22 : 28)
+        .background(tint.opacity(theme.colorScheme == .dark ? 0.16 : 0.10), in: Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(tint.opacity(0.22), lineWidth: theme.stroke.hairline)
+        }
+        .accessibilityLabel(status.title)
+    }
+}
+
+struct PinesMetricPillGroup: View {
+    @Environment(\.pinesTheme) private var theme
+
+    struct Item: Identifiable, Hashable {
+        var id: String { "\(title)-\(value)-\(systemImage)" }
+        var title: String
+        var value: String
+        var systemImage: String
+        var tone: PinesCloudStatusTone
+
+        init(_ title: String, value: String, systemImage: String, tone: PinesCloudStatusTone = .accent) {
+            self.title = title
+            self.value = value
+            self.systemImage = systemImage
+            self.tone = tone
+        }
+
+        var label: String {
+            value.isEmpty ? title : "\(title): \(value)"
+        }
+    }
+
+    let items: [Item]
+    var minimumWidth: CGFloat = 116
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: minimumWidth), spacing: theme.spacing.xsmall)], alignment: .leading, spacing: theme.spacing.xsmall) {
+            ForEach(items) { item in
+                PinesMetricPill(
+                    title: item.label,
+                    systemImage: item.systemImage,
+                    tint: item.tone.color(in: theme)
+                )
+            }
+        }
+    }
+}
+
+struct PinesCapabilityRow: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let detail: String
+    let systemImage: String
+    var status: PinesCloudStatus
+    var secondaryStatus: PinesCloudStatus?
+    var metricItems: [PinesMetricPillGroup.Item] = []
+    var tint: Color?
+
+    var body: some View {
+        let resolvedTint = tint ?? status.tone.color(in: theme)
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack(alignment: .top, spacing: theme.spacing.small) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(resolvedTint)
+                    .frame(width: 30, height: 30)
+                    .background(resolvedTint.opacity(theme.colorScheme == .dark ? 0.16 : 0.10), in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                            .strokeBorder(resolvedTint.opacity(0.18), lineWidth: theme.stroke.hairline)
+                    }
+
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(title)
+                        .font(theme.typography.callout.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                        .pinesFittingText()
+
+                    Text(detail)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.84)
+                }
+
+                Spacer(minLength: theme.spacing.small)
+
+                VStack(alignment: .trailing, spacing: theme.spacing.xxsmall) {
+                    PinesStatusChip(status: status, compact: true)
+                    if let secondaryStatus {
+                        PinesStatusChip(status: secondaryStatus, compact: true)
+                    }
+                }
+            }
+
+            if !metricItems.isEmpty {
+                PinesMetricPillGroup(items: metricItems, minimumWidth: 104)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: theme.row.minHeight)
+        .pinesSurface(.inset, padding: theme.spacing.small)
+    }
+}
+
+enum PinesProviderStorageKind: String, Hashable, CaseIterable {
+    case localOnly
+    case inlineThisTurn
+    case providerHosted
+    case vectorStore
+    case cachedContext
+
+    var title: String {
+        switch self {
+        case .localOnly:
+            "Local only"
+        case .inlineThisTurn:
+            "Inline this turn"
+        case .providerHosted:
+            "Provider-hosted"
+        case .vectorStore:
+            "Vector store"
+        case .cachedContext:
+            "Cached context"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .localOnly:
+            "internaldrive"
+        case .inlineThisTurn:
+            "paperclip"
+        case .providerHosted:
+            "cloud"
+        case .vectorStore:
+            "square.stack.3d.up"
+        case .cachedContext:
+            "memorychip"
+        }
+    }
+
+    var tone: PinesCloudStatusTone {
+        switch self {
+        case .localOnly:
+            .success
+        case .inlineThisTurn:
+            .info
+        case .providerHosted, .vectorStore, .cachedContext:
+            .warning
+        }
+    }
+}
+
+struct PinesProviderStorageBadge: View {
+    @Environment(\.pinesTheme) private var theme
+    let kind: PinesProviderStorageKind
+    var compact = false
+
+    var body: some View {
+        let tint = kind.tone.color(in: theme)
+        Label(kind.title, systemImage: kind.systemImage)
+            .font(theme.typography.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .labelStyle(.titleAndIcon)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .padding(.horizontal, compact ? theme.spacing.xsmall : theme.spacing.small)
+            .padding(.vertical, compact ? 3 : theme.spacing.xsmall)
+            .frame(minHeight: compact ? 22 : 28)
+            .background(tint.opacity(theme.colorScheme == .dark ? 0.16 : 0.10), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(tint.opacity(0.22), lineWidth: theme.stroke.hairline)
+            }
+            .accessibilityLabel(kind.title)
+    }
+}
+
+struct PinesToolTimelineRow: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let provider: String
+    let toolType: String
+    let status: PinesCloudStatus
+    let inputSummary: String
+    let outputSummary: String?
+    var environmentLabel: String?
+    var metricItems: [PinesMetricPillGroup.Item] = []
+    var systemImage = "wrench.and.screwdriver"
+
+    var body: some View {
+        HStack(alignment: .top, spacing: theme.spacing.small) {
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .fill(status.tone.color(in: theme).opacity(theme.colorScheme == .dark ? 0.16 : 0.10))
+                        .frame(width: 32, height: 32)
+
+                    Image(systemName: systemImage)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(status.tone.color(in: theme))
+                        .symbolRenderingMode(.hierarchical)
+                }
+
+                Rectangle()
+                    .fill(theme.colors.separator)
+                    .frame(width: theme.chart.timelineLine, minHeight: 34)
+            }
+
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                HStack(alignment: .firstTextBaseline, spacing: theme.spacing.small) {
+                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                        Text(title)
+                            .font(theme.typography.callout.weight(.semibold))
+                            .foregroundStyle(theme.colors.primaryText)
+                            .pinesFittingText()
+
+                        Text([provider, toolType, environmentLabel].compactMap(\.self).joined(separator: " - "))
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Spacer(minLength: theme.spacing.small)
+
+                    PinesStatusChip(status: status, compact: true)
+                }
+
+                Text(inputSummary)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.84)
+
+                if let outputSummary, !outputSummary.isEmpty {
+                    Text(outputSummary)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.tertiaryText)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.84)
+                }
+
+                if !metricItems.isEmpty {
+                    PinesMetricPillGroup(items: metricItems, minimumWidth: 104)
+                }
+            }
+            .padding(.bottom, theme.spacing.small)
+        }
+    }
+}
+
+struct PinesRunProvenancePanel: View {
+    @Environment(\.pinesTheme) private var theme
+
+    struct Field: Identifiable, Hashable {
+        var id: String { "\(title)-\(value)" }
+        var title: String
+        var value: String
+        var systemImage: String?
+
+        init(_ title: String, _ value: String, systemImage: String? = nil) {
+            self.title = title
+            self.value = value
+            self.systemImage = systemImage
+        }
+    }
+
+    let title: String
+    let subtitle: String?
+    let fields: [Field]
+    var metricItems: [PinesMetricPillGroup.Item] = []
+    var storageKinds: [PinesProviderStorageKind] = []
+    var status: PinesCloudStatus = .complete
+
+    init(
+        title: String = "Run Provenance",
+        subtitle: String? = nil,
+        fields: [Field],
+        metricItems: [PinesMetricPillGroup.Item] = [],
+        storageKinds: [PinesProviderStorageKind] = [],
+        status: PinesCloudStatus = .complete
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.fields = fields
+        self.metricItems = metricItems
+        self.storageKinds = storageKinds
+        self.status = status
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.medium) {
+            HStack(alignment: .top, spacing: theme.spacing.small) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 34, height: 34)
+                    .background(theme.colors.accentSoft, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(title)
+                        .font(theme.typography.headline)
+                        .foregroundStyle(theme.colors.primaryText)
+                        .pinesFittingText()
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.84)
+                    }
+                }
+
+                Spacer(minLength: theme.spacing.small)
+
+                PinesStatusChip(status: status, compact: true)
+            }
+
+            PinesKeyValueGrid(items: fields.map { field in
+                PinesKeyValueGrid.Item(field.title, field.value, systemImage: field.systemImage)
+            })
+
+            if !metricItems.isEmpty {
+                PinesMetricPillGroup(items: metricItems)
+            }
+
+            if !storageKinds.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: theme.spacing.xsmall)], alignment: .leading, spacing: theme.spacing.xsmall) {
+                    ForEach(storageKinds, id: \.self) { kind in
+                        PinesProviderStorageBadge(kind: kind)
+                    }
+                }
+            }
+        }
+        .pinesSurface(.panel, padding: theme.spacing.medium)
+    }
+}
+
+struct PinesArtifactRow: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let subtitle: String
+    let provider: String
+    let type: String
+    let status: PinesCloudStatus
+    let storageKind: PinesProviderStorageKind
+    var metricItems: [PinesMetricPillGroup.Item] = []
+    var systemImage = "doc"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack(alignment: .top, spacing: theme.spacing.small) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(status.tone.color(in: theme))
+                    .frame(width: 34, height: 34)
+                    .background(status.tone.color(in: theme).opacity(theme.colorScheme == .dark ? 0.16 : 0.10), in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                            .strokeBorder(status.tone.color(in: theme).opacity(0.18), lineWidth: theme.stroke.hairline)
+                    }
+
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(title)
+                        .font(theme.typography.callout.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                        .pinesFittingText()
+
+                    Text(subtitle)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.84)
+
+                    Text([provider, type].joined(separator: " - "))
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.tertiaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: theme.spacing.small)
+
+                VStack(alignment: .trailing, spacing: theme.spacing.xxsmall) {
+                    PinesStatusChip(status: status, compact: true)
+                    PinesProviderStorageBadge(kind: storageKind, compact: true)
+                }
+            }
+
+            if !metricItems.isEmpty {
+                PinesMetricPillGroup(items: metricItems, minimumWidth: 104)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .pinesSurface(.inset, padding: theme.spacing.small)
+    }
+}
+
 struct PinesEmptyState: View {
     @Environment(\.pinesTheme) private var theme
     let title: String

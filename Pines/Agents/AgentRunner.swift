@@ -120,6 +120,8 @@ struct RegistryAgentToolCatalog: AgentToolCatalog {
 }
 
 struct AgentRunner: AgentRuntime {
+    private static let maxSearchCalls = 3
+
     let toolRegistry: ToolRegistry
     let policyGate: ToolPolicyGate
     let auditRepository: (any AuditEventRepository)?
@@ -140,6 +142,54 @@ struct AgentRunner: AgentRuntime {
         self.activityHandler = activityHandler
     }
 
+    private struct SkippedToolCall {
+        var toolCall: ToolCallDelta
+        var reason: String
+    }
+
+    private static func availableTools(
+        from tools: [AnyToolSpec],
+        searchCalls: Int
+    ) -> [AnyToolSpec] {
+        guard searchCalls >= maxSearchCalls else { return tools }
+        return tools.filter { $0.name != "web.search" }
+    }
+
+    private static func executableToolCalls(
+        from toolCalls: [ToolCallDelta],
+        remainingToolCalls: Int,
+        remainingSearchCalls: Int,
+        repeatedToolCalls: inout [String: Int]
+    ) -> (executable: [ToolCallDelta], skipped: [SkippedToolCall]) {
+        var executable = [ToolCallDelta]()
+        var skipped = [SkippedToolCall]()
+        var searchCalls = 0
+
+        for toolCall in toolCalls {
+            guard executable.count < remainingToolCalls else {
+                skipped.append(SkippedToolCall(toolCall: toolCall, reason: "Skipped \(toolCall.name) because the agent reached the tool-call budget."))
+                continue
+            }
+            if toolCall.name == "web.search" {
+                guard searchCalls < remainingSearchCalls else {
+                    skipped.append(SkippedToolCall(toolCall: toolCall, reason: "Skipped web.search because the agent already used the 3-search refinement budget."))
+                    continue
+                }
+                searchCalls += 1
+            }
+
+            let repeatKey = "\(toolCall.name)::\(toolCall.argumentsFragment)"
+            repeatedToolCalls[repeatKey, default: 0] += 1
+            guard repeatedToolCalls[repeatKey, default: 0] <= 2 else {
+                skipped.append(SkippedToolCall(toolCall: toolCall, reason: "Skipped repeated \(toolCall.name) call because it was not making progress."))
+                continue
+            }
+            executable.append(toolCall)
+        }
+
+        return (executable, skipped)
+    }
+
     func run(
         session: AgentSession,
         request: ChatRequest,
@@ -147,10 +197,14 @@ struct AgentRunner: AgentRuntime {
     ) -> AsyncThrowingStream<InferenceStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
+                var messages = request.messages
+                let executionContext = request.executionContext
+                let isAgentContext = executionContext == .agent
+
                 do {
-                    var messages = request.messages
                     var step = 0
                     var toolCalls = 0
+                    var searchCalls = 0
                     var repeatedToolCalls = [String: Int]()
                     let startedAt = Date()
                     let toolRunContext = AgentToolRunContext(messages: request.messages)
@@ -161,20 +215,123 @@ struct AgentRunner: AgentRuntime {
                         }
                     }
 
+                    func synthesizeFinalAnswer(reason: String) async throws {
+                        guard isAgentContext else {
+                            throw AgentError.toolLimitExceeded
+                        }
+                        try enforceWallTimeLimit()
+                        var synthesisMessages = messages
+                        synthesisMessages.insert(
+                            ChatMessage(
+                                role: .system,
+                                content: """
+                                Agent final response required. Do not call tools. Answer the user's inquiry using only the gathered tool evidence in this conversation. Write a processed response, not raw tool output. Cite source URLs when available. If the evidence is incomplete, say what is known and what could not be verified. Reason: \(reason)
+                                """
+                            ),
+                            at: 0
+                        )
+                        let synthesisRequest = ChatRequest(
+                            id: request.id,
+                            modelID: request.modelID,
+                            messages: synthesisMessages,
+                            sampling: request.sampling,
+                            webSearchOptions: request.webSearchOptions,
+                            allowsTools: false,
+                            availableTools: [],
+                            vaultContextIDs: request.vaultContextIDs,
+                            executionContext: executionContext
+                        )
+                        var finalText = ""
+                        do {
+                            let stream = try await provider.streamEvents(synthesisRequest)
+                            for try await event in stream {
+                                try enforceWallTimeLimit()
+                                switch event {
+                                case let .token(delta):
+                                    finalText += delta.text
+                                    continuation.yield(event)
+                                case let .finish(finish):
+                                    if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        let fallback = Self.fallbackAnswer(from: messages, request: request)
+                                        finalText = fallback
+                                        continuation.yield(.token(TokenDelta(text: fallback, tokenCount: 1)))
+                                    }
+                                    continuation.yield(.finish(finish.reason == .cancelled ? finish : InferenceFinish(reason: .stop, providerMetadata: finish.providerMetadata)))
+                                    continuation.finish()
+                                    return
+                                case .toolCall:
+                                    continue
+                                case let .metrics(metrics):
+                                    continuation.yield(.metrics(metrics))
+                                case let .failure(failure):
+                                    if Self.hasToolEvidence(messages) {
+                                        throw AgentError.toolLimitExceeded
+                                    }
+                                    continuation.yield(.failure(failure))
+                                    continuation.finish()
+                                    return
+                                }
+                            }
+                        } catch is CancellationError {
+                            throw InferenceError.cancelled
+                        } catch InferenceError.cancelled {
+                            throw InferenceError.cancelled
+                        } catch {
+                            guard Self.hasToolEvidence(messages) else {
+                                throw error
+                            }
+                            let fallback = Self.fallbackAnswer(from: messages, request: request)
+                            continuation.yield(.token(TokenDelta(text: fallback, tokenCount: 1)))
+                            continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                            continuation.finish()
+                            return
+                        }
+
+                        if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            guard Self.hasToolEvidence(messages) else {
+                                continuation.yield(
+                                    .failure(
+                                        InferenceStreamFailure(
+                                            code: "agent_empty_final_response",
+                                            message: "The agent could not produce a final response.",
+                                            recoverable: true
+                                        )
+                                    )
+                                )
+                                continuation.finish()
+                                return
+                            }
+                            let fallback = Self.fallbackAnswer(from: messages, request: request)
+                            continuation.yield(.token(TokenDelta(text: fallback, tokenCount: 1)))
+                        }
+                        continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                        continuation.finish()
+                    }
+
                     while step < session.policy.maxSteps {
                         try enforceWallTimeLimit()
                         step += 1
                         var completedToolCalls = [ToolCallDelta]()
                         var assistantText = ""
+                        var bufferedTokenEvents = [TokenDelta]()
                         var pendingFinish: InferenceFinish?
+                        let availableTools = isAgentContext
+                            ? Self.availableTools(from: request.availableTools, searchCalls: searchCalls)
+                            : request.availableTools
+                        guard !isAgentContext || toolCalls < session.policy.maxToolCalls else {
+                            try await synthesizeFinalAnswer(reason: "The agent reached the tool-call budget.")
+                            return
+                        }
                         let currentRequest = ChatRequest(
                             id: request.id,
                             modelID: request.modelID,
                             messages: messages,
                             sampling: request.sampling,
+                            webSearchOptions: request.webSearchOptions,
                             allowsTools: request.allowsTools,
-                            availableTools: request.availableTools,
-                            vaultContextIDs: request.vaultContextIDs
+                            availableTools: availableTools,
+                            vaultContextIDs: request.vaultContextIDs,
+                            executionContext: executionContext
                         )
                         let stream = try await provider.streamEvents(currentRequest)
 
@@ -183,7 +340,11 @@ struct AgentRunner: AgentRuntime {
                             switch event {
                             case let .token(delta):
                                 assistantText += delta.text
-                                continuation.yield(event)
+                                if isAgentContext {
+                                    bufferedTokenEvents.append(delta)
+                                } else {
+                                    continuation.yield(event)
+                                }
                             case let .toolCall(toolCall) where toolCall.isComplete:
                                 if !completedToolCalls.contains(where: { $0.id == toolCall.id }) {
                                     completedToolCalls.append(toolCall)
@@ -191,8 +352,12 @@ struct AgentRunner: AgentRuntime {
                                 continuation.yield(event)
                             case let .finish(finish):
                                 pendingFinish = finish
-                            case .failure:
-                                continuation.yield(event)
+                            case let .failure(failure):
+                                if isAgentContext, Self.hasToolEvidence(messages) {
+                                    try await synthesizeFinalAnswer(reason: "The model stopped after gathering evidence: \(failure.message)")
+                                    return
+                                }
+                                continuation.yield(.failure(failure))
                                 continuation.finish()
                                 return
                             default:
@@ -201,37 +366,63 @@ struct AgentRunner: AgentRuntime {
                         }
 
                         guard !completedToolCalls.isEmpty else {
+                            if isAgentContext {
+                                for delta in bufferedTokenEvents {
+                                    continuation.yield(.token(delta))
+                                }
+                            }
                             continuation.yield(.finish(pendingFinish ?? InferenceFinish(reason: .stop)))
                             continuation.finish()
                             return
                         }
 
-                        guard toolCalls + completedToolCalls.count <= session.policy.maxToolCalls else {
-                            throw AgentError.toolLimitExceeded
+                        let selection: (executable: [ToolCallDelta], skipped: [SkippedToolCall])
+                        if isAgentContext {
+                            selection = Self.executableToolCalls(
+                                from: completedToolCalls,
+                                remainingToolCalls: max(0, session.policy.maxToolCalls - toolCalls),
+                                remainingSearchCalls: max(0, Self.maxSearchCalls - searchCalls),
+                                repeatedToolCalls: &repeatedToolCalls
+                            )
+                        } else {
+                            selection = (executable: completedToolCalls, skipped: [])
                         }
-                        toolCalls += completedToolCalls.count
+                        for skipped in selection.skipped {
+                            await activityHandler(
+                                Self.activityEvent(
+                                    id: UUID(),
+                                    toolCall: skipped.toolCall,
+                                    status: .denied,
+                                    argumentsJSON: skipped.toolCall.argumentsFragment,
+                                    detailOverride: skipped.reason,
+                                    startedAt: Date(),
+                                    completedAt: Date()
+                                )
+                            )
+                        }
+                        guard !selection.executable.isEmpty else {
+                            try await synthesizeFinalAnswer(reason: selection.skipped.first?.reason ?? "The agent could not run more tools.")
+                            return
+                        }
+                        toolCalls += selection.executable.count
+                        searchCalls += selection.executable.filter { $0.name == "web.search" }.count
 
                         messages.append(
                             ChatMessage(
                                 role: .assistant,
                                 content: assistantText,
-                                toolCalls: completedToolCalls,
+                                toolCalls: selection.executable,
                                 providerMetadata: pendingFinish?.providerMetadata ?? [:]
                             )
                         )
 
-                        for toolCall in completedToolCalls {
+                        for toolCall in selection.executable {
                             try enforceWallTimeLimit()
                             guard let spec = await toolRegistry.spec(named: toolCall.name) else {
                                 throw ToolRegistryError.toolNotFound(name: toolCall.name)
                             }
                             let activityID = UUID()
                             let activityStartedAt = Date()
-                            let repeatKey = "\(toolCall.name)::\(toolCall.argumentsFragment)"
-                            repeatedToolCalls[repeatKey, default: 0] += 1
-                            guard repeatedToolCalls[repeatKey, default: 0] <= 2 else {
-                                throw AgentError.invalidToolArguments("The agent repeated the same \(toolCall.name) call without making progress.")
-                            }
                             let plannedActivity = Self.activityEvent(
                                 id: activityID,
                                 toolCall: toolCall,
@@ -296,7 +487,9 @@ struct AgentRunner: AgentRuntime {
                             let outputJSON = Self.modelVisibleToolOutput(
                                 invocation: invocation,
                                 spec: spec,
-                                rawOutputJSON: rawOutputJSON
+                                rawOutputJSON: rawOutputJSON,
+                                provider: provider,
+                                executionContext: executionContext
                             )
                             try await auditRepository?.append(
                                 AuditEvent(
@@ -326,9 +519,13 @@ struct AgentRunner: AgentRuntime {
                                 )
                             )
                         }
+                        if let skippedReason = selection.skipped.first?.reason {
+                            try await synthesizeFinalAnswer(reason: skippedReason)
+                            return
+                        }
                     }
 
-                    throw AgentError.stepLimitExceeded
+                    try await synthesizeFinalAnswer(reason: "The agent reached the step limit.")
                 } catch is CancellationError {
                     continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
                     continuation.finish()
@@ -336,6 +533,13 @@ struct AgentRunner: AgentRuntime {
                     continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
                     continuation.finish()
                 } catch {
+                    if isAgentContext, Self.hasToolEvidence(messages) {
+                        let fallback = Self.fallbackAnswer(from: messages, request: request)
+                        continuation.yield(.token(TokenDelta(text: fallback, tokenCount: 1)))
+                        continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                        continuation.finish()
+                        return
+                    }
                     continuation.yield(
                         .failure(
                             InferenceStreamFailure(
@@ -543,7 +747,21 @@ struct AgentRunner: AgentRuntime {
         URL(string: value)?.host ?? value
     }
 
-    private static func modelVisibleToolOutput(invocation: ToolInvocation, spec: AnyToolSpec, rawOutputJSON: String) -> String {
+    private static func modelVisibleToolOutput(
+        invocation: ToolInvocation,
+        spec: AnyToolSpec,
+        rawOutputJSON: String,
+        provider: any InferenceProvider,
+        executionContext: ChatRequest.ExecutionContext
+    ) -> String {
+        if executionContext == .agent,
+           provider.capabilities.local,
+           ["web.search", WebFetchTool.name, "browser.observe", "browser.action"].contains(spec.name) {
+            return AgentEvidenceFormatter.modelVisibleOutput(
+                toolName: spec.name,
+                rawOutputJSON: rawOutputJSON
+            )
+        }
         let untrusted = spec.permissions.contains(.network) || spec.permissions.contains(.browser) || spec.name.hasPrefix("mcp.")
         guard untrusted else {
             return rawOutputJSON
@@ -559,6 +777,17 @@ struct AgentRunner: AgentRuntime {
             return String(decoding: try JSONEncoder().encode(envelope), as: UTF8.self)
         } catch {
             return rawOutputJSON
+        }
+    }
+
+    private static func fallbackAnswer(from messages: [ChatMessage], request: ChatRequest) -> String {
+        let userRequest = request.messages.last(where: { $0.role == .user })?.content ?? ""
+        return AgentEvidenceFormatter.fallbackAnswer(from: messages, userRequest: userRequest)
+    }
+
+    private static func hasToolEvidence(_ messages: [ChatMessage]) -> Bool {
+        messages.contains { message in
+            message.role == .tool && !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 

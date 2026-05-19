@@ -411,10 +411,10 @@ struct SettingsDetailView: View {
             )
             .pinesButtonStyle(.primary, fillWidth: true)
 
+            providerCapabilityPreview(for: providerKind)
+
             if settingsState.isRefreshingCloudModels {
-                Label("Refreshing cloud models", systemImage: "arrow.triangle.2.circlepath")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.secondaryText)
+                PinesStatusChip(status: .running)
             }
 
             ForEach(settingsState.cloudProviders) { provider in
@@ -426,47 +426,110 @@ struct SettingsDetailView: View {
 
     private func providerRow(_ provider: CloudProviderConfiguration) -> some View {
         let isValidating = settingsState.validatingCloudProviderIDs.contains(provider.id)
-        return HStack(spacing: theme.spacing.medium) {
-            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                Text(provider.displayName)
-                    .font(theme.typography.headline)
-                    .pinesFittingText()
-                Text(provider.kind.title)
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.secondaryText)
+        let capabilities = provider.capabilities
+        return VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack(alignment: .top, spacing: theme.spacing.medium) {
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(provider.displayName)
+                        .font(theme.typography.headline)
+                        .pinesFittingText()
+                    Text(provider.kind.title)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: theme.spacing.small)
+
+                PinesStatusChip(status: isValidating ? .running : provider.validationStatus.cloudStatus, compact: true)
+
+                Button {
+                    Task { await appModel.validateCloudProvider(provider, services: services) }
+                } label: {
+                    if isValidating {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "checkmark.seal")
+                    }
+                }
+                .accessibilityLabel("Validate \(provider.displayName)")
+                .disabled(isValidating)
+                .pinesButtonStyle(.icon)
+
+                Button(role: .destructive) {
+                    Task { await appModel.deleteCloudProvider(provider, services: services) }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .accessibilityLabel("Delete \(provider.displayName)")
+                .pinesButtonStyle(.icon)
             }
 
-            Spacer(minLength: theme.spacing.small)
+            PinesMetricPillGroup(items: [
+                .init("Agents", value: provider.enabledForAgents ? "enabled" : "off", systemImage: "person.2.badge.gearshape", tone: provider.enabledForAgents ? .success : .neutral),
+                .init("Models", value: capabilities.textGeneration ? "chat" : "retrieval", systemImage: capabilities.textGeneration ? "text.bubble" : "square.stack.3d.up", tone: capabilities.textGeneration ? .accent : .info),
+                .init("Tools", value: capabilities.toolCalling ? "available" : "off", systemImage: "wrench.and.screwdriver", tone: capabilities.toolCalling ? .success : .neutral)
+            ])
 
-            Text(provider.validationStatus.rawValue)
-                .font(theme.typography.caption.weight(.semibold))
-                .foregroundStyle(provider.validationStatus == .valid ? theme.colors.success : theme.colors.warning)
-                .lineLimit(1)
-                .minimumScaleFactor(0.76)
-
-            Button {
-                Task { await appModel.validateCloudProvider(provider, services: services) }
-            } label: {
-                if isValidating {
-                    ProgressView()
-                } else {
-                    Image(systemName: "checkmark.seal")
+            HStack(spacing: theme.spacing.xsmall) {
+                PinesProviderStorageBadge(kind: .localOnly, compact: true)
+                if capabilities.textDocumentInputs || capabilities.pdfInputs || capabilities.imageInputs {
+                    PinesProviderStorageBadge(kind: .inlineThisTurn, compact: true)
                 }
             }
-            .accessibilityLabel("Validate \(provider.displayName)")
-            .disabled(isValidating)
-            .pinesButtonStyle(.icon)
-
-            Button(role: .destructive) {
-                Task { await appModel.deleteCloudProvider(provider, services: services) }
-            } label: {
-                Image(systemName: "trash")
-            }
-            .accessibilityLabel("Delete \(provider.displayName)")
-            .pinesButtonStyle(.icon)
         }
         .frame(minHeight: theme.row.minHeight)
         .pinesSurface(.inset, padding: theme.spacing.small)
+    }
+
+    private func providerCapabilityPreview(for kind: CloudProviderKind) -> some View {
+        let rows = providerCapabilityRows(for: kind)
+        return VStack(alignment: .leading, spacing: theme.spacing.small) {
+            Text("Capability Preview")
+                .font(theme.typography.headline)
+                .foregroundStyle(theme.colors.primaryText)
+
+            ForEach(rows) { row in
+                PinesCapabilityRow(
+                    title: row.title,
+                    detail: row.detail,
+                    systemImage: row.systemImage,
+                    status: row.status,
+                    secondaryStatus: row.secondaryStatus,
+                    metricItems: row.metrics
+                )
+            }
+        }
+    }
+
+    private func providerCapabilityRows(for kind: CloudProviderKind) -> [ProviderCapabilityPreviewRow] {
+        [
+            .init(
+                title: "Chat and Responses",
+                detail: kind == .voyageAI ? "Retrieval provider; chat generation stays unavailable." : "Text generation, streaming, and provider response metadata scaffolding.",
+                systemImage: kind == .voyageAI ? "square.stack.3d.up" : "text.bubble",
+                status: kind == .voyageAI ? .unavailable : .supported,
+                secondaryStatus: .needsValidation,
+                metrics: [.init("Route", value: kind == .openRouter ? "routed" : "direct", systemImage: "arrow.triangle.branch", tone: kind == .openRouter ? .warning : .accent)]
+            ),
+            .init(
+                title: "Tools and Structured Output",
+                detail: "Hosted tools, function tools, and schema support must be validated per provider/model.",
+                systemImage: "wrench.and.screwdriver",
+                status: (kind == .custom || kind == .voyageAI) ? .unknown : .supported,
+                secondaryStatus: kind == .custom ? .needsValidation : nil,
+                metrics: [.init("Schemas", value: (kind == .custom || kind == .voyageAI) ? "probe" : "available", systemImage: "curlybraces", tone: (kind == .custom || kind == .voyageAI) ? .warning : .success)]
+            ),
+            .init(
+                title: "Files and Provider Storage",
+                detail: "Inline attachments remain separate from provider-hosted files, vector stores, and cached context.",
+                systemImage: "folder.badge.gearshape",
+                status: (kind == .anthropic || kind == .gemini || kind == .openAI) ? .accountGated : .unknown,
+                secondaryStatus: .custom("Explicit storage", .warning),
+                metrics: [.init("Storage", value: "opt-in", systemImage: "lock.shield", tone: .warning)]
+            )
+        ]
     }
 
     @ViewBuilder
@@ -634,11 +697,7 @@ struct SettingsDetailView: View {
 
                 Spacer(minLength: theme.spacing.small)
 
-                Text(server.status.rawValue)
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(server.status == .ready ? theme.colors.success : theme.colors.warning)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.76)
+                PinesStatusChip(status: server.status.cloudStatus, compact: true)
 
                 Button {
                     Task { await appModel.refreshMCPServer(server, services: services) }
@@ -957,6 +1016,20 @@ struct SettingsDetailView: View {
             Text("Activity")
                 .font(theme.typography.headline)
             PinesKeyValueGrid(items: mcpActivityItems(server))
+            PinesToolTimelineRow(
+                title: "Discovery and tool availability",
+                provider: server.displayName,
+                toolType: "MCP streamable HTTP",
+                status: server.status.cloudStatus,
+                inputSummary: server.enabledCapabilityTitles.joined(separator: ", ").nilIfEmpty ?? "Tools only",
+                outputSummary: server.lastConnectedAt.map { "Last connected \($0.formatted(date: .abbreviated, time: .shortened))" },
+                environmentLabel: "Local device",
+                metricItems: [
+                    .init("Auth", value: server.authMode.title, systemImage: "lock", tone: server.authMode == .none ? .neutral : .info),
+                    .init("Sampling", value: server.samplingEnabled ? "on" : "off", systemImage: "waveform.path.ecg", tone: server.samplingEnabled ? .warning : .neutral)
+                ],
+                systemImage: "server.rack"
+            )
             if let error = server.lastError {
                 Text(error)
                     .font(theme.typography.caption)
@@ -1198,6 +1271,32 @@ struct SettingsDetailView: View {
         mcpBYOKSamplingEnabled = false
         mcpSubscriptionsEnabled = false
         mcpMaxSamplingRequests = 3
+    }
+}
+
+private struct ProviderCapabilityPreviewRow: Identifiable {
+    var id: String { title }
+    let title: String
+    let detail: String
+    let systemImage: String
+    let status: PinesCloudStatus
+    let secondaryStatus: PinesCloudStatus?
+    let metrics: [PinesMetricPillGroup.Item]
+
+    init(
+        title: String,
+        detail: String,
+        systemImage: String,
+        status: PinesCloudStatus,
+        secondaryStatus: PinesCloudStatus? = nil,
+        metrics: [PinesMetricPillGroup.Item] = []
+    ) {
+        self.title = title
+        self.detail = detail
+        self.systemImage = systemImage
+        self.status = status
+        self.secondaryStatus = secondaryStatus
+        self.metrics = metrics
     }
 }
 
@@ -1488,6 +1587,40 @@ private extension CloudProviderKind {
         }
     }
 
+}
+
+private extension ProviderValidationStatus {
+    var cloudStatus: PinesCloudStatus {
+        switch self {
+        case .valid:
+            .enabled
+        case .unvalidated:
+            .needsValidation
+        case .invalid:
+            .failed
+        case .rateLimited:
+            .warning("Rate limited")
+        }
+    }
+}
+
+private extension MCPConnectionStatus {
+    var cloudStatus: PinesCloudStatus {
+        switch self {
+        case .ready:
+            .enabled
+        case .connecting:
+            .running
+        case .requiresAuthentication:
+            .accountGated
+        case .degraded:
+            .warning("Degraded")
+        case .failed:
+            .failed
+        case .disconnected:
+            .pending
+        }
+    }
 }
 
 private extension MCPAuthMode {

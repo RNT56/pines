@@ -20,7 +20,7 @@ cat > "$bundle/RELEASE_NOTES.md" <<NOTES
 
 This is a source/developer-preview release for the local-first iOS app foundation. It is not a signed App Store or TestFlight build.
 
-License: PolyForm Noncommercial License 1.0.0. Commercial use requires a separate written license from Schtack.
+License: PolyForm Noncommercial License 1.0.0. Commercial use requires a separate written license from RNT56.
 Third-party dependency notices are documented in THIRD_PARTY_NOTICES.md.
 The GitHub Release includes a CycloneDX SBOM generated from the committed SwiftPM and npm lockfiles.
 

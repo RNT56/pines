@@ -29,6 +29,102 @@ public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public struct OpenAIProviderFileID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct OpenAIVectorStoreID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct OpenAIVectorStoreFileID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct OpenAIResponseID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct OpenAIHostedToolCallID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct OpenAIArtifactID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct OpenAIRealtimeSessionID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
+public struct OpenAIBatchID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public var rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: StringLiteralType) {
+        self.rawValue = value
+    }
+}
+
 public enum CloudProviderHeaderKind: String, Hashable, Codable, Sendable, CaseIterable {
     case publicValue
     case secretReference

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ImageIO
 import PinesCore
 import UniformTypeIdentifiers
@@ -385,6 +386,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         addOpenAIClientRequestID(to: &request)
 
         let payload = try Self.openAIResponsesPayload(from: chatRequest.messages)
+        let instructions = payload.instructions
         let usesReasoningControls = Self.isOpenAIReasoningModelID(chatRequest.modelID)
         var textConfiguration: [String: Any] = [
             "format": ["type": "text"],
@@ -398,6 +400,10 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             "truncation": "auto",
             "text": textConfiguration,
         ]
+        var includeValues = Set<String>()
+        if openAINativeWebSearchEnabled(for: chatRequest) {
+            includeValues.insert("web_search_call.action.sources")
+        }
         if usesReasoningControls {
             body["reasoning"] = [
                 "effort": CloudProviderModelEligibility.openAIReasoningEffort(
@@ -408,15 +414,30 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             textConfiguration["verbosity"] = chatRequest.sampling.openAITextVerbosity.rawValue
             body["text"] = textConfiguration
             if chatRequest.sampling.openAIResponseStorage == .statelessEncrypted {
-                body["include"] = ["reasoning.encrypted_content"]
+                includeValues.insert("reasoning.encrypted_content")
             }
         } else {
             body["temperature"] = chatRequest.sampling.temperature
             body["top_p"] = chatRequest.sampling.topP
         }
+        if !includeValues.isEmpty {
+            body["include"] = includeValues.sorted()
+        }
         if chatRequest.sampling.openAIResponseStorage == .stateful, let previousResponseID = payload.previousResponseID {
             body["previous_response_id"] = previousResponseID
         }
+        let promptCacheKey = openAIPromptCacheKey(for: chatRequest, instructions: instructions)
+        body["metadata"] = [
+            "pines_request_id": chatRequest.id.uuidString,
+            "pines_execution_context": chatRequest.executionContext.rawValue,
+            "pines_prompt_cache_key": promptCacheKey,
+        ]
+        body["prompt_cache_key"] = promptCacheKey
+        body["prompt_cache_retention"] = "24h"
+        body["safety_identifier"] = openAISafetyIdentifier(for: chatRequest)
+        body["service_tier"] = "auto"
+        body["background"] = false
+        body["max_tool_calls"] = chatRequest.executionContext == .agent ? 8 : 4
         let functionTools = chatRequest.allowsTools ? chatRequest.availableTools.map(Self.openAIResponsesFunctionToolObject) : []
         let nativeSearchTools = openAINativeWebSearchEnabled(for: chatRequest) ? [Self.openAIWebSearchToolObject(options: chatRequest.webSearchOptions)] : []
         let responseTools = functionTools + nativeSearchTools
@@ -425,7 +446,6 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             body["tool_choice"] = openAIToolChoice(for: chatRequest, hasFunctionTools: !functionTools.isEmpty, hasNativeSearch: !nativeSearchTools.isEmpty)
             body["parallel_tool_calls"] = false
         }
-        let instructions = payload.instructions
         if !instructions.isEmpty {
             body["instructions"] = instructions
         }
@@ -660,15 +680,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
     private func usesOpenAIResponsesAPI(chatRequest: ChatRequest) -> Bool {
         guard usesOfficialOpenAIAPI else { return false }
-        if Self.isOpenAIReasoningModelID(chatRequest.modelID) || openAINativeWebSearchEnabled(for: chatRequest) {
-            return true
-        }
-        return chatRequest.messages.contains { message in
-            !message.attachments.isEmpty
-                || !message.toolCalls.isEmpty
-                || message.role == .tool
-                || message.providerMetadata[Self.openAIResponseIDMetadataKey]?.isEmpty == false
-        }
+        return true
     }
 
     private func shouldEnableAnthropicPromptCaching(for chatRequest: ChatRequest) -> Bool {
@@ -741,6 +753,31 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         let requested = chatRequest.sampling.maxTokens ?? 1024
         guard usesReasoningParameters else { return requested }
         return max(requested, Self.openAIReasoningDefaultMaxCompletionTokens)
+    }
+
+    private func openAIPromptCacheKey(for chatRequest: ChatRequest, instructions: String) -> String {
+        let firstStableUserText = chatRequest.messages.first { $0.role == .user }?.content ?? ""
+        let rawScope = [
+            configuration.id.rawValue,
+            chatRequest.modelID.rawValue,
+            chatRequest.executionContext.rawValue,
+            String(instructions.prefix(2048)),
+            String(firstStableUserText.prefix(512)),
+        ].joined(separator: "\u{1F}")
+        return "pines_" + Self.sha256Hex(rawScope).prefix(48)
+    }
+
+    private func openAISafetyIdentifier(for chatRequest: ChatRequest) -> String {
+        let rawScope = [
+            "pines",
+            configuration.id.rawValue,
+            chatRequest.executionContext.rawValue,
+        ].joined(separator: "\u{1F}")
+        return String(Self.sha256Hex(rawScope).prefix(64))
+    }
+
+    private static func sha256Hex(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func isOpenAIReasoningModelID(_ modelID: ModelID) -> Bool {

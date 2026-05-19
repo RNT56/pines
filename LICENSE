@@ -1,4 +1,50 @@
-# PolyForm Noncommercial License 1.0.0
+# Pines Project License
+
+Copyright 2026 RNT56 and Pines contributors. All rights reserved.
+
+This repository is source-available for noncommercial use under the PolyForm
+Noncommercial License 1.0.0 (`PolyForm-Noncommercial-1.0.0`).
+
+## Licensed Work
+
+The licensed work is Pines, including the application source code, Swift package
+source code, website source, documentation, tests, scripts, and first-party
+assets made available in this repository by RNT56 and Pines contributors.
+
+The licensed work does not include third-party dependencies, externally
+downloaded model weights, datasets, cloud services, trademarks, service marks,
+or assets that state a different license. Third-party software and dependency
+notices are documented separately in `THIRD_PARTY_NOTICES.md`, and each
+third-party component remains subject to its own license terms.
+
+## License Grant
+
+You may use, copy, modify, and distribute Pines only for noncommercial purposes
+as allowed by the PolyForm Noncommercial License 1.0.0 below. Commercial use is
+not permitted by this license and requires a separate written commercial license
+from RNT56.
+
+For clarity, "commercial use" includes using Pines, modified versions of Pines,
+or substantial parts of Pines to provide paid products or services, support a
+business operation, or otherwise pursue commercial advantage. Nothing in this
+file limits rights you may have under applicable law, including fair use.
+
+## Notices Required With Copies
+
+Every copy or substantial portion of Pines that you distribute must include this
+`LICENSE` file or the PolyForm Noncommercial License 1.0.0 URL below, plus the
+required notices from the repository `NOTICE` file.
+
+Required Notice: Copyright 2026 RNT56 and Pines contributors. All rights reserved.
+Required Notice: Pines is source-available for noncommercial use only under the PolyForm Noncommercial License 1.0.0. Commercial use requires a separate written license from RNT56.
+
+## Contributions
+
+Unless a separate written agreement says otherwise, contributions intentionally
+submitted to this repository are licensed to the project under the same license
+terms that apply to the repository: PolyForm Noncommercial License 1.0.0.
+
+## PolyForm Noncommercial License 1.0.0
 
 <https://polyformproject.org/licenses/noncommercial/1.0.0>
 

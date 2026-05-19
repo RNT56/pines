@@ -205,24 +205,8 @@ jobs:
         # actions/checkout v6.0.2
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
-      - name: Select Xcode with iPhoneOS SDK
-        run: |
-          selected=""
-          for xcode in /Applications/Xcode*.app; do
-            [ -d "$xcode" ] || continue
-            sudo xcode-select -s "$xcode"
-            if xcodebuild -showsdks | grep -q 'iphoneos'; then
-              selected="$xcode"
-              break
-            fi
-          done
-          if [ -z "$selected" ]; then
-            echo "No installed Xcode with an iPhoneOS SDK was found." >&2
-            exit 1
-          fi
-          echo "Selected $selected"
-          xcodebuild -version
-          xcodebuild -showsdks
+      - name: Select Xcode and Metal toolchain
+        run: bash scripts/ci/select-xcode.sh
 
       - name: Prepare pinned XcodeGen
         run: bash scripts/ci/xcodegen.sh --version

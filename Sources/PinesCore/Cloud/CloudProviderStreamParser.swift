@@ -8,6 +8,17 @@ public enum CloudProviderMetadataKeys {
     public static let openAIModel = "openai.model"
     public static let openAISystemFingerprint = "openai.system_fingerprint"
     public static let openAIOutputItemsJSON = "openai.output_items_json"
+    public static let openAIResponseStatus = "openai.response.status"
+    public static let openAIResponsePreviousID = "openai.response.previous_id"
+    public static let openAIResponseServiceTier = "openai.response.service_tier"
+    public static let openAIResponseStored = "openai.response.stored"
+    public static let openAIResponseIncompleteReason = "openai.response.incomplete_reason"
+    public static let openAIReasoningTokens = "openai.usage.reasoning_tokens"
+    public static let openAICachedInputTokens = "openai.usage.cached_input_tokens"
+    public static let openAIPromptCacheKey = "openai.prompt_cache_key"
+    public static let openAIHostedToolCallsJSON = "openai.hosted_tool_calls_json"
+    public static let openAIFileSearchResultsJSON = "openai.file_search.results_json"
+    public static let openAIArtifactsJSON = "openai.artifacts_json"
     public static let webSearchCitationsJSON = "pines.web_search.citations_json"
     public static let webSearchQueriesJSON = "pines.web_search.queries_json"
     public static let webSearchSuggestionsHTML = "pines.web_search.suggestions_html"
@@ -869,6 +880,9 @@ public struct CloudProviderStreamState {
     public var openAIResponsesEventTypes = Set<String>()
     public var openAIProviderMetadata = [String: String]()
     public var completedOpenAIToolCallIDs = Set<String>()
+    public var openAIHostedToolCalls = [[String: Any]]()
+    public var openAIFileSearchResults = [[String: Any]]()
+    public var openAIArtifacts = [[String: Any]]()
 
     public var anthropicToolIndex: Int?
     public var anthropicToolID: String?
@@ -980,6 +994,119 @@ public struct CloudProviderStreamState {
             }
         }
         return queries
+    }
+
+    private static func openAIHostedToolCalls(from response: [String: Any]) -> [[String: Any]] {
+        (response["output"] as? [[String: Any]] ?? []).compactMap(openAIHostedToolCallSummary(from:))
+    }
+
+    private static func openAIHostedToolCallSummary(from item: [String: Any]) -> [String: Any]? {
+        guard let type = item["type"] as? String,
+              Self.openAIHostedToolTypes.contains(type)
+        else { return nil }
+        var summary: [String: Any] = [
+            "id": stringValue(item["id"]) ?? "",
+            "type": type,
+            "status": stringValue(item["status"]) ?? "",
+        ]
+        if let action = item["action"] as? [String: Any] {
+            summary["action"] = action
+        }
+        if let containerID = stringValue(item["container_id"]) {
+            summary["container_id"] = containerID
+        }
+        if let revisedPrompt = stringValue(item["revised_prompt"]) {
+            summary["revised_prompt"] = revisedPrompt
+        }
+        if let toolName = stringValue(item["name"]) {
+            summary["name"] = toolName
+        }
+        return summary
+    }
+
+    private static let openAIHostedToolTypes: Set<String> = [
+        "web_search_call",
+        "file_search_call",
+        "code_interpreter_call",
+        "image_generation_call",
+        "computer_call",
+        "computer_call_output",
+        "mcp_call",
+        "mcp_list_tools",
+        "tool_search_call",
+        "shell_call",
+    ]
+
+    private static func openAIFileSearchResults(from response: [String: Any]) -> [[String: Any]] {
+        (response["output"] as? [[String: Any]] ?? []).flatMap { item -> [[String: Any]] in
+            guard item["type"] as? String == "file_search_call" else { return [] }
+            if let results = item["results"] as? [[String: Any]] {
+                return results
+            }
+            if let result = item["result"] as? [String: Any] {
+                return [result]
+            }
+            return []
+        }
+    }
+
+    private static func openAIArtifacts(from response: [String: Any]) -> [[String: Any]] {
+        var artifacts = [[String: Any]]()
+        for item in response["output"] as? [[String: Any]] ?? [] {
+            if let artifact = openAIArtifactSummary(from: item) {
+                artifacts.append(artifact)
+            }
+            for content in item["content"] as? [[String: Any]] ?? [] {
+                artifacts.append(contentsOf: openAIArtifacts(fromAnnotations: content["annotations"]))
+            }
+        }
+        return artifacts
+    }
+
+    private static func openAIArtifactSummary(from item: [String: Any]) -> [String: Any]? {
+        guard let type = item["type"] as? String else { return nil }
+        if type == "image_generation_call" {
+            var artifact: [String: Any] = [
+                "type": "image",
+                "provider_item_id": stringValue(item["id"]) ?? "",
+                "status": stringValue(item["status"]) ?? "",
+            ]
+            if let revisedPrompt = stringValue(item["revised_prompt"]) {
+                artifact["prompt"] = revisedPrompt
+            }
+            if let result = stringValue(item["result"]), !result.isEmpty {
+                artifact["encoding"] = "base64"
+                artifact["byte_hint"] = result.count
+            }
+            return artifact
+        }
+        if type == "code_interpreter_call" {
+            var artifact: [String: Any] = [
+                "type": "code_interpreter",
+                "provider_item_id": stringValue(item["id"]) ?? "",
+                "status": stringValue(item["status"]) ?? "",
+            ]
+            if let containerID = stringValue(item["container_id"]) {
+                artifact["container_id"] = containerID
+            }
+            if let outputs = item["outputs"] as? [[String: Any]] {
+                artifact["outputs"] = outputs
+            }
+            return artifact
+        }
+        return nil
+    }
+
+    private static func openAIArtifacts(fromAnnotations value: Any?) -> [[String: Any]] {
+        (value as? [[String: Any]] ?? []).compactMap { annotation in
+            guard annotation["type"] as? String == "container_file_citation" else { return nil }
+            return [
+                "type": "container_file",
+                "container_id": stringValue(annotation["container_id"]) ?? "",
+                "file_id": stringValue(annotation["file_id"]) ?? "",
+                "filename": stringValue(annotation["filename"]) ?? "",
+            ]
+        }
     }
 
     private static func anthropicWebSearchCitations(from value: [String: Any]) -> [WebSearchCitation] {
@@ -1147,6 +1274,36 @@ public struct CloudProviderStreamState {
         if let responseID = response["id"] as? String, !responseID.isEmpty {
             openAIProviderMetadata[CloudProviderMetadataKeys.openAIResponseID] = responseID
         }
+        if let status = response["status"] as? String, !status.isEmpty {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIResponseStatus] = status
+        }
+        if let previousResponseID = response["previous_response_id"] as? String, !previousResponseID.isEmpty {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIResponsePreviousID] = previousResponseID
+        }
+        if let serviceTier = response["service_tier"] as? String, !serviceTier.isEmpty {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIResponseServiceTier] = serviceTier
+        }
+        if let stored = response["store"] as? Bool {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIResponseStored] = String(stored)
+        }
+        if let incompleteDetails = response["incomplete_details"] as? [String: Any],
+           let reason = incompleteDetails["reason"] as? String,
+           !reason.isEmpty {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIResponseIncompleteReason] = reason
+        }
+        if let usage = response["usage"] as? [String: Any] {
+            if let reasoningTokens = Self.openAIUsageDetailTokenCount(usage, detailKeys: ["output_tokens_details", "completion_tokens_details"], tokenKey: "reasoning_tokens") {
+                openAIProviderMetadata[CloudProviderMetadataKeys.openAIReasoningTokens] = String(reasoningTokens)
+            }
+            if let cachedInputTokens = Self.openAIUsageDetailTokenCount(usage, detailKeys: ["input_tokens_details", "prompt_tokens_details"], tokenKey: "cached_tokens") {
+                openAIProviderMetadata[CloudProviderMetadataKeys.openAICachedInputTokens] = String(cachedInputTokens)
+            }
+        }
+        if let metadata = response["metadata"] as? [String: Any],
+           let promptCacheKey = metadata["pines_prompt_cache_key"] as? String,
+           !promptCacheKey.isEmpty {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIPromptCacheKey] = promptCacheKey
+        }
         if let requestID = response["_request_id"] as? String, !requestID.isEmpty {
             openAIProviderMetadata[CloudProviderMetadataKeys.openAIRequestID] = requestID
         }
@@ -1159,6 +1316,64 @@ public struct CloudProviderStreamState {
         }
         Self.recordSearchCitations(Self.openAIWebSearchCitations(from: response), into: &openAIProviderMetadata)
         Self.recordSearchQueries(Self.openAIWebSearchQueries(from: response), into: &openAIProviderMetadata)
+        recordOpenAIHostedToolCalls(Self.openAIHostedToolCalls(from: response))
+        recordOpenAIFileSearchResults(Self.openAIFileSearchResults(from: response))
+        recordOpenAIArtifacts(Self.openAIArtifacts(from: response))
+    }
+
+    private static func openAIUsageDetailTokenCount(_ usage: [String: Any], detailKeys: [String], tokenKey: String) -> Int? {
+        for detailKey in detailKeys {
+            if let details = usage[detailKey] as? [String: Any] {
+                let value = intValue(details[tokenKey])
+                if value > 0 {
+                    return value
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func intValue(_ value: Any?) -> Int {
+        if let value = value as? Int {
+            return value
+        }
+        if let value = value as? NSNumber {
+            return value.intValue
+        }
+        return 0
+    }
+
+    public mutating func recordOpenAIHostedToolCalls(_ calls: [[String: Any]]) {
+        openAIHostedToolCalls = Self.appendingJSONObjectSummaries(calls, to: openAIHostedToolCalls)
+        if let json = Self.jsonString(fromJSONObjectSummaries: openAIHostedToolCalls) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON] = json
+        }
+    }
+
+    public mutating func recordOpenAIFileSearchResults(_ results: [[String: Any]]) {
+        openAIFileSearchResults = Self.appendingJSONObjectSummaries(results, to: openAIFileSearchResults)
+        if let json = Self.jsonString(fromJSONObjectSummaries: openAIFileSearchResults) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON] = json
+        }
+    }
+
+    public mutating func recordOpenAIArtifacts(_ artifacts: [[String: Any]]) {
+        openAIArtifacts = Self.appendingJSONObjectSummaries(artifacts, to: openAIArtifacts)
+        if let json = Self.jsonString(fromJSONObjectSummaries: openAIArtifacts) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIArtifactsJSON] = json
+        }
+    }
+
+    private static func appendingJSONObjectSummaries(_ values: [[String: Any]], to storage: [[String: Any]]) -> [[String: Any]] {
+        guard !values.isEmpty else { return storage }
+        return Array((storage + values).prefix(64))
+    }
+
+    private static func jsonString(fromJSONObjectSummaries summaries: [[String: Any]]) -> String? {
+        guard JSONSerialization.isValidJSONObject(summaries),
+              let data = try? JSONSerialization.data(withJSONObject: summaries)
+        else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     public mutating func markOpenAIToolCallCompleted(_ toolCall: ToolCallDelta) -> Bool {

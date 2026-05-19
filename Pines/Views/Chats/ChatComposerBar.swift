@@ -9,6 +9,7 @@ struct ChatComposerBar: View {
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var chatState: PinesChatState
+    @EnvironmentObject private var modelState: PinesModelState
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var draft = ""
@@ -111,6 +112,15 @@ struct ChatComposerBar: View {
             refreshAgentToolsIfNeeded(force: true)
         }
         .onChange(of: settingsState.braveSearchCredentialStatus) { _, _ in
+            refreshAgentToolsIfNeeded(force: true)
+        }
+        .onChange(of: modelState.defaultProviderID) { _, _ in
+            refreshAgentToolsIfNeeded(force: true)
+        }
+        .onChange(of: modelState.defaultModelID) { _, _ in
+            refreshAgentToolsIfNeeded(force: true)
+        }
+        .onChange(of: currentAgentToolSelectionID) { _, _ in
             refreshAgentToolsIfNeeded(force: true)
         }
     }
@@ -331,6 +341,13 @@ struct ChatComposerBar: View {
         appModel.chatQuickSettingsAvailability(for: threadID, services: services)
     }
 
+    private var currentAgentToolSelectionID: String {
+        guard let selection = appModel.currentModelSelection(for: threadID, services: services) else {
+            return "none"
+        }
+        return "\(selection.providerID.rawValue)::\(selection.modelID.rawValue)"
+    }
+
     private func sendDraft() {
         guard canSend else { return }
         let pending = draft
@@ -363,7 +380,7 @@ struct ChatComposerBar: View {
         guard !isRefreshingAgentTools else { return }
         isRefreshingAgentTools = true
         Task {
-            let specs = await appModel.agentToolSpecs(services: services)
+            let specs = await appModel.agentToolSpecs(services: services, conversationID: threadID)
             await MainActor.run {
                 agentToolSpecs = specs
                 disabledAgentToolNames.formIntersection(Set(specs.map(\.name)))

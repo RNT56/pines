@@ -40,23 +40,8 @@ jobs:
           build-mode: manual
           queries: security-and-quality
 
-      - name: Select Xcode with iPhoneOS SDK
-        run: |
-          selected=""
-          for xcode in /Applications/Xcode*.app; do
-            [ -d "$xcode" ] || continue
-            sudo xcode-select -s "$xcode"
-            if xcodebuild -showsdks | grep -q 'iphoneos'; then
-              selected="$xcode"
-              break
-            fi
-          done
-          if [ -z "$selected" ]; then
-            echo "No installed Xcode with an iPhoneOS SDK was found." >&2
-            exit 1
-          fi
-          echo "Selected $selected"
-          xcodebuild -version
+      - name: Select Xcode and Metal toolchain
+        run: bash scripts/ci/select-xcode.sh
 
       - name: Prepare Xcode build inputs
         run: |
@@ -65,6 +50,9 @@ jobs:
           bash scripts/ci/run-xcode-validation.sh prepare
           bash scripts/ci/run-xcode-validation.sh generate
           bash scripts/ci/run-xcode-validation.sh resolve
+
+      - name: Prepare CodeQL Metal tools
+        run: bash scripts/ci/prepare-codeql-metal-tools.sh
 
       - name: Build app for CodeQL
         run: bash scripts/ci/run-xcode-validation.sh build-app
