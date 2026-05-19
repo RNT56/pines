@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 13
+    public static let currentVersion = 14
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -631,6 +631,188 @@ public enum PinesDatabaseSchema {
                 ''
             );
             """,
+        ]),
+        DatabaseMigration(version: 14, name: "openai-parity-contracts", sql: [
+            "ALTER TABLE chat_runs ADD COLUMN provider_kind TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN provider_base_url TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN provider_request_id TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN provider_response_id TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN parent_response_id TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN background_response_id TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN batch_id TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN realtime_session_id TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN structured_output_result_id TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN used_responses_api INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE chat_runs ADD COLUMN response_storage TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN web_search_mode TEXT;",
+            "ALTER TABLE chat_runs ADD COLUMN provider_metadata_json TEXT;",
+            """
+            CREATE TABLE IF NOT EXISTS openai_provider_files (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                content_type TEXT,
+                byte_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                sha256 TEXT,
+                local_path TEXT,
+                provider_object TEXT,
+                provider_metadata_json TEXT,
+                created_at REAL NOT NULL,
+                expires_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS openai_vector_stores (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                name TEXT,
+                status TEXT NOT NULL,
+                file_counts_json TEXT NOT NULL,
+                usage_bytes INTEGER NOT NULL DEFAULT 0,
+                expiration_policy_json TEXT,
+                metadata_json TEXT,
+                created_at REAL NOT NULL,
+                expires_at REAL,
+                last_active_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS openai_vector_store_files (
+                id TEXT PRIMARY KEY NOT NULL,
+                vector_store_id TEXT NOT NULL REFERENCES openai_vector_stores(id) ON DELETE CASCADE,
+                provider_file_id TEXT NOT NULL REFERENCES openai_provider_files(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                usage_bytes INTEGER NOT NULL DEFAULT 0,
+                chunking_strategy_json TEXT,
+                attributes_json TEXT,
+                created_at REAL NOT NULL,
+                completed_at REAL,
+                last_error TEXT,
+                UNIQUE(vector_store_id, provider_file_id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS openai_hosted_tool_calls (
+                id TEXT PRIMARY KEY NOT NULL,
+                response_id TEXT,
+                chat_run_id TEXT REFERENCES chat_runs(id) ON DELETE SET NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                name TEXT,
+                input_json TEXT,
+                output_json TEXT,
+                provider_metadata_json TEXT,
+                created_at REAL NOT NULL,
+                completed_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS openai_artifacts (
+                id TEXT PRIMARY KEY NOT NULL,
+                response_id TEXT,
+                hosted_tool_call_id TEXT REFERENCES openai_hosted_tool_calls(id) ON DELETE SET NULL,
+                provider_file_id TEXT REFERENCES openai_provider_files(id) ON DELETE SET NULL,
+                kind TEXT NOT NULL,
+                file_name TEXT,
+                content_type TEXT,
+                byte_count INTEGER,
+                text TEXT,
+                content_json TEXT,
+                local_path TEXT,
+                remote_url TEXT,
+                created_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS openai_background_responses (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+                chat_run_id TEXT REFERENCES chat_runs(id) ON DELETE SET NULL,
+                previous_response_id TEXT,
+                output_items_json TEXT,
+                provider_metadata_json TEXT,
+                created_at REAL NOT NULL,
+                completed_at REAL,
+                last_polled_at REAL,
+                expires_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS openai_realtime_sessions (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                modalities_json TEXT NOT NULL,
+                voice TEXT,
+                input_audio_format TEXT,
+                output_audio_format TEXT,
+                client_secret_keychain_account TEXT,
+                expires_at REAL,
+                provider_metadata_json TEXT,
+                created_at REAL NOT NULL,
+                closed_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS openai_batch_jobs (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                input_file_id TEXT NOT NULL REFERENCES openai_provider_files(id) ON DELETE RESTRICT,
+                output_file_id TEXT REFERENCES openai_provider_files(id) ON DELETE SET NULL,
+                error_file_id TEXT REFERENCES openai_provider_files(id) ON DELETE SET NULL,
+                completion_window TEXT NOT NULL,
+                request_counts_json TEXT NOT NULL,
+                metadata_json TEXT,
+                created_at REAL NOT NULL,
+                in_progress_at REAL,
+                finalizing_at REAL,
+                completed_at REAL,
+                failed_at REAL,
+                expired_at REAL,
+                cancelled_at REAL,
+                expires_at REAL,
+                last_error TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS openai_structured_output_results (
+                id TEXT PRIMARY KEY NOT NULL,
+                response_id TEXT,
+                message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+                schema_name TEXT,
+                schema_json TEXT,
+                content_json TEXT,
+                refusal TEXT,
+                incomplete_reason TEXT,
+                validation_errors_json TEXT,
+                status TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_chat_runs_provider_response ON chat_runs(provider_response_id);",
+            "CREATE INDEX IF NOT EXISTS idx_chat_runs_background_response ON chat_runs(background_response_id);",
+            "CREATE INDEX IF NOT EXISTS idx_openai_provider_files_provider ON openai_provider_files(provider_id, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_openai_vector_stores_provider ON openai_vector_stores(provider_id, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_openai_vector_store_files_store ON openai_vector_store_files(vector_store_id, status);",
+            "CREATE INDEX IF NOT EXISTS idx_openai_hosted_tool_calls_response ON openai_hosted_tool_calls(response_id, created_at);",
+            "CREATE INDEX IF NOT EXISTS idx_openai_artifacts_response ON openai_artifacts(response_id, created_at);",
+            "CREATE INDEX IF NOT EXISTS idx_openai_background_responses_status ON openai_background_responses(status, last_polled_at);",
+            "CREATE INDEX IF NOT EXISTS idx_openai_realtime_sessions_provider ON openai_realtime_sessions(provider_id, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_openai_batch_jobs_provider ON openai_batch_jobs(provider_id, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_openai_structured_output_results_response ON openai_structured_output_results(response_id);",
         ]),
     ]
 }

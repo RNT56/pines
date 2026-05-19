@@ -229,6 +229,572 @@ public struct ProviderValidationResult: Hashable, Codable, Sendable {
     }
 }
 
+public enum OpenAIProviderFilePurpose: String, Hashable, Codable, Sendable, CaseIterable {
+    case assistants
+    case batch
+    case fineTune
+    case vision
+    case userData
+    case evals
+    case other
+}
+
+public enum OpenAIProviderFileStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case uploaded
+    case processed
+    case error
+    case deleting
+    case deleted
+}
+
+public struct OpenAIProviderFile: Identifiable, Hashable, Codable, Sendable {
+    public var id: OpenAIProviderFileID
+    public var providerID: ProviderID
+    public var purpose: OpenAIProviderFilePurpose
+    public var fileName: String
+    public var contentType: String?
+    public var byteCount: Int64
+    public var status: OpenAIProviderFileStatus
+    public var sha256: String?
+    public var localURL: URL?
+    public var providerObject: String?
+    public var providerMetadata: [String: String]
+    public var createdAt: Date
+    public var expiresAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: OpenAIProviderFileID,
+        providerID: ProviderID,
+        purpose: OpenAIProviderFilePurpose,
+        fileName: String,
+        contentType: String? = nil,
+        byteCount: Int64 = 0,
+        status: OpenAIProviderFileStatus = .uploaded,
+        sha256: String? = nil,
+        localURL: URL? = nil,
+        providerObject: String? = nil,
+        providerMetadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        expiresAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.purpose = purpose
+        self.fileName = fileName
+        self.contentType = contentType
+        self.byteCount = byteCount
+        self.status = status
+        self.sha256 = sha256
+        self.localURL = localURL
+        self.providerObject = providerObject
+        self.providerMetadata = providerMetadata
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.lastError = lastError
+    }
+}
+
+public enum OpenAIVectorStoreStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case inProgress
+    case completed
+    case expired
+    case failed
+    case cancelled
+}
+
+public struct OpenAIVectorStoreFileCounts: Hashable, Codable, Sendable {
+    public var inProgress: Int
+    public var completed: Int
+    public var failed: Int
+    public var cancelled: Int
+    public var total: Int
+
+    public init(inProgress: Int = 0, completed: Int = 0, failed: Int = 0, cancelled: Int = 0, total: Int = 0) {
+        self.inProgress = inProgress
+        self.completed = completed
+        self.failed = failed
+        self.cancelled = cancelled
+        self.total = total
+    }
+}
+
+public struct OpenAIVectorStoreExpirationPolicy: Hashable, Codable, Sendable {
+    public enum Anchor: String, Hashable, Codable, Sendable, CaseIterable {
+        case lastActiveAt
+        case createdAt
+    }
+
+    public var anchor: Anchor
+    public var days: Int
+
+    public init(anchor: Anchor = .lastActiveAt, days: Int) {
+        self.anchor = anchor
+        self.days = max(1, days)
+    }
+}
+
+public struct OpenAIVectorStore: Identifiable, Hashable, Codable, Sendable {
+    public var id: OpenAIVectorStoreID
+    public var providerID: ProviderID
+    public var name: String?
+    public var status: OpenAIVectorStoreStatus
+    public var fileCounts: OpenAIVectorStoreFileCounts
+    public var usageBytes: Int64
+    public var expirationPolicy: OpenAIVectorStoreExpirationPolicy?
+    public var metadata: [String: String]
+    public var createdAt: Date
+    public var expiresAt: Date?
+    public var lastActiveAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: OpenAIVectorStoreID,
+        providerID: ProviderID,
+        name: String? = nil,
+        status: OpenAIVectorStoreStatus = .inProgress,
+        fileCounts: OpenAIVectorStoreFileCounts = .init(),
+        usageBytes: Int64 = 0,
+        expirationPolicy: OpenAIVectorStoreExpirationPolicy? = nil,
+        metadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        expiresAt: Date? = nil,
+        lastActiveAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.name = name
+        self.status = status
+        self.fileCounts = fileCounts
+        self.usageBytes = usageBytes
+        self.expirationPolicy = expirationPolicy
+        self.metadata = metadata
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.lastActiveAt = lastActiveAt
+        self.lastError = lastError
+    }
+}
+
+public enum OpenAIVectorStoreFileStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case inProgress
+    case completed
+    case failed
+    case cancelled
+}
+
+public struct OpenAIVectorStoreFile: Identifiable, Hashable, Codable, Sendable {
+    public var id: OpenAIVectorStoreFileID
+    public var vectorStoreID: OpenAIVectorStoreID
+    public var providerFileID: OpenAIProviderFileID
+    public var status: OpenAIVectorStoreFileStatus
+    public var usageBytes: Int64
+    public var chunkingStrategy: JSONValue?
+    public var attributes: [String: String]
+    public var createdAt: Date
+    public var completedAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: OpenAIVectorStoreFileID,
+        vectorStoreID: OpenAIVectorStoreID,
+        providerFileID: OpenAIProviderFileID,
+        status: OpenAIVectorStoreFileStatus = .inProgress,
+        usageBytes: Int64 = 0,
+        chunkingStrategy: JSONValue? = nil,
+        attributes: [String: String] = [:],
+        createdAt: Date = Date(),
+        completedAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.vectorStoreID = vectorStoreID
+        self.providerFileID = providerFileID
+        self.status = status
+        self.usageBytes = usageBytes
+        self.chunkingStrategy = chunkingStrategy
+        self.attributes = attributes
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+        self.lastError = lastError
+    }
+}
+
+public enum OpenAIHostedToolCallStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case queued
+    case inProgress
+    case completed
+    case failed
+    case cancelled
+    case requiresAction
+}
+
+public struct OpenAIHostedToolCall: Identifiable, Hashable, Codable, Sendable {
+    public var id: OpenAIHostedToolCallID
+    public var responseID: OpenAIResponseID?
+    public var chatRunID: UUID?
+    public var kind: OpenAIHostedToolKind
+    public var status: OpenAIHostedToolCallStatus
+    public var name: String?
+    public var input: JSONValue?
+    public var output: JSONValue?
+    public var providerMetadata: [String: String]
+    public var createdAt: Date
+    public var completedAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: OpenAIHostedToolCallID,
+        responseID: OpenAIResponseID? = nil,
+        chatRunID: UUID? = nil,
+        kind: OpenAIHostedToolKind,
+        status: OpenAIHostedToolCallStatus = .queued,
+        name: String? = nil,
+        input: JSONValue? = nil,
+        output: JSONValue? = nil,
+        providerMetadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        completedAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.responseID = responseID
+        self.chatRunID = chatRunID
+        self.kind = kind
+        self.status = status
+        self.name = name
+        self.input = input
+        self.output = output
+        self.providerMetadata = providerMetadata
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+        self.lastError = lastError
+    }
+}
+
+public enum OpenAIArtifactKind: String, Hashable, Codable, Sendable, CaseIterable {
+    case outputText
+    case structuredOutput
+    case image
+    case audio
+    case transcript
+    case code
+    case file
+    case toolOutput
+}
+
+public struct OpenAIArtifact: Identifiable, Hashable, Codable, Sendable {
+    public var id: OpenAIArtifactID
+    public var responseID: OpenAIResponseID?
+    public var hostedToolCallID: OpenAIHostedToolCallID?
+    public var providerFileID: OpenAIProviderFileID?
+    public var kind: OpenAIArtifactKind
+    public var fileName: String?
+    public var contentType: String?
+    public var byteCount: Int64?
+    public var text: String?
+    public var content: JSONValue?
+    public var localURL: URL?
+    public var remoteURL: URL?
+    public var createdAt: Date
+
+    public init(
+        id: OpenAIArtifactID,
+        responseID: OpenAIResponseID? = nil,
+        hostedToolCallID: OpenAIHostedToolCallID? = nil,
+        providerFileID: OpenAIProviderFileID? = nil,
+        kind: OpenAIArtifactKind,
+        fileName: String? = nil,
+        contentType: String? = nil,
+        byteCount: Int64? = nil,
+        text: String? = nil,
+        content: JSONValue? = nil,
+        localURL: URL? = nil,
+        remoteURL: URL? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.responseID = responseID
+        self.hostedToolCallID = hostedToolCallID
+        self.providerFileID = providerFileID
+        self.kind = kind
+        self.fileName = fileName
+        self.contentType = contentType
+        self.byteCount = byteCount
+        self.text = text
+        self.content = content
+        self.localURL = localURL
+        self.remoteURL = remoteURL
+        self.createdAt = createdAt
+    }
+}
+
+public enum OpenAIBackgroundResponseStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case queued
+    case inProgress
+    case completed
+    case failed
+    case cancelled
+    case expired
+    case requiresAction
+}
+
+public struct OpenAIBackgroundResponse: Identifiable, Hashable, Codable, Sendable {
+    public var id: OpenAIResponseID
+    public var providerID: ProviderID
+    public var modelID: ModelID
+    public var status: OpenAIBackgroundResponseStatus
+    public var conversationID: UUID?
+    public var chatRunID: UUID?
+    public var previousResponseID: OpenAIResponseID?
+    public var outputItems: JSONValue?
+    public var providerMetadata: [String: String]
+    public var createdAt: Date
+    public var completedAt: Date?
+    public var lastPolledAt: Date?
+    public var expiresAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: OpenAIResponseID,
+        providerID: ProviderID,
+        modelID: ModelID,
+        status: OpenAIBackgroundResponseStatus = .queued,
+        conversationID: UUID? = nil,
+        chatRunID: UUID? = nil,
+        previousResponseID: OpenAIResponseID? = nil,
+        outputItems: JSONValue? = nil,
+        providerMetadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        completedAt: Date? = nil,
+        lastPolledAt: Date? = nil,
+        expiresAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.modelID = modelID
+        self.status = status
+        self.conversationID = conversationID
+        self.chatRunID = chatRunID
+        self.previousResponseID = previousResponseID
+        self.outputItems = outputItems
+        self.providerMetadata = providerMetadata
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+        self.lastPolledAt = lastPolledAt
+        self.expiresAt = expiresAt
+        self.lastError = lastError
+    }
+}
+
+public enum OpenAIRealtimeSessionStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case created
+    case active
+    case closing
+    case closed
+    case failed
+    case expired
+}
+
+public enum OpenAIRealtimeModality: String, Hashable, Codable, Sendable, CaseIterable {
+    case text
+    case audio
+    case image
+}
+
+public struct OpenAIRealtimeSession: Identifiable, Hashable, Codable, Sendable {
+    public var id: OpenAIRealtimeSessionID
+    public var providerID: ProviderID
+    public var modelID: ModelID
+    public var status: OpenAIRealtimeSessionStatus
+    public var modalities: [OpenAIRealtimeModality]
+    public var voice: String?
+    public var inputAudioFormat: String?
+    public var outputAudioFormat: String?
+    public var clientSecretKeychainAccount: String?
+    public var expiresAt: Date?
+    public var providerMetadata: [String: String]
+    public var createdAt: Date
+    public var closedAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: OpenAIRealtimeSessionID,
+        providerID: ProviderID,
+        modelID: ModelID,
+        status: OpenAIRealtimeSessionStatus = .created,
+        modalities: [OpenAIRealtimeModality] = [.text],
+        voice: String? = nil,
+        inputAudioFormat: String? = nil,
+        outputAudioFormat: String? = nil,
+        clientSecretKeychainAccount: String? = nil,
+        expiresAt: Date? = nil,
+        providerMetadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        closedAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.modelID = modelID
+        self.status = status
+        self.modalities = modalities
+        self.voice = voice
+        self.inputAudioFormat = inputAudioFormat
+        self.outputAudioFormat = outputAudioFormat
+        self.clientSecretKeychainAccount = clientSecretKeychainAccount
+        self.expiresAt = expiresAt
+        self.providerMetadata = providerMetadata
+        self.createdAt = createdAt
+        self.closedAt = closedAt
+        self.lastError = lastError
+    }
+}
+
+public enum OpenAIBatchEndpoint: String, Hashable, Codable, Sendable, CaseIterable {
+    case responses = "/v1/responses"
+    case chatCompletions = "/v1/chat/completions"
+    case embeddings = "/v1/embeddings"
+    case completions = "/v1/completions"
+}
+
+public enum OpenAIBatchJobStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case validating
+    case failed
+    case inProgress
+    case finalizing
+    case completed
+    case expired
+    case cancelling
+    case cancelled
+}
+
+public struct OpenAIBatchRequestCounts: Hashable, Codable, Sendable {
+    public var total: Int
+    public var completed: Int
+    public var failed: Int
+
+    public init(total: Int = 0, completed: Int = 0, failed: Int = 0) {
+        self.total = total
+        self.completed = completed
+        self.failed = failed
+    }
+}
+
+public struct OpenAIBatchJob: Identifiable, Hashable, Codable, Sendable {
+    public var id: OpenAIBatchID
+    public var providerID: ProviderID
+    public var endpoint: OpenAIBatchEndpoint
+    public var status: OpenAIBatchJobStatus
+    public var inputFileID: OpenAIProviderFileID
+    public var outputFileID: OpenAIProviderFileID?
+    public var errorFileID: OpenAIProviderFileID?
+    public var completionWindow: String
+    public var requestCounts: OpenAIBatchRequestCounts
+    public var metadata: [String: String]
+    public var createdAt: Date
+    public var inProgressAt: Date?
+    public var finalizingAt: Date?
+    public var completedAt: Date?
+    public var failedAt: Date?
+    public var expiredAt: Date?
+    public var cancelledAt: Date?
+    public var expiresAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: OpenAIBatchID,
+        providerID: ProviderID,
+        endpoint: OpenAIBatchEndpoint,
+        status: OpenAIBatchJobStatus = .validating,
+        inputFileID: OpenAIProviderFileID,
+        outputFileID: OpenAIProviderFileID? = nil,
+        errorFileID: OpenAIProviderFileID? = nil,
+        completionWindow: String = "24h",
+        requestCounts: OpenAIBatchRequestCounts = .init(),
+        metadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        inProgressAt: Date? = nil,
+        finalizingAt: Date? = nil,
+        completedAt: Date? = nil,
+        failedAt: Date? = nil,
+        expiredAt: Date? = nil,
+        cancelledAt: Date? = nil,
+        expiresAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.endpoint = endpoint
+        self.status = status
+        self.inputFileID = inputFileID
+        self.outputFileID = outputFileID
+        self.errorFileID = errorFileID
+        self.completionWindow = completionWindow
+        self.requestCounts = requestCounts
+        self.metadata = metadata
+        self.createdAt = createdAt
+        self.inProgressAt = inProgressAt
+        self.finalizingAt = finalizingAt
+        self.completedAt = completedAt
+        self.failedAt = failedAt
+        self.expiredAt = expiredAt
+        self.cancelledAt = cancelledAt
+        self.expiresAt = expiresAt
+        self.lastError = lastError
+    }
+}
+
+public enum OpenAIStructuredOutputResultStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case parsed
+    case refused
+    case incomplete
+    case invalid
+}
+
+public struct OpenAIStructuredOutputResult: Identifiable, Hashable, Codable, Sendable {
+    public var id: UUID
+    public var responseID: OpenAIResponseID?
+    public var messageID: UUID?
+    public var schemaName: String?
+    public var schema: JSONValue?
+    public var content: JSONValue?
+    public var refusal: String?
+    public var incompleteReason: String?
+    public var validationErrors: [String]
+    public var status: OpenAIStructuredOutputResultStatus
+    public var createdAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        responseID: OpenAIResponseID? = nil,
+        messageID: UUID? = nil,
+        schemaName: String? = nil,
+        schema: JSONValue? = nil,
+        content: JSONValue? = nil,
+        refusal: String? = nil,
+        incompleteReason: String? = nil,
+        validationErrors: [String] = [],
+        status: OpenAIStructuredOutputResultStatus = .parsed,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.responseID = responseID
+        self.messageID = messageID
+        self.schemaName = schemaName
+        self.schema = schema
+        self.content = content
+        self.refusal = refusal
+        self.incompleteReason = incompleteReason
+        self.validationErrors = validationErrors
+        self.status = status
+        self.createdAt = createdAt
+    }
+}
+
 public enum VaultImportStatus: String, Hashable, Codable, Sendable, CaseIterable {
     case queued
     case extracting

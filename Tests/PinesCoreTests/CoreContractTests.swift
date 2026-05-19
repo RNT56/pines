@@ -1103,6 +1103,107 @@ struct CoreContractTests {
         #expect(decodedWebSearchRequest.webSearchOptions?.allowedDomains == ["example.com"])
     }
 
+    @Test
+    func openAIParityContractsRoundTripAndKeepLegacyDefaults() throws {
+        let legacyChatRun = """
+        {
+          "id":"00000000-0000-0000-0000-000000000001",
+          "conversationID":"00000000-0000-0000-0000-000000000002",
+          "requestID":"00000000-0000-0000-0000-000000000003",
+          "status":"completed",
+          "providerID":"openai",
+          "modelID":"gpt-5.5"
+        }
+        """
+        let decodedRun = try JSONDecoder().decode(ChatRun.self, from: Data(legacyChatRun.utf8))
+        #expect(decodedRun.providerKind == nil)
+        #expect(decodedRun.usedResponsesAPI == false)
+        #expect(decodedRun.providerMetadata.isEmpty)
+
+        let request = ChatRequest(
+            modelID: "gpt-5.5",
+            messages: [ChatMessage(role: .user, content: "Return JSON")],
+            openAIResponseOptions: OpenAIResponseRequestOptions(
+                previousResponseID: "resp_previous",
+                background: true,
+                structuredOutput: OpenAIStructuredOutputRequest(
+                    name: "answer",
+                    schema: .object(["type": .string("object")])
+                ),
+                hostedTools: [OpenAIHostedToolRequest(kind: .fileSearch, vectorStoreIDs: ["vs_1"])],
+                providerFileIDs: ["file_1"],
+                vectorStoreIDs: ["vs_1"],
+                metadata: ["trace": "test"]
+            )
+        )
+        let decodedRequest = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(request))
+        #expect(decodedRequest.openAIResponseOptions?.background == true)
+        #expect(decodedRequest.openAIResponseOptions?.structuredOutput?.name == "answer")
+        #expect(decodedRequest.openAIResponseOptions?.hostedTools.first?.vectorStoreIDs == ["vs_1"])
+
+        let vectorStore = OpenAIVectorStore(
+            id: "vs_1",
+            providerID: "openai",
+            name: "Docs",
+            status: .completed,
+            fileCounts: .init(completed: 1, total: 1),
+            usageBytes: 42
+        )
+        let background = OpenAIBackgroundResponse(
+            id: "resp_1",
+            providerID: "openai",
+            modelID: "gpt-5.5",
+            status: .completed,
+            outputItems: .array([.object(["type": .string("message")])]),
+            providerMetadata: [CloudProviderMetadataKeys.openAIResponseID: "resp_1"]
+        )
+        let structured = OpenAIStructuredOutputResult(
+            responseID: "resp_1",
+            schemaName: "answer",
+            content: .object(["ok": .bool(true)])
+        )
+
+        #expect(try JSONDecoder().decode(OpenAIVectorStore.self, from: JSONEncoder().encode(vectorStore)) == vectorStore)
+        #expect(try JSONDecoder().decode(OpenAIBackgroundResponse.self, from: JSONEncoder().encode(background)) == background)
+        #expect(try JSONDecoder().decode(OpenAIStructuredOutputResult.self, from: JSONEncoder().encode(structured)) == structured)
+    }
+
+    @Test
+    func openAIParityMigrationAddsTablesAndRunProvenance() throws {
+        #expect(PinesDatabaseSchema.currentVersion == 14)
+        let migration = try #require(PinesDatabaseSchema.migrations.last)
+        #expect(migration.version == 14)
+        let sql = migration.sql.joined(separator: "\n")
+
+        for table in [
+            "openai_provider_files",
+            "openai_vector_stores",
+            "openai_vector_store_files",
+            "openai_hosted_tool_calls",
+            "openai_artifacts",
+            "openai_background_responses",
+            "openai_realtime_sessions",
+            "openai_batch_jobs",
+            "openai_structured_output_results",
+        ] {
+            #expect(sql.contains("CREATE TABLE IF NOT EXISTS \(table)"))
+        }
+
+        for column in [
+            "provider_kind",
+            "provider_request_id",
+            "provider_response_id",
+            "parent_response_id",
+            "background_response_id",
+            "batch_id",
+            "realtime_session_id",
+            "structured_output_result_id",
+            "provider_metadata_json",
+        ] {
+            #expect(sql.contains("ALTER TABLE chat_runs ADD COLUMN \(column)"))
+        }
+    }
+
     private func decodedCitations(_ metadata: [String: String]) throws -> [WebSearchCitation] {
         let raw = try #require(metadata[CloudProviderMetadataKeys.webSearchCitationsJSON])
         return try JSONDecoder().decode([WebSearchCitation].self, from: Data(raw.utf8))

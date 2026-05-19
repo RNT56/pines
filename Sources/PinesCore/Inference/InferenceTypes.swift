@@ -466,6 +466,78 @@ public enum HostedToolConfiguration: Hashable, Codable, Sendable {
         case remoteMCP
         case toolSearch
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(ToolType.self, forKey: .type)
+        switch type {
+        case .webSearch:
+            self = .webSearch
+        case .fileSearch:
+            self = .fileSearch(
+                vectorStoreIDs: try container.decodeIfPresent([String].self, forKey: .vectorStoreIDs) ?? [],
+                maxResults: try container.decodeIfPresent(Int.self, forKey: .maxResults)
+            )
+        case .codeInterpreter:
+            self = .codeInterpreter(
+                containerID: try container.decodeIfPresent(String.self, forKey: .containerID),
+                memoryLimit: try container.decodeIfPresent(String.self, forKey: .memoryLimit)
+            )
+        case .imageGeneration:
+            self = .imageGeneration(
+                action: try container.decodeIfPresent(String.self, forKey: .action),
+                quality: try container.decodeIfPresent(String.self, forKey: .quality),
+                size: try container.decodeIfPresent(String.self, forKey: .size),
+                partialImages: try container.decodeIfPresent(Int.self, forKey: .partialImages)
+            )
+        case .computerUse:
+            self = .computerUse(
+                displayWidth: try container.decodeIfPresent(Int.self, forKey: .displayWidth),
+                displayHeight: try container.decodeIfPresent(Int.self, forKey: .displayHeight)
+            )
+        case .remoteMCP:
+            self = .remoteMCP(
+                serverLabel: try container.decode(String.self, forKey: .serverLabel),
+                serverURL: try container.decode(String.self, forKey: .serverURL),
+                requireApproval: try container.decodeIfPresent(String.self, forKey: .requireApproval) ?? "never"
+            )
+        case .toolSearch:
+            self = .toolSearch
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .webSearch:
+            try container.encode(ToolType.webSearch, forKey: .type)
+        case let .fileSearch(vectorStoreIDs, maxResults):
+            try container.encode(ToolType.fileSearch, forKey: .type)
+            try container.encode(vectorStoreIDs, forKey: .vectorStoreIDs)
+            try container.encodeIfPresent(maxResults, forKey: .maxResults)
+        case let .codeInterpreter(containerID, memoryLimit):
+            try container.encode(ToolType.codeInterpreter, forKey: .type)
+            try container.encodeIfPresent(containerID, forKey: .containerID)
+            try container.encodeIfPresent(memoryLimit, forKey: .memoryLimit)
+        case let .imageGeneration(action, quality, size, partialImages):
+            try container.encode(ToolType.imageGeneration, forKey: .type)
+            try container.encodeIfPresent(action, forKey: .action)
+            try container.encodeIfPresent(quality, forKey: .quality)
+            try container.encodeIfPresent(size, forKey: .size)
+            try container.encodeIfPresent(partialImages, forKey: .partialImages)
+        case let .computerUse(displayWidth, displayHeight):
+            try container.encode(ToolType.computerUse, forKey: .type)
+            try container.encodeIfPresent(displayWidth, forKey: .displayWidth)
+            try container.encodeIfPresent(displayHeight, forKey: .displayHeight)
+        case let .remoteMCP(serverLabel, serverURL, requireApproval):
+            try container.encode(ToolType.remoteMCP, forKey: .type)
+            try container.encode(serverLabel, forKey: .serverLabel)
+            try container.encode(serverURL, forKey: .serverURL)
+            try container.encode(requireApproval, forKey: .requireApproval)
+        case .toolSearch:
+            try container.encode(ToolType.toolSearch, forKey: .type)
+        }
+    }
 }
 
 public struct OpenAIResponsesRequestOptions: Hashable, Codable, Sendable {
