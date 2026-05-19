@@ -61,7 +61,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WLDMWQ963U
         CURRENT_PROJECT_VERSION: 1
-        MARKETING_VERSION: 0.1.0
+        MARKETING_VERSION: 0.1.1
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
       - package: PinesCore
@@ -113,7 +113,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WLDMWQ963U
         CURRENT_PROJECT_VERSION: 1
-        MARKETING_VERSION: 0.1.0
+        MARKETING_VERSION: 0.1.1
         GENERATE_INFOPLIST_FILE: NO
   PinesWatch:
     type: application
@@ -130,7 +130,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: WLDMWQ963U
         CURRENT_PROJECT_VERSION: 1
-        MARKETING_VERSION: 0.1.0
+        MARKETING_VERSION: 0.1.1
     dependencies:
       - package: PinesCore
         product: PinesWatchSupport
