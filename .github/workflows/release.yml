@@ -149,11 +149,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.validate.outputs.tag }}
         run: |
+          mapfile -t release_files < <(find release-artifacts -type f | sort)
+          if [ "${#release_files[@]}" -eq 0 ]; then
+            echo "No release artifact files found." >&2
+            exit 1
+          fi
+
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" release-artifacts/* --clobber
+            gh release upload "$TAG" "${release_files[@]}" --clobber
           else
             gh release create "$TAG" \
               --title "pines $TAG" \
               --generate-notes \
-              release-artifacts/*
+              "${release_files[@]}"
           fi
