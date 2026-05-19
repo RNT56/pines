@@ -68,6 +68,11 @@ find_developer_tool() {
     find_tool_in_known_locations "$tool"
 }
 
+require_mlx_helper() {
+  local required="${PINES_REQUIRE_CODEQL_METAL_PATCH:-}"
+  [ "$required" = "1" ] || [ "$required" = "true" ]
+}
+
 escape_replacement() {
   printf '%s' "$1" | sed 's/[&/\]/\\&/g'
 }
@@ -84,6 +89,11 @@ fi
 
 script="build/DerivedData/SourcePackages/checkouts/mlx-swift/tools/build-swiftpm-metallib.sh"
 if [ ! -f "$script" ]; then
+  if require_mlx_helper; then
+    echo "MLX SwiftPM Metal helper was not found; resolve Xcode packages into build/DerivedData before CodeQL build." >&2
+    exit 1
+  fi
+
   echo "MLX SwiftPM Metal helper was not found; no CodeQL Metal patch is needed."
   exit 0
 fi

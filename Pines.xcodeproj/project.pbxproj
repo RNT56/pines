@@ -837,7 +837,7 @@
 				DEVELOPMENT_TEAM = WLDMWQ963U;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.schtack.pines;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.watchkitapp;
 				PRODUCT_NAME = "Pines Watch";
 				SDKROOT = watchos;
@@ -862,7 +862,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.liveactivities;
 				PRODUCT_NAME = PinesLiveActivities;
 				SDKROOT = iphoneos;
@@ -886,7 +886,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.liveactivities;
 				PRODUCT_NAME = PinesLiveActivities;
 				SDKROOT = iphoneos;
@@ -950,7 +950,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				OTHER_SWIFT_FLAGS = "$(inherited) $(PINES_ICLOUD_SWIFT_FLAGS)";
 				PINES_CODE_SIGN_ENTITLEMENTS = "";
 				PINES_ICLOUD_SWIFT_FLAGS = "";
@@ -1100,7 +1100,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				OTHER_SWIFT_FLAGS = "$(inherited) $(PINES_ICLOUD_SWIFT_FLAGS)";
 				PINES_CODE_SIGN_ENTITLEMENTS = "";
 				PINES_ICLOUD_SWIFT_FLAGS = "";
@@ -1121,7 +1121,7 @@
 				DEVELOPMENT_TEAM = WLDMWQ963U;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.schtack.pines;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.watchkitapp;
 				PRODUCT_NAME = "Pines Watch";
 				SDKROOT = watchos;
