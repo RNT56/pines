@@ -44,6 +44,8 @@ jobs:
           bash scripts/ci/run-xcode-validation.sh resolve
 
       - name: Prepare CodeQL Metal tools
+        env:
+          PINES_REQUIRE_CODEQL_METAL_PATCH: "1"
         run: bash scripts/ci/prepare-codeql-metal-tools.sh
 
       - name: Initialize CodeQL

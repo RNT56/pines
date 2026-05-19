@@ -116,6 +116,7 @@ resolve_packages() {
     -resolvePackageDependencies \
     -project "$project" \
     -scheme "$scheme" \
+    -derivedDataPath "$derived_data" \
     "${xcode_package_flags[@]}"
   check_package_resolution_drift
 }
