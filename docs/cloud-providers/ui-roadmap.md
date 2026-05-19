@@ -154,6 +154,26 @@ Production requirements:
 - Realtime mode must not share assumptions with SSE chat streaming.
 - Accessibility: captions/transcripts, explicit mute state, and clear recording indicators.
 
+### 9. Deep Research Workspace
+
+Purpose: Support long-running provider research agents without hiding minutes-long work inside normal chat.
+
+Components:
+
+- Research prompt and scope form with source policy, domain filters, provider-hosted file choices, and report format.
+- Job status header: queued, planning, searching, reading, synthesizing, completed, failed, cancelled.
+- Progress timeline with thought summaries/progress updates where providers expose them.
+- Source/citation review panel with web, URL, file, and Vault-export provenance.
+- Resume/reconnect controls for background or interrupted streams.
+- Final report viewer with actions: attach to chat, save to Vault, export/share, create follow-up.
+- Cost/time warning and provider-storage disclosure.
+
+Production requirements:
+
+- Deep research must use a job-oriented surface, not a chat typing indicator.
+- Background/store requirements must be explicit before starting.
+- Follow-up questions should preserve the provider interaction/response ID while making provider-side state visible.
+
 ## Theme And Component Todos
 
 - Add missing reusable components to `PinesDesignComponents.swift` before implementing provider-specific views:
@@ -163,7 +183,9 @@ Production requirements:
   - `PinesProviderStorageBadge`
   - `PinesToolTimelineRow`
   - `PinesRunProvenancePanel`
-  - `PinesArtifactRow`
+- `PinesArtifactRow`
+- `PinesResearchJobRow`
+- `PinesResearchSourcePanel`
 - Add no new palette tokens unless the existing semantic colors cannot express a provider state.
 - Verify each new screen under all theme templates and light/dark/system modes.
 - Add compact-width previews for provider settings, file lists, tool approvals, and artifact rows.

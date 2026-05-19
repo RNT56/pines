@@ -28,6 +28,7 @@ This comparison is about provider API features that matter to Pines, not every p
 | Prompt/context caching controls | Yes | Yes | Yes | Yes | No | Gap/partial |
 | Hosted code execution | Yes | Yes | Yes | Provider/model dependent | No | Gap |
 | Hosted file search/RAG | Yes | Search-result/citations patterns | Yes on newer models/tools | Provider/model dependent | Retrieval primitives only | Gap |
+| Deep research / long-running research agent | Yes, Responses/Deep Research | No direct equivalent | Yes, Interactions Deep Research Agent | Model/provider dependent | No | Gap/partial; Gemini has early routing |
 | Remote MCP/provider-hosted connectors | Yes | Yes | No primary public equivalent | Server tools, OpenAI-compatible tools | No | Gap |
 | Computer use | Yes | Yes | No primary Gemini API equivalent | Model/provider dependent | No | Gap |
 | Image generation/editing | Yes | No primary Messages output | Yes/Imagen | Yes via routed models | No | Gap |

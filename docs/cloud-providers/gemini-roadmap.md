@@ -12,6 +12,7 @@ Make Gemini in Pines production-complete for Google's strongest API capabilities
 - Files API for large/reusable media and documents.
 - Image, PDF, text, audio, and video input.
 - Structured outputs, function calling, code execution, URL context, Google Search grounding.
+- Gemini Deep Research Agent through Interactions/background mode.
 - Context caching and token counting.
 - Live API for realtime audio/video sessions.
 - Image/video/speech generation where it fits Pines artifact workflows.
@@ -33,6 +34,7 @@ All UI must follow the shared [cloud provider UI roadmap](ui-roadmap.md).
 Provider-specific screens/components:
 
 - Gemini capability dashboard for Generate Content, Interactions, Files API, audio/video, structured output, code execution, URL context, Google Search grounding, context caching, Live API, generated media, batch, and token counting.
+- Deep Research workspace with agent selector, background status, stream/reconnect state, thought-summary progress, source/citation review, File Search data-source controls, and final report actions.
 - Gemini file/media manager with processing state, URI references, duration/size metadata, and provider-hosted retention labels.
 - Media attachment controls for audio/video with duration, token estimate, and inline versus Files API choice.
 - Structured output settings and validation panel.
@@ -46,6 +48,7 @@ UI production requirements:
 
 - Audio/video controls must show recording/upload state clearly.
 - Google grounding attribution requirements must be represented in the source UI.
+- Deep Research must show preview/limitations, background/store requirements, source policy, and max research-time expectations.
 - Live API UI must be separate from normal SSE chat.
 
 ## Phase 1: Files API And Media Inputs
@@ -136,7 +139,32 @@ Production complete when:
 
 - Large Gemini threads can reuse cached context with visible cache state and safe cleanup.
 
-## Phase 5: Live API
+## Phase 5: Deep Research Agent
+
+Goal: Make Gemini Deep Research a first-class long-running research workflow.
+
+Todos:
+
+- Add explicit Deep Research run type using `v1beta/interactions` with `agent`, `background=true`, optional `stream=true`, and `agent_config`.
+- Persist `interaction_id`, `event_id`, status, final outputs, sources/citations, and previous interaction ID.
+- Add poll/resume/cancel/retry behavior for long-running tasks and interrupted streams.
+- Support thought-summary progress when enabled.
+- Add File Search data-source selection for user-approved provider-hosted files/stores.
+- Expose limitations in UI: preview, no Generate Content access, no custom function tools/MCP, no structured output/plan approval, store requirement, no audio input.
+- Add follow-up interaction support via `previous_interaction_id`.
+- Add tests for start, poll complete, failed, reconnect from last event, streamed progress, File Search config, and follow-up.
+
+Possible hiccups:
+
+- The agent is preview and Interactions schemas can change.
+- Background/store requirements conflict with local-first defaults and need explicit user consent.
+- File Search integration for own data is experimental.
+
+Production complete when:
+
+- A user can start, monitor, resume, follow up on, and save a Gemini Deep Research report with cited sources and clear provider-storage disclosure.
+
+## Phase 6: Live API
 
 Goal: Add Gemini realtime mode without destabilizing text chat.
 
@@ -159,7 +187,7 @@ Production complete when:
 
 - Gemini realtime sessions have dedicated UI, transcript persistence, and predictable cancellation/reconnect behavior.
 
-## Phase 6: Generated Media
+## Phase 7: Generated Media
 
 Goal: Support Gemini media generation where it fits Pines artifacts.
 
@@ -181,7 +209,7 @@ Production complete when:
 
 - Users can generate and manage media artifacts without losing provenance, cost, or deletion controls.
 
-## Phase 7: Batch And Model Metadata
+## Phase 8: Batch And Model Metadata
 
 Goal: Improve large-job reliability and model selection.
 

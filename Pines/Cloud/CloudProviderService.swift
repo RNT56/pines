@@ -41,4 +41,12 @@ struct CloudProviderService {
         )
         return result
     }
+
+    func openAIProviderService(for provider: CloudProviderConfiguration) -> OpenAIProviderService {
+        OpenAIProviderService(configuration: provider, secretStore: secretStore)
+    }
+
+    func geminiProviderService(for provider: CloudProviderConfiguration) -> GeminiProviderService {
+        GeminiProviderService(configuration: provider, secretStore: secretStore)
+    }
 }

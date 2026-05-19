@@ -83,7 +83,19 @@ public enum PinesArchitecture {
         FeatureModuleDescriptor(
             feature: .agents,
             displayName: "Agents",
-            ownsTables: ["audit_events", "mcp_servers", "mcp_tools"],
+            ownsTables: [
+                "audit_events",
+                "mcp_servers",
+                "mcp_tools",
+                "provider_files",
+                "provider_artifacts",
+                "provider_caches",
+                "provider_batches",
+                "provider_live_sessions",
+                "provider_structured_outputs",
+                "provider_model_capabilities",
+                "provider_research_runs",
+            ],
             ownsPermissions: ["Network", "Browser", "Cloud BYOK"],
             serviceDependencies: ["ToolRegistry", "ExecutionRouter", "SecretStore"]
         ),
@@ -439,6 +451,425 @@ public protocol CloudProviderRepository: Sendable {
     func observeProviders() -> AsyncStream<[CloudProviderConfiguration]>
     func upsertProvider(_ provider: CloudProviderConfiguration) async throws
     func deleteProvider(id: ProviderID) async throws
+}
+
+public struct ProviderFileRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var providerID: ProviderID
+    public var providerKind: CloudProviderKind
+    public var purpose: String
+    public var fileName: String
+    public var contentType: String?
+    public var byteCount: Int64
+    public var status: String
+    public var sha256: String?
+    public var localURL: URL?
+    public var providerObject: String?
+    public var providerMetadata: [String: String]
+    public var createdAt: Date
+    public var expiresAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: String,
+        providerID: ProviderID,
+        providerKind: CloudProviderKind,
+        purpose: String,
+        fileName: String,
+        contentType: String? = nil,
+        byteCount: Int64 = 0,
+        status: String,
+        sha256: String? = nil,
+        localURL: URL? = nil,
+        providerObject: String? = nil,
+        providerMetadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        expiresAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.purpose = purpose
+        self.fileName = fileName
+        self.contentType = contentType
+        self.byteCount = byteCount
+        self.status = status
+        self.sha256 = sha256
+        self.localURL = localURL
+        self.providerObject = providerObject
+        self.providerMetadata = providerMetadata
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.lastError = lastError
+    }
+}
+
+public struct ProviderArtifactRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var providerID: ProviderID?
+    public var providerKind: CloudProviderKind
+    public var responseID: String?
+    public var toolCallID: String?
+    public var providerFileID: String?
+    public var kind: String
+    public var fileName: String?
+    public var contentType: String?
+    public var byteCount: Int64?
+    public var text: String?
+    public var content: JSONValue?
+    public var localURL: URL?
+    public var remoteURL: URL?
+    public var createdAt: Date
+
+    public init(
+        id: String,
+        providerID: ProviderID? = nil,
+        providerKind: CloudProviderKind,
+        responseID: String? = nil,
+        toolCallID: String? = nil,
+        providerFileID: String? = nil,
+        kind: String,
+        fileName: String? = nil,
+        contentType: String? = nil,
+        byteCount: Int64? = nil,
+        text: String? = nil,
+        content: JSONValue? = nil,
+        localURL: URL? = nil,
+        remoteURL: URL? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.responseID = responseID
+        self.toolCallID = toolCallID
+        self.providerFileID = providerFileID
+        self.kind = kind
+        self.fileName = fileName
+        self.contentType = contentType
+        self.byteCount = byteCount
+        self.text = text
+        self.content = content
+        self.localURL = localURL
+        self.remoteURL = remoteURL
+        self.createdAt = createdAt
+    }
+}
+
+public struct ProviderCacheRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var providerID: ProviderID
+    public var providerKind: CloudProviderKind
+    public var kind: String
+    public var name: String?
+    public var modelID: ModelID?
+    public var status: String
+    public var usageBytes: Int64
+    public var itemCounts: JSONValue?
+    public var configuration: JSONValue?
+    public var metadata: [String: String]
+    public var createdAt: Date
+    public var expiresAt: Date?
+    public var lastActiveAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: String,
+        providerID: ProviderID,
+        providerKind: CloudProviderKind,
+        kind: String,
+        name: String? = nil,
+        modelID: ModelID? = nil,
+        status: String,
+        usageBytes: Int64 = 0,
+        itemCounts: JSONValue? = nil,
+        configuration: JSONValue? = nil,
+        metadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        expiresAt: Date? = nil,
+        lastActiveAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.kind = kind
+        self.name = name
+        self.modelID = modelID
+        self.status = status
+        self.usageBytes = usageBytes
+        self.itemCounts = itemCounts
+        self.configuration = configuration
+        self.metadata = metadata
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.lastActiveAt = lastActiveAt
+        self.lastError = lastError
+    }
+}
+
+public struct ProviderBatchRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var providerID: ProviderID
+    public var providerKind: CloudProviderKind
+    public var endpoint: String
+    public var status: String
+    public var inputFileID: String?
+    public var outputFileID: String?
+    public var errorFileID: String?
+    public var completionWindow: String?
+    public var requestCounts: JSONValue?
+    public var metadata: [String: String]
+    public var createdAt: Date
+    public var completedAt: Date?
+    public var expiresAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: String,
+        providerID: ProviderID,
+        providerKind: CloudProviderKind,
+        endpoint: String,
+        status: String,
+        inputFileID: String? = nil,
+        outputFileID: String? = nil,
+        errorFileID: String? = nil,
+        completionWindow: String? = nil,
+        requestCounts: JSONValue? = nil,
+        metadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        completedAt: Date? = nil,
+        expiresAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.endpoint = endpoint
+        self.status = status
+        self.inputFileID = inputFileID
+        self.outputFileID = outputFileID
+        self.errorFileID = errorFileID
+        self.completionWindow = completionWindow
+        self.requestCounts = requestCounts
+        self.metadata = metadata
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+        self.expiresAt = expiresAt
+        self.lastError = lastError
+    }
+}
+
+public struct ProviderLiveSessionRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var providerID: ProviderID
+    public var providerKind: CloudProviderKind
+    public var modelID: ModelID
+    public var status: String
+    public var modalities: [String]
+    public var clientSecretKeychainAccount: String?
+    public var expiresAt: Date?
+    public var providerMetadata: [String: String]
+    public var createdAt: Date
+    public var closedAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: String,
+        providerID: ProviderID,
+        providerKind: CloudProviderKind,
+        modelID: ModelID,
+        status: String,
+        modalities: [String] = [],
+        clientSecretKeychainAccount: String? = nil,
+        expiresAt: Date? = nil,
+        providerMetadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        closedAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.modelID = modelID
+        self.status = status
+        self.modalities = modalities
+        self.clientSecretKeychainAccount = clientSecretKeychainAccount
+        self.expiresAt = expiresAt
+        self.providerMetadata = providerMetadata
+        self.createdAt = createdAt
+        self.closedAt = closedAt
+        self.lastError = lastError
+    }
+}
+
+public struct ProviderStructuredOutputRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: UUID
+    public var providerID: ProviderID?
+    public var providerKind: CloudProviderKind
+    public var responseID: String?
+    public var messageID: UUID?
+    public var schemaName: String?
+    public var schema: JSONValue?
+    public var content: JSONValue?
+    public var refusal: String?
+    public var incompleteReason: String?
+    public var validationErrors: [String]
+    public var status: String
+    public var createdAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        providerID: ProviderID? = nil,
+        providerKind: CloudProviderKind,
+        responseID: String? = nil,
+        messageID: UUID? = nil,
+        schemaName: String? = nil,
+        schema: JSONValue? = nil,
+        content: JSONValue? = nil,
+        refusal: String? = nil,
+        incompleteReason: String? = nil,
+        validationErrors: [String] = [],
+        status: String,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.responseID = responseID
+        self.messageID = messageID
+        self.schemaName = schemaName
+        self.schema = schema
+        self.content = content
+        self.refusal = refusal
+        self.incompleteReason = incompleteReason
+        self.validationErrors = validationErrors
+        self.status = status
+        self.createdAt = createdAt
+    }
+}
+
+public struct ProviderModelCapabilityRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: String { "\(providerID.rawValue)::\(modelID.rawValue)" }
+    public var providerID: ProviderID
+    public var providerKind: CloudProviderKind
+    public var modelID: ModelID
+    public var capabilities: ProviderCapabilities
+    public var contextWindowTokens: Int?
+    public var inputModalities: [String]
+    public var outputModalities: [String]
+    public var metadata: [String: String]
+    public var fetchedAt: Date
+    public var expiresAt: Date?
+
+    public init(
+        providerID: ProviderID,
+        providerKind: CloudProviderKind,
+        modelID: ModelID,
+        capabilities: ProviderCapabilities,
+        contextWindowTokens: Int? = nil,
+        inputModalities: [String] = [],
+        outputModalities: [String] = [],
+        metadata: [String: String] = [:],
+        fetchedAt: Date = Date(),
+        expiresAt: Date? = nil
+    ) {
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.modelID = modelID
+        self.capabilities = capabilities
+        self.contextWindowTokens = contextWindowTokens
+        self.inputModalities = inputModalities
+        self.outputModalities = outputModalities
+        self.metadata = metadata
+        self.fetchedAt = fetchedAt
+        self.expiresAt = expiresAt
+    }
+}
+
+public protocol ProviderFileRepository: Sendable {
+    func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord]
+    func upsertProviderFile(_ file: ProviderFileRecord) async throws
+    func deleteProviderFile(id: String) async throws
+}
+
+public protocol ProviderArtifactRepository: Sendable {
+    func listProviderArtifacts(responseID: String?) async throws -> [ProviderArtifactRecord]
+    func upsertProviderArtifact(_ artifact: ProviderArtifactRecord) async throws
+    func deleteProviderArtifact(id: String) async throws
+}
+
+public protocol ProviderCacheRepository: Sendable {
+    func listProviderCaches(providerID: ProviderID?, kind: String?) async throws -> [ProviderCacheRecord]
+    func upsertProviderCache(_ cache: ProviderCacheRecord) async throws
+    func deleteProviderCache(id: String) async throws
+}
+
+public protocol ProviderBatchRepository: Sendable {
+    func listProviderBatches(providerID: ProviderID?) async throws -> [ProviderBatchRecord]
+    func upsertProviderBatch(_ batch: ProviderBatchRecord) async throws
+    func deleteProviderBatch(id: String) async throws
+}
+
+public protocol ProviderLiveSessionRepository: Sendable {
+    func listProviderLiveSessions(providerID: ProviderID?) async throws -> [ProviderLiveSessionRecord]
+    func upsertProviderLiveSession(_ session: ProviderLiveSessionRecord) async throws
+    func deleteProviderLiveSession(id: String) async throws
+}
+
+public protocol ProviderStructuredOutputRepository: Sendable {
+    func listProviderStructuredOutputs(responseID: String?) async throws -> [ProviderStructuredOutputRecord]
+    func upsertProviderStructuredOutput(_ output: ProviderStructuredOutputRecord) async throws
+    func deleteProviderStructuredOutput(id: UUID) async throws
+}
+
+public protocol ProviderModelCapabilityRepository: Sendable {
+    func listProviderModelCapabilities(providerID: ProviderID?) async throws -> [ProviderModelCapabilityRecord]
+    func upsertProviderModelCapability(_ capability: ProviderModelCapabilityRecord) async throws
+    func deleteProviderModelCapability(providerID: ProviderID, modelID: ModelID) async throws
+}
+
+public extension ProviderFileRepository {
+    func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord] { [] }
+    func upsertProviderFile(_ file: ProviderFileRecord) async throws {}
+    func deleteProviderFile(id: String) async throws {}
+}
+
+public extension ProviderArtifactRepository {
+    func listProviderArtifacts(responseID: String?) async throws -> [ProviderArtifactRecord] { [] }
+    func upsertProviderArtifact(_ artifact: ProviderArtifactRecord) async throws {}
+    func deleteProviderArtifact(id: String) async throws {}
+}
+
+public extension ProviderCacheRepository {
+    func listProviderCaches(providerID: ProviderID?, kind: String?) async throws -> [ProviderCacheRecord] { [] }
+    func upsertProviderCache(_ cache: ProviderCacheRecord) async throws {}
+    func deleteProviderCache(id: String) async throws {}
+}
+
+public extension ProviderBatchRepository {
+    func listProviderBatches(providerID: ProviderID?) async throws -> [ProviderBatchRecord] { [] }
+    func upsertProviderBatch(_ batch: ProviderBatchRecord) async throws {}
+    func deleteProviderBatch(id: String) async throws {}
+}
+
+public extension ProviderLiveSessionRepository {
+    func listProviderLiveSessions(providerID: ProviderID?) async throws -> [ProviderLiveSessionRecord] { [] }
+    func upsertProviderLiveSession(_ session: ProviderLiveSessionRecord) async throws {}
+    func deleteProviderLiveSession(id: String) async throws {}
+}
+
+public extension ProviderStructuredOutputRepository {
+    func listProviderStructuredOutputs(responseID: String?) async throws -> [ProviderStructuredOutputRecord] { [] }
+    func upsertProviderStructuredOutput(_ output: ProviderStructuredOutputRecord) async throws {}
+    func deleteProviderStructuredOutput(id: UUID) async throws {}
+}
+
+public extension ProviderModelCapabilityRepository {
+    func listProviderModelCapabilities(providerID: ProviderID?) async throws -> [ProviderModelCapabilityRecord] { [] }
+    func upsertProviderModelCapability(_ capability: ProviderModelCapabilityRecord) async throws {}
+    func deleteProviderModelCapability(providerID: ProviderID, modelID: ModelID) async throws {}
 }
 
 public typealias RemoteMCPServerRepository = MCPServerRepository

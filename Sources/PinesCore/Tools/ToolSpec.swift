@@ -213,15 +213,6 @@ public struct AnyToolSpec: Codable, Equatable, Hashable, Sendable {
 private struct EmptyToolInput: ToolInput {}
 private struct EmptyToolOutput: ToolOutput {}
 
-public extension JSONValue {
-    var stringValue: String? {
-        if case let .string(value) = self {
-            return value
-        }
-        return nil
-    }
-}
-
 public extension ToolParameterSpec {
     func jsonSchemaObject() -> [String: any Sendable] {
         var object: [String: any Sendable] = ["type": type.rawValue]

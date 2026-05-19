@@ -69,6 +69,27 @@ public enum JSONValue: Codable, Hashable, Sendable {
         return nil
     }
 
+    public var stringValue: String? {
+        if case let .string(value) = self {
+            return value
+        }
+        return nil
+    }
+
+    public var intValue: Int? {
+        if case let .number(value) = self, value.isFinite {
+            return Int(value)
+        }
+        return nil
+    }
+
+    public var boolValue: Bool? {
+        if case let .bool(value) = self {
+            return value
+        }
+        return nil
+    }
+
     public static func objectSchema() -> JSONValue {
         .object([
             "type": .string("object"),

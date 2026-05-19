@@ -357,6 +357,136 @@ extension GRDBPinesStore {
         )
     }
 
+    static func providerFile(from row: Row) -> ProviderFileRecord {
+        ProviderFileRecord(
+            id: row["id"],
+            providerID: ProviderID(rawValue: row["provider_id"]),
+            providerKind: CloudProviderKind(rawValue: row["provider_kind"]) ?? .custom,
+            purpose: row["purpose"],
+            fileName: row["file_name"],
+            contentType: row["content_type"] as String?,
+            byteCount: row["byte_count"],
+            status: row["status"],
+            sha256: row["sha256"] as String?,
+            localURL: (row["local_path"] as String?).map(URL.init(fileURLWithPath:)),
+            providerObject: row["provider_object"] as String?,
+            providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?),
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            expiresAt: (row["expires_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
+            lastError: row["last_error"] as String?
+        )
+    }
+
+    static func providerArtifact(from row: Row) -> ProviderArtifactRecord {
+        ProviderArtifactRecord(
+            id: row["id"],
+            providerID: (row["provider_id"] as String?).map(ProviderID.init(rawValue:)),
+            providerKind: CloudProviderKind(rawValue: row["provider_kind"]) ?? .custom,
+            responseID: row["response_id"] as String?,
+            toolCallID: row["tool_call_id"] as String?,
+            providerFileID: row["provider_file_id"] as String?,
+            kind: row["kind"],
+            fileName: row["file_name"] as String?,
+            contentType: row["content_type"] as String?,
+            byteCount: row["byte_count"] as Int64?,
+            text: row["text"] as String?,
+            content: decodeJSON(row["content_json"] as String?),
+            localURL: (row["local_path"] as String?).map(URL.init(fileURLWithPath:)),
+            remoteURL: (row["remote_url"] as String?).flatMap(URL.init(string:)),
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
+        )
+    }
+
+    static func providerCache(from row: Row) -> ProviderCacheRecord {
+        ProviderCacheRecord(
+            id: row["id"],
+            providerID: ProviderID(rawValue: row["provider_id"]),
+            providerKind: CloudProviderKind(rawValue: row["provider_kind"]) ?? .custom,
+            kind: row["kind"],
+            name: row["name"] as String?,
+            modelID: (row["model_id"] as String?).map(ModelID.init(rawValue:)),
+            status: row["status"],
+            usageBytes: row["usage_bytes"],
+            itemCounts: decodeJSON(row["item_counts_json"] as String?),
+            configuration: decodeJSON(row["configuration_json"] as String?),
+            metadata: decodeJSON(row["metadata_json"] as String?) ?? [:],
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            expiresAt: (row["expires_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
+            lastActiveAt: (row["last_active_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
+            lastError: row["last_error"] as String?
+        )
+    }
+
+    static func providerBatch(from row: Row) -> ProviderBatchRecord {
+        ProviderBatchRecord(
+            id: row["id"],
+            providerID: ProviderID(rawValue: row["provider_id"]),
+            providerKind: CloudProviderKind(rawValue: row["provider_kind"]) ?? .custom,
+            endpoint: row["endpoint"],
+            status: row["status"],
+            inputFileID: row["input_file_id"] as String?,
+            outputFileID: row["output_file_id"] as String?,
+            errorFileID: row["error_file_id"] as String?,
+            completionWindow: row["completion_window"] as String?,
+            requestCounts: decodeJSON(row["request_counts_json"] as String?),
+            metadata: decodeJSON(row["metadata_json"] as String?) ?? [:],
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            completedAt: (row["completed_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
+            expiresAt: (row["expires_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
+            lastError: row["last_error"] as String?
+        )
+    }
+
+    static func providerLiveSession(from row: Row) -> ProviderLiveSessionRecord {
+        ProviderLiveSessionRecord(
+            id: row["id"],
+            providerID: ProviderID(rawValue: row["provider_id"]),
+            providerKind: CloudProviderKind(rawValue: row["provider_kind"]) ?? .custom,
+            modelID: ModelID(rawValue: row["model_id"]),
+            status: row["status"],
+            modalities: decodeJSON(row["modalities_json"] as String?) ?? [],
+            clientSecretKeychainAccount: row["client_secret_keychain_account"] as String?,
+            expiresAt: (row["expires_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
+            providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?),
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            closedAt: (row["closed_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
+            lastError: row["last_error"] as String?
+        )
+    }
+
+    static func providerStructuredOutput(from row: Row) -> ProviderStructuredOutputRecord {
+        ProviderStructuredOutputRecord(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            providerID: (row["provider_id"] as String?).map(ProviderID.init(rawValue:)),
+            providerKind: CloudProviderKind(rawValue: row["provider_kind"]) ?? .custom,
+            responseID: row["response_id"] as String?,
+            messageID: (row["message_id"] as String?).flatMap(UUID.init(uuidString:)),
+            schemaName: row["schema_name"] as String?,
+            schema: decodeJSON(row["schema_json"] as String?),
+            content: decodeJSON(row["content_json"] as String?),
+            refusal: row["refusal"] as String?,
+            incompleteReason: row["incomplete_reason"] as String?,
+            validationErrors: decodeJSON(row["validation_errors_json"] as String?) ?? [],
+            status: row["status"],
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
+        )
+    }
+
+    static func providerModelCapability(from row: Row) -> ProviderModelCapabilityRecord {
+        ProviderModelCapabilityRecord(
+            providerID: ProviderID(rawValue: row["provider_id"]),
+            providerKind: CloudProviderKind(rawValue: row["provider_kind"]) ?? .custom,
+            modelID: ModelID(rawValue: row["model_id"]),
+            capabilities: decodeJSON(row["capabilities_json"] as String?) ?? ProviderCapabilities(local: false),
+            contextWindowTokens: row["context_window_tokens"] as Int?,
+            inputModalities: decodeJSON(row["input_modalities_json"] as String?) ?? [],
+            outputModalities: decodeJSON(row["output_modalities_json"] as String?) ?? [],
+            metadata: decodeJSON(row["metadata_json"] as String?) ?? [:],
+            fetchedAt: Date(timeIntervalSinceReferenceDate: row["fetched_at"]),
+            expiresAt: (row["expires_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
+        )
+    }
+
     static func mcpServer(from row: Row) -> MCPServerConfiguration {
         MCPServerConfiguration(
             id: MCPServerID(rawValue: row["id"]),

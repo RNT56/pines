@@ -34,6 +34,10 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         guard let apiKey = try await readAPIKey() else {
             throw CloudProviderError.missingAPIKey
         }
+        if usesOpenAIResponsesAPI(chatRequest: request),
+           request.openAIResponseOptions?.background == true || request.openAIOptions?.background == true {
+            throw InferenceError.invalidRequest("OpenAI background Responses runs must be created through the provider lifecycle service, not the foreground chat stream.")
+        }
 
         let streamingFormat = self.streamingFormat(for: request)
         let urlRequest = try await buildStreamingRequest(apiKey: apiKey, chatRequest: request)
@@ -387,20 +391,25 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
         let payload = try Self.openAIResponsesPayload(from: chatRequest.messages)
         let instructions = payload.instructions
+        let responseOptions = chatRequest.openAIResponseOptions
+        let requestOptions = chatRequest.openAIOptions
+        let storageMode = responseOptions?.store ?? requestOptions?.store ?? chatRequest.sampling.openAIResponseStorage
+        let promptCacheKey = requestOptions?.promptCacheKey ?? openAIPromptCacheKey(for: chatRequest, instructions: instructions)
         let usesReasoningControls = Self.isOpenAIReasoningModelID(chatRequest.modelID)
         var textConfiguration: [String: Any] = [
-            "format": ["type": "text"],
+            "format": responseOptions?.structuredOutput.map(Self.openAITextFormatObject)
+                ?? Self.openAITextFormatObject(from: chatRequest.structuredOutput),
         ]
         var body: [String: Any] = [
             "model": chatRequest.modelID.rawValue,
             "stream": true,
-            "store": chatRequest.sampling.openAIResponseStorage == .stateful,
+            "store": storageMode == .stateful,
             "input": payload.input,
             "max_output_tokens": openAICompletionTokenLimit(for: chatRequest, usesReasoningParameters: usesReasoningControls),
             "truncation": "auto",
             "text": textConfiguration,
         ]
-        var includeValues = Set<String>()
+        var includeValues = Set(requestOptions?.include ?? [])
         if openAINativeWebSearchEnabled(for: chatRequest) {
             includeValues.insert("web_search_call.action.sources")
         }
@@ -413,38 +422,51 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             ]
             textConfiguration["verbosity"] = chatRequest.sampling.openAITextVerbosity.rawValue
             body["text"] = textConfiguration
-            if chatRequest.sampling.openAIResponseStorage == .statelessEncrypted {
+            if storageMode == .statelessEncrypted {
                 includeValues.insert("reasoning.encrypted_content")
             }
         } else {
             body["temperature"] = chatRequest.sampling.temperature
             body["top_p"] = chatRequest.sampling.topP
         }
-        if !includeValues.isEmpty {
-            body["include"] = includeValues.sorted()
-        }
-        if chatRequest.sampling.openAIResponseStorage == .stateful, let previousResponseID = payload.previousResponseID {
+        let previousResponseID = responseOptions?.previousResponseID?.rawValue ?? payload.previousResponseID
+        if storageMode == .stateful, let previousResponseID, !previousResponseID.isEmpty {
             body["previous_response_id"] = previousResponseID
         }
-        let promptCacheKey = openAIPromptCacheKey(for: chatRequest, instructions: instructions)
-        body["metadata"] = [
+        var metadata = requestOptions?.metadata ?? [:]
+        metadata.merge(responseOptions?.metadata ?? [:], uniquingKeysWith: { _, new in new })
+        metadata.merge([
             "pines_request_id": chatRequest.id.uuidString,
             "pines_execution_context": chatRequest.executionContext.rawValue,
             "pines_prompt_cache_key": promptCacheKey,
-        ]
+        ], uniquingKeysWith: { _, new in new })
+        body["metadata"] = metadata
         body["prompt_cache_key"] = promptCacheKey
-        body["prompt_cache_retention"] = "24h"
-        body["safety_identifier"] = openAISafetyIdentifier(for: chatRequest)
-        body["service_tier"] = "auto"
-        body["background"] = false
-        body["max_tool_calls"] = chatRequest.executionContext == .agent ? 8 : 4
+        if let retention = requestOptions?.promptCacheRetention, retention != .standard {
+            body["prompt_cache_retention"] = retention.rawValue
+        }
+        body["safety_identifier"] = requestOptions?.safetyIdentifier ?? openAISafetyIdentifier(for: chatRequest)
+        body["service_tier"] = requestOptions?.serviceTier.rawValue ?? OpenAIServiceTier.auto.rawValue
+        body["background"] = responseOptions?.background ?? requestOptions?.background ?? false
+        body["max_tool_calls"] = requestOptions?.maxToolCalls ?? (chatRequest.executionContext == .agent ? 8 : 4)
+        if let conversationID = requestOptions?.conversationID, !conversationID.isEmpty {
+            body["conversation"] = conversationID
+        }
         let functionTools = chatRequest.allowsTools ? chatRequest.availableTools.map(Self.openAIResponsesFunctionToolObject) : []
         let nativeSearchTools = openAINativeWebSearchEnabled(for: chatRequest) ? [Self.openAIWebSearchToolObject(options: chatRequest.webSearchOptions)] : []
-        let responseTools = functionTools + nativeSearchTools
+        var hostedTools = try openAIHostedTools(for: chatRequest, includeValues: &includeValues)
+        if hostedTools.isEmpty, let vectorStoreIDs = responseOptions?.vectorStoreIDs, !vectorStoreIDs.isEmpty {
+            hostedTools.append(Self.openAIFileSearchToolObject(vectorStoreIDs: vectorStoreIDs.map(\.rawValue), maxResults: nil))
+            includeValues.insert("file_search_call.results")
+        }
+        let responseTools = functionTools + nativeSearchTools + hostedTools
         if !responseTools.isEmpty {
             body["tools"] = responseTools
             body["tool_choice"] = openAIToolChoice(for: chatRequest, hasFunctionTools: !functionTools.isEmpty, hasNativeSearch: !nativeSearchTools.isEmpty)
             body["parallel_tool_calls"] = false
+        }
+        if !includeValues.isEmpty {
+            body["include"] = includeValues.sorted()
         }
         if !instructions.isEmpty {
             body["instructions"] = instructions
@@ -591,6 +613,233 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             tool["user_location"] = userLocation
         }
         return tool
+    }
+
+    private static func openAITextFormatObject(from format: StructuredOutputFormat) -> [String: Any] {
+        switch format {
+        case .text:
+            return ["type": "text"]
+        case .jsonObject:
+            return ["type": "json_object"]
+        case let .jsonSchema(name, schema, strict):
+            return [
+                "type": "json_schema",
+                "name": name,
+                "schema": jsonObject(from: schema),
+                "strict": strict,
+            ]
+        }
+    }
+
+    private static func openAITextFormatObject(from request: OpenAIStructuredOutputRequest) -> [String: Any] {
+        var format: [String: Any] = [
+            "type": "json_schema",
+            "name": request.name,
+            "schema": jsonObject(from: request.schema),
+            "strict": request.strictness == .strict,
+        ]
+        if let description = request.description, !description.isEmpty {
+            format["description"] = description
+        }
+        return format
+    }
+
+    private func openAIHostedTools(for chatRequest: ChatRequest, includeValues: inout Set<String>) throws -> [[String: Any]] {
+        var tools = [[String: Any]]()
+        for tool in chatRequest.hostedTools {
+            let mapped = try Self.openAIHostedToolObject(tool, executionContext: chatRequest.executionContext)
+            tools.append(mapped.tool)
+            includeValues.formUnion(mapped.include)
+        }
+        for tool in chatRequest.openAIResponseOptions?.hostedTools ?? [] {
+            let mapped = try Self.openAIHostedToolObject(tool, executionContext: chatRequest.executionContext)
+            tools.append(mapped.tool)
+            includeValues.formUnion(mapped.include)
+        }
+        return tools
+    }
+
+    private static func openAIHostedToolObject(
+        _ tool: HostedToolConfiguration,
+        executionContext: ChatRequest.ExecutionContext
+    ) throws -> (tool: [String: Any], include: [String]) {
+        switch tool {
+        case .webSearch:
+            return (openAIWebSearchToolObject(options: nil), ["web_search_call.action.sources"])
+        case let .fileSearch(vectorStoreIDs, maxResults):
+            return (openAIFileSearchToolObject(vectorStoreIDs: vectorStoreIDs, maxResults: maxResults), ["file_search_call.results"])
+        case let .codeInterpreter(containerID, memoryLimit):
+            return (openAICodeInterpreterToolObject(containerID: containerID, memoryLimit: memoryLimit), ["code_interpreter_call.outputs"])
+        case let .imageGeneration(action, quality, size, partialImages):
+            return (openAIImageGenerationToolObject(action: action, quality: quality, size: size, partialImages: partialImages), [])
+        case let .computerUse(displayWidth, displayHeight):
+            try requireAgentContext(executionContext, toolName: "Computer Use")
+            return (openAIComputerUseToolObject(displayWidth: displayWidth, displayHeight: displayHeight), [])
+        case let .remoteMCP(serverLabel, serverURL, requireApproval):
+            try requireAgentContext(executionContext, toolName: "remote MCP")
+            return ([
+                "type": "mcp",
+                "server_label": serverLabel,
+                "server_url": serverURL,
+                "require_approval": requireApproval,
+            ], [])
+        case .toolSearch:
+            try requireAgentContext(executionContext, toolName: "Tool Search")
+            return (["type": "tool_search"], [])
+        }
+    }
+
+    private static func openAIHostedToolObject(
+        _ tool: OpenAIHostedToolRequest,
+        executionContext: ChatRequest.ExecutionContext
+    ) throws -> (tool: [String: Any], include: [String]) {
+        switch tool.kind {
+        case .webSearch:
+            return (openAIWebSearchToolObject(options: nil), ["web_search_call.action.sources"])
+        case .fileSearch:
+            let maxResults = tool.configuration?.objectValue?["max_results"].flatMap(intValue)
+            return (
+                openAIFileSearchToolObject(vectorStoreIDs: tool.vectorStoreIDs.map(\.rawValue), maxResults: maxResults),
+                ["file_search_call.results"]
+            )
+        case .codeInterpreter:
+            let configuration = tool.configuration?.objectValue
+            return (
+                openAICodeInterpreterToolObject(
+                    containerID: configuration?["container_id"]?.stringValue,
+                    memoryLimit: configuration?["memory_limit"]?.stringValue
+                ),
+                ["code_interpreter_call.outputs"]
+            )
+        case .imageGeneration:
+            let configuration = tool.configuration?.objectValue
+            return (
+                openAIImageGenerationToolObject(
+                    action: configuration?["action"]?.stringValue,
+                    quality: configuration?["quality"]?.stringValue,
+                    size: configuration?["size"]?.stringValue,
+                    partialImages: configuration?["partial_images"].flatMap(intValue)
+                ),
+                []
+            )
+        case .computerUse:
+            try requireAgentContext(executionContext, toolName: "Computer Use")
+            let configuration = tool.configuration?.objectValue
+            return (
+                openAIComputerUseToolObject(
+                    displayWidth: configuration?["display_width"].flatMap(intValue),
+                    displayHeight: configuration?["display_height"].flatMap(intValue)
+                ),
+                []
+            )
+        case .mcp:
+            try requireAgentContext(executionContext, toolName: "remote MCP")
+            guard let configuration = tool.configuration?.objectValue,
+                  let serverLabel = configuration["server_label"]?.stringValue,
+                  let serverURL = configuration["server_url"]?.stringValue
+            else {
+                throw InferenceError.invalidRequest("Remote MCP hosted tools require a server label and URL.")
+            }
+            var object: [String: Any] = [
+                "type": "mcp",
+                "server_label": serverLabel,
+                "server_url": serverURL,
+            ]
+            if let approval = configuration["require_approval"]?.stringValue {
+                object["require_approval"] = approval
+            }
+            return (object, [])
+        case .custom:
+            guard let configuration = tool.configuration else {
+                throw InferenceError.invalidRequest("Custom hosted tools require a provider configuration object.")
+            }
+            return (jsonObject(from: configuration) as? [String: Any] ?? [:], [])
+        }
+    }
+
+    private static func openAIFileSearchToolObject(vectorStoreIDs: [String], maxResults: Int?) -> [String: Any] {
+        var tool: [String: Any] = [
+            "type": "file_search",
+            "vector_store_ids": vectorStoreIDs,
+        ]
+        if let maxResults {
+            tool["max_num_results"] = maxResults
+        }
+        return tool
+    }
+
+    private static func openAICodeInterpreterToolObject(containerID: String?, memoryLimit: String?) -> [String: Any] {
+        var container: [String: Any] = containerID.map { ["type": "container_id", "id": $0] } ?? ["type": "auto"]
+        if let memoryLimit, !memoryLimit.isEmpty {
+            container["memory_limit"] = memoryLimit
+        }
+        return [
+            "type": "code_interpreter",
+            "container": container,
+        ]
+    }
+
+    private static func openAIImageGenerationToolObject(
+        action: String?,
+        quality: String?,
+        size: String?,
+        partialImages: Int?
+    ) -> [String: Any] {
+        var tool: [String: Any] = ["type": "image_generation"]
+        if let action, !action.isEmpty {
+            tool["action"] = action
+        }
+        if let quality, !quality.isEmpty {
+            tool["quality"] = quality
+        }
+        if let size, !size.isEmpty {
+            tool["size"] = size
+        }
+        if let partialImages {
+            tool["partial_images"] = partialImages
+        }
+        return tool
+    }
+
+    private static func openAIComputerUseToolObject(displayWidth: Int?, displayHeight: Int?) -> [String: Any] {
+        var tool: [String: Any] = ["type": "computer_use_preview"]
+        if let displayWidth {
+            tool["display_width"] = displayWidth
+        }
+        if let displayHeight {
+            tool["display_height"] = displayHeight
+        }
+        return tool
+    }
+
+    private static func requireAgentContext(_ executionContext: ChatRequest.ExecutionContext, toolName: String) throws {
+        guard executionContext == .agent else {
+            throw InferenceError.invalidRequest("\(toolName) hosted tools are only available in Agent runs.")
+        }
+    }
+
+    private static func intValue(from value: JSONValue) -> Int? {
+        if case let .number(number) = value {
+            return Int(number)
+        }
+        return nil
+    }
+
+    private static func jsonObject(from value: JSONValue) -> Any {
+        switch value {
+        case let .object(object):
+            return object.mapValues(jsonObject)
+        case let .array(array):
+            return array.map(jsonObject)
+        case let .string(string):
+            return string
+        case let .number(number):
+            return number
+        case let .bool(bool):
+            return bool
+        case .null:
+            return NSNull()
+        }
     }
 
     private static func anthropicWebSearchToolObject(options: CloudWebSearchOptions?) -> [String: Any] {
@@ -817,6 +1066,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if chatRequest.sampling.topK > 0 {
             generationConfig["topK"] = chatRequest.sampling.topK
         }
+        generationConfig.merge(Self.geminiGenerationConfigStructuredOutput(from: chatRequest.structuredOutput, usesSnakeCase: false)) { _, new in new }
         let geminiThinkingLevelOptions = CloudProviderModelEligibility.geminiThinkingLevelOptions(for: chatRequest.modelID)
         if !geminiThinkingLevelOptions.isEmpty {
             generationConfig["thinkingConfig"] = [
@@ -851,6 +1101,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if geminiNativeWebSearchEnabled(for: chatRequest, hasFunctionTools: chatRequest.allowsTools && !chatRequest.availableTools.isEmpty) {
             geminiTools.append(["google_search": [:] as [String: Any]])
         }
+        geminiTools.append(contentsOf: try geminiHostedTools(for: chatRequest, usesInteractionsAPI: false))
         if !geminiTools.isEmpty {
             body["tools"] = geminiTools
         }
@@ -891,6 +1142,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if chatRequest.sampling.topK > 0 {
             generationConfig["top_k"] = chatRequest.sampling.topK
         }
+        generationConfig.merge(Self.geminiGenerationConfigStructuredOutput(from: chatRequest.structuredOutput, usesSnakeCase: true)) { _, new in new }
 
         var body: [String: Any] = [
             "stream": true,
@@ -919,6 +1171,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         if geminiNativeWebSearchEnabled(for: chatRequest, hasFunctionTools: chatRequest.allowsTools && !chatRequest.availableTools.isEmpty) {
             geminiInteractionTools.append(["type": "google_search"])
         }
+        geminiInteractionTools.append(contentsOf: try geminiHostedTools(for: chatRequest, usesInteractionsAPI: true))
         if !geminiInteractionTools.isEmpty {
             body["tools"] = geminiInteractionTools
             body["tool_choice"] = "auto"
@@ -933,6 +1186,48 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         modelID.rawValue.lowercased().contains("deep-research")
     }
 
+    private static func geminiGenerationConfigStructuredOutput(from format: StructuredOutputFormat, usesSnakeCase: Bool) -> [String: Any] {
+        let mimeTypeKey = usesSnakeCase ? "response_mime_type" : "responseMimeType"
+        let schemaKey = usesSnakeCase ? "response_schema" : "responseSchema"
+        switch format {
+        case .text:
+            return [:]
+        case .jsonObject:
+            return [mimeTypeKey: "application/json"]
+        case let .jsonSchema(_, schema, _):
+            return [
+                mimeTypeKey: "application/json",
+                schemaKey: jsonObject(from: schema),
+            ]
+        }
+    }
+
+    private func geminiHostedTools(for chatRequest: ChatRequest, usesInteractionsAPI: Bool) throws -> [[String: Any]] {
+        try chatRequest.hostedTools.map { tool in
+            try Self.geminiHostedToolObject(tool, executionContext: chatRequest.executionContext, usesInteractionsAPI: usesInteractionsAPI)
+        }
+    }
+
+    private static func geminiHostedToolObject(
+        _ tool: HostedToolConfiguration,
+        executionContext: ChatRequest.ExecutionContext,
+        usesInteractionsAPI: Bool
+    ) throws -> [String: Any] {
+        switch tool {
+        case .codeInterpreter:
+            try requireAgentContext(executionContext, toolName: "Gemini code execution")
+            return usesInteractionsAPI ? ["type": "code_execution"] : ["codeExecution": [:] as [String: Any]]
+        case .webSearch:
+            return usesInteractionsAPI ? ["type": "url_context"] : ["urlContext": [:] as [String: Any]]
+        case .fileSearch:
+            throw InferenceError.unsupportedCapability("Gemini does not support Pines hosted file search. Use Gemini fileData parts or cached contents instead.")
+        case .imageGeneration:
+            throw InferenceError.unsupportedCapability("Gemini image generation is not available through Pines hosted tools yet.")
+        case .computerUse, .remoteMCP, .toolSearch:
+            throw InferenceError.unsupportedCapability("This hosted tool is not supported by Gemini.")
+        }
+    }
+
     private func handleSSEEvent(
         _ event: CloudProviderSSEEvent,
         format: CloudProviderStreamFormat,
@@ -940,7 +1235,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         pendingFinish: inout InferenceFinish?,
         continuation: AsyncThrowingStream<InferenceStreamEvent, Error>.Continuation
     ) {
-        guard let data = event.jsonData() else { return }
+        let eventTypeField = format == .geminiInteractions ? "event_type" : "type"
+        guard let data = event.jsonData(eventTypeField: eventTypeField) else { return }
 
         let output = parser.parse(data: data, format: format, providerKind: configuration.kind)
         if let finish = output.finish {

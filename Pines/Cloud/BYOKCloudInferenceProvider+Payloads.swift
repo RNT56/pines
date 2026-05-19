@@ -63,7 +63,7 @@ extension BYOKCloudInferenceProvider {
                         "file_data": attachment.dataURL,
                     ],
                 ])
-            case .textDocument:
+            case .textDocument, .audio, .video, .providerFileURI:
                 throw unsupportedAttachment(attachment, providerName: providerKind == .openRouter ? "OpenRouter" : "this OpenAI-compatible provider")
             }
         }
@@ -169,6 +169,8 @@ extension BYOKCloudInferenceProvider {
                     "filename": attachment.fileName,
                     "file_data": attachment.dataURL,
                 ])
+            case .audio, .video, .providerFileURI:
+                throw unsupportedAttachment(attachment, providerName: "OpenAI")
             }
         }
         return content
@@ -204,6 +206,14 @@ extension BYOKCloudInferenceProvider {
     }
 
     static func geminiInlinePart(from attachment: CloudAttachmentPayload) throws -> [String: Any] {
+        if let providerURI = attachment.providerURI {
+            return [
+                "fileData": [
+                    "mimeType": attachment.contentType,
+                    "fileUri": providerURI,
+                ],
+            ]
+        }
         let geminiAttachment = try geminiCompatibleAttachment(attachment)
         return [
             "inlineData": [
@@ -244,6 +254,8 @@ extension BYOKCloudInferenceProvider {
                     content.append(anthropicDocumentBlock(from: attachment))
                 case .textDocument:
                     content.append(try anthropicTextDocumentBlock(from: attachment))
+                case .audio, .video, .providerFileURI:
+                    throw unsupportedAttachment(attachment, providerName: "Anthropic")
                 }
             }
         } else if !message.attachments.isEmpty {
@@ -314,7 +326,7 @@ extension BYOKCloudInferenceProvider {
         if message.role == .user {
             for attachment in try normalizedCloudAttachments(from: message) {
                 switch attachment.kind {
-                case .image, .pdf:
+                case .image, .pdf, .audio, .video, .providerFileURI:
                     parts.append(try geminiInlinePart(from: attachment))
                 case .textDocument:
                     parts.append(["text": try textDocumentPrompt(from: attachment)])
@@ -395,22 +407,33 @@ extension BYOKCloudInferenceProvider {
             switch attachment.kind {
             case .image:
                 let geminiAttachment = try geminiCompatibleAttachment(attachment)
-                content.append([
-                    "type": "image",
-                    "mime_type": geminiAttachment.contentType,
-                    "data": geminiAttachment.base64Data,
-                ])
+                content.append(geminiInteractionMediaContent(type: "image", attachment: geminiAttachment))
             case .pdf:
-                content.append([
-                    "type": "document",
-                    "mime_type": attachment.contentType,
-                    "data": attachment.base64Data,
-                ])
+                content.append(geminiInteractionMediaContent(type: "document", attachment: attachment))
             case .textDocument:
                 content.append(["type": "text", "text": try textDocumentPrompt(from: attachment)])
+            case .audio:
+                content.append(geminiInteractionMediaContent(type: "audio", attachment: attachment))
+            case .video:
+                content.append(geminiInteractionMediaContent(type: "video", attachment: attachment))
+            case .providerFileURI:
+                content.append(geminiInteractionMediaContent(type: "file", attachment: attachment))
             }
         }
         return content.isEmpty ? [["type": "text", "text": message.content]] : content
+    }
+
+    static func geminiInteractionMediaContent(type: String, attachment: CloudAttachmentPayload) -> [String: Any] {
+        var content: [String: Any] = [
+            "type": type,
+            "mime_type": attachment.contentType,
+        ]
+        if let providerURI = attachment.providerURI {
+            content["uri"] = providerURI
+        } else {
+            content["data"] = attachment.base64Data
+        }
+        return content
     }
 
     static func geminiInteractionFunctionToolObject(_ spec: AnyToolSpec) -> [String: Any] {
@@ -442,16 +465,24 @@ extension BYOKCloudInferenceProvider {
     }
 
     static func normalizedCloudAttachment(_ attachment: ChatAttachment) throws -> CloudAttachmentPayload {
-        let contentType = normalizedCloudAttachmentContentType(attachment.normalizedContentType)
+        let contentType = normalizedCloudAttachmentContentType(
+            attachment.normalizedContentType,
+            fileName: attachment.fileName,
+            localURL: attachment.localURL
+        )
         let kind: CloudAttachmentPayload.Kind
-        switch attachment.cloudInputKind {
-        case .image:
+        switch (attachment.kind, attachment.cloudInputKind) {
+        case (_, .image):
             kind = .image
-        case .pdf:
+        case (_, .pdf):
             kind = .pdf
-        case .textDocument:
+        case (_, .textDocument):
             kind = .textDocument
-        case .unsupported:
+        case (.audio, _):
+            kind = .audio
+        case (.video, _):
+            kind = .video
+        case (_, .unsupported):
             throw InferenceError.unsupportedCapability("Cloud attachment \(attachment.fileName) has unsupported MIME type \(contentType).")
         }
 
@@ -459,7 +490,18 @@ extension BYOKCloudInferenceProvider {
             throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) is missing a local file URL.")
         }
         guard localURL.isFileURL else {
-            throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) must be a local file.")
+            let providerURI = localURL.absoluteString.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !providerURI.isEmpty else {
+                throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) has an empty provider file URI.")
+            }
+            let rawFileName = attachment.fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return CloudAttachmentPayload(
+                kind: .providerFileURI,
+                fileName: rawFileName.isEmpty ? providerURI : rawFileName,
+                contentType: contentType,
+                data: Data(),
+                providerURI: providerURI
+            )
         }
 
         let data: Data
@@ -488,13 +530,49 @@ extension BYOKCloudInferenceProvider {
     }
 
     static func normalizedCloudAttachmentContentType(_ contentType: String) -> String {
-        switch contentType.lowercased() {
+        normalizedCloudAttachmentContentType(contentType, fileName: nil, localURL: nil)
+    }
+
+    static func normalizedCloudAttachmentContentType(_ contentType: String, fileName: String?, localURL: URL?) -> String {
+        let normalized = contentType.lowercased()
+        if normalized.isEmpty || normalized == "application/octet-stream" {
+            let ext = [localURL?.pathExtension, fileName.map { URL(fileURLWithPath: $0).pathExtension }]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .first { !$0.isEmpty }
+            switch ext {
+            case "mp3", "mpga":
+                return "audio/mpeg"
+            case "m4a":
+                return "audio/mp4"
+            case "wav":
+                return "audio/wav"
+            case "aac":
+                return "audio/aac"
+            case "flac":
+                return "audio/flac"
+            case "ogg", "oga":
+                return "audio/ogg"
+            case "mp4", "m4v":
+                return "video/mp4"
+            case "mov", "qt":
+                return "video/quicktime"
+            case "webm":
+                return "video/webm"
+            case "avi":
+                return "video/x-msvideo"
+            case "mpeg", "mpg":
+                return "video/mpeg"
+            default:
+                break
+            }
+        }
+        switch normalized {
         case "image/jpg":
             return "image/jpeg"
         case "text/x-markdown":
             return "text/markdown"
         default:
-            return contentType.lowercased()
+            return normalized
         }
     }
 
@@ -514,6 +592,9 @@ extension BYOKCloudInferenceProvider {
     }
 
     static func geminiCompatibleAttachment(_ attachment: CloudAttachmentPayload) throws -> CloudAttachmentPayload {
+        guard attachment.providerURI == nil else {
+            return attachment
+        }
         guard attachment.kind == .image,
               attachment.contentType == "image/gif"
         else {
@@ -696,12 +777,16 @@ struct CloudAttachmentPayload {
         case image
         case pdf
         case textDocument
+        case audio
+        case video
+        case providerFileURI
     }
 
     var kind: Kind
     var fileName: String
     var contentType: String
     var data: Data
+    var providerURI: String?
 
     var base64Data: String {
         data.base64EncodedString()

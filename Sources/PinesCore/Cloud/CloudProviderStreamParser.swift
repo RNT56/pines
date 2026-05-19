@@ -30,6 +30,11 @@ public enum CloudProviderMetadataKeys {
     public static let geminiRequestID = "gemini.request_id"
     public static let geminiModelContentJSON = "gemini.model_content_json"
     public static let geminiInteractionID = "gemini.interaction_id"
+    public static let geminiCodeExecutionJSON = "gemini.code_execution_json"
+    public static let geminiURLContextJSON = "gemini.url_context_json"
+    public static let geminiFileReferencesJSON = "gemini.file_references_json"
+    public static let geminiCacheUsageJSON = "gemini.cache_usage_json"
+    public static let geminiArtifactsJSON = "gemini.artifacts_json"
 }
 
 public enum CloudProviderStreamFormat: Sendable {
@@ -225,6 +230,7 @@ public struct CloudProviderStreamParser {
             if let content = candidate["content"] as? [String: Any] {
                 state.recordGeminiModelContent(content)
                 for part in content["parts"] as? [[String: Any]] ?? [] {
+                    state.recordGeminiPartMetadata(part, interactionsAPI: false)
                     if part["thought"] as? Bool == true {
                         continue
                     }
@@ -897,12 +903,20 @@ public struct CloudProviderStreamState {
     public var geminiProviderMetadata = [String: String]()
     public var geminiCompletedToolCallIDs = Set<String>()
     public var geminiModelContent: [String: Any]?
+    public var geminiCodeExecution = [[String: Any]]()
+    public var geminiURLContext = [[String: Any]]()
+    public var geminiFileReferences = [[String: Any]]()
+    public var geminiArtifacts = [[String: Any]]()
 
     public var geminiInteractionProviderMetadata = [String: String]()
     public var geminiInteractionToolIDs: [Int: String] = [:]
     public var geminiInteractionToolNames: [Int: String] = [:]
     public var geminiInteractionArguments: [Int: String] = [:]
     public var geminiInteractionCompletedToolCallIDs = Set<String>()
+    public var geminiInteractionCodeExecution = [[String: Any]]()
+    public var geminiInteractionURLContext = [[String: Any]]()
+    public var geminiInteractionFileReferences = [[String: Any]]()
+    public var geminiInteractionArtifacts = [[String: Any]]()
 
     public init() {}
 
@@ -1202,6 +1216,178 @@ public struct CloudProviderStreamState {
         return nil
     }
 
+    private static func extractedGeminiCacheUsage(from usage: [String: Any]?) -> [String: Any]? {
+        guard let usage else { return nil }
+        var summary = [String: Any]()
+        for key in [
+            "cachedContentTokenCount",
+            "cacheTokensDetails",
+            "promptTokensDetails",
+            "candidatesTokensDetails",
+            "toolUsePromptTokenCount",
+            "thoughtsTokenCount",
+            "totalTokenCount",
+            "total_input_tokens",
+            "cached_input_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        ] {
+            if let value = usage[key] {
+                summary[key] = value
+            }
+        }
+        return summary.isEmpty ? nil : summary
+    }
+
+    private static func extractedGeminiCodeExecution(fromGenerateContentResponse response: [String: Any]) -> [[String: Any]] {
+        (response["candidates"] as? [[String: Any]] ?? []).flatMap { candidate in
+            extractedGeminiCodeExecution(fromContent: candidate["content"] as? [String: Any])
+        }
+    }
+
+    private static func extractedGeminiCodeExecution(fromInteraction interaction: [String: Any]) -> [[String: Any]] {
+        var values = [[String: Any]]()
+        for output in interactionOutputs(from: interaction) {
+            values.append(contentsOf: extractedGeminiCodeExecution(fromContent: output["content"] as? [String: Any]))
+            values.append(contentsOf: extractedGeminiCodeExecution(fromParts: output["parts"] as? [[String: Any]] ?? []))
+            values.append(contentsOf: codeExecutionObjects(from: output))
+        }
+        values.append(contentsOf: codeExecutionObjects(from: interaction))
+        return values
+    }
+
+    private static func extractedGeminiCodeExecution(fromContent content: [String: Any]?) -> [[String: Any]] {
+        extractedGeminiCodeExecution(fromParts: content?["parts"] as? [[String: Any]] ?? [])
+    }
+
+    private static func extractedGeminiCodeExecution(fromParts parts: [[String: Any]]) -> [[String: Any]] {
+        parts.flatMap(codeExecutionObjects(from:))
+    }
+
+    private static func codeExecutionObjects(from object: [String: Any]) -> [[String: Any]] {
+        var values = [[String: Any]]()
+        if let executableCode = object["executableCode"] as? [String: Any] ?? object["executable_code"] as? [String: Any] {
+            values.append(["type": "executable_code", "value": executableCode])
+        }
+        if let result = object["codeExecutionResult"] as? [String: Any] ?? object["code_execution_result"] as? [String: Any] {
+            values.append(["type": "code_execution_result", "value": result])
+        }
+        return values
+    }
+
+    private static func extractedGeminiURLContext(fromGenerateContentResponse response: [String: Any]) -> [[String: Any]] {
+        var values = [[String: Any]]()
+        for candidate in response["candidates"] as? [[String: Any]] ?? [] {
+            values.append(contentsOf: urlContextObjects(from: candidate))
+            if let metadata = candidate["urlContextMetadata"] as? [String: Any] ?? candidate["url_context_metadata"] as? [String: Any] {
+                values.append(metadata)
+            }
+            if let groundingMetadata = candidate["groundingMetadata"] as? [String: Any] {
+                values.append(contentsOf: urlContextObjects(from: groundingMetadata))
+            }
+        }
+        return values
+    }
+
+    private static func extractedGeminiURLContext(fromInteraction interaction: [String: Any]) -> [[String: Any]] {
+        var values = urlContextObjects(from: interaction)
+        for output in interactionOutputs(from: interaction) {
+            values.append(contentsOf: urlContextObjects(from: output))
+            if let metadata = output["urlContextMetadata"] as? [String: Any] ?? output["url_context_metadata"] as? [String: Any] {
+                values.append(metadata)
+            }
+        }
+        return values
+    }
+
+    private static func urlContextObjects(from object: [String: Any]) -> [[String: Any]] {
+        var values = [[String: Any]]()
+        for key in ["urlContextMetadata", "url_context_metadata", "urlMetadata", "url_metadata"] {
+            if let value = object[key] as? [String: Any] {
+                values.append(value)
+            } else if let value = object[key] as? [[String: Any]] {
+                values.append(contentsOf: value)
+            }
+        }
+        return values
+    }
+
+    private static func extractedGeminiFileReferences(fromGenerateContentResponse response: [String: Any]) -> [[String: Any]] {
+        (response["candidates"] as? [[String: Any]] ?? []).flatMap { candidate in
+            extractedGeminiFileReferences(fromContent: candidate["content"] as? [String: Any])
+        }
+    }
+
+    private static func extractedGeminiFileReferences(fromInteraction interaction: [String: Any]) -> [[String: Any]] {
+        interactionOutputs(from: interaction).flatMap { output in
+            extractedGeminiFileReferences(fromContent: output["content"] as? [String: Any])
+                + fileReferenceObjects(from: output)
+        }
+    }
+
+    private static func extractedGeminiFileReferences(fromContent content: [String: Any]?) -> [[String: Any]] {
+        (content?["parts"] as? [[String: Any]] ?? []).flatMap(fileReferenceObjects(from:))
+    }
+
+    private static func fileReferenceObjects(from object: [String: Any]) -> [[String: Any]] {
+        var values = [[String: Any]]()
+        if let fileData = object["fileData"] as? [String: Any] ?? object["file_data"] as? [String: Any] {
+            values.append(fileData)
+        }
+        if let uri = stringValue(object["fileUri"]) ?? stringValue(object["file_uri"]) ?? stringValue(object["uri"]) {
+            values.append([
+                "fileUri": uri,
+                "mimeType": stringValue(object["mimeType"]) ?? stringValue(object["mime_type"]) ?? "",
+            ])
+        }
+        return values
+    }
+
+    private static func extractedGeminiArtifacts(fromGenerateContentResponse response: [String: Any]) -> [[String: Any]] {
+        (response["candidates"] as? [[String: Any]] ?? []).flatMap { candidate in
+            extractedGeminiArtifacts(fromContent: candidate["content"] as? [String: Any])
+        }
+    }
+
+    private static func extractedGeminiArtifacts(fromInteraction interaction: [String: Any]) -> [[String: Any]] {
+        interactionOutputs(from: interaction).flatMap { output in
+            extractedGeminiArtifacts(fromContent: output["content"] as? [String: Any])
+                + artifactObjects(from: output)
+        }
+    }
+
+    private static func extractedGeminiArtifacts(fromContent content: [String: Any]?) -> [[String: Any]] {
+        (content?["parts"] as? [[String: Any]] ?? []).flatMap(artifactObjects(from:))
+    }
+
+    private static func artifactObjects(from object: [String: Any]) -> [[String: Any]] {
+        var values = [[String: Any]]()
+        if let inlineData = object["inlineData"] as? [String: Any] ?? object["inline_data"] as? [String: Any] {
+            values.append([
+                "type": "inline_data",
+                "mimeType": stringValue(inlineData["mimeType"]) ?? stringValue(inlineData["mime_type"]) ?? "",
+                "byte_hint": stringValue(inlineData["data"])?.count ?? 0,
+            ])
+        }
+        for key in ["generatedFiles", "generated_files", "artifacts"] {
+            if let value = object[key] as? [[String: Any]] {
+                values.append(contentsOf: value)
+            }
+        }
+        return values
+    }
+
+    private static func interactionOutputs(from interaction: [String: Any]) -> [[String: Any]] {
+        var outputs = interaction["outputs"] as? [[String: Any]] ?? []
+        if let output = interaction["output"] as? [String: Any] {
+            outputs.append(output)
+        }
+        if let steps = interaction["steps"] as? [[String: Any]] {
+            outputs.append(contentsOf: steps)
+        }
+        return outputs
+    }
+
     private static func sourceCitations(from sources: [[String: Any]], provider: String) -> [WebSearchCitation] {
         sources.compactMap { source in
             let web = source["web"] as? [String: Any]
@@ -1422,9 +1608,14 @@ public struct CloudProviderStreamState {
         if let modelVersion = response["modelVersion"] as? String, !modelVersion.isEmpty {
             geminiProviderMetadata[CloudProviderMetadataKeys.geminiModelVersion] = modelVersion
         }
+        Self.recordGeminiCacheUsage(Self.extractedGeminiCacheUsage(from: response["usageMetadata"] as? [String: Any]), into: &geminiProviderMetadata)
         Self.recordSearchCitations(Self.geminiWebSearchCitations(from: response), into: &geminiProviderMetadata)
         Self.recordSearchQueries(Self.geminiWebSearchQueries(from: response), into: &geminiProviderMetadata)
         Self.recordSearchSuggestionsHTML(Self.geminiSearchSuggestionsHTML(from: response), into: &geminiProviderMetadata)
+        recordGeminiCodeExecution(Self.extractedGeminiCodeExecution(fromGenerateContentResponse: response), interactionsAPI: false)
+        recordGeminiURLContext(Self.extractedGeminiURLContext(fromGenerateContentResponse: response), interactionsAPI: false)
+        recordGeminiFileReferences(Self.extractedGeminiFileReferences(fromGenerateContentResponse: response), interactionsAPI: false)
+        recordGeminiArtifacts(Self.extractedGeminiArtifacts(fromGenerateContentResponse: response), interactionsAPI: false)
     }
 
     public mutating func recordGeminiInteraction(_ interaction: [String: Any]) {
@@ -1434,9 +1625,103 @@ public struct CloudProviderStreamState {
         if let model = interaction["model"] as? String, !model.isEmpty {
             geminiInteractionProviderMetadata[CloudProviderMetadataKeys.geminiModelVersion] = model
         }
+        let usage = interaction["usage"] as? [String: Any] ?? interaction["usageMetadata"] as? [String: Any]
+        Self.recordGeminiCacheUsage(Self.extractedGeminiCacheUsage(from: usage), into: &geminiInteractionProviderMetadata)
         Self.recordSearchCitations(Self.geminiInteractionWebSearchCitations(from: interaction), into: &geminiInteractionProviderMetadata)
         Self.recordSearchQueries(Self.geminiInteractionWebSearchQueries(from: interaction), into: &geminiInteractionProviderMetadata)
         Self.recordSearchSuggestionsHTML(Self.geminiInteractionSearchSuggestionsHTML(from: interaction), into: &geminiInteractionProviderMetadata)
+        recordGeminiCodeExecution(Self.extractedGeminiCodeExecution(fromInteraction: interaction), interactionsAPI: true)
+        recordGeminiURLContext(Self.extractedGeminiURLContext(fromInteraction: interaction), interactionsAPI: true)
+        recordGeminiFileReferences(Self.extractedGeminiFileReferences(fromInteraction: interaction), interactionsAPI: true)
+        recordGeminiArtifacts(Self.extractedGeminiArtifacts(fromInteraction: interaction), interactionsAPI: true)
+    }
+
+    public mutating func recordGeminiCodeExecution(_ values: [[String: Any]], interactionsAPI: Bool) {
+        if interactionsAPI {
+            geminiInteractionCodeExecution = Self.appendingJSONObjectSummaries(values, to: geminiInteractionCodeExecution)
+            if let json = Self.jsonString(fromJSONObjectSummaries: geminiInteractionCodeExecution) {
+                geminiInteractionProviderMetadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON] = json
+            }
+        } else {
+            geminiCodeExecution = Self.appendingJSONObjectSummaries(values, to: geminiCodeExecution)
+            if let json = Self.jsonString(fromJSONObjectSummaries: geminiCodeExecution) {
+                geminiProviderMetadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON] = json
+            }
+        }
+    }
+
+    public mutating func recordGeminiURLContext(_ values: [[String: Any]], interactionsAPI: Bool) {
+        if interactionsAPI {
+            geminiInteractionURLContext = Self.appendingJSONObjectSummaries(values, to: geminiInteractionURLContext)
+            if let json = Self.jsonString(fromJSONObjectSummaries: geminiInteractionURLContext) {
+                geminiInteractionProviderMetadata[CloudProviderMetadataKeys.geminiURLContextJSON] = json
+            }
+        } else {
+            geminiURLContext = Self.appendingJSONObjectSummaries(values, to: geminiURLContext)
+            if let json = Self.jsonString(fromJSONObjectSummaries: geminiURLContext) {
+                geminiProviderMetadata[CloudProviderMetadataKeys.geminiURLContextJSON] = json
+            }
+        }
+    }
+
+    public mutating func recordGeminiFileReferences(_ values: [[String: Any]], interactionsAPI: Bool) {
+        if interactionsAPI {
+            geminiInteractionFileReferences = Self.appendingJSONObjectSummaries(values, to: geminiInteractionFileReferences)
+            if let json = Self.jsonString(fromJSONObjectSummaries: geminiInteractionFileReferences) {
+                geminiInteractionProviderMetadata[CloudProviderMetadataKeys.geminiFileReferencesJSON] = json
+            }
+        } else {
+            geminiFileReferences = Self.appendingJSONObjectSummaries(values, to: geminiFileReferences)
+            if let json = Self.jsonString(fromJSONObjectSummaries: geminiFileReferences) {
+                geminiProviderMetadata[CloudProviderMetadataKeys.geminiFileReferencesJSON] = json
+            }
+        }
+    }
+
+    public mutating func recordGeminiArtifacts(_ values: [[String: Any]], interactionsAPI: Bool) {
+        if interactionsAPI {
+            geminiInteractionArtifacts = Self.appendingJSONObjectSummaries(values, to: geminiInteractionArtifacts)
+            if let json = Self.jsonString(fromJSONObjectSummaries: geminiInteractionArtifacts) {
+                geminiInteractionProviderMetadata[CloudProviderMetadataKeys.geminiArtifactsJSON] = json
+            }
+        } else {
+            geminiArtifacts = Self.appendingJSONObjectSummaries(values, to: geminiArtifacts)
+            if let json = Self.jsonString(fromJSONObjectSummaries: geminiArtifacts) {
+                geminiProviderMetadata[CloudProviderMetadataKeys.geminiArtifactsJSON] = json
+            }
+        }
+    }
+
+    public mutating func recordGeminiPartMetadata(_ part: [String: Any], interactionsAPI: Bool) {
+        var codeExecution = [[String: Any]]()
+        if let executableCode = part["executableCode"] as? [String: Any] {
+            codeExecution.append(["type": "executable_code", "value": executableCode])
+        }
+        if let result = part["codeExecutionResult"] as? [String: Any] {
+            codeExecution.append(["type": "code_execution_result", "value": result])
+        }
+        recordGeminiCodeExecution(codeExecution, interactionsAPI: interactionsAPI)
+
+        if let fileData = part["fileData"] as? [String: Any] {
+            recordGeminiFileReferences([fileData], interactionsAPI: interactionsAPI)
+        }
+
+        if let inlineData = part["inlineData"] as? [String: Any] {
+            recordGeminiArtifacts([[
+                "type": "inline_data",
+                "mimeType": Self.stringValue(inlineData["mimeType"]) ?? "",
+                "byte_hint": Self.stringValue(inlineData["data"])?.count ?? 0,
+            ]], interactionsAPI: interactionsAPI)
+        }
+    }
+
+    private static func recordGeminiCacheUsage(_ value: [String: Any]?, into metadata: inout [String: String]) {
+        guard let value,
+              JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON] = json
     }
 
     public mutating func recordGeminiModelContent(_ content: [String: Any]) {

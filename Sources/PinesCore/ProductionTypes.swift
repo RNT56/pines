@@ -541,6 +541,14 @@ public enum OpenAIBackgroundResponseStatus: String, Hashable, Codable, Sendable,
     case requiresAction
 }
 
+public enum OpenAIRunKind: String, Hashable, Codable, Sendable, CaseIterable {
+    case chat
+    case backgroundResponse
+    case deepResearch
+    case batch
+    case realtime
+}
+
 public struct OpenAIBackgroundResponse: Identifiable, Hashable, Codable, Sendable {
     public var id: OpenAIResponseID
     public var providerID: ProviderID
@@ -586,6 +594,144 @@ public struct OpenAIBackgroundResponse: Identifiable, Hashable, Codable, Sendabl
         self.completedAt = completedAt
         self.lastPolledAt = lastPolledAt
         self.expiresAt = expiresAt
+        self.lastError = lastError
+    }
+}
+
+public enum OpenAIDeepResearchDepth: String, Hashable, Codable, Sendable, CaseIterable {
+    case quick
+    case standard
+    case deep
+}
+
+public enum OpenAIDeepResearchSourceScope: String, Hashable, Codable, Sendable, CaseIterable {
+    case webOnly
+    case webAndProviderFiles
+    case webAndVaultExport
+    case webAndMCP
+}
+
+public enum OpenAIDeepResearchReportFormat: String, Hashable, Codable, Sendable, CaseIterable {
+    case memo
+    case brief
+    case citationFirst
+    case tableHeavy
+    case markdown
+}
+
+public struct OpenAIDeepResearchSourcePolicy: Hashable, Codable, Sendable {
+    public var scope: OpenAIDeepResearchSourceScope
+    public var vectorStoreIDs: [OpenAIVectorStoreID]
+    public var providerFileIDs: [OpenAIProviderFileID]
+    public var vaultDocumentIDs: [UUID]
+    public var allowedDomains: [String]
+    public var blockedDomains: [String]
+    public var mcpServerLabel: String?
+    public var mcpServerURL: URL?
+    public var requireMCPApproval: String
+
+    public init(
+        scope: OpenAIDeepResearchSourceScope = .webOnly,
+        vectorStoreIDs: [OpenAIVectorStoreID] = [],
+        providerFileIDs: [OpenAIProviderFileID] = [],
+        vaultDocumentIDs: [UUID] = [],
+        allowedDomains: [String] = [],
+        blockedDomains: [String] = [],
+        mcpServerLabel: String? = nil,
+        mcpServerURL: URL? = nil,
+        requireMCPApproval: String = "always"
+    ) {
+        self.scope = scope
+        self.vectorStoreIDs = vectorStoreIDs
+        self.providerFileIDs = providerFileIDs
+        self.vaultDocumentIDs = vaultDocumentIDs
+        self.allowedDomains = allowedDomains
+        self.blockedDomains = blockedDomains
+        self.mcpServerLabel = mcpServerLabel
+        self.mcpServerURL = mcpServerURL
+        self.requireMCPApproval = requireMCPApproval
+    }
+}
+
+public struct OpenAIDeepResearchRequest: Hashable, Codable, Sendable {
+    public var id: UUID
+    public var providerID: ProviderID
+    public var modelID: ModelID
+    public var title: String
+    public var prompt: String
+    public var depth: OpenAIDeepResearchDepth
+    public var sourcePolicy: OpenAIDeepResearchSourcePolicy
+    public var reportFormat: OpenAIDeepResearchReportFormat
+    public var includeCodeInterpreter: Bool
+    public var serviceTier: OpenAIServiceTier
+    public var metadata: [String: String]
+
+    public init(
+        id: UUID = UUID(),
+        providerID: ProviderID,
+        modelID: ModelID = "gpt-5.5-pro",
+        title: String,
+        prompt: String,
+        depth: OpenAIDeepResearchDepth = .standard,
+        sourcePolicy: OpenAIDeepResearchSourcePolicy = .init(),
+        reportFormat: OpenAIDeepResearchReportFormat = .memo,
+        includeCodeInterpreter: Bool = true,
+        serviceTier: OpenAIServiceTier = .auto,
+        metadata: [String: String] = [:]
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.modelID = modelID
+        self.title = title
+        self.prompt = prompt
+        self.depth = depth
+        self.sourcePolicy = sourcePolicy
+        self.reportFormat = reportFormat
+        self.includeCodeInterpreter = includeCodeInterpreter
+        self.serviceTier = serviceTier
+        self.metadata = metadata
+    }
+}
+
+public struct OpenAIDeepResearchRun: Identifiable, Hashable, Codable, Sendable {
+    public var id: UUID
+    public var request: OpenAIDeepResearchRequest
+    public var responseID: OpenAIResponseID?
+    public var status: OpenAIBackgroundResponseStatus
+    public var finalReportArtifactID: OpenAIArtifactID?
+    public var citationCount: Int
+    public var toolCallCount: Int
+    public var providerMetadata: [String: String]
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var completedAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: UUID = UUID(),
+        request: OpenAIDeepResearchRequest,
+        responseID: OpenAIResponseID? = nil,
+        status: OpenAIBackgroundResponseStatus = .queued,
+        finalReportArtifactID: OpenAIArtifactID? = nil,
+        citationCount: Int = 0,
+        toolCallCount: Int = 0,
+        providerMetadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        completedAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.request = request
+        self.responseID = responseID
+        self.status = status
+        self.finalReportArtifactID = finalReportArtifactID
+        self.citationCount = citationCount
+        self.toolCallCount = toolCallCount
+        self.providerMetadata = providerMetadata
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.completedAt = completedAt
         self.lastError = lastError
     }
 }
@@ -794,6 +940,86 @@ public struct OpenAIStructuredOutputResult: Identifiable, Hashable, Codable, Sen
         self.createdAt = createdAt
     }
 }
+
+public enum ProviderContextCacheStatus: String, Hashable, Codable, Sendable, CaseIterable {
+    case creating
+    case active
+    case expired
+    case failed
+    case deleting
+    case deleted
+}
+
+public struct ProviderContextCache: Identifiable, Hashable, Codable, Sendable {
+    public var id: ProviderContextCacheID
+    public var providerID: ProviderID
+    public var modelID: ModelID
+    public var name: String?
+    public var status: ProviderContextCacheStatus
+    public var displayName: String?
+    public var contentTokenCount: Int?
+    public var ttlSeconds: Int?
+    public var expiresAt: Date?
+    public var providerMetadata: [String: String]
+    public var createdAt: Date
+    public var updatedAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: ProviderContextCacheID,
+        providerID: ProviderID,
+        modelID: ModelID,
+        name: String? = nil,
+        status: ProviderContextCacheStatus = .creating,
+        displayName: String? = nil,
+        contentTokenCount: Int? = nil,
+        ttlSeconds: Int? = nil,
+        expiresAt: Date? = nil,
+        providerMetadata: [String: String] = [:],
+        createdAt: Date = Date(),
+        updatedAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.providerID = providerID
+        self.modelID = modelID
+        self.name = name
+        self.status = status
+        self.displayName = displayName
+        self.contentTokenCount = contentTokenCount
+        self.ttlSeconds = ttlSeconds
+        self.expiresAt = expiresAt
+        self.providerMetadata = providerMetadata
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.lastError = lastError
+    }
+}
+
+public typealias ProviderFilePurpose = OpenAIProviderFilePurpose
+public typealias ProviderFileStatus = OpenAIProviderFileStatus
+public typealias ProviderFile = OpenAIProviderFile
+public typealias ProviderDataStoreStatus = OpenAIVectorStoreStatus
+public typealias ProviderDataStoreFileCounts = OpenAIVectorStoreFileCounts
+public typealias ProviderDataStoreExpirationPolicy = OpenAIVectorStoreExpirationPolicy
+public typealias ProviderDataStore = OpenAIVectorStore
+public typealias ProviderDataStoreFileStatus = OpenAIVectorStoreFileStatus
+public typealias ProviderDataStoreFile = OpenAIVectorStoreFile
+public typealias ProviderHostedToolCallStatus = OpenAIHostedToolCallStatus
+public typealias ProviderHostedToolCall = OpenAIHostedToolCall
+public typealias ProviderArtifactKind = OpenAIArtifactKind
+public typealias ProviderArtifact = OpenAIArtifact
+public typealias ProviderBackgroundRunStatus = OpenAIBackgroundResponseStatus
+public typealias ProviderBackgroundRun = OpenAIBackgroundResponse
+public typealias ProviderLiveSessionStatus = OpenAIRealtimeSessionStatus
+public typealias ProviderLiveModality = OpenAIRealtimeModality
+public typealias ProviderLiveSession = OpenAIRealtimeSession
+public typealias ProviderBatchEndpoint = OpenAIBatchEndpoint
+public typealias ProviderBatchJobStatus = OpenAIBatchJobStatus
+public typealias ProviderBatchRequestCounts = OpenAIBatchRequestCounts
+public typealias ProviderBatchJob = OpenAIBatchJob
+public typealias StructuredOutputResultStatus = OpenAIStructuredOutputResultStatus
+public typealias StructuredOutputResult = OpenAIStructuredOutputResult
 
 public enum VaultImportStatus: String, Hashable, Codable, Sendable, CaseIterable {
     case queued
