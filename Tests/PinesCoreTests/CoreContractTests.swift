@@ -1345,6 +1345,8 @@ struct CoreContractTests {
         ] {
             #expect(genericSQL.contains("CREATE TABLE IF NOT EXISTS \(table)"))
         }
+        #expect(genericSQL.contains("credential_keychain_account"))
+        #expect(!genericSQL.contains("client_secret_keychain_account"))
     }
 
     @Test

@@ -756,7 +756,7 @@ public enum PinesDatabaseSchema {
                 voice TEXT,
                 input_audio_format TEXT,
                 output_audio_format TEXT,
-                client_secret_keychain_account TEXT,
+                credential_keychain_account TEXT,
                 expires_at REAL,
                 provider_metadata_json TEXT,
                 created_at REAL NOT NULL,
@@ -907,7 +907,7 @@ public enum PinesDatabaseSchema {
                 voice TEXT,
                 input_audio_format TEXT,
                 output_audio_format TEXT,
-                client_secret_keychain_account TEXT,
+                credential_keychain_account TEXT,
                 expires_at REAL,
                 provider_metadata_json TEXT,
                 created_at REAL NOT NULL,
@@ -1021,11 +1021,11 @@ public enum PinesDatabaseSchema {
             """
             INSERT OR IGNORE INTO provider_live_sessions
                 (id, provider_id, provider_kind, model_id, status, modalities_json, voice,
-                 input_audio_format, output_audio_format, client_secret_keychain_account,
+                 input_audio_format, output_audio_format, credential_keychain_account,
                  expires_at, provider_metadata_json, created_at, closed_at, last_error)
             SELECT
                 id, provider_id, 'openAI', model_id, status, modalities_json, voice,
-                input_audio_format, output_audio_format, client_secret_keychain_account,
+                input_audio_format, output_audio_format, credential_keychain_account,
                 expires_at, provider_metadata_json, created_at, closed_at, last_error
             FROM openai_realtime_sessions;
             """,

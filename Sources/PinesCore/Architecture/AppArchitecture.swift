@@ -668,7 +668,7 @@ public struct ProviderLiveSessionRecord: Identifiable, Hashable, Codable, Sendab
     public var modelID: ModelID
     public var status: String
     public var modalities: [String]
-    public var clientSecretKeychainAccount: String?
+    public var credentialKeychainAccount: String?
     public var expiresAt: Date?
     public var providerMetadata: [String: String]
     public var createdAt: Date
@@ -682,7 +682,7 @@ public struct ProviderLiveSessionRecord: Identifiable, Hashable, Codable, Sendab
         modelID: ModelID,
         status: String,
         modalities: [String] = [],
-        clientSecretKeychainAccount: String? = nil,
+        credentialKeychainAccount: String? = nil,
         expiresAt: Date? = nil,
         providerMetadata: [String: String] = [:],
         createdAt: Date = Date(),
@@ -695,7 +695,7 @@ public struct ProviderLiveSessionRecord: Identifiable, Hashable, Codable, Sendab
         self.modelID = modelID
         self.status = status
         self.modalities = modalities
-        self.clientSecretKeychainAccount = clientSecretKeychainAccount
+        self.credentialKeychainAccount = credentialKeychainAccount
         self.expiresAt = expiresAt
         self.providerMetadata = providerMetadata
         self.createdAt = createdAt

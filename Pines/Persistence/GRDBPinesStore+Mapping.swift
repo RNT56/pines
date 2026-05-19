@@ -445,7 +445,7 @@ extension GRDBPinesStore {
             modelID: ModelID(rawValue: row["model_id"]),
             status: row["status"],
             modalities: decodeJSON(row["modalities_json"] as String?) ?? [],
-            clientSecretKeychainAccount: row["client_secret_keychain_account"] as String?,
+            credentialKeychainAccount: row["credential_keychain_account"] as String?,
             expiresAt: (row["expires_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:)),
             providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?),
             createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),

@@ -760,7 +760,7 @@ public struct OpenAIRealtimeSession: Identifiable, Hashable, Codable, Sendable {
     public var voice: String?
     public var inputAudioFormat: String?
     public var outputAudioFormat: String?
-    public var clientSecretKeychainAccount: String?
+    public var credentialKeychainAccount: String?
     public var expiresAt: Date?
     public var providerMetadata: [String: String]
     public var createdAt: Date
@@ -776,7 +776,7 @@ public struct OpenAIRealtimeSession: Identifiable, Hashable, Codable, Sendable {
         voice: String? = nil,
         inputAudioFormat: String? = nil,
         outputAudioFormat: String? = nil,
-        clientSecretKeychainAccount: String? = nil,
+        credentialKeychainAccount: String? = nil,
         expiresAt: Date? = nil,
         providerMetadata: [String: String] = [:],
         createdAt: Date = Date(),
@@ -791,7 +791,7 @@ public struct OpenAIRealtimeSession: Identifiable, Hashable, Codable, Sendable {
         self.voice = voice
         self.inputAudioFormat = inputAudioFormat
         self.outputAudioFormat = outputAudioFormat
-        self.clientSecretKeychainAccount = clientSecretKeychainAccount
+        self.credentialKeychainAccount = credentialKeychainAccount
         self.expiresAt = expiresAt
         self.providerMetadata = providerMetadata
         self.createdAt = createdAt

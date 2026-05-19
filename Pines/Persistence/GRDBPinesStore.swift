@@ -1763,7 +1763,7 @@ actor GRDBPinesStore:
             try db.execute(
                 sql: """
                 INSERT INTO provider_live_sessions
-                    (id, provider_id, provider_kind, model_id, status, modalities_json, client_secret_keychain_account,
+                    (id, provider_id, provider_kind, model_id, status, modalities_json, credential_keychain_account,
                      expires_at, provider_metadata_json, created_at, closed_at, last_error)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
@@ -1772,7 +1772,7 @@ actor GRDBPinesStore:
                     model_id = excluded.model_id,
                     status = excluded.status,
                     modalities_json = excluded.modalities_json,
-                    client_secret_keychain_account = excluded.client_secret_keychain_account,
+                    credential_keychain_account = excluded.credential_keychain_account,
                     expires_at = excluded.expires_at,
                     provider_metadata_json = excluded.provider_metadata_json,
                     closed_at = excluded.closed_at,
@@ -1785,7 +1785,7 @@ actor GRDBPinesStore:
                     session.modelID.rawValue,
                     session.status,
                     Self.encodeJSON(session.modalities),
-                    session.clientSecretKeychainAccount,
+                    session.credentialKeychainAccount,
                     session.expiresAt?.timeIntervalSinceReferenceDate,
                     Self.encodeProviderMetadata(session.providerMetadata),
                     session.createdAt.timeIntervalSinceReferenceDate,

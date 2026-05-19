@@ -86,7 +86,7 @@ public enum OpenAIProviderRecordMapper {
             modelID: fields.string(for: "model").map(ModelID.init(rawValue:)) ?? fallbackModelID ?? "gpt-realtime",
             status: normalizedStatus(fields.string(for: "status") ?? "created"),
             modalities: fields.arrayStrings(for: "modalities"),
-            clientSecretKeychainAccount: nil,
+            credentialKeychainAccount: nil,
             expiresAt: date(from: fields["expires_at"]),
             providerMetadata: metadata(from: fields["metadata"]),
             createdAt: date(from: fields["created_at"]) ?? Date(),
