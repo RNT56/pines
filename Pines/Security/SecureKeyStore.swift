@@ -20,7 +20,7 @@ actor SecureKeyStore {
     }
 
     func deleteDataKey(purpose: SecureKeyPurpose, keyID: String) async throws {
-        try Self.delete(account: account(purpose: purpose, keyID: keyID))
+        try Self.delete(account: Self.account(purpose: purpose, keyID: keyID))
     }
 
     static func loadOrCreateDataKey(purpose: SecureKeyPurpose, keyID: String) throws -> Data {

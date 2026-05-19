@@ -53,6 +53,10 @@ struct VaultIngestionService {
             )
             try await vaultRepository.upsertEmbeddingJob(job)
             do {
+                let progressRepository = vaultRepository
+                let progressDocumentID = document.id
+                let progressProfileID = embeddingProfile.id
+                let totalChunks = chunks.count
                 let jobID = job.id
                 let jobCreatedAt = job.createdAt
                 let chunkEmbeddings = try await embeddingService?.embed(
@@ -60,14 +64,14 @@ struct VaultIngestionService {
                     documentID: document.id,
                     profile: embeddingProfile,
                     progress: { processed in
-                        try await vaultRepository.upsertEmbeddingJob(
+                        try await progressRepository.upsertEmbeddingJob(
                             VaultEmbeddingJob(
                                 id: jobID,
-                                profileID: embeddingProfile.id,
-                                documentID: document.id,
+                                profileID: progressProfileID,
+                                documentID: progressDocumentID,
                                 status: .running,
                                 processedChunks: processed,
-                                totalChunks: chunks.count,
+                                totalChunks: totalChunks,
                                 attemptCount: 1,
                                 createdAt: jobCreatedAt,
                                 updatedAt: Date()

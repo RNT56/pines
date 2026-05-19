@@ -10,7 +10,7 @@ struct EncryptedBlobMetadata: Hashable, Codable, Sendable {
     var relativePath: String
 }
 
-struct EncryptedBlobStore: Sendable {
+struct EncryptedBlobStore {
     private static let directoryName = "EncryptedBlobs"
 
     let secureKeyStore: SecureKeyStore

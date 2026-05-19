@@ -529,7 +529,7 @@ struct PinesCoreTestRunner {
         try expect(!sql.contains("INSERT INTO vault_chunks_fts(vault_chunks_fts"), "vault FTS trigger must not use external-content delete rows")
         try expect(sql.contains("PRIMARY KEY(chunk_id, embedding_model_id)"), "missing stable embedding merge key")
         try expect(sql.contains("PRIMARY KEY(chunk_id, profile_id)"), "missing profile-scoped embedding merge key")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 12)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 13)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")
