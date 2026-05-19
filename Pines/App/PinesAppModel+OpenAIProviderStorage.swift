@@ -393,7 +393,9 @@ private extension PinesAppModel {
             )
         )
     }
+}
 
+extension PinesAppModel {
     static func providerStorageContentType(for url: URL) -> String {
         switch url.pathExtension.lowercased() {
         case "jsonl":
