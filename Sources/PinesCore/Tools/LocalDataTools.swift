@@ -64,6 +64,7 @@ public enum VaultSearchTool {
     public static let name = "vault.search"
 
     public static func spec(
+        allowedDocumentIDs: @escaping @Sendable () -> Set<UUID>? = { nil },
         search: @escaping @Sendable (_ query: String, _ limit: Int) async throws -> VaultSearchOutput
     ) throws -> ToolSpec<VaultSearchInput, VaultSearchOutput> {
         try ToolSpec(
@@ -95,7 +96,14 @@ public enum VaultSearchTool {
             guard !query.isEmpty else {
                 throw AgentError.invalidToolArguments("vault.search query must not be empty.")
             }
-            return try await search(query, clamp(input.limit, defaultValue: 6, range: 1...12))
+            let output = try await search(query, clamp(input.limit, defaultValue: 6, range: 1...12))
+            guard let allowedDocumentIDs = allowedDocumentIDs() else {
+                return output
+            }
+            let filteredResults = output.results.filter { result in
+                UUID(uuidString: result.documentID).map(allowedDocumentIDs.contains) ?? false
+            }
+            return VaultSearchOutput(query: output.query, searchMode: output.searchMode, results: filteredResults)
         }
     }
 
@@ -173,7 +181,10 @@ public struct VaultReadOutput: ToolOutput, Equatable {
 public enum VaultReadTool {
     public static let name = "vault.read"
 
-    public static func spec(repository: any VaultRepository) throws -> ToolSpec<VaultReadInput, VaultReadOutput> {
+    public static func spec(
+        repository: any VaultRepository,
+        allowedDocumentIDs: @escaping @Sendable () -> Set<UUID>? = { nil }
+    ) throws -> ToolSpec<VaultReadInput, VaultReadOutput> {
         try ToolSpec(
             name: name,
             description: "Read bounded text from a private local Vault document or chunk returned by vault.search.",
@@ -202,7 +213,7 @@ public enum VaultReadTool {
             timeoutSeconds: 10,
             explanationRequired: true
         ) { input in
-            try await readVault(input: input, repository: repository)
+            try await readVault(input: input, repository: repository, allowedDocumentIDs: allowedDocumentIDs())
         }
     }
 }
@@ -322,7 +333,10 @@ public struct ConversationSearchOutput: ToolOutput, Equatable {
 public enum ConversationSearchTool {
     public static let name = "conversation.search"
 
-    public static func spec(repository: any ConversationRepository) throws -> ToolSpec<ConversationSearchInput, ConversationSearchOutput> {
+    public static func spec(
+        repository: any ConversationRepository,
+        allowsSearch: @escaping @Sendable () -> Bool = { true }
+    ) throws -> ToolSpec<ConversationSearchInput, ConversationSearchOutput> {
         try ToolSpec(
             name: name,
             description: "Search the user's private local conversation history and return matching message snippets.",
@@ -347,6 +361,9 @@ public enum ConversationSearchTool {
             timeoutSeconds: 10,
             explanationRequired: true
         ) { input in
+            guard allowsSearch() else {
+                throw AgentError.permissionDenied("conversation.search is outside the approved cloud context for this run.")
+            }
             let query = input.query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !query.isEmpty else {
                 throw AgentError.invalidToolArguments("conversation.search query must not be empty.")
@@ -357,13 +374,23 @@ public enum ConversationSearchTool {
     }
 }
 
-private func readVault(input: VaultReadInput, repository: any VaultRepository) async throws -> VaultReadOutput {
-    let documents = try await repository.listDocuments()
+private func readVault(
+    input: VaultReadInput,
+    repository: any VaultRepository,
+    allowedDocumentIDs: Set<UUID>?
+) async throws -> VaultReadOutput {
+    let documents = try await repository.listDocuments().filter { document in
+        guard let allowedDocumentIDs else { return true }
+        return allowedDocumentIDs.contains(document.id)
+    }
     let requestedDocumentID = input.documentID.flatMap(UUID.init(uuidString:))
     let maxCharacters = clamp(input.maxCharacters, defaultValue: 12_000, range: 1...20_000)
     let chunkLimit = clamp(input.limit, defaultValue: 4, range: 1...12)
 
     if let requestedDocumentID {
+        if let allowedDocumentIDs, !allowedDocumentIDs.contains(requestedDocumentID) {
+            throw AgentError.permissionDenied("vault.read documentID is outside the approved cloud context for this run.")
+        }
         guard let document = documents.first(where: { $0.id == requestedDocumentID }) else {
             throw AgentError.invalidToolArguments("vault.read documentID was not found.")
         }
@@ -382,6 +409,9 @@ private func readVault(input: VaultReadInput, repository: any VaultRepository) a
                 let selected = Array(chunks[index..<min(chunks.endIndex, index + chunkLimit)])
                 return try vaultReadOutput(document: document, chunks: selected, maxCharacters: maxCharacters)
             }
+        }
+        if allowedDocumentIDs != nil {
+            throw AgentError.permissionDenied("vault.read chunkID is outside the approved cloud context for this run.")
         }
         throw AgentError.invalidToolArguments("vault.read chunkID was not found.")
     }

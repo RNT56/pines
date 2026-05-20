@@ -184,6 +184,12 @@ final class PinesSettingsState: ObservableObject {
     @Published var openAIReasoningEffort: OpenAIReasoningEffort
     @Published var openAITextVerbosity: OpenAITextVerbosity
     @Published var anthropicEffort: AnthropicEffort
+    @Published var anthropicThinkingMode: AnthropicThinkingMode
+    @Published var anthropicThinkingBudgetTokens: Int
+    @Published var anthropicPromptCachingEnabled: Bool
+    @Published var anthropicPromptCacheTTL: AnthropicPromptCacheTTL
+    @Published var anthropicCitationsEnabled: Bool
+    @Published var anthropicTokenCountPreflightEnabled: Bool
     @Published var geminiThinkingLevel: GeminiThinkingLevel
     @Published var cloudWebSearchMode: CloudWebSearchMode
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]]
@@ -213,6 +219,12 @@ final class PinesSettingsState: ObservableObject {
         openAIReasoningEffort: OpenAIReasoningEffort = AppSettingsSnapshot.defaultOpenAIReasoningEffort,
         openAITextVerbosity: OpenAITextVerbosity = AppSettingsSnapshot.defaultOpenAITextVerbosity,
         anthropicEffort: AnthropicEffort = AppSettingsSnapshot.defaultAnthropicEffort,
+        anthropicThinkingMode: AnthropicThinkingMode = AppSettingsSnapshot.defaultAnthropicThinkingMode,
+        anthropicThinkingBudgetTokens: Int = AppSettingsSnapshot.defaultAnthropicThinkingBudgetTokens,
+        anthropicPromptCachingEnabled: Bool = false,
+        anthropicPromptCacheTTL: AnthropicPromptCacheTTL = .fiveMinutes,
+        anthropicCitationsEnabled: Bool = true,
+        anthropicTokenCountPreflightEnabled: Bool = false,
         geminiThinkingLevel: GeminiThinkingLevel = AppSettingsSnapshot.defaultGeminiThinkingLevel,
         cloudWebSearchMode: CloudWebSearchMode = AppSettingsSnapshot.defaultCloudWebSearchMode,
         cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:],
@@ -241,6 +253,12 @@ final class PinesSettingsState: ObservableObject {
         self.openAIReasoningEffort = openAIReasoningEffort
         self.openAITextVerbosity = openAITextVerbosity
         self.anthropicEffort = anthropicEffort
+        self.anthropicThinkingMode = anthropicThinkingMode
+        self.anthropicThinkingBudgetTokens = AppSettingsSnapshot.normalizedAnthropicThinkingBudgetTokens(anthropicThinkingBudgetTokens)
+        self.anthropicPromptCachingEnabled = anthropicPromptCachingEnabled
+        self.anthropicPromptCacheTTL = anthropicPromptCacheTTL
+        self.anthropicCitationsEnabled = anthropicCitationsEnabled
+        self.anthropicTokenCountPreflightEnabled = anthropicTokenCountPreflightEnabled
         self.geminiThinkingLevel = geminiThinkingLevel
         self.cloudWebSearchMode = cloudWebSearchMode
         self.cloudModelCatalog = cloudModelCatalog
@@ -249,6 +267,74 @@ final class PinesSettingsState: ObservableObject {
         self.validatingCloudProviderIDs = validatingCloudProviderIDs
         self.huggingFaceCredentialStatus = huggingFaceCredentialStatus
         self.braveSearchCredentialStatus = braveSearchCredentialStatus
+    }
+}
+
+@MainActor
+final class PinesProviderLifecycleState: ObservableObject {
+    @Published var providerFiles: [ProviderFileRecord]
+    @Published var providerFilePreviews: [PinesProviderFilePreview]
+    @Published var providerArtifacts: [ProviderArtifactRecord]
+    @Published var providerArtifactPreviews: [PinesProviderArtifactPreview]
+    @Published var providerCaches: [ProviderCacheRecord]
+    @Published var providerCachePreviews: [PinesProviderCachePreview]
+    @Published var providerVectorStores: [ProviderCacheRecord]
+    @Published var providerVectorStorePreviews: [PinesProviderCachePreview]
+    @Published var providerBatches: [ProviderBatchRecord]
+    @Published var providerBatchPreviews: [PinesProviderBatchPreview]
+    @Published var providerLiveSessions: [ProviderLiveSessionRecord]
+    @Published var providerLiveSessionPreviews: [PinesProviderLiveSessionPreview]
+    @Published var providerStructuredOutputs: [ProviderStructuredOutputRecord]
+    @Published var providerStructuredOutputPreviews: [PinesProviderStructuredOutputPreview]
+    @Published var providerModelCapabilities: [ProviderModelCapabilityRecord]
+    @Published var providerModelCapabilityPreviews: [PinesProviderModelCapabilityPreview]
+    @Published var providerResearchRuns: [ProviderResearchRunRecord]
+    @Published var providerResearchRunPreviews: [PinesProviderResearchRunPreview]
+    @Published var isRefreshingProviderLifecycle: Bool
+    @Published var providerLifecycleError: String?
+
+    init(
+        providerFiles: [ProviderFileRecord] = [],
+        providerFilePreviews: [PinesProviderFilePreview] = [],
+        providerArtifacts: [ProviderArtifactRecord] = [],
+        providerArtifactPreviews: [PinesProviderArtifactPreview] = [],
+        providerCaches: [ProviderCacheRecord] = [],
+        providerCachePreviews: [PinesProviderCachePreview] = [],
+        providerVectorStores: [ProviderCacheRecord] = [],
+        providerVectorStorePreviews: [PinesProviderCachePreview] = [],
+        providerBatches: [ProviderBatchRecord] = [],
+        providerBatchPreviews: [PinesProviderBatchPreview] = [],
+        providerLiveSessions: [ProviderLiveSessionRecord] = [],
+        providerLiveSessionPreviews: [PinesProviderLiveSessionPreview] = [],
+        providerStructuredOutputs: [ProviderStructuredOutputRecord] = [],
+        providerStructuredOutputPreviews: [PinesProviderStructuredOutputPreview] = [],
+        providerModelCapabilities: [ProviderModelCapabilityRecord] = [],
+        providerModelCapabilityPreviews: [PinesProviderModelCapabilityPreview] = [],
+        providerResearchRuns: [ProviderResearchRunRecord] = [],
+        providerResearchRunPreviews: [PinesProviderResearchRunPreview] = [],
+        isRefreshingProviderLifecycle: Bool = false,
+        providerLifecycleError: String? = nil
+    ) {
+        self.providerFiles = providerFiles
+        self.providerFilePreviews = providerFilePreviews
+        self.providerArtifacts = providerArtifacts
+        self.providerArtifactPreviews = providerArtifactPreviews
+        self.providerCaches = providerCaches
+        self.providerCachePreviews = providerCachePreviews
+        self.providerVectorStores = providerVectorStores
+        self.providerVectorStorePreviews = providerVectorStorePreviews
+        self.providerBatches = providerBatches
+        self.providerBatchPreviews = providerBatchPreviews
+        self.providerLiveSessions = providerLiveSessions
+        self.providerLiveSessionPreviews = providerLiveSessionPreviews
+        self.providerStructuredOutputs = providerStructuredOutputs
+        self.providerStructuredOutputPreviews = providerStructuredOutputPreviews
+        self.providerModelCapabilities = providerModelCapabilities
+        self.providerModelCapabilityPreviews = providerModelCapabilityPreviews
+        self.providerResearchRuns = providerResearchRuns
+        self.providerResearchRunPreviews = providerResearchRunPreviews
+        self.isRefreshingProviderLifecycle = isRefreshingProviderLifecycle
+        self.providerLifecycleError = providerLifecycleError
     }
 }
 

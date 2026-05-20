@@ -187,8 +187,8 @@ extension BYOKCloudInferenceProvider {
         ]
     }
 
-    static func anthropicDocumentBlock(from attachment: CloudAttachmentPayload) -> [String: Any] {
-        [
+    static func anthropicDocumentBlock(from attachment: CloudAttachmentPayload, enableCitations: Bool = true) -> [String: Any] {
+        var block: [String: Any] = [
             "type": "document",
             "source": [
                 "type": "base64",
@@ -196,13 +196,83 @@ extension BYOKCloudInferenceProvider {
                 "data": attachment.base64Data,
             ],
         ]
+        if enableCitations {
+            block["citations"] = ["enabled": true]
+        }
+        return block
     }
 
-    static func anthropicTextDocumentBlock(from attachment: CloudAttachmentPayload) throws -> [String: Any] {
-        [
-            "type": "text",
-            "text": try textDocumentPrompt(from: attachment),
+    static func anthropicTextDocumentBlock(from attachment: CloudAttachmentPayload, enableCitations: Bool = true) throws -> [String: Any] {
+        guard let text = String(data: attachment.data, encoding: .utf8) else {
+            throw InferenceError.invalidRequest("Cloud text attachment \(attachment.fileName) is not valid UTF-8.")
+        }
+        var block: [String: Any] = [
+            "type": "document",
+            "source": [
+                "type": "text",
+                "media_type": "text/plain",
+                "data": text,
+            ],
+            "title": attachment.fileName,
+            "context": "Attached file \(attachment.fileName) (\(attachment.contentType))",
         ]
+        if enableCitations {
+            block["citations"] = ["enabled": true]
+        }
+        return block
+    }
+
+    static func anthropicProviderFileBlock(from attachment: CloudAttachmentPayload, enableCitations: Bool = true) throws -> [String: Any] {
+        guard let providerURI = attachment.providerURI,
+              let fileID = anthropicProviderFileID(from: providerURI)
+        else {
+            throw InferenceError.invalidRequest("Anthropic provider file attachment \(attachment.fileName) is missing a usable file_id.")
+        }
+
+        if anthropicFileContentTypeIsImage(attachment.contentType) {
+            return [
+                "type": "image",
+                "source": [
+                    "type": "file",
+                    "file_id": fileID,
+                ],
+            ]
+        }
+
+        if anthropicFileContentTypeIsDocument(attachment.contentType) {
+            var block: [String: Any] = [
+                "type": "document",
+                "source": [
+                    "type": "file",
+                    "file_id": fileID,
+                ],
+                "title": attachment.fileName,
+            ]
+            if enableCitations {
+                block["citations"] = ["enabled": true]
+            }
+            return block
+        }
+
+        return [
+            "type": "container_upload",
+            "file_id": fileID,
+        ]
+    }
+
+    static func anthropicProviderFileBlock(fileID: AnthropicProviderFileID, enableCitations: Bool = true) -> [String: Any] {
+        var block: [String: Any] = [
+            "type": "document",
+            "source": [
+                "type": "file",
+                "file_id": fileID.rawValue,
+            ],
+            "title": fileID.rawValue,
+        ]
+        if enableCitations {
+            block["citations"] = ["enabled": true]
+        }
+        return block
     }
 
     static func geminiInlinePart(from attachment: CloudAttachmentPayload) throws -> [String: Any] {
@@ -233,14 +303,26 @@ extension BYOKCloudInferenceProvider {
     }
 
     static func anthropicMessageObject(_ message: ChatMessage) throws -> [String: Any] {
+        try anthropicMessageObject(message, cacheControl: nil, enableCitations: true)
+    }
+
+    static func anthropicMessageObject(
+        _ message: ChatMessage,
+        cacheControl: [String: Any]?,
+        enableCitations: Bool
+    ) throws -> [String: Any] {
         if message.role == .tool {
+            var contentBlock: [String: Any] = [
+                "type": "tool_result",
+                "tool_use_id": message.toolCallID ?? "",
+                "content": message.content,
+            ]
+            if let cacheControl {
+                contentBlock["cache_control"] = cacheControl
+            }
             return [
                 "role": "user",
-                "content": [[
-                    "type": "tool_result",
-                    "tool_use_id": message.toolCallID ?? "",
-                    "content": message.content,
-                ]],
+                "content": [contentBlock],
             ]
         }
 
@@ -251,10 +333,12 @@ extension BYOKCloudInferenceProvider {
                 case .image:
                     content.append(anthropicImageBlock(from: attachment))
                 case .pdf:
-                    content.append(anthropicDocumentBlock(from: attachment))
+                    content.append(anthropicDocumentBlock(from: attachment, enableCitations: enableCitations))
                 case .textDocument:
-                    content.append(try anthropicTextDocumentBlock(from: attachment))
-                case .audio, .video, .providerFileURI:
+                    content.append(try anthropicTextDocumentBlock(from: attachment, enableCitations: enableCitations))
+                case .providerFileURI:
+                    content.append(try anthropicProviderFileBlock(from: attachment, enableCitations: enableCitations))
+                case .audio, .video:
                     throw unsupportedAttachment(attachment, providerName: "Anthropic")
                 }
             }
@@ -272,10 +356,43 @@ extension BYOKCloudInferenceProvider {
                 "input": Self.jsonObject(fromJSONString: toolCall.argumentsFragment) ?? [:],
             ])
         }
+        if let cacheControl {
+            content = annotatingLastCacheableAnthropicBlock(in: content, cacheControl: cacheControl)
+        }
         return [
             "role": message.role == .assistant ? "assistant" : "user",
             "content": content.isEmpty ? [["type": "text", "text": message.content]] : content,
         ]
+    }
+
+    static func anthropicSystemBlocks(from messages: [ChatMessage], cacheControl: [String: Any]?) -> [[String: Any]] {
+        var blocks = messages
+            .filter { $0.role == .system }
+            .map(\.content)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { ["type": "text", "text": $0] as [String: Any] }
+        if let cacheControl {
+            blocks = annotatingLastCacheableAnthropicBlock(in: blocks, cacheControl: cacheControl)
+        }
+        return blocks
+    }
+
+    static func annotatingLastCacheableAnthropicBlock(in content: [[String: Any]], cacheControl: [String: Any]) -> [[String: Any]] {
+        var content = content
+        guard let index = content.indices.reversed().first(where: { index in
+            guard content[index]["cache_control"] == nil else { return false }
+            switch content[index]["type"] as? String {
+            case "text", "image", "document", "tool_result", "container_upload":
+                return true
+            default:
+                return false
+            }
+        }) else {
+            return content
+        }
+        content[index]["cache_control"] = cacheControl
+        return content
     }
 
     static func anthropicThinkingContentBlocks(from message: ChatMessage) -> [[String: Any]] {
@@ -589,6 +706,48 @@ extension BYOKCloudInferenceProvider {
 
         \(text)
         """
+    }
+
+    static func anthropicProviderFileID(from providerURI: String) -> String? {
+        let trimmed = providerURI.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix("file_") {
+            return trimmed
+        }
+        if let components = URLComponents(string: trimmed) {
+            for name in ["file_id", "fileID", "id"] {
+                if let value = components.queryItems?.first(where: { $0.name == name })?.value,
+                   value.hasPrefix("file_") {
+                    return value
+                }
+            }
+            let candidates = [
+                components.path.split(separator: "/").last.map(String.init),
+                components.host,
+                components.fragment,
+            ]
+            for candidate in candidates.compactMap({ $0 }) where candidate.hasPrefix("file_") {
+                return candidate
+            }
+        }
+        let separators = CharacterSet(charactersIn: "/:?&=#")
+            .union(.whitespacesAndNewlines)
+        return trimmed
+            .components(separatedBy: separators)
+            .first(where: { $0.hasPrefix("file_") && !$0.isEmpty })
+    }
+
+    static func anthropicFileContentTypeIsImage(_ contentType: String) -> Bool {
+        contentType.lowercased().hasPrefix("image/")
+    }
+
+    static func anthropicFileContentTypeIsDocument(_ contentType: String) -> Bool {
+        let normalized = contentType.lowercased()
+        return normalized == "application/pdf"
+            || normalized == "text/plain"
+            || normalized == "text/markdown"
+            || normalized == "text/x-markdown"
+            || normalized == "application/json"
     }
 
     static func geminiCompatibleAttachment(_ attachment: CloudAttachmentPayload) throws -> CloudAttachmentPayload {

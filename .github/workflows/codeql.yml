@@ -25,7 +25,7 @@ jobs:
   swift:
     name: CodeQL Swift
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout

@@ -149,10 +149,29 @@ struct AgentRunner: AgentRuntime {
 
     private static func availableTools(
         from tools: [AnyToolSpec],
-        searchCalls: Int
+        searchCalls: Int,
+        policy: AgentPolicy,
+        vaultContextIDs: [UUID]
     ) -> [AnyToolSpec] {
-        guard searchCalls >= maxSearchCalls else { return tools }
-        return tools.filter { $0.name != "web.search" }
+        var scopedTools = tools
+
+        if !policy.allowsCloudContext {
+            scopedTools = scopedTools.filter { !$0.permissions.contains(.cloudContext) }
+        } else if policy.cloudContextScope == .selectedRequestContext {
+            scopedTools = scopedTools.filter { spec in
+                switch spec.name {
+                case ConversationSearchTool.name:
+                    return false
+                case VaultSearchTool.name, VaultReadTool.name:
+                    return !vaultContextIDs.isEmpty
+                default:
+                    return true
+                }
+            }
+        }
+
+        guard searchCalls >= maxSearchCalls else { return scopedTools }
+        return scopedTools.filter { $0.name != "web.search" }
     }
 
     private static func executableToolCalls(
@@ -207,7 +226,12 @@ struct AgentRunner: AgentRuntime {
                     var searchCalls = 0
                     var repeatedToolCalls = [String: Int]()
                     let startedAt = Date()
-                    let toolRunContext = AgentToolRunContext(messages: request.messages)
+                    let hasSelectedCloudContextScope = session.policy.cloudContextScope == .selectedRequestContext
+                    let toolRunContext = AgentToolRunContext(
+                        messages: request.messages,
+                        allowedVaultDocumentIDs: hasSelectedCloudContextScope ? Set(request.vaultContextIDs) : nil,
+                        allowsConversationSearch: !hasSelectedCloudContextScope
+                    )
 
                     func enforceWallTimeLimit() throws {
                         guard Date().timeIntervalSince(startedAt) <= TimeInterval(session.policy.maxWallTimeSeconds) else {
@@ -230,15 +254,10 @@ struct AgentRunner: AgentRuntime {
                             ),
                             at: 0
                         )
-                        let synthesisRequest = ChatRequest(
-                            id: request.id,
-                            modelID: request.modelID,
+                        let synthesisRequest = request.replacing(
                             messages: synthesisMessages,
-                            sampling: request.sampling,
-                            webSearchOptions: request.webSearchOptions,
                             allowsTools: false,
                             availableTools: [],
-                            vaultContextIDs: request.vaultContextIDs,
                             executionContext: executionContext
                         )
                         var finalText = ""
@@ -316,21 +335,26 @@ struct AgentRunner: AgentRuntime {
                         var bufferedTokenEvents = [TokenDelta]()
                         var pendingFinish: InferenceFinish?
                         let availableTools = isAgentContext
-                            ? Self.availableTools(from: request.availableTools, searchCalls: searchCalls)
-                            : request.availableTools
+                            ? Self.availableTools(
+                                from: request.availableTools,
+                                searchCalls: searchCalls,
+                                policy: session.policy,
+                                vaultContextIDs: request.vaultContextIDs
+                            )
+                            : Self.availableTools(
+                                from: request.availableTools,
+                                searchCalls: 0,
+                                policy: session.policy,
+                                vaultContextIDs: request.vaultContextIDs
+                            )
                         guard !isAgentContext || toolCalls < session.policy.maxToolCalls else {
                             try await synthesizeFinalAnswer(reason: "The agent reached the tool-call budget.")
                             return
                         }
-                        let currentRequest = ChatRequest(
-                            id: request.id,
-                            modelID: request.modelID,
+                        let currentRequest = request.replacing(
                             messages: messages,
-                            sampling: request.sampling,
-                            webSearchOptions: request.webSearchOptions,
-                            allowsTools: request.allowsTools,
+                            allowsTools: request.allowsTools && !availableTools.isEmpty,
                             availableTools: availableTools,
-                            vaultContextIDs: request.vaultContextIDs,
                             executionContext: executionContext
                         )
                         let stream = try await provider.streamEvents(currentRequest)

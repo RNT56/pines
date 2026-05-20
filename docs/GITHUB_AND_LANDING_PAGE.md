@@ -74,7 +74,7 @@ Use this as a GitHub About/README summary, release-page intro, or pinned issue d
 >
 > The project treats the iPhone as a real AI computer, not just a remote control for cloud chat. Local models can answer directly on device, private files can live in a searchable vault, and stronger cloud providers can be added explicitly when a task needs them. Pines never silently falls back from local execution to cloud execution; provider choice and private-context sharing are visible user decisions.
 >
-> Pines currently includes an iOS app, a watchOS companion, shared core Swift packages, model discovery and install flows, vault ingestion with OCR and embeddings, BYOK adapters for OpenAI-compatible endpoints, OpenRouter, Anthropic, and Gemini, MCP Streamable HTTP support, policy-gated tools, audit events, and release/CI validation scripts. It is a working production-oriented foundation rather than a finished App Store client.
+> Pines currently includes an iOS app, a watchOS companion, shared core Swift packages, model discovery and install flows, vault ingestion with OCR and embeddings, BYOK adapters for OpenAI-compatible endpoints, OpenRouter, Anthropic, and Gemini, shared provider lifecycle records for cloud files/artifacts/caches/batches/research runs, MCP Streamable HTTP support, policy-gated tools, audit events, and release/CI validation scripts. It is a working production-oriented foundation rather than a finished App Store client.
 
 ## Positioning
 
@@ -93,6 +93,7 @@ Pines gives people one place to use local models, private context, trusted cloud
 
 - Local-first iOS inference through MLX Swift.
 - BYOK cloud routing across multiple provider families.
+- Shared cloud-provider lifecycle management for OpenAI, Anthropic, and Gemini files, artifacts, caches, batches, citations, generated media, realtime/live sessions, and research runs.
 - No silent local-to-cloud fallback.
 - Private vault for documents, chunks, OCR, embeddings, retrieval, and local context.
 - MCP Streamable HTTP support for tools, resources, prompts, subscriptions, and user-approved sampling.

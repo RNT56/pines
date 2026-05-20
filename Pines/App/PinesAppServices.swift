@@ -10,6 +10,14 @@ typealias PinesLiveStore = any ConversationRepository
     & VaultRepository
     & SettingsRepository
     & CloudProviderRepository
+    & ProviderFileRepository
+    & ProviderArtifactRepository
+    & ProviderCacheRepository
+    & ProviderBatchRepository
+    & ProviderLiveSessionRepository
+    & ProviderStructuredOutputRepository
+    & ProviderModelCapabilityRepository
+    & ProviderResearchRunRepository
     & MCPServerRepository
     & ModelDownloadRepository
     & AuditEventRepository
@@ -34,6 +42,14 @@ final class PinesAppServices: Sendable {
     let vaultRepository: (any VaultRepository)?
     let settingsRepository: (any SettingsRepository)?
     let cloudProviderRepository: (any CloudProviderRepository)?
+    let providerFileRepository: (any ProviderFileRepository)?
+    let providerArtifactRepository: (any ProviderArtifactRepository)?
+    let providerCacheRepository: (any ProviderCacheRepository)?
+    let providerBatchRepository: (any ProviderBatchRepository)?
+    let providerLiveSessionRepository: (any ProviderLiveSessionRepository)?
+    let providerStructuredOutputRepository: (any ProviderStructuredOutputRepository)?
+    let providerModelCapabilityRepository: (any ProviderModelCapabilityRepository)?
+    let providerResearchRunRepository: (any ProviderResearchRunRepository)?
     let mcpServerRepository: (any MCPServerRepository)?
     let modelDownloadRepository: (any ModelDownloadRepository)?
     let auditRepository: (any AuditEventRepository)?
@@ -97,6 +113,14 @@ final class PinesAppServices: Sendable {
         vaultRepository = resolvedStore
         settingsRepository = resolvedStore
         cloudProviderRepository = resolvedStore
+        providerFileRepository = resolvedStore
+        providerArtifactRepository = resolvedStore
+        providerCacheRepository = resolvedStore
+        providerBatchRepository = resolvedStore
+        providerLiveSessionRepository = resolvedStore
+        providerStructuredOutputRepository = resolvedStore
+        providerModelCapabilityRepository = resolvedStore
+        providerResearchRunRepository = resolvedStore
         mcpServerRepository = resolvedStore
         modelDownloadRepository = resolvedStore
         auditRepository = resolvedStore
@@ -133,7 +157,9 @@ final class PinesAppServices: Sendable {
         if let vaultRepository {
             let embeddingService = vaultEmbeddingService
             await registerBuiltInTool(VaultSearchTool.name) {
-                try VaultSearchTool.spec { query, limit in
+                try VaultSearchTool.spec(allowedDocumentIDs: {
+                    AgentToolExecutionContext.current.allowedVaultDocumentIDs
+                }) { query, limit in
                     var profile: VaultEmbeddingProfile?
                     var queryEmbedding: [Float]?
                     if let activeProfile = try? await vaultRepository.activeEmbeddingProfile(),
@@ -157,12 +183,16 @@ final class PinesAppServices: Sendable {
                 }
             }
             await registerBuiltInTool(VaultReadTool.name) {
-                try VaultReadTool.spec(repository: vaultRepository)
+                try VaultReadTool.spec(repository: vaultRepository) {
+                    AgentToolExecutionContext.current.allowedVaultDocumentIDs
+                }
             }
         }
         if let conversationRepository {
             await registerBuiltInTool(ConversationSearchTool.name) {
-                try ConversationSearchTool.spec(repository: conversationRepository)
+                try ConversationSearchTool.spec(repository: conversationRepository) {
+                    AgentToolExecutionContext.current.allowsConversationSearch
+                }
             }
         }
         #if canImport(WebKit) && canImport(UIKit)
@@ -311,6 +341,68 @@ final class PinesAppServices: Sendable {
             repository: cloudProviderRepository,
             secretStore: secretStore,
             auditRepository: auditRepository
+        )
+    }
+
+    var openAIProviderLifecycleRepositories: OpenAIProviderLifecycleRepositories {
+        OpenAIProviderLifecycleRepositories(
+            files: providerFileRepository,
+            artifacts: providerArtifactRepository,
+            caches: providerCacheRepository,
+            batches: providerBatchRepository,
+            liveSessions: providerLiveSessionRepository,
+            structuredOutputs: providerStructuredOutputRepository,
+            modelCapabilities: providerModelCapabilityRepository,
+            researchRuns: providerResearchRunRepository,
+            audit: auditRepository
+        )
+    }
+
+    var geminiProviderLifecycleRepositories: GeminiProviderLifecycleRepositories {
+        GeminiProviderLifecycleRepositories(
+            files: providerFileRepository,
+            artifacts: providerArtifactRepository,
+            caches: providerCacheRepository,
+            batches: providerBatchRepository,
+            liveSessions: providerLiveSessionRepository,
+            structuredOutputs: providerStructuredOutputRepository,
+            modelCapabilities: providerModelCapabilityRepository,
+            researchRuns: providerResearchRunRepository,
+            audit: auditRepository
+        )
+    }
+
+    var anthropicProviderLifecycleRepositories: AnthropicProviderLifecycleRepositories {
+        AnthropicProviderLifecycleRepositories(
+            files: providerFileRepository,
+            artifacts: providerArtifactRepository,
+            caches: providerCacheRepository,
+            batches: providerBatchRepository,
+            liveSessions: providerLiveSessionRepository,
+            structuredOutputs: providerStructuredOutputRepository,
+            modelCapabilities: providerModelCapabilityRepository,
+            researchRuns: providerResearchRunRepository,
+            audit: auditRepository
+        )
+    }
+
+    func geminiLifecycleCoordinator(for provider: CloudProviderConfiguration) throws -> GeminiProviderLifecycleCoordinator {
+        guard let cloudProviderService else {
+            throw InferenceError.providerUnavailable(provider.id)
+        }
+        return GeminiProviderLifecycleCoordinator(
+            service: cloudProviderService.geminiProviderService(for: provider),
+            repositories: geminiProviderLifecycleRepositories
+        )
+    }
+
+    func anthropicLifecycleCoordinator(for provider: CloudProviderConfiguration) throws -> AnthropicProviderLifecycleCoordinator {
+        guard let cloudProviderService else {
+            throw InferenceError.providerUnavailable(provider.id)
+        }
+        return cloudProviderService.anthropicLifecycleCoordinator(
+            for: provider,
+            repositories: anthropicProviderLifecycleRepositories
         )
     }
 

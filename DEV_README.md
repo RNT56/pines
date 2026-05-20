@@ -102,9 +102,16 @@ Important repository contracts include:
 - `VaultRepository`
 - `SettingsRepository`
 - `CloudProviderRepository`
+- `ProviderFileRepository`
+- `ProviderArtifactRepository`
+- `ProviderCacheRepository`
+- `ProviderBatchRepository`
+- `ProviderModelCapabilityRepository`
 - `MCPServerRepository`
 - `ModelDownloadRepository`
 - `AuditEventRepository`
+
+Provider lifecycle records are generic on purpose. OpenAI Files/vector stores, Anthropic Files, Gemini Files/context caches, batches, generated artifacts, live/realtime sessions, and research runs should map through shared provider records and previews unless a provider-specific persistence table is truly required.
 
 ## Persistence And Sync
 
@@ -148,6 +155,7 @@ Hard requirements:
 - Cloud execution must be BYOK-only.
 - The router must never silently fall back from local inference to cloud.
 - Local vault and MCP resource context must require per-turn approval before entering a cloud request.
+- Provider-hosted files, caches, vector stores, batches, generated artifacts, live/realtime sessions, research runs, token counting, and hosted tools must be labeled as cloud/provider resources and kept distinct from local Vault data.
 - Browser, web, and MCP outputs are untrusted model context.
 - Browser automation must require visible approval for login, checkout, posting, upload, credential-adjacent, and remote-state-changing actions.
 - Tool execution is deny-by-default and must pass `ToolPolicyGate`.
@@ -327,6 +335,7 @@ BYOK provider support is split between core contracts and app adapters.
 - App request/stream handling lives in `Pines/Cloud/BYOKCloudInferenceProvider.swift`.
 - Provider payload details live in `BYOKCloudInferenceProvider+Payloads.swift`.
 - Stream metadata parsing lives in `CloudProviderStreamParser.swift`.
+- Provider lifecycle service/coordinator code lives in `Pines/Cloud/`, with shared record mappers in `Sources/PinesCore/Cloud/`.
 - Secrets must go through Keychain services.
 
 When adding or changing a provider:
@@ -334,6 +343,7 @@ When adding or changing a provider:
 - Keep request construction typed and provider-specific.
 - Preserve streaming behavior and typed `InferenceEvent` output.
 - Validate attachment capability checks before encoding files into a request.
+- Map hosted files, artifacts, caches, batches, capabilities, live sessions, and research runs into shared provider lifecycle records before adding provider-specific persistence.
 - Parse provider metadata without leaking keys or raw sensitive payloads into logs.
 - Add tests for stream parser edge cases.
 - Keep cloud route selection explicit through `ExecutionRouter`.

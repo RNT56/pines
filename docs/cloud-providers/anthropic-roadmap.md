@@ -16,6 +16,17 @@ Make Anthropic in Pines production-complete for Claude's relevant API strengths:
 - Token counting, batch jobs, fine-grained tool streaming, and tool-result reliability.
 - Themed UI for prompt caching, Files API, citations, thinking controls, hosted tools, batches, and run provenance.
 
+## Implementation Status
+
+Updated 2026-05-19:
+
+- Added shared Anthropic request options for prompt cache, thinking modes, citations, hosted tools, file IDs, batches, token count preflight, beta headers, and settings migration.
+- Moved prompt caching to eligible Anthropic content blocks and added cache TTL/header handling, structured system blocks, provider file ID blocks, and citation-enabled document/text/file blocks.
+- Added Anthropic Files, Message Batches, token counting, model capability refresh, retry/backoff, provider audit events, generated file download/import hooks, Vault-to-Files export, and generic provider record mapping.
+- Extended stream parsing for request/message IDs, usage/cache metrics, signed thinking, provider citations, web-source mirroring, server tool use/results, hosted tool metadata, file references, artifacts, and streaming errors.
+- Added Anthropic participation in the shared lifecycle dashboard, Settings capability rows, Vault provider storage refresh/delete/export, chat quick settings, file manager, batch create/count/refresh/cancel/import, hosted-tool timeline rows, chat provenance pills, and provider citation/source panel.
+- Added core contract coverage for Anthropic options, legacy effort migration, hosted tool gating, provider citation metadata, cache metrics, signed thinking preservation, hosted tool parsing, and citation metadata.
+
 ## Explicitly Out Of Scope
 
 - Anthropic organization/admin management.
@@ -51,13 +62,12 @@ Goal: Use Anthropic prompt caching exactly where it reduces cost/latency without
 
 Todos:
 
-- Audit current top-level `cache_control` usage against current Anthropic block-level requirements.
-- Apply `cache_control` to eligible system, tool, and message content blocks.
-- Support cache TTL options where available.
-- Parse cache creation/read token usage.
-- Add cache hit/miss telemetry in run details.
-- Add tests for cached system prompt, cached tools, cached document context, and cache-disabled runs.
-- Add UI showing cacheable blocks, TTL, and cache metrics in run details.
+- Maintain block-level `cache_control` placement on eligible system, tool, and message content blocks.
+- Continue supporting cache TTL options where available.
+- Continue parsing cache creation/read token usage.
+- Harden cache hit/miss telemetry in run details.
+- Expand tests for cached system prompt, cached tools, cached document context, and cache-disabled runs.
+- Continue improving UI for cacheable blocks, TTL, and cache metrics in run details.
 
 Possible hiccups:
 
@@ -74,13 +84,13 @@ Goal: Support reusable Anthropic-hosted files with explicit user consent.
 
 Todos:
 
-- Add Anthropic file upload/list/get/delete/download.
-- Support document/image blocks by `file_id`.
-- Add file retention and provider-storage UI.
-- Support generated-file retrieval from code execution.
-- Add local-to-Anthropic upload flow from chat attachments and Vault documents.
+- Harden existing Anthropic file upload/list/get/delete/download workflows.
+- Continue supporting document/image blocks by `file_id`.
+- Continue improving file retention and provider-storage UI.
+- Harden generated-file retrieval from code execution.
+- Continue supporting local-to-Anthropic upload flow from chat attachments and Vault documents.
 - Add cleanup and orphan detection.
-- Add Anthropic-hosted file manager and generated-file import/delete UI.
+- Harden Anthropic-hosted file manager and generated-file import/delete UI with progress, retry, and cancellation.
 
 Possible hiccups:
 
@@ -97,12 +107,12 @@ Goal: Make Claude document answers auditable.
 
 Todos:
 
-- Enable citations on supported document/text blocks.
-- Parse citation blocks into provider metadata and visible source chips.
+- Continue enabling citations on supported document/text blocks.
+- Continue parsing citation blocks into provider metadata and visible source chips.
 - Map local Vault chunks to Anthropic custom content or search-result blocks when cloud context is approved.
 - Add source highlighting where local document offsets are available.
 - Add tests for PDF, plain text, search-result citations, and citation-free fallback.
-- Add source chip and citation detail panel UI.
+- Harden source chip and citation detail panel UI.
 
 Possible hiccups:
 
@@ -119,9 +129,9 @@ Goal: Let users tune Claude reasoning without exposing unsafe/raw internals.
 
 Todos:
 
-- Add explicit thinking modes: off, adaptive, budgeted, and effort where supported.
-- Store and replay signed thinking blocks for tool-result continuity.
-- Optionally show provider-approved summaries only.
+- Continue supporting explicit thinking modes: off, adaptive, budgeted, and effort where supported.
+- Continue storing and replaying signed thinking blocks for tool-result continuity.
+- Harden provider-approved summary-only display.
 - Add per-model eligibility rules based on model metadata or tested behavior.
 - Add cost/latency warnings for high thinking settings.
 
@@ -140,10 +150,10 @@ Goal: Add Claude hosted tools that are valuable in Pines workflows.
 
 Todos:
 
-- Web fetch: allow approved URL fetches and parse source metadata.
-- Code execution: enable tool, parse server tool use/results, retrieve generated files.
-- Text editor/bash: expose only in agent/coding workflows with explicit environment labels.
-- Remote MCP: store server URL/auth/allowlist and map approvals.
+- Web fetch: harden approved URL fetches and source metadata parsing.
+- Code execution: harden tool approval, server tool use/result parsing, and generated-file retrieval.
+- Text editor/bash: keep exposure limited to agent/coding workflows with explicit environment labels.
+- Remote MCP: harden server URL/auth/allowlist storage and approval mapping.
 - Computer use: add screenshot/action loop only after dedicated safety UX exists.
 - Fine-grained tool streaming: parse partial tool args and update approval UI.
 - Add hosted tool approval sheets and timeline rows.
@@ -164,8 +174,8 @@ Goal: Support reliable large-scale Anthropic work without foreground chat hacks.
 
 Todos:
 
-- Add token counting to cloud preflight and Vault context packing.
-- Add Message Batches job creation/status/cancel/result import.
+- Continue integrating token counting into cloud preflight and Vault context packing.
+- Harden Message Batches job creation/status/cancel/result import.
 - Add batch use cases: summarization, extraction, classification, document tagging.
 - Add backoff and retry for rate limits.
 

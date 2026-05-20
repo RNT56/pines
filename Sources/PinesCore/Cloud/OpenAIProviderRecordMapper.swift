@@ -168,6 +168,9 @@ public enum OpenAIProviderRecordMapper {
         if !policy.blockedDomains.isEmpty {
             fields["blocked_domains"] = .array(policy.blockedDomains.map(JSONValue.string))
         }
+        if let budget = policy.webSearchReturnTokenBudget {
+            fields["web_search_return_token_budget"] = .number(Double(budget))
+        }
         if let label = policy.mcpServerLabel {
             fields["mcp_server_label"] = .string(label)
         }

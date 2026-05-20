@@ -134,17 +134,8 @@ build_app() {
     build | tee "$log_dir/xcodebuild.log"
 }
 
-build_tests() {
-  echo "Building iOS runtime smoke tests..."
-  set -o pipefail
-  xcodebuild \
-    -project "$project" \
-    -scheme "$scheme" \
-    -destination 'generic/platform=iOS Simulator' \
-    -derivedDataPath "$derived_data" \
-    "${xcode_package_flags[@]}" \
-    CODE_SIGNING_ALLOWED=NO \
-    build-for-testing | tee "$log_dir/xcodebuild-tests.log"
+first_available_iphone_simulator() {
+  xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }'
 }
 
 simulator_required() {
@@ -155,6 +146,38 @@ simulator_required() {
   [ "$required" = "1" ] || [ "$required" = "true" ]
 }
 
+simulator_id_file="$log_dir/ios-smoke-simulator-id"
+
+build_tests() {
+  echo "Building iOS runtime smoke tests..."
+
+  local destination='generic/platform=iOS Simulator'
+  local simulator_id
+  simulator_id="$(first_available_iphone_simulator || true)"
+  if [ -n "$simulator_id" ]; then
+    destination="id=$simulator_id"
+    printf '%s\n' "$simulator_id" > "$simulator_id_file"
+  elif simulator_required; then
+    echo "::error::No available iPhone simulator was found; CI requires runtime smoke tests."
+    xcrun simctl list devices available || true
+    exit 1
+  else
+    echo "::warning::No available iPhone simulator was found; smoke tests are build-verified with a generic simulator destination."
+    rm -f "$simulator_id_file"
+  fi
+
+  set -o pipefail
+  xcodebuild \
+    -project "$project" \
+    -scheme "$scheme" \
+    -destination "$destination" \
+    -derivedDataPath "$derived_data" \
+    "${xcode_package_flags[@]}" \
+    CODE_SIGNING_ALLOWED=NO \
+    ONLY_ACTIVE_ARCH=YES \
+    build-for-testing | tee "$log_dir/xcodebuild-tests.log"
+}
+
 run_tests() {
   if [ "${PINES_SKIP_SIMULATOR_TEST_RUN:-0}" = "1" ]; then
     echo "Skipping simulator test run because PINES_SKIP_SIMULATOR_TEST_RUN=1."
@@ -162,7 +185,11 @@ run_tests() {
   fi
 
   local simulator_id
-  simulator_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+  if [ -f "$simulator_id_file" ]; then
+    simulator_id="$(cat "$simulator_id_file")"
+  else
+    simulator_id="$(first_available_iphone_simulator || true)"
+  fi
   if [ -z "$simulator_id" ]; then
     if simulator_required; then
       echo "::error::No available iPhone simulator was found; CI requires runtime smoke tests."
@@ -182,6 +209,7 @@ run_tests() {
     -derivedDataPath "$derived_data" \
     "${xcode_package_flags[@]}" \
     CODE_SIGNING_ALLOWED=NO \
+    ONLY_ACTIVE_ARCH=YES \
     test-without-building | tee "$log_dir/xcodebuild-test-run.log"
 }
 

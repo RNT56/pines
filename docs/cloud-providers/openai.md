@@ -1,4 +1,4 @@
-# OpenAI Provider Gaps
+# OpenAI Provider Status And Gaps
 
 Last verified: 2026-05-19.
 
@@ -17,237 +17,128 @@ Primary sources:
 
 ## What Pines Supports Today
 
-- Official OpenAI and OpenAI-compatible providers with BYOK credentials.
+- Official OpenAI and OpenAI-compatible providers with BYOK credentials, model catalog refresh, validation, request ID capture, token usage parsing, and provider-specific stream metadata.
 - Chat Completions streaming for OpenAI-compatible endpoints.
-- Responses API for official OpenAI when reasoning models, native web search, attachments, tool call replay, or prior response IDs are involved.
+- Responses API for official OpenAI when reasoning models, native web search, attachments, tool-call replay, prior response IDs, or stateful/stateless reasoning paths require it.
 - Text streaming, images, PDFs, and text documents through inline data URLs or Responses `input_file`.
-- Function tools, with `parallel_tool_calls` disabled.
-- Native OpenAI web search through the Responses API, with search context size, domain filters, external web access, and approximate user location.
+- Function tools, with `parallel_tool_calls` disabled for the current tool loop.
+- Native OpenAI web search through Responses, including search context size, domain filters, external web access, approximate user location, and web-source metadata.
 - OpenAI reasoning effort and text verbosity for recognized reasoning models.
 - Stateful Responses through `previous_response_id` when `store` is enabled, plus encrypted reasoning content inclusion for stateless-encrypted mode.
+- OpenAI Files lifecycle through shared provider records: upload from local files/Vault, list, refresh metadata, delete, and storage previews.
+- OpenAI vector store lifecycle through shared provider cache records: create, list, refresh, update, delete, attach/detach files, and vector-store file batch records.
+- OpenAI Batch lifecycle: create from JSONL or provider file, refresh, cancel, and import result artifacts.
+- OpenAI Deep Research run records: start, refresh, cancel, resume, summarize, and show research runs in the shared long-running job UI.
+- OpenAI realtime/session records and workflow plumbing for realtime client/session creation.
+- OpenAI provider artifact workflows for image, video, speech, transcription, translation, batch-result, and hosted-output artifacts, with shared artifact previews.
+- Hosted tool request mapping for OpenAI web search, file search, code interpreter, image generation, computer use, remote MCP, tool search, and custom hosted tool configurations, with agent-context gating for high-risk tools.
+- Hosted tool and artifact metadata parsing for OpenAI stream/output variants, including generated artifacts and provider-side tool provenance where returned.
 - Embeddings through `/v1/embeddings`, including `dimensions`.
-- Request ID capture and basic token usage parsing.
 
-## High-Value Unsupported Or Partial Features
+## Remaining High-Value Gaps
 
 ### 1. Make Responses the default OpenAI path
 
 Pines still uses Chat Completions for ordinary official OpenAI text turns unless specific features force Responses. OpenAI positions Responses as the recommended API for reasoning, tools, state, multimodal inputs, and future models.
 
-Value:
-
-- Better reasoning-model behavior and less split-path logic.
-- One event parser for text, tools, hosted tools, files, reasoning metadata, and state.
-- Cleaner support for future OpenAI models and hosted tools.
-
-Implementation notes:
+Needed work:
 
 - Route all official OpenAI text/tool/image/file turns to `/v1/responses`.
 - Keep Chat Completions only for OpenAI-compatible providers that do not implement Responses.
-- Expand parser coverage for `phase`, assistant item replay, preambles, reasoning summaries, and output item variants.
+- Expand parser coverage for every Responses output item and hosted-tool phase before making the switch.
 
 ### 2. Structured Outputs and strict JSON schema
 
-Pines exposes a `jsonMode` capability but request builders do not send `text.format` / JSON schema for Responses or `response_format` for Chat Completions.
+Pines exposes JSON-oriented capability flags, but it does not yet provide a provider-neutral structured-output request shape that maps to Responses `text.format` or compatible `response_format`.
 
-Value:
-
-- Reliable typed extraction, data entry, tool planning, and local automation handoffs.
-- Less brittle prompt-only JSON guidance.
-
-Implementation notes:
+Needed work:
 
 - Add a typed response schema surface to `ChatRequest` or a separate structured-generation request.
-- Map to Responses `text.format`.
-- Preserve streaming partial JSON handling separately from plain token streaming.
+- Validate final objects separately from normal markdown/text streams.
+- Reuse the same abstraction for Anthropic, Gemini, OpenRouter, and compatible endpoints.
 
-### 3. Hosted File Search and vector stores
+### 3. Hosted File Search per chat
 
-Pines has a local vault, but it does not use OpenAI vector stores or the hosted `file_search` tool.
+OpenAI Files and vector stores are represented in Pines, but enabling the hosted `file_search` tool as a normal chat/agent source still needs product and policy work.
 
-Value:
+Needed work:
 
-- Users can bring large corpora to OpenAI without Pines inlining every file on each turn.
-- Better long-document retrieval for cloud-specific threads.
-- Useful for users already invested in OpenAI file/vector-store workflows.
-
-Implementation notes:
-
-- Add optional provider-hosted knowledge stores as distinct from local Vault.
-- Add upload/delete/list lifecycle, retention disclosure, and per-turn consent.
-- Parse `file_search_call.results` when included.
+- Add per-chat/agent selection of vector stores and file-search settings.
+- Parse and present `file_search_call.results` with citations/source chips.
+- Keep local Vault, inline files, OpenAI files, and OpenAI vector stores visually distinct.
 
 ### 4. Code Interpreter hosted tool
 
-OpenAI's hosted `code_interpreter` is not available in Pines.
+Pines has shared hosted-tool provenance and artifact records, but OpenAI `code_interpreter` is not yet a complete user-facing workflow.
 
-Value:
+Needed work:
 
-- Data analysis, chart generation, file transformation, spreadsheet inspection, and repeatable calculations without implementing a local sandbox on iOS.
+- Send tool config only after explicit provider-tool approval.
+- Parse code outputs via the relevant `include` fields.
+- Retrieve generated files and present them as cloud artifacts with download/import/delete controls.
 
-Implementation notes:
+### 5. Generated media production UI
 
-- Treat generated files as cloud artifacts with explicit download/import controls.
-- Parse code outputs via `include: ["code_interpreter_call.outputs"]`.
-- Add UI policy around executing code outside the device.
+OpenAI media artifact workflows exist for images, video, speech, transcription, and translation, but the normal user-facing media studio/viewer flow is still partial.
 
-### 5. Image generation and image editing
+Needed work:
 
-Pines can send image inputs for analysis, but it cannot ask OpenAI to generate or edit images through the Images API or Responses `image_generation` tool.
+- Add dedicated image/video/audio controls rather than hiding media inside chat.
+- Show cost, model, dimensions/duration, job status, provider retention, and safety context.
+- Support edit/reuse/export/import actions from the artifact library.
 
-Value:
+### 6. Realtime voice/audio production UX
 
-- Visual ideation, UI asset generation, diagram/image edits, and multimodal assistant parity with ChatGPT-like workflows.
+OpenAI realtime/session record plumbing exists, but a complete realtime voice UI and transport lifecycle is still in progress.
 
-Implementation notes:
+Needed work:
 
-- Support generated image output items and base64/media handling.
-- Decide whether this belongs in chat, a separate asset workflow, or both.
-- Add safety/usage disclosures because images may have different retention and policy behavior.
+- Add dedicated voice/session surface with audio capture/playback, interruption handling, transcripts, reconnect/cancel, and tool approval overlays.
+- Keep realtime separate from SSE chat assumptions.
 
-### 6. Video generation and editing with Sora
+### 7. Computer Use, remote MCP, and tool search
 
-OpenAI exposes Sora video generation and video editing APIs. Pines has no generated video output or provider video lifecycle support.
+Pines has local MCP support and generic hosted-tool policy primitives, but OpenAI-hosted computer use, remote MCP, and tool search need separate approval models.
 
-Value:
+Needed work:
 
-- Video prototyping, social/marketing assets, product storytelling, and iterative media editing.
+- Computer use requires screenshot/action review, visible state, and high-risk approvals.
+- Remote MCP must be labeled separately from Pines-local MCP because data flows through OpenAI and the remote server.
+- Tool search needs dynamic tool-loading provenance and model capability checks.
 
-Implementation notes:
+### 8. Prompt caching, background mode, conversations, and governance controls
 
-- Add generated video job records because video generation is asynchronous and media-heavy.
-- Support upload/reference/delete/download lifecycle for generated and edited videos.
-- Add clear cost, eligibility, retention, and safety policy UI before exposing it in normal chat.
+Pines captures stateful response IDs and can represent long-running jobs, but it does not yet expose every OpenAI lifecycle/governance field.
 
-### 7. Realtime audio, speech-to-text, text-to-speech, and voice agents
+Needed work:
 
-Pines has no OpenAI Realtime, transcription, translation, or speech generation integration.
+- Add safe `prompt_cache_key` generation and retention controls without leaking private identifiers.
+- Add broader `background`, `conversation`, response retrieve/cancel, service tier, safety identifier, and metadata settings.
+- Show cached/reasoning token metrics consistently in run provenance.
 
-Value:
+### 9. Evals, moderation, and fine-tuning
 
-- Low-latency voice conversations, live transcription, accessibility, dictation, spoken responses, and translation.
+These remain lower-priority developer/pro workflows.
 
-Implementation notes:
+Needed work:
 
-- This is a separate transport from SSE chat: WebRTC/WebSocket sessions, ephemeral client secrets, audio buffers, VAD, interruptions, transcripts, and tool calls.
-- On iOS, use server-minted ephemeral credentials if direct client sessions are supported.
-
-### 8. Computer Use hosted tool
-
-Pines does not expose OpenAI computer-use workflows.
-
-Value:
-
-- Browser/UI automation and visual task completion when combined with screenshots and actions.
-
-Implementation notes:
-
-- Needs strong approval gates, visible state, screenshot capture, action review, and provider-specific output parsing.
-- Likely agent-only, not normal chat.
-
-### 9. Remote MCP hosted tool and tool search
-
-Pines has its own MCP client/server support, but it does not pass OpenAI-hosted `mcp` tools or `tool_search` to the Responses API.
-
-Value:
-
-- Let OpenAI models call remote MCP servers directly where the user wants provider-hosted orchestration.
-- Reduce token cost for large tool catalogs by loading tools only when relevant.
-
-Implementation notes:
-
-- Keep this separate from local MCP approval policy; remote MCP sends data to a third-party service through OpenAI.
-- Store remote MCP server configs per provider and expose per-tool allowlists.
-
-### 10. Deep Research API
-
-OpenAI exposes Deep Research through the Responses API. It is an agentic, long-running research workflow that plans sub-questions, searches the web, can use tools such as code execution, and returns citation-rich reports. Current docs identify dedicated deep-research model IDs as well as high-reasoning web-search workflows.
-
-Value:
-
-- Long-form research reports, market/competitive analysis, literature reviews, technical investigations, due diligence, and multi-source synthesis.
-- Strong fit for Pines if it can combine provider web research with user-approved local Vault or hosted file context.
-
-Implementation notes:
-
-- Requires background runs, status polling/resume, citation parsing, and progress UI.
-- Should have a dedicated "Research" run type, not just normal chat.
-- Needs source/citation review, research-plan/progress display, and cost/time warnings.
-- Should support provider-hosted MCP/File Search only with explicit consent.
-
-### 11. Prompt caching controls
-
-OpenAI can use `prompt_cache_key` and cache retention policies. Pines currently relies on provider defaults and does not expose cache keys or retention settings.
-
-Value:
-
-- Lower latency and cost for repeated system prompts, vault context, and long-running workflows.
-
-Implementation notes:
-
-- Add a stable cache key strategy that does not leak private identifiers.
-- Track cached token counts in metrics.
-- Allow per-thread or per-workflow cache policy.
-
-### 12. Background mode, conversations, and response lifecycle APIs
-
-Pines streams foreground requests only. It does not expose `background`, `conversation`, response retrieval/cancel, or provider-side conversation objects.
-
-Value:
-
-- Long-running research/coding/analysis tasks can continue while the app is backgrounded or reconnect after network interruptions.
-
-Implementation notes:
-
-- Needs local run records that can reconcile provider response IDs and statuses.
-- Avoid silent provider-side persistence unless the user chooses it.
-
-### 13. Service tier, safety identifier, metadata, and governance controls
-
-Pines does not expose `service_tier`, `safety_identifier`, metadata, or organization/project governance fields.
-
-Value:
-
-- Enterprise users can control latency/cost class, abuse monitoring scoping, and audit correlation.
-
-Implementation notes:
-
-- Add optional per-provider advanced settings.
-- Hash user/device identifiers before sending safety IDs.
-
-### 14. Batch API, evals, moderation, and fine-tuning
-
-These are not part of Pines today.
-
-Value:
-
-- Batch: cheaper asynchronous summarization, embedding, classification, and vault maintenance jobs.
-- Evals: regression testing prompts/providers/models inside Pines.
-- Moderation: optional user-controlled safety classification before sending cloud requests or publishing outputs.
-- Fine-tuning: lower current priority because OpenAI's fine-tuning platform availability has changed and may not fit a BYOK consumer app.
-
-Implementation notes:
-
-- Batch and evals fit developer/pro workflows more than normal chat.
-- Moderation should be optional and privacy-explicit, not hidden.
+- Add only when Pines has a developer/pro workspace that can explain provider storage, cost, and policy boundaries.
+- Keep moderation optional and explicit, not hidden inside normal chat.
 
 ## Suggested Priority
 
-1. Responses API as the default official OpenAI route.
-2. Structured Outputs.
-3. Hosted File Search/vector stores and Files API lifecycle.
-4. Code Interpreter.
-5. Realtime/audio.
-6. Image and video generation/editing.
-7. Deep Research as a dedicated long-running research workflow.
-8. Prompt caching and lifecycle controls.
-9. Remote MCP/tool search/computer use.
-10. Batch/evals/moderation/governance settings.
+1. Make Responses the default official OpenAI route.
+2. Add provider-neutral structured outputs.
+3. Finish hosted File Search selection and citation UI.
+4. Complete Code Interpreter approvals and artifact import.
+5. Harden generated media and realtime UX.
+6. Add prompt cache/background/conversation/governance controls.
+7. Revisit computer use, remote MCP, tool search, evals, moderation, and fine-tuning.
 
 ## Review Checklist
 
 - Should OpenAI Responses become mandatory for official OpenAI providers?
-- Should provider-hosted files/vector stores be separate from local Vault, or can they be one UI with local/cloud profiles?
+- Are OpenAI files/vector stores clearly separate from local Vault in every flow?
 - Should generated images and code outputs appear inside chats, as attachments, or in a separate artifact library?
-- Which OpenAI hosted tools should be available in normal chat versus agent-only mode?
+- Which OpenAI hosted tools are safe in normal chat versus agent-only mode?
 - Should stateless encrypted reasoning be user-facing, automatic under ZDR-like settings, or hidden?

@@ -14,7 +14,7 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Local/cloud execution routing rules.
 - Hugging Face model catalog search and model preflight classification.
 - Curated model manifest.
-- Persistence schema for conversations, messages, model installs/downloads, vault documents, chunks, FTS, settings, cloud providers, sync records, agent/tool runs, and audit events.
+- Persistence schema for conversations, messages, model installs/downloads, vault documents, chunks, FTS, settings, cloud providers, provider lifecycle records, sync records, agent/tool runs, and audit events.
 - Tool registry, typed tool specs, expanded built-in tools, and policy gate.
 - Agent policy and tool invocation models.
 - Vault chunking and exact cosine vector index.
@@ -28,6 +28,11 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Split MLX compatibility implementations for Llama 4 and DeepSeek V4 model families.
 - Hugging Face preflight and resumable model install/delete service.
 - BYOK cloud streaming adapters for OpenAI-compatible, OpenRouter, Anthropic, and Gemini, including provider-specific stream metadata parsing.
+- Shared provider lifecycle records, repositories, previews, and dashboard surfaces for provider-hosted files, artifacts, caches/vector stores, batches, model capabilities, live sessions, and research runs.
+- OpenAI provider lifecycle workflows for Files, vector stores, vector-store file batches, batches, Deep Research, realtime session records, generated image/video artifacts, speech, transcription, and translation artifacts.
+- Anthropic provider lifecycle workflows for Files, generated file download/import, prompt cache metrics, citations, thinking preservation, Message Batches, token counting, hosted tool metadata, and model capability rows.
+- Gemini provider lifecycle workflows for Files, context caches, token counting, Deep Research, Live sessions, generated media artifacts, batches, URL context metadata, Google Search grounding, and model capability rows.
+- Chat provenance surfaces for provider citations, hosted tool timelines, provider file references, request/message IDs, cache metrics, thinking mode, and generated artifacts.
 - Built-in calculator, time/date, attachment read, vault search/read, conversation search, Brave Search BYOK, web fetch, and WKWebView browser observe/action tools.
 - Vault file/PDF/image import pipeline with chunking, OCR, and embedding invocation.
 - TurboQuant runtime profile defaults, requested/active backend diagnostics, Metal codec and compressed-attention availability diagnostics, compressed vault embedding storage, approximate vector search, and FP16 rerank path.
@@ -50,7 +55,7 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 ## Not Complete
 
 - Real-device TurboQuant acceptance on the A16 through A19 Pro hardware matrix.
-- Production UX hardening for regenerate controls, fuller provider editing, CloudKit conflict UI, and detailed model compatibility messaging.
+- Production UX hardening for regenerate controls, fuller provider editing, provider-hosted transfer progress/retry/cancellation, richer hosted-tool approvals, CloudKit conflict UI, and detailed model compatibility messaging.
 - App Store privacy manifest validation against the final resolved package graph.
 - Remaining monolith candidates are semantic rather than mechanical: `PinesAppModel` still owns high-level orchestration, `SettingsDetailView` owns the full settings editor, and `ModelsViewComponents` owns model list/detail presentation. Split these further only alongside focused feature changes.
 

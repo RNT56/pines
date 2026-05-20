@@ -36,6 +36,69 @@ extension String {
     }
 }
 
+enum PinesGeminiMediaTransport: String, Codable, Hashable, Sendable {
+    case inlineData
+    case fileData
+}
+
+struct PinesGeminiMediaDisposition: Codable, Hashable, Sendable {
+    static let maxInlineImageBytes: Int64 = 20 * 1024 * 1024
+    static let maxInlineFileBytes: Int64 = 50 * 1024 * 1024
+
+    var transport: PinesGeminiMediaTransport
+    var contentType: String
+    var byteCount: Int64?
+    var inlineLimitBytes: Int64
+    var reason: String
+
+    var shouldUploadToFiles: Bool {
+        transport == .fileData
+    }
+
+    static func decision(
+        contentType: String,
+        byteCount: Int64?,
+        hasProviderURI: Bool = false
+    ) -> PinesGeminiMediaDisposition {
+        let normalizedContentType = contentType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let limit = normalizedContentType.hasPrefix("image/") ? maxInlineImageBytes : maxInlineFileBytes
+        if hasProviderURI {
+            return PinesGeminiMediaDisposition(
+                transport: .fileData,
+                contentType: normalizedContentType,
+                byteCount: byteCount,
+                inlineLimitBytes: limit,
+                reason: "provider_uri"
+            )
+        }
+        guard let byteCount else {
+            return PinesGeminiMediaDisposition(
+                transport: .fileData,
+                contentType: normalizedContentType,
+                byteCount: nil,
+                inlineLimitBytes: limit,
+                reason: "unknown_size"
+            )
+        }
+        let transport: PinesGeminiMediaTransport = byteCount <= limit ? .inlineData : .fileData
+        return PinesGeminiMediaDisposition(
+            transport: transport,
+            contentType: normalizedContentType,
+            byteCount: byteCount,
+            inlineLimitBytes: limit,
+            reason: transport == .inlineData ? "within_inline_limit" : "exceeds_inline_limit"
+        )
+    }
+
+    static func decision(for attachment: ChatAttachment) -> PinesGeminiMediaDisposition {
+        decision(
+            contentType: attachment.normalizedContentType,
+            byteCount: attachment.byteCount > 0 ? Int64(attachment.byteCount) : nil,
+            hasProviderURI: attachment.localURL?.isFileURL == false
+        )
+    }
+}
+
 extension Array {
     func asyncMap<T>(_ transform: (Element) async throws -> T) async throws -> [T] {
         var values = [T]()
@@ -112,6 +175,7 @@ struct ChatQuickSettingsAvailability: Hashable {
     let openAIReasoningEfforts: [OpenAIReasoningEffort]
     let supportsOpenAITextVerbosity: Bool
     let anthropicEfforts: [AnthropicEffort]
+    let anthropicThinkingModes: [AnthropicThinkingMode]
     let geminiThinkingLevels: [GeminiThinkingLevel]
     let cloudWebSearchModes: [CloudWebSearchMode]
 
@@ -119,6 +183,7 @@ struct ChatQuickSettingsAvailability: Hashable {
         openAIReasoningEfforts.isEmpty
             && !supportsOpenAITextVerbosity
             && anthropicEfforts.isEmpty
+            && anthropicThinkingModes.isEmpty
             && geminiThinkingLevels.isEmpty
             && cloudWebSearchModes.isEmpty
     }
@@ -287,6 +352,123 @@ struct PinesVaultItemPreview: Identifiable, Hashable {
     let linkedThreads: Int
     let activeProfileEmbeddedChunks: Int
     let activeProfileTotalChunks: Int
+}
+
+struct PinesProviderFilePreview: Identifiable, Hashable {
+    let id: String
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let title: String
+    let detail: String
+    let purpose: String
+    let status: String
+    let byteCountLabel: String
+    let createdLabel: String
+    let expiresLabel: String?
+}
+
+struct PinesProviderArtifactPreview: Identifiable, Hashable {
+    let id: String
+    let providerID: ProviderID?
+    let providerKind: CloudProviderKind
+    let title: String
+    let detail: String
+    let kind: String
+    let status: String
+    let byteCountLabel: String?
+    let createdLabel: String
+}
+
+struct PinesProviderCachePreview: Identifiable, Hashable {
+    let id: String
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let title: String
+    let detail: String
+    let kind: String
+    let status: String
+    let usageLabel: String
+    let createdLabel: String
+    let expiresLabel: String?
+}
+
+struct PinesProviderBatchPreview: Identifiable, Hashable {
+    let id: String
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let title: String
+    let endpoint: String
+    let status: String
+    let fileSummary: String
+    let createdLabel: String
+    let completedLabel: String?
+}
+
+struct PinesProviderLiveSessionPreview: Identifiable, Hashable {
+    let id: String
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let title: String
+    let modelID: ModelID
+    let status: String
+    let modalitySummary: String
+    let createdLabel: String
+    let expiresLabel: String?
+}
+
+struct PinesProviderStructuredOutputPreview: Identifiable, Hashable {
+    let id: UUID
+    let providerID: ProviderID?
+    let providerKind: CloudProviderKind
+    let title: String
+    let detail: String
+    let status: String
+    let validationSummary: String
+    let createdLabel: String
+}
+
+struct PinesProviderModelCapabilityPreview: Identifiable, Hashable {
+    let id: String
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let modelID: ModelID
+    let title: String
+    let detail: String
+    let capabilitySummary: String
+    let fetchedLabel: String
+    let expiresLabel: String?
+}
+
+struct PinesProviderResearchRunPreview: Identifiable, Hashable {
+    let id: String
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let title: String
+    let modelID: ModelID
+    let status: String
+    let detail: String
+    let activitySummary: String
+    let updatedLabel: String
+}
+
+struct PinesProviderDeepResearchRequest: Hashable, Sendable {
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let modelID: ModelID
+    let title: String
+    let prompt: String
+    let depth: String
+    let reportFormat: String
+    let vectorStoreIDs: [String]
+    let providerFileIDs: [String]
+}
+
+struct PinesProviderRealtimeSessionRequest: Hashable, Sendable {
+    let providerID: ProviderID
+    let providerKind: CloudProviderKind
+    let modelID: ModelID
+    let modalities: [String]
+    let session: JSONValue
 }
 
 enum PinesVaultKind: String, Hashable {

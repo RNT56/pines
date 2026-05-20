@@ -19,6 +19,18 @@ Make Gemini in Pines production-complete for Google's strongest API capabilities
 - Batch jobs and detailed usage/citation metadata.
 - Themed UI for Files API/media inputs, structured outputs, tools, grounding, context caching, Live API, generated media, and model capabilities.
 
+## Implementation Status
+
+Updated 2026-05-19:
+
+- Pines supports Gemini Generate Content streaming, Interactions routing, model listing/validation, function declarations/results, Google Search grounding, URL context metadata, thinking levels, embeddings, and image/PDF/text chat inputs.
+- Gemini Files API and context caches now use shared provider lifecycle records, with upload/list/refresh/delete/poll operations, file URI request parts, cache creation, token counting, and provider storage previews.
+- Gemini Deep Research run records support start, refresh, cancel, resume, follow-up, and shared research-run previews.
+- Gemini Live session service and session records exist for realtime-capable workflows, though the production voice/video UI remains separate work.
+- Gemini generated media workflows create image/video/audio-style provider artifacts and expose them through shared artifact previews.
+- Gemini batch operations and model capability records participate in the shared lifecycle dashboard.
+- Stream/parser metadata covers grounding, URL context, code execution, generated file references, and provider file references.
+
 ## Explicitly Out Of Scope
 
 - Managing Google Cloud projects, billing, IAM, or Vertex AI-specific admin flows.
@@ -57,13 +69,13 @@ Goal: Support Gemini's large-file and multimodal strengths.
 
 Todos:
 
-- Add Gemini file upload/list/get/delete and file URI references.
-- Use Files API automatically or by user choice for large PDFs, audio, video, and images.
-- Extend cloud attachment mapping for audio and video.
-- Add duration, size, and token preflight for media.
-- Add file retention/provider-hosted storage UI.
+- Harden existing Gemini file upload/list/get/delete and file URI reference workflows.
+- Use Files API automatically or by user choice for large PDFs, audio, video, and images only when consent and capability checks are clear.
+- Extend first-class cloud attachment mapping for audio and video.
+- Expand duration, size, and token preflight for media.
+- Continue improving file retention/provider-hosted storage UI.
 - Add tests for inline small media, Files API large media, deleted file references, and unsupported MIME types.
-- Add file/media manager and attachment controls with provider-hosted status.
+- Harden file/media manager and attachment controls with provider-hosted status, progress, retry, and cancellation.
 
 Possible hiccups:
 
@@ -123,12 +135,12 @@ Goal: Reduce cost and prevent over-context failures.
 
 Todos:
 
-- Add token counting endpoint usage before large requests.
-- Add context cache create/list/delete and TTL handling.
-- Use cached content for repeated system prompts, tools, and document/media context.
+- Continue using token counting endpoint usage before large requests and cache creation.
+- Harden existing context cache create/list/delete and TTL handling.
+- Use cached content more broadly for repeated system prompts, tools, and document/media context.
 - Parse cache usage and expose cost savings where available.
 - Integrate token counts with Vault context packing.
-- Add context cache manager and token estimate UI.
+- Continue improving context cache manager and token estimate UI.
 
 Possible hiccups:
 
@@ -145,9 +157,9 @@ Goal: Make Gemini Deep Research a first-class long-running research workflow.
 
 Todos:
 
-- Add explicit Deep Research run type using `v1beta/interactions` with `agent`, `background=true`, optional `stream=true`, and `agent_config`.
-- Persist `interaction_id`, `event_id`, status, final outputs, sources/citations, and previous interaction ID.
-- Add poll/resume/cancel/retry behavior for long-running tasks and interrupted streams.
+- Harden the existing Deep Research run type using `v1beta/interactions` with `agent`, `background=true`, optional `stream=true`, and `agent_config`.
+- Persist richer `interaction_id`, `event_id`, status, final outputs, sources/citations, and previous interaction ID.
+- Continue supporting poll/resume/cancel/retry behavior for long-running tasks and interrupted streams.
 - Support thought-summary progress when enabled.
 - Add File Search data-source selection for user-approved provider-hosted files/stores.
 - Expose limitations in UI: preview, no Generate Content access, no custom function tools/MCP, no structured output/plan approval, store requirement, no audio input.
@@ -170,7 +182,7 @@ Goal: Add Gemini realtime mode without destabilizing text chat.
 
 Todos:
 
-- Add separate Live session service for WebSocket/WebRTC style flows.
+- Harden the existing separate Live session service for WebSocket/WebRTC style flows.
 - Support ephemeral/session credentials where applicable.
 - Add audio capture/playback, video frame input, interruption handling, transcripts, VAD, and session persistence.
 - Add function tool gating in live sessions.
@@ -193,10 +205,10 @@ Goal: Support Gemini media generation where it fits Pines artifacts.
 
 Todos:
 
-- Add image generation/editing through Gemini/Imagen where available.
-- Add video generation through Veo job lifecycle.
-- Add speech generation/audio output.
-- Store generated artifacts locally with provider metadata.
+- Harden existing image generation/editing through Gemini/Imagen where available.
+- Harden existing video generation through Veo job lifecycle.
+- Harden existing speech generation/audio output.
+- Continue storing generated artifacts locally with provider metadata.
 - Add cost, eligibility, safety, and retention disclosure.
 - Add generated media artifact gallery and viewer controls.
 
@@ -215,8 +227,8 @@ Goal: Improve large-job reliability and model selection.
 
 Todos:
 
-- Add Batch API for bulk document/media work.
-- Cache model capabilities: modalities, tools, context, output types, structured output support.
+- Harden existing Batch API records for bulk document/media work.
+- Continue caching model capabilities: modalities, tools, context, output types, structured output support.
 - Replace model-name heuristics with metadata where available.
 
 Possible hiccups:

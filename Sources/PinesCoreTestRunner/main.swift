@@ -12,6 +12,8 @@ struct PinesCoreTestRunner {
         try testModelRuntimeConfigurationHints()
         try await testModelCatalogSearch()
         try testPersistenceSchema()
+        try testGeminiLifecycleContracts()
+        try testAnthropicCoreContracts()
         try testPersistenceFTSTriggers()
         try testProductionTypes()
         try testDeviceProfiles()
@@ -549,6 +551,176 @@ struct PinesCoreTestRunner {
         try expect(!config.syncsEmbeddings, "embeddings must not sync by default")
     }
 
+    private static func testGeminiLifecycleContracts() throws {
+        let providerID = ProviderID(rawValue: "gemini")
+        let modelID = ModelID(rawValue: "gemini-3.1-pro-preview")
+        let capabilities = ProviderCapabilities(
+            local: false,
+            imageInputs: true,
+            audioInputs: true,
+            videoInputs: true,
+            pdfInputs: true,
+            textDocumentInputs: true,
+            files: true,
+            embeddings: true,
+            toolCalling: true,
+            hostedTools: true,
+            jsonMode: true,
+            structuredOutputs: true,
+            contextCache: true,
+            live: true,
+            generatedImages: true,
+            generatedVideo: true,
+            batch: true,
+            tokenCounting: true
+        )
+        let file = ProviderFileRecord(
+            id: "files/audio_123",
+            providerID: providerID,
+            providerKind: .gemini,
+            purpose: "prompt",
+            fileName: "meeting.mp3",
+            contentType: "audio/mpeg",
+            byteCount: 4096,
+            status: "active",
+            providerMetadata: ["workspace": "pines"]
+        )
+        let cache = ProviderCacheRecord(
+            id: "cachedContents/cache_123",
+            providerID: providerID,
+            providerKind: .gemini,
+            kind: "context_cache",
+            name: "Research cache",
+            modelID: modelID,
+            status: "active",
+            usageBytes: 1536,
+            itemCounts: .object(["cachedContentTokenCount": .number(1536)])
+        )
+        let batch = ProviderBatchRecord(
+            id: "batches/batch_123",
+            providerID: providerID,
+            providerKind: .gemini,
+            endpoint: "models/gemini-3.1-pro-preview:batchGenerateContent",
+            status: "running",
+            inputFileID: "files/input_123",
+            outputFileID: "files/output_123"
+        )
+        let live = ProviderLiveSessionRecord(
+            id: "liveSessions/session_123",
+            providerID: providerID,
+            providerKind: .gemini,
+            modelID: "gemini-live-2.5-flash-preview",
+            status: "active",
+            modalities: ["audio", "text"]
+        )
+        let artifact = ProviderArtifactRecord(
+            id: "files/generated_image",
+            providerID: providerID,
+            providerKind: .gemini,
+            responseID: "resp_gemini",
+            providerFileID: "files/generated_image",
+            kind: "file_data",
+            contentType: "image/png"
+        )
+        let structuredOutput = ProviderStructuredOutputRecord(
+            providerID: providerID,
+            providerKind: .gemini,
+            responseID: "resp_gemini",
+            schemaName: "answer",
+            content: .object(["answer": .string("ok")]),
+            status: "parsed"
+        )
+        let modelCapability = ProviderModelCapabilityRecord(
+            providerID: providerID,
+            providerKind: .gemini,
+            modelID: modelID,
+            capabilities: capabilities,
+            contextWindowTokens: 1_048_576,
+            inputModalities: ["text", "image", "audio", "video", "pdf"],
+            outputModalities: ["text", "image", "video"],
+            metadata: ["source": "runner"]
+        )
+        let researchRun = ProviderResearchRunRecord(
+            id: "resp_gemini",
+            providerID: providerID,
+            providerKind: .gemini,
+            modelID: modelID,
+            title: "Market map",
+            prompt: "Research Gemini lifecycle records.",
+            depth: "standard",
+            sourcePolicy: .object(["scope": .string("web")]),
+            reportFormat: "citation_first",
+            serviceTier: "default",
+            responseID: "resp_gemini",
+            status: "completed",
+            citationCount: 1,
+            toolCallCount: 1,
+            providerMetadata: [CloudProviderMetadataKeys.geminiResponseID: "resp_gemini"]
+        )
+
+        try expectEqual(try JSONDecoder().decode(ProviderFileRecord.self, from: JSONEncoder().encode(file)), file)
+        try expectEqual(try JSONDecoder().decode(ProviderCacheRecord.self, from: JSONEncoder().encode(cache)), cache)
+        try expectEqual(try JSONDecoder().decode(ProviderBatchRecord.self, from: JSONEncoder().encode(batch)), batch)
+        try expectEqual(try JSONDecoder().decode(ProviderLiveSessionRecord.self, from: JSONEncoder().encode(live)), live)
+        try expectEqual(try JSONDecoder().decode(ProviderArtifactRecord.self, from: JSONEncoder().encode(artifact)), artifact)
+        try expectEqual(try JSONDecoder().decode(ProviderStructuredOutputRecord.self, from: JSONEncoder().encode(structuredOutput)), structuredOutput)
+        try expectEqual(try JSONDecoder().decode(ProviderModelCapabilityRecord.self, from: JSONEncoder().encode(modelCapability)), modelCapability)
+        try expectEqual(try JSONDecoder().decode(ProviderResearchRunRecord.self, from: JSONEncoder().encode(researchRun)), researchRun)
+        try expect(modelCapability.capabilities.modelCapabilities.contains(.contextCache), "Gemini model capabilities should include context cache")
+        try expect(modelCapability.capabilities.modelCapabilities.contains(.live), "Gemini model capabilities should include live sessions")
+        try expect(modelCapability.capabilities.modelCapabilities.contains(.batch), "Gemini model capabilities should include batch")
+        try expect(modelCapability.capabilities.modelCapabilities.contains(.tokenCounting), "Gemini model capabilities should include token counting")
+    }
+
+    private static func testAnthropicCoreContracts() throws {
+        let provider = CloudProviderConfiguration(
+            id: "anthropic",
+            kind: .anthropic,
+            displayName: "Anthropic",
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            keychainAccount: "anthropic"
+        )
+        try expect(provider.capabilities.contextCache, "Anthropic should advertise prompt cache support")
+        try expect(provider.capabilities.batch, "Anthropic should advertise batch support")
+        try expect(provider.capabilities.tokenCounting, "Anthropic should advertise token counting support")
+
+        let fileID = AnthropicProviderFileID(rawValue: "file_abc")
+        let batchID = AnthropicBatchID(rawValue: "msgbatch_abc")
+        let messageID = AnthropicMessageID(rawValue: "msg_abc")
+        let toolCallID = AnthropicHostedToolCallID(rawValue: "srvtoolu_abc")
+        try expectEqual(try JSONDecoder().decode(AnthropicProviderFileID.self, from: JSONEncoder().encode(fileID)), fileID)
+        try expectEqual(try JSONDecoder().decode(AnthropicBatchID.self, from: JSONEncoder().encode(batchID)), batchID)
+        try expectEqual(try JSONDecoder().decode(AnthropicMessageID.self, from: JSONEncoder().encode(messageID)), messageID)
+        try expectEqual(try JSONDecoder().decode(AnthropicHostedToolCallID.self, from: JSONEncoder().encode(toolCallID)), toolCallID)
+
+        let request = ChatRequest(
+            modelID: "claude-sonnet-4-6",
+            messages: [ChatMessage(role: .user, content: "hi")],
+            sampling: ChatSampling(anthropicEffort: .high),
+            anthropicOptions: AnthropicRequestOptions(
+                promptCache: AnthropicPromptCacheOptions(enabled: true, ttl: .oneHour),
+                thinking: AnthropicThinkingOptions(mode: .effort, effort: .max),
+                citations: AnthropicCitationOptions(enabled: true),
+                hostedTools: [.webFetch(allowedDomains: ["example.com"], blockedDomains: [], maxUses: 1), .textEditor],
+                providerFileIDs: [fileID],
+                countTokensBeforeSend: true
+            )
+        )
+        let decoded = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(request))
+        try expectEqual(decoded.anthropicOptions?.promptCache.ttl, .oneHour)
+        try expectEqual(decoded.anthropicOptions?.thinking.mode, .effort)
+        try expect(decoded.anthropicOptions?.requiredBetaHeaders.contains(AnthropicBetaHeaders.extendedCacheTTL) == true, "Anthropic one-hour cache TTL should require beta header")
+        try expect(decoded.anthropicOptions?.requiredBetaHeaders.contains(AnthropicBetaHeaders.filesAPI) == true, "Anthropic file references should require Files API beta header")
+        try expect(decoded.hasAgentOnlyHostedTools, "Text editor should gate Anthropic request to agent execution")
+        try expect(!decoded.hostedToolsAreAllowedForExecutionContext(), "Agent-only Anthropic tools should not run in chat context")
+
+        let legacy = try JSONDecoder().decode(
+            ChatRequest.self,
+            from: Data(#"{"modelID":"claude-sonnet-4-6","messages":[{"id":"00000000-0000-0000-0000-000000000001","role":"user","content":"hi"}],"sampling":{"anthropicEffort":"xhigh"}}"#.utf8)
+        )
+        try expectEqual(legacy.resolvedAnthropicOptions.thinking.effort, .xhigh)
+    }
+
     private static func testPersistenceFTSTriggers() throws {
         let probe = try runSQLiteScript("CREATE VIRTUAL TABLE pines_fts5_probe USING fts5(value);")
         guard probe.status == 0 else {
@@ -623,6 +795,7 @@ struct PinesCoreTestRunner {
             cloudMaxCompletionTokens: 32768,
             localMaxCompletionTokens: 2048,
             localMaxContextTokens: 32768,
+            anthropicTokenCountPreflightEnabled: true,
             requireToolApproval: true,
             braveSearchEnabled: true,
             onboardingCompleted: true,
@@ -635,6 +808,7 @@ struct PinesCoreTestRunner {
         try expectEqual(decoded.cloudMaxCompletionTokens, 32768)
         try expectEqual(decoded.localMaxCompletionTokens, 2048)
         try expectEqual(decoded.localMaxContextTokens, 32768)
+        try expectEqual(decoded.anthropicTokenCountPreflightEnabled, true)
 
         let runtimeProfile = RuntimeProfile()
         try expectEqual(runtimeProfile.quantization.algorithm, .turboQuant)

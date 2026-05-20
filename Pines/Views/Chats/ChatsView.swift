@@ -876,9 +876,18 @@ private struct ChatBubble: View {
                 if !webSearchCitations.isEmpty {
                     ChatWebSearchCitationList(citations: webSearchCitations)
                 }
+                let providerCitations = message.providerMetadata.providerCitations
+                if !providerCitations.isEmpty {
+                    ChatProviderCitationList(citations: providerCitations)
+                }
                 if let searchSuggestionsHTML = ChatWebSearchSuggestionsView.html(from: message.providerMetadata) {
                     ChatWebSearchSuggestionsView(html: searchSuggestionsHTML)
                 }
+                let hostedToolEntries = message.providerMetadata.hostedToolAuditEntries
+                if !hostedToolEntries.isEmpty {
+                    ChatHostedToolTimeline(entries: hostedToolEntries)
+                }
+                ChatProviderProvenancePills(metadata: message.providerMetadata)
 
                 let agentActivities = PinesAppModel.agentActivities(from: message.providerMetadata)
                 if !agentActivities.isEmpty {
@@ -987,6 +996,87 @@ private struct ChatLocalTokenRateView: View {
         }
         .foregroundStyle(theme.colors.secondaryText)
         .accessibilityLabel("\(performance.displayValue) tokens per second")
+    }
+}
+
+private struct ChatProviderProvenancePills: View {
+    @Environment(\.pinesTheme) private var theme
+    let metadata: [String: String]
+
+    private var items: [PinesMetricPillGroup.Item] {
+        var values = [PinesMetricPillGroup.Item]()
+        if let responseID = metadata[CloudProviderMetadataKeys.openAIResponseID]?.pinesCompactMetadataValue {
+            values.append(.init("Response", value: responseID, systemImage: "number", tone: .info))
+        }
+        if let requestID = metadata[CloudProviderMetadataKeys.openAIRequestID]?.pinesCompactMetadataValue {
+            values.append(.init("Request", value: requestID, systemImage: "arrow.left.arrow.right", tone: .neutral))
+        }
+        if let messageID = metadata[CloudProviderMetadataKeys.anthropicMessageID]?.pinesCompactMetadataValue {
+            values.append(.init("Message", value: messageID, systemImage: "number", tone: .info))
+        }
+        if let requestID = metadata[CloudProviderMetadataKeys.anthropicRequestID]?.pinesCompactMetadataValue {
+            values.append(.init("Request", value: requestID, systemImage: "arrow.left.arrow.right", tone: .neutral))
+        }
+        if let cacheRead = metadata[CloudProviderMetadataKeys.anthropicCacheReadInputTokens], cacheRead != "0" {
+            values.append(.init("Cache read", value: cacheRead, systemImage: "memorychip", tone: .success))
+        }
+        if let cacheWrite = metadata[CloudProviderMetadataKeys.anthropicCacheCreationInputTokens], cacheWrite != "0" {
+            values.append(.init("Cache write", value: cacheWrite, systemImage: "memorychip.fill", tone: .warning))
+        }
+        if let countedTokens = metadata[CloudProviderMetadataKeys.anthropicCountTokensInputTokens], countedTokens != "0" {
+            values.append(.init("Token preflight", value: countedTokens, systemImage: "number", tone: .accent))
+        }
+        if metadata[CloudProviderMetadataKeys.openAIResponseStored] == "true" {
+            values.append(.init("Stored", value: "provider", systemImage: "cloud", tone: .warning))
+        }
+        if let status = metadata[CloudProviderMetadataKeys.openAIResponseStatus]?.pinesCompactMetadataValue {
+            values.append(.init("Status", value: status, systemImage: "clock", tone: .accent))
+        }
+        let artifactCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.openAIArtifactsJSON])
+        if artifactCount > 0 {
+            values.append(.init("Artifacts", value: "\(artifactCount)", systemImage: "sparkles", tone: .accent))
+        }
+        let anthropicArtifactCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.anthropicArtifactsJSON])
+        if anthropicArtifactCount > 0 {
+            values.append(.init("Artifacts", value: "\(anthropicArtifactCount)", systemImage: "sparkles", tone: .accent))
+        }
+        let anthropicHostedToolCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.anthropicHostedToolCallsJSON])
+        if anthropicHostedToolCount > 0 {
+            values.append(.init("Hosted tools", value: "\(anthropicHostedToolCount)", systemImage: "wrench.and.screwdriver", tone: .warning))
+        }
+        let providerCitationCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.providerCitationsJSON])
+        if providerCitationCount > 0 {
+            values.append(.init("Citations", value: "\(providerCitationCount)", systemImage: "quote.bubble", tone: .info))
+        }
+        let fileSearchCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON])
+        if fileSearchCount > 0 {
+            values.append(.init("File search", value: "\(fileSearchCount)", systemImage: "doc.text.magnifyingglass", tone: .success))
+        }
+        return values
+    }
+
+    var body: some View {
+        if !items.isEmpty {
+            PinesMetricPillGroup(items: items, minimumWidth: 112)
+                .padding(.top, theme.spacing.xxsmall)
+        }
+    }
+
+    private static func jsonArrayCount(_ raw: String?) -> Int {
+        guard let raw,
+              let data = raw.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [Any]
+        else { return 0 }
+        return array.count
+    }
+}
+
+private extension String {
+    var pinesCompactMetadataValue: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.count <= 18 { return trimmed }
+        return "\(trimmed.prefix(8))...\(trimmed.suffix(6))"
     }
 }
 
@@ -1102,6 +1192,260 @@ private struct ChatWebSearchCitationList: View {
               let citations = try? JSONDecoder().decode([WebSearchCitation].self, from: data)
         else { return [] }
         return citations
+    }
+}
+
+private struct ChatProviderCitationList: View {
+    @Environment(\.pinesTheme) private var theme
+    let citations: [ProviderCitation]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            HStack(spacing: theme.spacing.xsmall) {
+                Image(systemName: "quote.bubble")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 16, height: 16)
+                Text("Provider sources")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+            }
+
+            ForEach(citations.prefix(6)) { citation in
+                HStack(spacing: theme.spacing.xxsmall) {
+                    Text(citation.sourceType.title)
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .lineLimit(1)
+
+                    if let url = citation.url, let link = URL(string: url) {
+                        Link(citation.title ?? url, destination: link)
+                            .font(theme.typography.caption.weight(.medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text(citation.providerSourceTitle)
+                            .font(theme.typography.caption.weight(.medium))
+                            .foregroundStyle(theme.colors.primaryText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.vertical, theme.spacing.xsmall)
+        .padding(.horizontal, theme.spacing.small)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
+        }
+        .accessibilityLabel("\(citations.count) provider sources")
+    }
+}
+
+private extension ProviderCitation {
+    var providerSourceTitle: String {
+        var parts = [String]()
+        if let title, !title.isEmpty {
+            parts.append(title)
+        }
+        if let fileID, !fileID.isEmpty {
+            parts.append(fileID)
+        }
+        if let page {
+            parts.append("p. \(page)")
+        }
+        if let citedText, !citedText.isEmpty {
+            parts.append(citedText)
+        }
+        return parts.first ?? source ?? "Source"
+    }
+}
+
+private extension ProviderCitationSourceType {
+    var title: String {
+        switch self {
+        case .web:
+            "Web"
+        case .file:
+            "File"
+        case .pdf:
+            "PDF"
+        case .text:
+            "Text"
+        case .searchResult:
+            "Search"
+        case .vaultChunk:
+            "Vault"
+        case .unknown:
+            "Source"
+        }
+    }
+}
+
+private struct ChatHostedToolTimeline: View {
+    @Environment(\.pinesTheme) private var theme
+    let entries: [HostedToolAuditEntry]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            HStack(spacing: theme.spacing.xsmall) {
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.warning)
+                    .frame(width: 16, height: 16)
+                Text("Hosted tool timeline")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+            }
+
+            ForEach(entries.prefix(6)) { entry in
+                HStack(alignment: .top, spacing: theme.spacing.xsmall) {
+                    Image(systemName: entry.kind.chatSystemImage)
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(entry.requiresApproval ? theme.colors.warning : theme.colors.accent)
+                        .frame(width: 16, height: 16)
+
+                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                        HStack(spacing: theme.spacing.xxsmall) {
+                            Text(entry.chatTitle)
+                                .font(theme.typography.caption.weight(.semibold))
+                                .foregroundStyle(theme.colors.primaryText)
+                                .lineLimit(1)
+
+                            if let status = entry.status {
+                                Text(status.chatTitle)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(theme.colors.secondaryText)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Text(entry.chatDetail)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, theme.spacing.xsmall)
+                .padding(.horizontal, theme.spacing.small)
+                .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                        .strokeBorder(theme.colors.separator, lineWidth: theme.stroke.hairline)
+                }
+            }
+        }
+        .accessibilityLabel("\(entries.count) provider-hosted tool events")
+    }
+}
+
+private extension HostedToolAuditEntry {
+    var chatTitle: String {
+        if let name, !name.isEmpty {
+            return name
+        }
+        if let serverLabel, !serverLabel.isEmpty {
+            return serverLabel
+        }
+        return kind.chatTitle
+    }
+
+    var chatDetail: String {
+        var parts = ["Provider-hosted \(type.replacingOccurrences(of: "_", with: " "))"]
+        if let serverURL, !serverURL.isEmpty {
+            parts.append(serverURL)
+        }
+        if let containerID, !containerID.isEmpty {
+            parts.append("container \(containerID)")
+        }
+        if requiresAgentExecution {
+            parts.append("agent context")
+        }
+        if requiresApproval {
+            parts.append("approval required")
+        }
+        return parts.joined(separator: " - ")
+    }
+}
+
+private extension OpenAIHostedToolKind {
+    var chatTitle: String {
+        switch self {
+        case .webSearch:
+            "Web search"
+        case .webFetch:
+            "Web fetch"
+        case .fileSearch:
+            "File search"
+        case .computerUse:
+            "Computer use"
+        case .codeInterpreter:
+            "Code execution"
+        case .imageGeneration:
+            "Image generation"
+        case .mcp:
+            "Remote MCP"
+        case .textEditor:
+            "Text editor"
+        case .bash:
+            "Bash"
+        case .toolSearch:
+            "Tool search"
+        case .custom:
+            "Hosted tool"
+        }
+    }
+
+    var chatSystemImage: String {
+        switch self {
+        case .webSearch:
+            "globe"
+        case .webFetch:
+            "link"
+        case .fileSearch:
+            "doc.text.magnifyingglass"
+        case .computerUse:
+            "display"
+        case .codeInterpreter:
+            "terminal"
+        case .imageGeneration:
+            "photo"
+        case .mcp:
+            "network"
+        case .textEditor:
+            "doc.text"
+        case .bash:
+            "terminal"
+        case .toolSearch:
+            "magnifyingglass"
+        case .custom:
+            "wrench.and.screwdriver"
+        }
+    }
+}
+
+private extension OpenAIHostedToolCallStatus {
+    var chatTitle: String {
+        switch self {
+        case .queued:
+            "queued"
+        case .inProgress:
+            "running"
+        case .completed:
+            "complete"
+        case .failed:
+            "failed"
+        case .cancelled:
+            "cancelled"
+        case .requiresAction:
+            "needs approval"
+        }
     }
 }
 
@@ -1668,8 +2012,32 @@ struct ChatQuickSettingsButton: View {
                 }
             }
 
-            if !availability.anthropicEfforts.isEmpty {
-                Section("Anthropic Thinking Effort") {
+            if !availability.anthropicThinkingModes.isEmpty {
+                Section("Anthropic Thinking") {
+                    ForEach(availability.anthropicThinkingModes, id: \.self) { mode in
+                        Button {
+                            anthropicThinkingModeSelection.wrappedValue = mode
+                        } label: {
+                            quickSettingLabel(mode.shortTitle, isSelected: anthropicThinkingModeSelection.wrappedValue == mode)
+                        }
+                    }
+                }
+            }
+
+            if !availability.anthropicThinkingModes.isEmpty, anthropicThinkingModeSelection.wrappedValue == .budgeted {
+                Section("Anthropic Budget") {
+                    ForEach([4096, 8192, 16384], id: \.self) { budget in
+                        Button {
+                            anthropicThinkingBudgetSelection.wrappedValue = budget
+                        } label: {
+                            quickSettingLabel("\(budget) tokens", isSelected: anthropicThinkingBudgetSelection.wrappedValue == budget)
+                        }
+                    }
+                }
+            }
+
+            if !availability.anthropicEfforts.isEmpty, anthropicThinkingModeSelection.wrappedValue == .effort {
+                Section("Anthropic Effort") {
                     ForEach(availability.anthropicEfforts, id: \.self) { effort in
                         Button {
                             anthropicEffortSelection.wrappedValue = effort
@@ -1677,6 +2045,21 @@ struct ChatQuickSettingsButton: View {
                             quickSettingLabel(effort.shortTitle, isSelected: anthropicEffortSelection.wrappedValue == effort)
                         }
                     }
+                }
+            }
+
+            if !availability.anthropicThinkingModes.isEmpty {
+                Section("Anthropic Prompt Cache") {
+                    Toggle("Cache prompts", isOn: anthropicPromptCacheEnabledSelection)
+                    ForEach(AnthropicPromptCacheTTL.allCases, id: \.self) { ttl in
+                        Button {
+                            anthropicPromptCacheTTLSelection.wrappedValue = ttl
+                        } label: {
+                            quickSettingLabel(ttl.shortTitle, isSelected: anthropicPromptCacheTTLSelection.wrappedValue == ttl)
+                        }
+                    }
+                    Toggle("Citations", isOn: anthropicCitationsEnabledSelection)
+                    Toggle("Token preflight", isOn: anthropicTokenCountPreflightSelection)
                 }
             }
 
@@ -1796,6 +2179,62 @@ struct ChatQuickSettingsButton: View {
         }
     }
 
+    private var anthropicThinkingModeSelection: Binding<AnthropicThinkingMode> {
+        Binding {
+            availability.anthropicThinkingModes.contains(settingsState.anthropicThinkingMode)
+                ? settingsState.anthropicThinkingMode
+                : defaultAnthropicThinkingMode
+        } set: { mode in
+            settingsState.anthropicThinkingMode = availability.anthropicThinkingModes.contains(mode) ? mode : defaultAnthropicThinkingMode
+            haptics.play(.primaryAction)
+        }
+    }
+
+    private var anthropicThinkingBudgetSelection: Binding<Int> {
+        Binding {
+            settingsState.anthropicThinkingBudgetTokens
+        } set: { budget in
+            settingsState.anthropicThinkingBudgetTokens = AppSettingsSnapshot.normalizedAnthropicThinkingBudgetTokens(budget)
+            haptics.play(.primaryAction)
+        }
+    }
+
+    private var anthropicPromptCacheEnabledSelection: Binding<Bool> {
+        Binding {
+            settingsState.anthropicPromptCachingEnabled
+        } set: { enabled in
+            settingsState.anthropicPromptCachingEnabled = enabled
+            haptics.play(.primaryAction)
+        }
+    }
+
+    private var anthropicPromptCacheTTLSelection: Binding<AnthropicPromptCacheTTL> {
+        Binding {
+            settingsState.anthropicPromptCacheTTL
+        } set: { ttl in
+            settingsState.anthropicPromptCacheTTL = ttl
+            haptics.play(.primaryAction)
+        }
+    }
+
+    private var anthropicCitationsEnabledSelection: Binding<Bool> {
+        Binding {
+            settingsState.anthropicCitationsEnabled
+        } set: { enabled in
+            settingsState.anthropicCitationsEnabled = enabled
+            haptics.play(.primaryAction)
+        }
+    }
+
+    private var anthropicTokenCountPreflightSelection: Binding<Bool> {
+        Binding {
+            settingsState.anthropicTokenCountPreflightEnabled
+        } set: { enabled in
+            settingsState.anthropicTokenCountPreflightEnabled = enabled
+            haptics.play(.primaryAction)
+        }
+    }
+
     private var geminiThinkingSelection: Binding<GeminiThinkingLevel> {
         Binding {
             availability.geminiThinkingLevels.contains(settingsState.geminiThinkingLevel)
@@ -1839,6 +2278,13 @@ struct ChatQuickSettingsButton: View {
         return availability.anthropicEfforts.first ?? AppSettingsSnapshot.defaultAnthropicEffort
     }
 
+    private var defaultAnthropicThinkingMode: AnthropicThinkingMode {
+        if availability.anthropicThinkingModes.contains(.adaptive) {
+            return .adaptive
+        }
+        return availability.anthropicThinkingModes.first ?? AppSettingsSnapshot.defaultAnthropicThinkingMode
+    }
+
     private var defaultGeminiThinkingLevel: GeminiThinkingLevel {
         if availability.geminiThinkingLevels.contains(.medium) {
             return .medium
@@ -1857,8 +2303,15 @@ struct ChatQuickSettingsButton: View {
         if availability.supportsOpenAITextVerbosity {
             parts.append("OpenAI text verbosity \(settingsState.openAITextVerbosity.shortTitle)")
         }
-        if !availability.anthropicEfforts.isEmpty {
-            parts.append("Anthropic thinking effort \(anthropicEffortSelection.wrappedValue.shortTitle)")
+        if !availability.anthropicThinkingModes.isEmpty {
+            parts.append("Anthropic thinking \(anthropicThinkingModeSelection.wrappedValue.shortTitle)")
+            parts.append("Anthropic cache \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off")")
+            if settingsState.anthropicTokenCountPreflightEnabled {
+                parts.append("Anthropic token preflight on")
+            }
+        }
+        if !availability.anthropicEfforts.isEmpty, anthropicThinkingModeSelection.wrappedValue == .effort {
+            parts.append("Anthropic effort \(anthropicEffortSelection.wrappedValue.shortTitle)")
         }
         if !availability.geminiThinkingLevels.isEmpty {
             parts.append("Gemini thinking level \(geminiThinkingSelection.wrappedValue.shortTitle)")
@@ -1930,6 +2383,32 @@ private extension AnthropicEffort {
             "X High"
         case .max:
             "Max"
+        }
+    }
+}
+
+private extension AnthropicThinkingMode {
+    var shortTitle: String {
+        switch self {
+        case .off:
+            "Off"
+        case .adaptive:
+            "Adaptive"
+        case .budgeted:
+            "Budget"
+        case .effort:
+            "Effort"
+        }
+    }
+}
+
+private extension AnthropicPromptCacheTTL {
+    var shortTitle: String {
+        switch self {
+        case .fiveMinutes:
+            "5 min"
+        case .oneHour:
+            "1 hour"
         }
     }
 }

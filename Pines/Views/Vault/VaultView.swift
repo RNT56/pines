@@ -38,6 +38,7 @@ struct VaultView: View {
         NavigationSplitView {
             List(selection: $selectedItemID) {
                 VaultEmbeddingSetupSection()
+                VaultProviderStorageSection()
 
                 if !searchInput.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Section("Search results") {
@@ -142,6 +143,220 @@ struct VaultView: View {
 
 private final class VaultSearchInputState {
     var text = ""
+}
+
+private struct VaultProviderStorageSection: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    @EnvironmentObject private var settingsState: PinesSettingsState
+
+    private var providerStorageProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.filter { provider in
+            provider.kind == .openAI || provider.kind == .anthropic || provider.kind == .gemini
+        }
+    }
+
+    private var fileSearchConfigSummary: String {
+        let ids = providerState.providerVectorStores.map(\.id)
+        guard !ids.isEmpty else { return "No vector store selected" }
+        let quotedIDs = ids.map { #""\#($0)""# }.joined(separator: ",")
+        return #"{"type":"file_search","vector_store_ids":["# + quotedIDs + #"]}"#
+    }
+
+    var body: some View {
+        Section("Provider Storage") {
+            VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                HStack(spacing: theme.spacing.xsmall) {
+                    PinesProviderStorageBadge(kind: .providerHosted, compact: true)
+                    PinesProviderStorageBadge(kind: .vectorStore, compact: true)
+                }
+
+                Text("Uploads are opt-in and provider-hosted until deleted. Vault files stay local unless explicitly exported to cloud provider storage.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, theme.spacing.xsmall)
+
+            HStack {
+                Label("\(providerState.providerFilePreviews.count) files", systemImage: "doc")
+                    .font(theme.typography.caption.weight(.semibold))
+                Spacer()
+                Label("\(providerState.providerVectorStorePreviews.count) stores", systemImage: "square.stack.3d.up")
+                    .font(theme.typography.caption.weight(.semibold))
+            }
+            .foregroundStyle(theme.colors.secondaryText)
+
+            Button {
+                Task { await refreshProviderStorage() }
+            } label: {
+                Label(providerState.isRefreshingProviderLifecycle ? "Refreshing" : "Refresh provider storage", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(providerStorageProviders.isEmpty || providerState.isRefreshingProviderLifecycle)
+
+            if !providerState.providerVectorStorePreviews.isEmpty {
+                Text("File search config")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.tertiaryText)
+                Text(fileSearchConfigSummary)
+                    .font(theme.typography.code)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+
+            ForEach(providerState.providerVectorStorePreviews.prefix(4)) { store in
+                VaultProviderVectorStoreRow(store: store)
+            }
+
+            ForEach(providerState.providerFilePreviews.prefix(4)) { file in
+                VaultProviderFileRow(file: file)
+            }
+
+            if let error = providerState.providerLifecycleError {
+                Text(error)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.danger)
+            }
+        }
+    }
+
+    @MainActor
+    private func refreshProviderStorage() async {
+        do {
+            for provider in providerStorageProviders {
+                switch provider.kind {
+                case .openAI:
+                    _ = try await appModel.refreshOpenAIProviderStorage(providerID: provider.id, services: services)
+                case .anthropic:
+                    _ = try await appModel.refreshAnthropicProviderStorage(providerID: provider.id, services: services)
+                case .gemini:
+                    _ = try await appModel.refreshGeminiProviderStorage(providerID: provider.id, services: services)
+                default:
+                    break
+                }
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
+private struct VaultProviderVectorStoreRow: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    let store: PinesProviderCachePreview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+            HStack {
+                Label(store.title, systemImage: "square.stack.3d.up")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .pinesFittingText()
+                Spacer(minLength: theme.spacing.xsmall)
+                PinesStatusChip(status: store.status.providerStorageCloudStatus, compact: true)
+            }
+
+            Text("\(store.usageLabel) - \(store.createdLabel)")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .lineLimit(1)
+
+            HStack(spacing: theme.spacing.xsmall) {
+                Button("Files") {
+                    Task { await refreshFiles() }
+                }
+                .buttonStyle(.borderless)
+
+                Button("Delete", role: .destructive) {
+                    Task { await deleteStore() }
+                }
+                .buttonStyle(.borderless)
+            }
+            .font(theme.typography.caption)
+        }
+        .padding(.vertical, theme.spacing.xsmall)
+    }
+
+    @MainActor
+    private func refreshFiles() async {
+        do {
+            _ = try await appModel.refreshOpenAIVectorStoreFiles(
+                providerID: store.providerID,
+                vectorStoreID: store.id,
+                services: services
+            )
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func deleteStore() async {
+        do {
+            try await appModel.deleteOpenAIVectorStore(
+                providerID: store.providerID,
+                vectorStoreID: store.id,
+                services: services
+            )
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
+private struct VaultProviderFileRow: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    let file: PinesProviderFilePreview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+            HStack {
+                Label(file.title, systemImage: "doc")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .pinesFittingText()
+                Spacer(minLength: theme.spacing.xsmall)
+                PinesStatusChip(status: file.status.providerStorageCloudStatus, compact: true)
+            }
+
+            Text("\(file.purpose) - \(file.byteCountLabel) - \(file.createdLabel)")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .lineLimit(1)
+
+            Button("Delete hosted file", role: .destructive) {
+                Task { await deleteFile() }
+            }
+            .buttonStyle(.borderless)
+            .font(theme.typography.caption)
+        }
+        .padding(.vertical, theme.spacing.xsmall)
+    }
+
+    @MainActor
+    private func deleteFile() async {
+        do {
+            switch file.providerKind {
+            case .openAI:
+                try await appModel.deleteOpenAIProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            case .anthropic:
+                try await appModel.deleteAnthropicProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            case .gemini:
+                try await appModel.deleteGeminiProviderFile(providerID: file.providerID, fileID: file.id, services: services)
+            default:
+                throw InferenceError.invalidRequest("\(file.providerKind.rawValue) file deletion is not supported here.")
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
 }
 
 private struct VaultEmbeddingSetupSection: View {
@@ -298,6 +513,9 @@ private struct VaultDetailView: View {
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var vaultState: PinesVaultState
+    @EnvironmentObject private var settingsState: PinesSettingsState
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    @State private var providerStorageExportInFlightID: ProviderID?
     let item: PinesVaultItemPreview
 
     var body: some View {
@@ -334,6 +552,44 @@ private struct VaultDetailView: View {
                     }
                 }
                 .pinesSurface(.elevated)
+
+                if !providerStorageExportProviders.isEmpty {
+                    VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                        HStack {
+                            Label("Provider storage", systemImage: "cloud")
+                                .font(theme.typography.section)
+
+                            Spacer(minLength: theme.spacing.small)
+
+                            Menu {
+                                ForEach(providerStorageExportProviders) { provider in
+                                    Button(provider.displayName) {
+                                        Task { await exportToProviderStorage(provider) }
+                                    }
+                                }
+                            } label: {
+                                Label(
+                                    providerStorageExportInFlightID == nil ? "Export" : "Exporting",
+                                    systemImage: providerStorageExportInFlightID == nil ? "square.and.arrow.up" : "hourglass"
+                                )
+                            }
+                            .disabled(providerStorageExportInFlightID != nil)
+                        }
+
+                        Text("Exported Vault documents become provider-hosted files and can be deleted from the shared Provider Storage views.")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if let error = providerState.providerLifecycleError {
+                            Text(error)
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.danger)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .pinesSurface(.panel)
+                }
 
                 VStack(alignment: .leading, spacing: theme.spacing.medium) {
                     Text("Index activity")
@@ -376,6 +632,58 @@ private struct VaultDetailView: View {
         return "\(item.chunks.count) chunks are available for text search. Add an embedding provider for semantic retrieval."
     }
 
+    private var providerStorageExportProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.filter { provider in
+            provider.kind == .openAI || provider.kind == .anthropic
+        }
+    }
+
+    private var providerStorageByteCount: Int64 {
+        Int64(item.chunks.reduce(0) { partial, chunk in
+            partial + chunk.text.utf8.count
+        })
+    }
+
+    @MainActor
+    private func exportToProviderStorage(_ provider: CloudProviderConfiguration) async {
+        providerStorageExportInFlightID = provider.id
+        defer { providerStorageExportInFlightID = nil }
+        do {
+            switch provider.kind {
+            case .openAI:
+                let consent = PinesOpenAIProviderStorageConsent(
+                    isGranted: true,
+                    sourceDescription: "Vault document \(item.title)",
+                    destinationDescription: "OpenAI Files API for \(provider.displayName)",
+                    byteCount: providerStorageByteCount
+                )
+                _ = try await appModel.uploadOpenAIVaultDocument(
+                    providerID: provider.id,
+                    documentID: item.id,
+                    consent: consent,
+                    services: services
+                )
+            case .anthropic:
+                let consent = PinesAnthropicProviderStorageConsent(
+                    isGranted: true,
+                    sourceDescription: "Vault document \(item.title)",
+                    destinationDescription: "Anthropic Files API for \(provider.displayName)",
+                    byteCount: providerStorageByteCount
+                )
+                _ = try await appModel.uploadAnthropicVaultDocument(
+                    providerID: provider.id,
+                    documentID: item.id,
+                    consent: consent,
+                    services: services
+                )
+            default:
+                throw InferenceError.invalidRequest("\(provider.kind.rawValue) Vault export is not supported.")
+            }
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
     private var activityRows: [(title: String, image: String)] {
         let activeJob = vaultState.vaultEmbeddingJobs.first { $0.documentID == item.id }
         var rows = [(String, String)]()
@@ -384,5 +692,26 @@ private struct VaultDetailView: View {
         }
         rows.append(("\(vaultState.vaultRetrievalEvents.count) recent retrieval events", "magnifyingglass"))
         return rows.map { (title: $0.0, image: $0.1) }
+    }
+}
+
+private extension String {
+    var providerStorageCloudStatus: PinesCloudStatus {
+        switch lowercased().replacingOccurrences(of: "_", with: "") {
+        case "completed", "complete", "processed", "closed":
+            .complete
+        case "failed", "error":
+            .failed
+        case "cancelled", "canceled", "expired", "deleted":
+            .warning(capitalized)
+        case "queued", "pending", "created", "validating":
+            .pending
+        case "inprogress", "running", "active", "finalizing", "uploaded":
+            .running
+        case "requiresaction", "cancelling", "deleting", "closing":
+            .needsValidation
+        default:
+            .custom(isEmpty ? "Unknown" : self, .neutral)
+        }
     }
 }

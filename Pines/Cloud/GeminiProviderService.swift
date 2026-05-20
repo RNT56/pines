@@ -102,6 +102,14 @@ struct GeminiProviderService {
         try await rawJSON(method: .post, path: "\(normalizedModelPath(modelID)):batchGenerateContent", body: body)
     }
 
+    func generateVideos(modelID: ModelID, body: JSONValue) async throws -> GeminiProviderResponse {
+        try await rawJSON(method: .post, path: "\(normalizedModelPath(modelID)):generateVideos", body: body)
+    }
+
+    func predict(modelID: ModelID, body: JSONValue) async throws -> GeminiProviderResponse {
+        try await rawJSON(method: .post, path: "\(normalizedModelPath(modelID)):predict", body: body)
+    }
+
     func createCachedContent(body: JSONValue) async throws -> GeminiProviderResponse {
         try await rawJSON(method: .post, path: "cachedContents", body: body)
     }
@@ -114,8 +122,30 @@ struct GeminiProviderService {
         try await rawJSON(method: .get, path: normalizedResourcePath(name, defaultCollection: "cachedContents"))
     }
 
+    func updateCachedContent(
+        _ name: String,
+        body: JSONValue,
+        updateMask: String? = nil
+    ) async throws -> GeminiProviderResponse {
+        let queryItems = updateMask.map { [URLQueryItem(name: "updateMask", value: $0)] } ?? []
+        return try await rawJSON(
+            method: .patch,
+            path: normalizedResourcePath(name, defaultCollection: "cachedContents"),
+            queryItems: queryItems,
+            body: body
+        )
+    }
+
     func deleteCachedContent(_ name: String) async throws -> GeminiProviderResponse {
         try await rawJSON(method: .delete, path: normalizedResourcePath(name, defaultCollection: "cachedContents"))
+    }
+
+    func listModels(_ request: GeminiListRequest = GeminiListRequest(pageSize: 100)) async throws -> GeminiProviderResponse {
+        try await rawJSON(method: .get, path: "models", queryItems: request.queryItems)
+    }
+
+    func getModel(_ name: String) async throws -> GeminiProviderResponse {
+        try await rawJSON(method: .get, path: normalizedResourcePath(name, defaultCollection: "models"))
     }
 
     func getOperation(_ name: String) async throws -> GeminiProviderResponse {
@@ -124,6 +154,19 @@ struct GeminiProviderService {
 
     func cancelOperation(_ name: String) async throws -> GeminiProviderResponse {
         try await rawJSON(method: .post, path: "\(normalizedResourcePath(name, defaultCollection: "operations")):cancel")
+    }
+
+    func createInteraction(body: JSONValue, stream: Bool = false) async throws -> GeminiProviderResponse {
+        let queryItems = stream ? [URLQueryItem(name: "alt", value: "sse")] : []
+        return try await rawJSON(method: .post, path: "interactions", queryItems: queryItems, body: body)
+    }
+
+    func getInteraction(_ name: String) async throws -> GeminiProviderResponse {
+        try await rawJSON(method: .get, path: normalizedResourcePath(name, defaultCollection: "interactions"))
+    }
+
+    func cancelInteraction(_ name: String) async throws -> GeminiProviderResponse {
+        try await rawJSON(method: .post, path: "\(normalizedResourcePath(name, defaultCollection: "interactions")):cancel")
     }
 
     private func send(
@@ -244,6 +287,7 @@ struct GeminiProviderService {
 enum GeminiHTTPMethod: String {
     case get = "GET"
     case post = "POST"
+    case patch = "PATCH"
     case delete = "DELETE"
 }
 

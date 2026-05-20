@@ -5,6 +5,11 @@ public enum PinesRunMode: String, Hashable, Codable, Sendable, CaseIterable {
     case agent
 }
 
+public enum AgentCloudContextScope: String, Hashable, Codable, Sendable {
+    case unrestricted
+    case selectedRequestContext
+}
+
 public struct AgentPolicy: Hashable, Codable, Sendable {
     public var executionMode: AgentExecutionMode
     public var maxSteps: Int
@@ -14,6 +19,7 @@ public struct AgentPolicy: Hashable, Codable, Sendable {
     public var requiresConsentForNetwork: Bool
     public var requiresConsentForBrowser: Bool
     public var allowsCloudContext: Bool
+    public var cloudContextScope: AgentCloudContextScope
 
     public init(
         executionMode: AgentExecutionMode = .localOnly,
@@ -23,7 +29,8 @@ public struct AgentPolicy: Hashable, Codable, Sendable {
         allowedDomains: Set<String> = [],
         requiresConsentForNetwork: Bool = true,
         requiresConsentForBrowser: Bool = true,
-        allowsCloudContext: Bool = false
+        allowsCloudContext: Bool = false,
+        cloudContextScope: AgentCloudContextScope = .unrestricted
     ) {
         self.executionMode = executionMode
         self.maxSteps = maxSteps
@@ -33,6 +40,32 @@ public struct AgentPolicy: Hashable, Codable, Sendable {
         self.requiresConsentForNetwork = requiresConsentForNetwork
         self.requiresConsentForBrowser = requiresConsentForBrowser
         self.allowsCloudContext = allowsCloudContext
+        self.cloudContextScope = cloudContextScope
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case executionMode
+        case maxSteps
+        case maxToolCalls
+        case maxWallTimeSeconds
+        case allowedDomains
+        case requiresConsentForNetwork
+        case requiresConsentForBrowser
+        case allowsCloudContext
+        case cloudContextScope
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.executionMode = try container.decodeIfPresent(AgentExecutionMode.self, forKey: .executionMode) ?? .localOnly
+        self.maxSteps = try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8
+        self.maxToolCalls = try container.decodeIfPresent(Int.self, forKey: .maxToolCalls) ?? 6
+        self.maxWallTimeSeconds = try container.decodeIfPresent(Int.self, forKey: .maxWallTimeSeconds) ?? 120
+        self.allowedDomains = try container.decodeIfPresent(Set<String>.self, forKey: .allowedDomains) ?? []
+        self.requiresConsentForNetwork = try container.decodeIfPresent(Bool.self, forKey: .requiresConsentForNetwork) ?? true
+        self.requiresConsentForBrowser = try container.decodeIfPresent(Bool.self, forKey: .requiresConsentForBrowser) ?? true
+        self.allowsCloudContext = try container.decodeIfPresent(Bool.self, forKey: .allowsCloudContext) ?? false
+        self.cloudContextScope = try container.decodeIfPresent(AgentCloudContextScope.self, forKey: .cloudContextScope) ?? .unrestricted
     }
 }
 

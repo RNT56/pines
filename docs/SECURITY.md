@@ -35,6 +35,10 @@ If cloud is required but not configured, execution must fail with a consent/conf
 
 All remote endpoints must use HTTPS. `EndpointSecurityPolicy` is shared by BYOK providers, MCP endpoints, OAuth authorization/token URLs, model catalog calls, and `web.fetch`. `http://localhost`, `http://127.0.0.1`, and `http://[::1]` are allowed only when the integration has an explicit local-development flag. RFC1918/LAN HTTP is never treated as local.
 
+Provider-hosted resources are explicit cloud resources. OpenAI files/vector stores, Anthropic files, Gemini files/context caches, provider batches, generated media, generated files, realtime/live sessions, and Deep Research runs are shown through provider lifecycle records and must stay visually distinct from local Vault documents. Uploading a Vault document to a provider, importing a provider artifact into Vault, deleting a local Vault file, and deleting a provider-hosted copy are separate user-visible actions.
+
+Provider tools run outside the device unless clearly labeled otherwise. Anthropic/OpenAI/Gemini hosted search, fetch, code execution, remote MCP, text editor/bash, computer use, generated media, token counting, and batch requests may send prompts, attachments, provider file references, or derived context to the provider. Normal chat may use low-risk provider search/fetch only through explicit enablement; code execution, remote MCP, text editor/bash, and computer use require stronger approval and environment labels. Computer use remains disabled until a dedicated safety UX exists.
+
 ## Tool Execution
 
 Tools are deny-by-default. Tool specs include:
@@ -61,6 +65,7 @@ Do not sync:
 - API keys
 - model binaries
 - prompt caches
+- provider-hosted file contents, provider context caches, provider batch payloads, realtime/live session payloads, or generated provider artifacts unless a later explicit sync/export workflow encrypts them first
 - generated embeddings and compressed vector codes by default
 - transient tool/browser state
 

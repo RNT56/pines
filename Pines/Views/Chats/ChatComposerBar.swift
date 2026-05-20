@@ -85,6 +85,24 @@ struct ChatComposerBar: View {
             .onChange(of: settingsState.anthropicEffort) { _, _ in
                 Task { await appModel.saveSettings(services: services) }
             }
+            .onChange(of: settingsState.anthropicThinkingMode) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+            .onChange(of: settingsState.anthropicThinkingBudgetTokens) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+            .onChange(of: settingsState.anthropicPromptCachingEnabled) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+            .onChange(of: settingsState.anthropicPromptCacheTTL) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+            .onChange(of: settingsState.anthropicCitationsEnabled) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+            .onChange(of: settingsState.anthropicTokenCountPreflightEnabled) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
             .onChange(of: settingsState.geminiThinkingLevel) { _, _ in
                 Task { await appModel.saveSettings(services: services) }
             }

@@ -200,7 +200,8 @@ extension PinesAppModel {
             sampling: sampling,
             webSearchOptions: await webSearchOptions(for: cloudProvider.id, settings: settings, services: services),
             allowsTools: !tools.isEmpty,
-            availableTools: tools
+            availableTools: tools,
+            anthropicOptions: anthropicRequestOptions(for: cloudProvider.id, settings: settings, services: services)
         )
         let provider = BYOKCloudInferenceProvider(configuration: cloudProvider, secretStore: services.secretStore)
         let result = try await runMCPSampling(

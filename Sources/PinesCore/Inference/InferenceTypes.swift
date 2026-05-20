@@ -560,6 +560,91 @@ public enum AnthropicEffort: String, Hashable, Codable, Sendable {
     case max
 }
 
+public enum AnthropicThinkingMode: String, Hashable, Codable, Sendable, CaseIterable {
+    case off
+    case adaptive
+    case budgeted
+    case effort
+}
+
+public struct AnthropicThinkingOptions: Hashable, Codable, Sendable {
+    public var mode: AnthropicThinkingMode
+    public var budgetTokens: Int?
+    public var effort: AnthropicEffort
+    public var showSummaries: Bool
+
+    public init(
+        mode: AnthropicThinkingMode = .adaptive,
+        budgetTokens: Int? = nil,
+        effort: AnthropicEffort = .medium,
+        showSummaries: Bool = true
+    ) {
+        self.mode = mode
+        self.budgetTokens = budgetTokens
+        self.effort = effort
+        self.showSummaries = showSummaries
+    }
+
+    public func resolvingLegacyEffort(_ legacyEffort: AnthropicEffort) -> AnthropicThinkingOptions {
+        var options = self
+        if options.effort == .medium {
+            options.effort = legacyEffort
+        }
+        return options
+    }
+}
+
+public enum AnthropicPromptCacheTTL: String, Hashable, Codable, Sendable, CaseIterable {
+    case fiveMinutes = "5m"
+    case oneHour = "1h"
+
+    public var betaHeader: String? {
+        switch self {
+        case .fiveMinutes:
+            return nil
+        case .oneHour:
+            return AnthropicBetaHeaders.extendedCacheTTL
+        }
+    }
+}
+
+public enum AnthropicBetaHeaders {
+    public static let extendedCacheTTL = "extended-cache-ttl-2025-04-11"
+    public static let filesAPI = "files-api-2025-04-14"
+}
+
+public struct AnthropicPromptCacheOptions: Hashable, Codable, Sendable {
+    public var enabled: Bool
+    public var ttl: AnthropicPromptCacheTTL
+    public var cacheSystemPrompt: Bool
+    public var cacheTools: Bool
+    public var cacheMessages: Bool
+    public var cacheFileBlocks: Bool
+    public var breakpointLimit: Int
+
+    public init(
+        enabled: Bool = false,
+        ttl: AnthropicPromptCacheTTL = .fiveMinutes,
+        cacheSystemPrompt: Bool = true,
+        cacheTools: Bool = true,
+        cacheMessages: Bool = true,
+        cacheFileBlocks: Bool = true,
+        breakpointLimit: Int = 4
+    ) {
+        self.enabled = enabled
+        self.ttl = ttl
+        self.cacheSystemPrompt = cacheSystemPrompt
+        self.cacheTools = cacheTools
+        self.cacheMessages = cacheMessages
+        self.cacheFileBlocks = cacheFileBlocks
+        self.breakpointLimit = max(0, breakpointLimit)
+    }
+
+    public var betaHeaders: [String] {
+        ttl.betaHeader.map { [$0] } ?? []
+    }
+}
+
 public enum GeminiThinkingLevel: String, Hashable, Codable, Sendable {
     case minimal
     case low
@@ -637,15 +722,21 @@ public enum StructuredOutputFormat: Hashable, Codable, Sendable {
 
 public enum HostedToolConfiguration: Hashable, Codable, Sendable {
     case webSearch
+    case webFetch(allowedDomains: [String], blockedDomains: [String], maxUses: Int?)
     case fileSearch(vectorStoreIDs: [String], maxResults: Int?)
     case codeInterpreter(containerID: String?, memoryLimit: String?)
     case imageGeneration(action: String?, quality: String?, size: String?, partialImages: Int?)
     case computerUse(displayWidth: Int?, displayHeight: Int?)
     case remoteMCP(serverLabel: String, serverURL: String, requireApproval: String)
+    case textEditor
+    case bash
     case toolSearch
 
     private enum CodingKeys: String, CodingKey {
         case type
+        case allowedDomains
+        case blockedDomains
+        case maxUses
         case vectorStoreIDs
         case maxResults
         case containerID
@@ -663,11 +754,14 @@ public enum HostedToolConfiguration: Hashable, Codable, Sendable {
 
     private enum ToolType: String, Codable {
         case webSearch
+        case webFetch
         case fileSearch
         case codeInterpreter
         case imageGeneration
         case computerUse
         case remoteMCP
+        case textEditor
+        case bash
         case toolSearch
     }
 
@@ -677,6 +771,12 @@ public enum HostedToolConfiguration: Hashable, Codable, Sendable {
         switch type {
         case .webSearch:
             self = .webSearch
+        case .webFetch:
+            self = .webFetch(
+                allowedDomains: try container.decodeIfPresent([String].self, forKey: .allowedDomains) ?? [],
+                blockedDomains: try container.decodeIfPresent([String].self, forKey: .blockedDomains) ?? [],
+                maxUses: try container.decodeIfPresent(Int.self, forKey: .maxUses)
+            )
         case .fileSearch:
             self = .fileSearch(
                 vectorStoreIDs: try container.decodeIfPresent([String].self, forKey: .vectorStoreIDs) ?? [],
@@ -703,8 +803,12 @@ public enum HostedToolConfiguration: Hashable, Codable, Sendable {
             self = .remoteMCP(
                 serverLabel: try container.decode(String.self, forKey: .serverLabel),
                 serverURL: try container.decode(String.self, forKey: .serverURL),
-                requireApproval: try container.decodeIfPresent(String.self, forKey: .requireApproval) ?? "never"
+                requireApproval: try container.decodeIfPresent(String.self, forKey: .requireApproval) ?? "always"
             )
+        case .textEditor:
+            self = .textEditor
+        case .bash:
+            self = .bash
         case .toolSearch:
             self = .toolSearch
         }
@@ -715,6 +819,11 @@ public enum HostedToolConfiguration: Hashable, Codable, Sendable {
         switch self {
         case .webSearch:
             try container.encode(ToolType.webSearch, forKey: .type)
+        case let .webFetch(allowedDomains, blockedDomains, maxUses):
+            try container.encode(ToolType.webFetch, forKey: .type)
+            try container.encode(allowedDomains, forKey: .allowedDomains)
+            try container.encode(blockedDomains, forKey: .blockedDomains)
+            try container.encodeIfPresent(maxUses, forKey: .maxUses)
         case let .fileSearch(vectorStoreIDs, maxResults):
             try container.encode(ToolType.fileSearch, forKey: .type)
             try container.encode(vectorStoreIDs, forKey: .vectorStoreIDs)
@@ -738,8 +847,43 @@ public enum HostedToolConfiguration: Hashable, Codable, Sendable {
             try container.encode(serverLabel, forKey: .serverLabel)
             try container.encode(serverURL, forKey: .serverURL)
             try container.encode(requireApproval, forKey: .requireApproval)
+        case .textEditor:
+            try container.encode(ToolType.textEditor, forKey: .type)
+        case .bash:
+            try container.encode(ToolType.bash, forKey: .type)
         case .toolSearch:
             try container.encode(ToolType.toolSearch, forKey: .type)
+        }
+    }
+
+    public var requiresAgentExecution: Bool {
+        switch self {
+        case .computerUse, .remoteMCP, .textEditor, .bash:
+            return true
+        case .webSearch, .webFetch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch:
+            return false
+        }
+    }
+
+    public var requiresApproval: Bool {
+        switch self {
+        case .computerUse, .textEditor, .bash:
+            return true
+        case let .remoteMCP(_, _, requireApproval):
+            return requireApproval != "never"
+        case .webSearch, .webFetch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch:
+            return false
+        }
+    }
+
+    public var approvalPolicy: String {
+        switch self {
+        case .computerUse, .textEditor, .bash:
+            return "always"
+        case let .remoteMCP(_, _, requireApproval):
+            return requireApproval.isEmpty ? "always" : requireApproval
+        case .webSearch, .webFetch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch:
+            return "never"
         }
     }
 }
@@ -922,6 +1066,65 @@ public struct WebSearchCitation: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public enum ProviderCitationSourceType: String, Hashable, Codable, Sendable, CaseIterable {
+    case web
+    case file
+    case pdf
+    case text
+    case searchResult
+    case vaultChunk
+    case unknown
+}
+
+public struct ProviderCitation: Identifiable, Hashable, Codable, Sendable {
+    public var id: String
+    public var providerKind: CloudProviderKind?
+    public var sourceType: ProviderCitationSourceType
+    public var title: String?
+    public var url: String?
+    public var fileID: String?
+    public var page: Int?
+    public var chunkID: String?
+    public var documentID: String?
+    public var startOffset: Int?
+    public var endOffset: Int?
+    public var citedText: String?
+    public var source: String?
+    public var raw: JSONValue?
+
+    public init(
+        id: String = UUID().uuidString,
+        providerKind: CloudProviderKind? = nil,
+        sourceType: ProviderCitationSourceType = .unknown,
+        title: String? = nil,
+        url: String? = nil,
+        fileID: String? = nil,
+        page: Int? = nil,
+        chunkID: String? = nil,
+        documentID: String? = nil,
+        startOffset: Int? = nil,
+        endOffset: Int? = nil,
+        citedText: String? = nil,
+        source: String? = nil,
+        raw: JSONValue? = nil
+    ) {
+        self.id = id
+        self.providerKind = providerKind
+        self.sourceType = sourceType
+        self.title = title
+        self.url = url
+        self.fileID = fileID
+        self.page = page
+        self.chunkID = chunkID
+        self.documentID = documentID
+        self.startOffset = startOffset
+        self.endOffset = endOffset
+        self.citedText = citedText
+        self.source = source
+        self.raw = raw
+    }
+}
+
 public enum OpenAIStructuredOutputStrictness: String, Hashable, Codable, Sendable, CaseIterable {
     case disabled
     case strict
@@ -948,11 +1151,15 @@ public struct OpenAIStructuredOutputRequest: Hashable, Codable, Sendable {
 
 public enum OpenAIHostedToolKind: String, Hashable, Codable, Sendable, CaseIterable {
     case webSearch
+    case webFetch
     case fileSearch
     case computerUse
     case codeInterpreter
     case imageGeneration
     case mcp
+    case textEditor
+    case bash
+    case toolSearch
     case custom
 }
 
@@ -1035,6 +1242,83 @@ public struct GeminiRequestOptions: Hashable, Codable, Sendable {
     }
 }
 
+public struct AnthropicCitationOptions: Hashable, Codable, Sendable {
+    public var enabled: Bool
+    public var includeCitedText: Bool
+
+    public init(enabled: Bool = false, includeCitedText: Bool = true) {
+        self.enabled = enabled
+        self.includeCitedText = includeCitedText
+    }
+}
+
+public struct AnthropicBatchRequestOptions: Hashable, Codable, Sendable {
+    public var customID: String?
+    public var metadata: [String: String]
+
+    public init(customID: String? = nil, metadata: [String: String] = [:]) {
+        self.customID = customID
+        self.metadata = metadata
+    }
+}
+
+public struct AnthropicRequestOptions: Hashable, Codable, Sendable {
+    public var promptCache: AnthropicPromptCacheOptions
+    public var thinking: AnthropicThinkingOptions
+    public var citations: AnthropicCitationOptions
+    public var hostedTools: [HostedToolConfiguration]
+    public var providerFileIDs: [AnthropicProviderFileID]
+    public var batch: AnthropicBatchRequestOptions?
+    public var countTokensBeforeSend: Bool
+    public var betaHeaders: [String]
+    public var metadata: [String: String]
+
+    public init(
+        promptCache: AnthropicPromptCacheOptions = .init(),
+        thinking: AnthropicThinkingOptions = .init(),
+        citations: AnthropicCitationOptions = .init(),
+        hostedTools: [HostedToolConfiguration] = [],
+        providerFileIDs: [AnthropicProviderFileID] = [],
+        batch: AnthropicBatchRequestOptions? = nil,
+        countTokensBeforeSend: Bool = false,
+        betaHeaders: [String] = [],
+        metadata: [String: String] = [:]
+    ) {
+        self.promptCache = promptCache
+        self.thinking = thinking
+        self.citations = citations
+        self.hostedTools = hostedTools
+        self.providerFileIDs = providerFileIDs
+        self.batch = batch
+        self.countTokensBeforeSend = countTokensBeforeSend
+        self.betaHeaders = betaHeaders
+        self.metadata = metadata
+    }
+
+    public func resolvingLegacyEffort(_ legacyEffort: AnthropicEffort) -> AnthropicRequestOptions {
+        var options = self
+        options.thinking = options.thinking.resolvingLegacyEffort(legacyEffort)
+        return options
+    }
+
+    public var requiredBetaHeaders: [String] {
+        var headers = betaHeaders
+        headers.append(contentsOf: promptCache.betaHeaders)
+        if !providerFileIDs.isEmpty {
+            headers.append(AnthropicBetaHeaders.filesAPI)
+        }
+        return Array(Set(headers.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
+    }
+
+    public var hasAgentOnlyHostedTools: Bool {
+        hostedTools.contains { $0.requiresAgentExecution }
+    }
+
+    public var hasApprovalGatedHostedTools: Bool {
+        hostedTools.contains { $0.requiresApproval }
+    }
+}
+
 public struct ChatRequest: Hashable, Codable, Sendable {
     public enum ExecutionContext: String, Hashable, Codable, Sendable {
         case chat
@@ -1055,6 +1339,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
     public var executionContext: ExecutionContext
     public var openAIResponseOptions: OpenAIResponseRequestOptions?
     public var geminiOptions: GeminiRequestOptions?
+    public var anthropicOptions: AnthropicRequestOptions?
 
     public init(
         id: UUID = UUID(),
@@ -1070,7 +1355,8 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         vaultContextIDs: [UUID] = [],
         executionContext: ExecutionContext = .chat,
         openAIResponseOptions: OpenAIResponseRequestOptions? = nil,
-        geminiOptions: GeminiRequestOptions? = nil
+        geminiOptions: GeminiRequestOptions? = nil,
+        anthropicOptions: AnthropicRequestOptions? = nil
     ) {
         self.id = id
         self.modelID = modelID
@@ -1086,6 +1372,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         self.executionContext = executionContext
         self.openAIResponseOptions = openAIResponseOptions
         self.geminiOptions = geminiOptions
+        self.anthropicOptions = anthropicOptions
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1103,6 +1390,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         case executionContext
         case openAIResponseOptions
         case geminiOptions
+        case anthropicOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -1121,6 +1409,79 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         executionContext = try container.decodeIfPresent(ExecutionContext.self, forKey: .executionContext) ?? .chat
         openAIResponseOptions = try container.decodeIfPresent(OpenAIResponseRequestOptions.self, forKey: .openAIResponseOptions)
         geminiOptions = try container.decodeIfPresent(GeminiRequestOptions.self, forKey: .geminiOptions)
+        anthropicOptions = try container.decodeIfPresent(AnthropicRequestOptions.self, forKey: .anthropicOptions)
+    }
+
+    public func replacing(
+        messages: [ChatMessage]? = nil,
+        allowsTools: Bool? = nil,
+        availableTools: [AnyToolSpec]? = nil,
+        executionContext: ExecutionContext? = nil
+    ) -> ChatRequest {
+        ChatRequest(
+            id: id,
+            modelID: modelID,
+            messages: messages ?? self.messages,
+            sampling: sampling,
+            webSearchOptions: webSearchOptions,
+            structuredOutput: structuredOutput,
+            hostedTools: hostedTools,
+            openAIOptions: openAIOptions,
+            allowsTools: allowsTools ?? self.allowsTools,
+            availableTools: availableTools ?? self.availableTools,
+            vaultContextIDs: vaultContextIDs,
+            executionContext: executionContext ?? self.executionContext,
+            openAIResponseOptions: openAIResponseOptions,
+            geminiOptions: geminiOptions,
+            anthropicOptions: anthropicOptions
+        )
+    }
+
+    public var hasAgentOnlyHostedTools: Bool {
+        hostedTools.contains { $0.requiresAgentExecution }
+            || openAIResponseOptions?.hostedTools.contains { $0.requiresAgentExecution } == true
+            || anthropicOptions?.hasAgentOnlyHostedTools == true
+    }
+
+    public var hasApprovalGatedHostedTools: Bool {
+        hostedTools.contains { $0.requiresApproval }
+            || openAIResponseOptions?.hostedTools.contains { $0.requiresApproval } == true
+            || anthropicOptions?.hasApprovalGatedHostedTools == true
+    }
+
+    public func hostedToolsAreAllowedForExecutionContext() -> Bool {
+        !hasAgentOnlyHostedTools || executionContext == .agent
+    }
+
+    public var resolvedAnthropicOptions: AnthropicRequestOptions {
+        if let anthropicOptions {
+            return anthropicOptions
+        }
+        return AnthropicRequestOptions(
+            thinking: AnthropicThinkingOptions(effort: sampling.anthropicEffort)
+        )
+    }
+}
+
+public extension OpenAIHostedToolRequest {
+    var requiresAgentExecution: Bool {
+        switch kind {
+        case .computerUse, .mcp, .textEditor, .bash:
+            return true
+        case .webSearch, .webFetch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch, .custom:
+            return false
+        }
+    }
+
+    var requiresApproval: Bool {
+        switch kind {
+        case .computerUse, .textEditor, .bash:
+            return true
+        case .mcp:
+            return configuration?.objectValue?["require_approval"]?.stringValue != "never"
+        case .webSearch, .webFetch, .fileSearch, .codeInterpreter, .imageGeneration, .toolSearch, .custom:
+            return false
+        }
     }
 }
 

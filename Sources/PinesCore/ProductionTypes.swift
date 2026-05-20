@@ -541,6 +541,28 @@ public enum OpenAIBackgroundResponseStatus: String, Hashable, Codable, Sendable,
     case requiresAction
 }
 
+public extension OpenAIBackgroundResponseStatus {
+    var isTerminal: Bool {
+        switch self {
+        case .completed, .failed, .cancelled, .expired:
+            return true
+        case .queued, .inProgress, .requiresAction:
+            return false
+        }
+    }
+
+    init(providerStatus: String) {
+        switch providerStatus {
+        case "in_progress":
+            self = .inProgress
+        case "requires_action":
+            self = .requiresAction
+        default:
+            self = OpenAIBackgroundResponseStatus(rawValue: providerStatus) ?? .queued
+        }
+    }
+}
+
 public enum OpenAIRunKind: String, Hashable, Codable, Sendable, CaseIterable {
     case chat
     case backgroundResponse
@@ -626,6 +648,7 @@ public struct OpenAIDeepResearchSourcePolicy: Hashable, Codable, Sendable {
     public var vaultDocumentIDs: [UUID]
     public var allowedDomains: [String]
     public var blockedDomains: [String]
+    public var webSearchReturnTokenBudget: Int?
     public var mcpServerLabel: String?
     public var mcpServerURL: URL?
     public var requireMCPApproval: String
@@ -637,6 +660,7 @@ public struct OpenAIDeepResearchSourcePolicy: Hashable, Codable, Sendable {
         vaultDocumentIDs: [UUID] = [],
         allowedDomains: [String] = [],
         blockedDomains: [String] = [],
+        webSearchReturnTokenBudget: Int? = nil,
         mcpServerLabel: String? = nil,
         mcpServerURL: URL? = nil,
         requireMCPApproval: String = "always"
@@ -647,9 +671,63 @@ public struct OpenAIDeepResearchSourcePolicy: Hashable, Codable, Sendable {
         self.vaultDocumentIDs = vaultDocumentIDs
         self.allowedDomains = allowedDomains
         self.blockedDomains = blockedDomains
+        self.webSearchReturnTokenBudget = webSearchReturnTokenBudget
         self.mcpServerLabel = mcpServerLabel
         self.mcpServerURL = mcpServerURL
         self.requireMCPApproval = requireMCPApproval
+    }
+}
+
+public extension OpenAIDeepResearchSourcePolicy {
+    static func webOnly(
+        allowedDomains: [String] = [],
+        blockedDomains: [String] = [],
+        webSearchReturnTokenBudget: Int? = nil
+    ) -> Self {
+        Self(
+            scope: .webOnly,
+            allowedDomains: allowedDomains,
+            blockedDomains: blockedDomains,
+            webSearchReturnTokenBudget: webSearchReturnTokenBudget
+        )
+    }
+
+    static func webAndFiles(
+        vectorStoreIDs: [OpenAIVectorStoreID] = [],
+        providerFileIDs: [OpenAIProviderFileID] = [],
+        vaultDocumentIDs: [UUID] = [],
+        allowedDomains: [String] = [],
+        blockedDomains: [String] = [],
+        webSearchReturnTokenBudget: Int? = nil
+    ) -> Self {
+        Self(
+            scope: .webAndProviderFiles,
+            vectorStoreIDs: vectorStoreIDs,
+            providerFileIDs: providerFileIDs,
+            vaultDocumentIDs: vaultDocumentIDs,
+            allowedDomains: allowedDomains,
+            blockedDomains: blockedDomains,
+            webSearchReturnTokenBudget: webSearchReturnTokenBudget
+        )
+    }
+
+    static func webAndMCP(
+        serverLabel: String,
+        serverURL: URL,
+        requireApproval: String = "always",
+        allowedDomains: [String] = [],
+        blockedDomains: [String] = [],
+        webSearchReturnTokenBudget: Int? = nil
+    ) -> Self {
+        Self(
+            scope: .webAndMCP,
+            allowedDomains: allowedDomains,
+            blockedDomains: blockedDomains,
+            webSearchReturnTokenBudget: webSearchReturnTokenBudget,
+            mcpServerLabel: serverLabel,
+            mcpServerURL: serverURL,
+            requireMCPApproval: requireApproval
+        )
     }
 }
 
@@ -664,6 +742,7 @@ public struct OpenAIDeepResearchRequest: Hashable, Codable, Sendable {
     public var reportFormat: OpenAIDeepResearchReportFormat
     public var includeCodeInterpreter: Bool
     public var serviceTier: OpenAIServiceTier
+    public var responseOutputTokenBudget: Int?
     public var metadata: [String: String]
 
     public init(
@@ -677,6 +756,7 @@ public struct OpenAIDeepResearchRequest: Hashable, Codable, Sendable {
         reportFormat: OpenAIDeepResearchReportFormat = .memo,
         includeCodeInterpreter: Bool = true,
         serviceTier: OpenAIServiceTier = .auto,
+        responseOutputTokenBudget: Int? = nil,
         metadata: [String: String] = [:]
     ) {
         self.id = id
@@ -689,6 +769,7 @@ public struct OpenAIDeepResearchRequest: Hashable, Codable, Sendable {
         self.reportFormat = reportFormat
         self.includeCodeInterpreter = includeCodeInterpreter
         self.serviceTier = serviceTier
+        self.responseOutputTokenBudget = responseOutputTokenBudget
         self.metadata = metadata
     }
 }
@@ -938,6 +1019,147 @@ public struct OpenAIStructuredOutputResult: Identifiable, Hashable, Codable, Sen
         self.validationErrors = validationErrors
         self.status = status
         self.createdAt = createdAt
+    }
+
+    public init(
+        id: UUID = UUID(),
+        messageID: UUID? = nil,
+        schemaName: String? = nil,
+        schema: JSONValue? = nil,
+        content: JSONValue? = nil,
+        refusal: String? = nil,
+        providerMetadata: [String: String],
+        createdAt: Date = Date()
+    ) {
+        let responseID = providerMetadata[CloudProviderMetadataKeys.openAIResponseID].map(OpenAIResponseID.init(rawValue:))
+        let incompleteReason = providerMetadata[CloudProviderMetadataKeys.openAIResponseIncompleteReason]
+        let validationErrors: [String]
+        if let content, let schema {
+            validationErrors = Self.localValidationErrors(content: content, schema: schema)
+        } else {
+            validationErrors = []
+        }
+        let status: OpenAIStructuredOutputResultStatus
+        if refusal?.isEmpty == false {
+            status = .refused
+        } else if incompleteReason?.isEmpty == false {
+            status = .incomplete
+        } else if !validationErrors.isEmpty {
+            status = .invalid
+        } else {
+            status = .parsed
+        }
+        self.init(
+            id: id,
+            responseID: responseID,
+            messageID: messageID,
+            schemaName: schemaName,
+            schema: schema,
+            content: content,
+            refusal: refusal,
+            incompleteReason: incompleteReason,
+            validationErrors: validationErrors,
+            status: status,
+            createdAt: createdAt
+        )
+    }
+
+    public func locallyValidated() -> OpenAIStructuredOutputResult {
+        guard let content, let schema else {
+            return self
+        }
+        let errors = Self.localValidationErrors(content: content, schema: schema)
+        var result = self
+        result.validationErrors = errors
+        if !errors.isEmpty {
+            result.status = .invalid
+        } else if result.status == .invalid {
+            result.status = .parsed
+        }
+        return result
+    }
+
+    public static func localValidationErrors(content: JSONValue, schema: JSONValue) -> [String] {
+        var errors = [String]()
+        validate(content, schema: schema, path: "$", errors: &errors)
+        return errors
+    }
+
+    private static func validate(_ value: JSONValue, schema: JSONValue, path: String, errors: inout [String]) {
+        guard case let .object(schemaObject) = schema else {
+            return
+        }
+        if let allowed = allowedTypes(from: schemaObject["type"]),
+           !allowed.contains(jsonSchemaType(of: value)) {
+            errors.append("\(path) expected \(allowed.sorted().joined(separator: " or ")), got \(jsonSchemaType(of: value))")
+            return
+        }
+        if let enumValues = schemaObject["enum"],
+           case let .array(candidates) = enumValues,
+           !candidates.contains(value) {
+            errors.append("\(path) did not match an allowed enum value")
+        }
+        if case let .object(object) = value {
+            validateObject(object, schema: schemaObject, path: path, errors: &errors)
+        }
+        if case let .array(array) = value,
+           let itemSchema = schemaObject["items"] {
+            for (index, item) in array.enumerated() {
+                validate(item, schema: itemSchema, path: "\(path)[\(index)]", errors: &errors)
+            }
+        }
+    }
+
+    private static func validateObject(_ object: [String: JSONValue], schema: [String: JSONValue], path: String, errors: inout [String]) {
+        let required = stringArray(from: schema["required"])
+        for key in required where object[key] == nil {
+            errors.append("\(path).\(key) is required")
+        }
+        let properties = schema["properties"]?.objectValue ?? [:]
+        for (key, propertySchema) in properties {
+            guard let child = object[key] else { continue }
+            validate(child, schema: propertySchema, path: "\(path).\(key)", errors: &errors)
+        }
+        if schema["additionalProperties"]?.boolValue == false {
+            let allowedKeys = Set(properties.keys)
+            for key in object.keys where !allowedKeys.contains(key) {
+                errors.append("\(path).\(key) is not allowed")
+            }
+        }
+    }
+
+    private static func allowedTypes(from typeValue: JSONValue?) -> Set<String>? {
+        switch typeValue {
+        case let .string(value):
+            return [value]
+        case let .array(values):
+            let strings = values.compactMap(\.stringValue)
+            return strings.isEmpty ? nil : Set(strings)
+        case .object, .number, .bool, .null, .none:
+            return nil
+        }
+    }
+
+    private static func stringArray(from value: JSONValue?) -> [String] {
+        guard case let .array(values) = value else { return [] }
+        return values.compactMap(\.stringValue)
+    }
+
+    private static func jsonSchemaType(of value: JSONValue) -> String {
+        switch value {
+        case .object:
+            return "object"
+        case .array:
+            return "array"
+        case .string:
+            return "string"
+        case .number:
+            return "number"
+        case .bool:
+            return "boolean"
+        case .null:
+            return "null"
+        }
     }
 }
 
@@ -1254,6 +1476,8 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let defaultOpenAIReasoningEffort: OpenAIReasoningEffort = .low
     public static let defaultOpenAITextVerbosity: OpenAITextVerbosity = .low
     public static let defaultAnthropicEffort: AnthropicEffort = .medium
+    public static let defaultAnthropicThinkingMode: AnthropicThinkingMode = .adaptive
+    public static let defaultAnthropicThinkingBudgetTokens = 4096
     public static let defaultGeminiThinkingLevel: GeminiThinkingLevel = .medium
     public static let defaultCloudWebSearchMode: CloudWebSearchMode = .off
 
@@ -1269,6 +1493,12 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var openAIReasoningEffort: OpenAIReasoningEffort
     public var openAITextVerbosity: OpenAITextVerbosity
     public var anthropicEffort: AnthropicEffort
+    public var anthropicThinkingMode: AnthropicThinkingMode
+    public var anthropicThinkingBudgetTokens: Int
+    public var anthropicPromptCachingEnabled: Bool
+    public var anthropicPromptCacheTTL: AnthropicPromptCacheTTL
+    public var anthropicCitationsEnabled: Bool
+    public var anthropicTokenCountPreflightEnabled: Bool
     public var geminiThinkingLevel: GeminiThinkingLevel
     public var cloudWebSearchMode: CloudWebSearchMode
     public var requireToolApproval: Bool
@@ -1290,6 +1520,12 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         case openAIReasoningEffort
         case openAITextVerbosity
         case anthropicEffort
+        case anthropicThinkingMode
+        case anthropicThinkingBudgetTokens
+        case anthropicPromptCachingEnabled
+        case anthropicPromptCacheTTL
+        case anthropicCitationsEnabled
+        case anthropicTokenCountPreflightEnabled
         case geminiThinkingLevel
         case cloudWebSearchMode
         case requireToolApproval
@@ -1312,6 +1548,12 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         openAIReasoningEffort: OpenAIReasoningEffort = Self.defaultOpenAIReasoningEffort,
         openAITextVerbosity: OpenAITextVerbosity = Self.defaultOpenAITextVerbosity,
         anthropicEffort: AnthropicEffort = Self.defaultAnthropicEffort,
+        anthropicThinkingMode: AnthropicThinkingMode = Self.defaultAnthropicThinkingMode,
+        anthropicThinkingBudgetTokens: Int = Self.defaultAnthropicThinkingBudgetTokens,
+        anthropicPromptCachingEnabled: Bool = false,
+        anthropicPromptCacheTTL: AnthropicPromptCacheTTL = .fiveMinutes,
+        anthropicCitationsEnabled: Bool = true,
+        anthropicTokenCountPreflightEnabled: Bool = false,
         geminiThinkingLevel: GeminiThinkingLevel = Self.defaultGeminiThinkingLevel,
         cloudWebSearchMode: CloudWebSearchMode = Self.defaultCloudWebSearchMode,
         requireToolApproval: Bool = true,
@@ -1332,6 +1574,12 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         self.openAIReasoningEffort = openAIReasoningEffort
         self.openAITextVerbosity = openAITextVerbosity
         self.anthropicEffort = anthropicEffort
+        self.anthropicThinkingMode = anthropicThinkingMode
+        self.anthropicThinkingBudgetTokens = Self.normalizedAnthropicThinkingBudgetTokens(anthropicThinkingBudgetTokens)
+        self.anthropicPromptCachingEnabled = anthropicPromptCachingEnabled
+        self.anthropicPromptCacheTTL = anthropicPromptCacheTTL
+        self.anthropicCitationsEnabled = anthropicCitationsEnabled
+        self.anthropicTokenCountPreflightEnabled = anthropicTokenCountPreflightEnabled
         self.geminiThinkingLevel = geminiThinkingLevel
         self.cloudWebSearchMode = cloudWebSearchMode
         self.requireToolApproval = requireToolApproval
@@ -1361,6 +1609,14 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         openAIReasoningEffort = try container.decodeIfPresent(OpenAIReasoningEffort.self, forKey: .openAIReasoningEffort) ?? Self.defaultOpenAIReasoningEffort
         openAITextVerbosity = try container.decodeIfPresent(OpenAITextVerbosity.self, forKey: .openAITextVerbosity) ?? Self.defaultOpenAITextVerbosity
         anthropicEffort = try container.decodeIfPresent(AnthropicEffort.self, forKey: .anthropicEffort) ?? Self.defaultAnthropicEffort
+        anthropicThinkingMode = try container.decodeIfPresent(AnthropicThinkingMode.self, forKey: .anthropicThinkingMode) ?? Self.defaultAnthropicThinkingMode
+        anthropicThinkingBudgetTokens = Self.normalizedAnthropicThinkingBudgetTokens(
+            try container.decodeIfPresent(Int.self, forKey: .anthropicThinkingBudgetTokens) ?? Self.defaultAnthropicThinkingBudgetTokens
+        )
+        anthropicPromptCachingEnabled = try container.decodeIfPresent(Bool.self, forKey: .anthropicPromptCachingEnabled) ?? false
+        anthropicPromptCacheTTL = try container.decodeIfPresent(AnthropicPromptCacheTTL.self, forKey: .anthropicPromptCacheTTL) ?? .fiveMinutes
+        anthropicCitationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .anthropicCitationsEnabled) ?? true
+        anthropicTokenCountPreflightEnabled = try container.decodeIfPresent(Bool.self, forKey: .anthropicTokenCountPreflightEnabled) ?? false
         geminiThinkingLevel = try container.decodeIfPresent(GeminiThinkingLevel.self, forKey: .geminiThinkingLevel) ?? Self.defaultGeminiThinkingLevel
         cloudWebSearchMode = try container.decodeIfPresent(CloudWebSearchMode.self, forKey: .cloudWebSearchMode) ?? Self.defaultCloudWebSearchMode
         requireToolApproval = try container.decodeIfPresent(Bool.self, forKey: .requireToolApproval) ?? true
@@ -1376,6 +1632,10 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
 
     public static func normalizedLocalContextTokens(_ value: Int) -> Int {
         min(max(value, minLocalContextTokens), maxLocalContextTokens)
+    }
+
+    public static func normalizedAnthropicThinkingBudgetTokens(_ value: Int) -> Int {
+        min(max(value, 1_024), 128_000)
     }
 }
 
