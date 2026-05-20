@@ -456,9 +456,7 @@ private struct ChatTranscriptView: View {
             .scrollDismissesKeyboard(.immediately)
             .simultaneousGesture(transcriptDragGesture)
             .pinesExpressiveScrollHaptics()
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                Self.isNearBottom(geometry)
-            } action: { _, isNearBottom in
+            .pinesOnScrollNearBottom { isNearBottom in
                 isNearTranscriptBottom = isNearBottom
                 if isNearBottom {
                     isAutoScrollPinned = true
@@ -543,7 +541,7 @@ private struct ChatTranscriptView: View {
                     appModel.retryLastUserMessage(in: thread, services: services)
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .symbolEffect(.rotate, options: .nonRepeating, value: retrySpin)
+                        .pinesRetrySymbolEffect(value: retrySpin)
                 }
                 .accessibilityLabel("Retry")
                 .disabled(chatState.activeRunID != nil || !thread.messages.contains { $0.role == .user })
@@ -588,7 +586,8 @@ private struct ChatTranscriptView: View {
     }
 
     private var composerInsetBottomPadding: CGFloat {
-        horizontalSizeClass == .compact ? 0 : theme.spacing.small
+        guard horizontalSizeClass == .compact else { return theme.spacing.small }
+        return isComposerFocused ? theme.spacing.xxsmall : -theme.spacing.small
     }
 
     @ViewBuilder
@@ -635,6 +634,42 @@ private struct ChatTranscriptView: View {
             }
         } else {
             proxy.scrollTo("chat-bottom", anchor: .bottom)
+        }
+    }
+
+}
+
+private extension View {
+    @ViewBuilder
+    func pinesRetrySymbolEffect(value: Bool) -> some View {
+        if #available(iOS 18.0, *) {
+            symbolEffect(.rotate, options: .nonRepeating, value: value)
+        } else {
+            self
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func pinesOnScrollNearBottom(_ action: @escaping (Bool) -> Void) -> some View {
+        if #available(iOS 18.0, *) {
+            modifier(ChatNearBottomObserver(action: action))
+        } else {
+            self
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct ChatNearBottomObserver: ViewModifier {
+    let action: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content.onScrollGeometryChange(for: Bool.self) { geometry in
+            Self.isNearBottom(geometry)
+        } action: { _, isNearBottom in
+            action(isNearBottom)
         }
     }
 
@@ -935,7 +970,6 @@ private struct ChatBubble: View {
                 if !hostedToolEntries.isEmpty {
                     ChatHostedToolTimeline(entries: hostedToolEntries)
                 }
-                ChatProviderProvenancePills(metadata: message.providerMetadata)
 
                 let agentActivities = PinesAppModel.agentActivities(from: message.providerMetadata)
                 if !agentActivities.isEmpty {
@@ -1044,101 +1078,6 @@ private struct ChatLocalTokenRateView: View {
         }
         .foregroundStyle(theme.colors.secondaryText)
         .accessibilityLabel("\(performance.displayValue) tokens per second")
-    }
-}
-
-private struct ChatProviderProvenancePills: View {
-    @Environment(\.pinesTheme) private var theme
-    let metadata: [String: String]
-
-    private var items: [PinesMetricPillGroup.Item] {
-        var values = [PinesMetricPillGroup.Item]()
-        if let responseID = metadata[CloudProviderMetadataKeys.openAIResponseID]?.pinesCompactMetadataValue {
-            values.append(.init("Response", value: responseID, systemImage: "number", tone: .info))
-        }
-        if let requestID = metadata[CloudProviderMetadataKeys.openAIRequestID]?.pinesCompactMetadataValue {
-            values.append(.init("Request", value: requestID, systemImage: "arrow.left.arrow.right", tone: .neutral))
-        }
-        if let messageID = metadata[CloudProviderMetadataKeys.anthropicMessageID]?.pinesCompactMetadataValue {
-            values.append(.init("Message", value: messageID, systemImage: "number", tone: .info))
-        }
-        if let requestID = metadata[CloudProviderMetadataKeys.anthropicRequestID]?.pinesCompactMetadataValue {
-            values.append(.init("Request", value: requestID, systemImage: "arrow.left.arrow.right", tone: .neutral))
-        }
-        if let cacheRead = metadata[CloudProviderMetadataKeys.anthropicCacheReadInputTokens], cacheRead != "0" {
-            values.append(.init("Cache read", value: cacheRead, systemImage: "memorychip", tone: .success))
-        }
-        if let cacheWrite = metadata[CloudProviderMetadataKeys.anthropicCacheCreationInputTokens], cacheWrite != "0" {
-            values.append(.init("Cache write", value: cacheWrite, systemImage: "memorychip.fill", tone: .warning))
-        }
-        if let countedTokens = metadata[CloudProviderMetadataKeys.anthropicCountTokensInputTokens], countedTokens != "0" {
-            values.append(.init("Token preflight", value: countedTokens, systemImage: "number", tone: .accent))
-        }
-        if let exactInputTokens = metadata[ChatContextMetadataKeys.exactInputTokens], exactInputTokens != "0" {
-            values.append(.init("Input exact", value: exactInputTokens, systemImage: "number", tone: .success))
-        } else if let estimatedInputTokens = metadata[ChatContextMetadataKeys.estimatedInputTokens], estimatedInputTokens != "0" {
-            values.append(.init("Input est.", value: estimatedInputTokens, systemImage: "number", tone: .neutral))
-        }
-        if let contextWindow = metadata[ChatContextMetadataKeys.contextWindowTokens], contextWindow != "0" {
-            values.append(.init("Context", value: contextWindow, systemImage: "text.word.spacing", tone: .info))
-        }
-        if metadata[ChatContextMetadataKeys.truncationApplied] == "true" {
-            let dropped = Int(metadata[ChatContextMetadataKeys.droppedMessageCount] ?? "0") ?? 0
-            let clipped = Int(metadata[ChatContextMetadataKeys.clippedMessageCount] ?? "0") ?? 0
-            let detail = dropped + clipped > 0 ? "\(dropped + clipped)" : "on"
-            values.append(.init("Trimmed", value: detail, systemImage: "scissors", tone: .warning))
-        }
-        if metadata[CloudProviderMetadataKeys.openAIResponseStored] == "true" {
-            values.append(.init("Stored", value: "provider", systemImage: "cloud", tone: .warning))
-        }
-        if let status = metadata[CloudProviderMetadataKeys.openAIResponseStatus]?.pinesCompactMetadataValue {
-            values.append(.init("Status", value: status, systemImage: "clock", tone: .accent))
-        }
-        let artifactCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.openAIArtifactsJSON])
-        if artifactCount > 0 {
-            values.append(.init("Artifacts", value: "\(artifactCount)", systemImage: "sparkles", tone: .accent))
-        }
-        let anthropicArtifactCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.anthropicArtifactsJSON])
-        if anthropicArtifactCount > 0 {
-            values.append(.init("Artifacts", value: "\(anthropicArtifactCount)", systemImage: "sparkles", tone: .accent))
-        }
-        let anthropicHostedToolCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.anthropicHostedToolCallsJSON])
-        if anthropicHostedToolCount > 0 {
-            values.append(.init("Hosted tools", value: "\(anthropicHostedToolCount)", systemImage: "wrench.and.screwdriver", tone: .warning))
-        }
-        let providerCitationCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.providerCitationsJSON])
-        if providerCitationCount > 0 {
-            values.append(.init("Citations", value: "\(providerCitationCount)", systemImage: "quote.bubble", tone: .info))
-        }
-        let fileSearchCount = Self.jsonArrayCount(metadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON])
-        if fileSearchCount > 0 {
-            values.append(.init("File search", value: "\(fileSearchCount)", systemImage: "doc.text.magnifyingglass", tone: .success))
-        }
-        return values
-    }
-
-    var body: some View {
-        if !items.isEmpty {
-            PinesMetricPillGroup(items: items, minimumWidth: 112)
-                .padding(.top, theme.spacing.xxsmall)
-        }
-    }
-
-    private static func jsonArrayCount(_ raw: String?) -> Int {
-        guard let raw,
-              let data = raw.data(using: .utf8),
-              let array = try? JSONSerialization.jsonObject(with: data) as? [Any]
-        else { return 0 }
-        return array.count
-    }
-}
-
-private extension String {
-    var pinesCompactMetadataValue: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        if trimmed.count <= 18 { return trimmed }
-        return "\(trimmed.prefix(8))...\(trimmed.suffix(6))"
     }
 }
 
@@ -1919,6 +1858,7 @@ private struct ChatMessageEditSheet: View {
                 }
             }
         }
+        .pinesDismissKeyboardOnSwipeDown()
         .presentationDetents([.medium, .large])
     }
 

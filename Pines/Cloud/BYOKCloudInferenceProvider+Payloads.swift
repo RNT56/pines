@@ -77,10 +77,10 @@ extension BYOKCloudInferenceProvider {
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
 
-        let previousResponse = messages.enumerated().last { _, message in
-            message.providerMetadata[openAIResponseIDMetadataKey]?.isEmpty == false
+        let previousResponseIndex = messages.indices.reversed().first { index in
+            messages[index].providerMetadata[openAIResponseIDMetadataKey]?.isEmpty == false
         }
-        let replayStartIndex = previousResponse.map { messages.index(after: $0.offset) } ?? messages.startIndex
+        let replayStartIndex = previousResponseIndex.map { messages.index(after: $0) } ?? messages.startIndex
         let replayMessages = messages[replayStartIndex...]
         let input = try replayMessages.reduce(into: [[String: Any]]()) { input, message in
             guard message.role != .system else { return }
@@ -121,7 +121,7 @@ extension BYOKCloudInferenceProvider {
         return OpenAIResponsesPayload(
             input: input,
             instructions: instructions,
-            previousResponseID: previousResponse?.element.providerMetadata[openAIResponseIDMetadataKey]
+            previousResponseID: previousResponseIndex.flatMap { messages[$0].providerMetadata[openAIResponseIDMetadataKey] }
         )
     }
 

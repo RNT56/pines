@@ -26,16 +26,22 @@ enum PinesRefreshRatePolicy {
 }
 
 extension View {
+    @ViewBuilder
     func pinesHighRefreshRate() -> some View {
-        background {
-            PinesHighRefreshRateHost()
-                .frame(width: 0, height: 0)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+        if #available(iOS 18.0, *) {
+            background {
+                PinesHighRefreshRateHost()
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        } else {
+            self
         }
     }
 }
 
+@available(iOS 18.0, *)
 private struct PinesHighRefreshRateHost: UIViewRepresentable {
     func makeUIView(context: Context) -> PinesHighRefreshRateView {
         let view = PinesHighRefreshRateView()
@@ -48,6 +54,7 @@ private struct PinesHighRefreshRateHost: UIViewRepresentable {
     }
 }
 
+@available(iOS 18.0, *)
 private final class PinesHighRefreshRateView: UIView {
     private weak var linkedWindow: UIWindow?
     private var updateLink: UIUpdateLink?

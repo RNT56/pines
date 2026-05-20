@@ -947,17 +947,21 @@ final class PinesAppModel: ObservableObject {
     private func finishBackgroundBootstrap(services: PinesAppServices) async {
         let startedAt = Date()
         await services.bootstrap()
-        if let modelLifecycleService = services.modelLifecycleService {
-            do {
-                try await modelLifecycleService.reconcileInterruptedDownloads()
-            } catch {
-                recordRecoverableIssue("startup.model_download_reconcile", error: error, services: services)
-            }
-        }
+        await reconcileModelDownloads(services: services)
         await refreshPostBootstrapState(services: services)
         didBootstrap = true
         isBootstrapping = false
         services.runtimeMetrics.recordStartupPhase("background_bootstrap", elapsedSeconds: Date().timeIntervalSince(startedAt))
+    }
+
+    func reconcileModelDownloads(services: PinesAppServices) async {
+        guard let modelLifecycleService = services.modelLifecycleService else { return }
+        do {
+            try await modelLifecycleService.reconcileInterruptedDownloads()
+            try await refreshModelPreviews(services: services, enrichRuntime: shouldEnrichRuntimeModelPreviews)
+        } catch {
+            recordRecoverableIssue("models.download_reconcile", error: error, services: services)
+        }
     }
 
     private func refreshPostBootstrapState(services: PinesAppServices) async {

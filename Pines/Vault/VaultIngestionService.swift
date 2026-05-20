@@ -1,16 +1,27 @@
 import Foundation
 import OSLog
 import PinesCore
+import UniformTypeIdentifiers
 
 #if canImport(PDFKit)
 import PDFKit
 #endif
-#if canImport(Vision) && canImport(UIKit)
-import UIKit
+#if canImport(Vision)
 import Vision
 #endif
 
 struct VaultIngestionService {
+    static let allowedContentTypes: [UTType] = {
+        var types: [UTType] = [.plainText, .utf8PlainText, .text, .pdf, .image, .json, .commaSeparatedText]
+        if let markdown = UTType(filenameExtension: "md") {
+            types.append(markdown)
+        }
+        if let markdown = UTType(filenameExtension: "markdown") {
+            types.append(markdown)
+        }
+        return types
+    }()
+
     let vaultRepository: any VaultRepository
     let settingsRepository: (any SettingsRepository)?
     let inferenceProvider: any InferenceProvider
@@ -20,21 +31,44 @@ struct VaultIngestionService {
     let chunker = VaultChunker()
     private let deviceMonitor = DeviceRuntimeMonitor()
     private static let logger = Logger(subsystem: "com.schtack.pines", category: "vault-ingestion")
+    private static let maximumSourceFileBytes: Int64 = 50 * 1024 * 1024
+    private static let maximumExtractedTextCharacters = 1_000_000
+    private static let supportedExtensions: Set<String> = [
+        "csv",
+        "heic",
+        "jpeg",
+        "jpg",
+        "json",
+        "markdown",
+        "md",
+        "pdf",
+        "png",
+        "text",
+        "tif",
+        "tiff",
+        "txt"
+    ]
 
     func importFile(url sourceURL: URL) async throws -> VaultDocumentRecord {
-        let storedURL = try Self.copyIntoVault(sourceURL)
-        defer { try? FileManager.default.removeItem(at: storedURL) }
+        let didStart = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if didStart {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        try Self.validateSourceFile(sourceURL)
         try Task.checkCancellation()
-        let text = try await Self.extractText(from: storedURL)
+        let text = try await Self.extractText(from: sourceURL)
         try Task.checkCancellation()
         let encryptedMetadata = try await encryptedBlobStore.write(
-            Data(contentsOf: storedURL),
-            contentType: Self.sourceType(for: storedURL)
+            try Self.readLimitedFileData(from: sourceURL),
+            contentType: Self.sourceType(for: sourceURL)
         )
         let encryptedURL = try encryptedBlobStore.fileURL(for: encryptedMetadata)
         let document = VaultDocumentRecord(
-            title: storedURL.deletingPathExtension().lastPathComponent,
-            sourceType: Self.sourceType(for: storedURL),
+            title: sourceURL.deletingPathExtension().lastPathComponent,
+            sourceType: Self.sourceType(for: sourceURL),
             updatedAt: Date(),
             chunkCount: 0
         )
@@ -144,7 +178,7 @@ struct VaultIngestionService {
         }
 
         try await auditRepository?.append(
-            AuditEvent(category: .vaultImport, summary: "Imported encrypted source \(storedURL.lastPathComponent)")
+            AuditEvent(category: .vaultImport, summary: "Imported encrypted source \(sourceURL.lastPathComponent)")
         )
         return VaultDocumentRecord(
             id: document.id,
@@ -187,56 +221,87 @@ struct VaultIngestionService {
         return allEmbeddings
     }
 
-    private static func copyIntoVault(_ sourceURL: URL) throws -> URL {
-        let didStart = sourceURL.startAccessingSecurityScopedResource()
-        defer {
-            if didStart {
-                sourceURL.stopAccessingSecurityScopedResource()
-            }
+    private static func validateSourceFile(_ url: URL) throws {
+        let values = try url.resourceValues(forKeys: [.contentTypeKey, .fileSizeKey, .isRegularFileKey])
+        if values.isRegularFile == false {
+            throw VaultIngestionError.unsupportedFileType(url.pathExtension)
         }
 
-        let directory = try vaultFilesDirectory()
-        let destination = directory.appending(path: "\(UUID().uuidString)-\(sourceURL.lastPathComponent)")
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
+        let extensionIsSupported = supportedExtensions.contains(url.pathExtension.lowercased())
+        let typeIsSupported = values.contentType.map { type in
+            allowedContentTypes.contains { allowedType in
+                type.conforms(to: allowedType)
+            }
+        } ?? false
+        guard extensionIsSupported || typeIsSupported else {
+            throw VaultIngestionError.unsupportedFileType(url.pathExtension)
         }
-        try FileManager.default.copyItem(at: sourceURL, to: destination)
-        return destination
+
+        guard let fileSize = values.fileSize else {
+            throw VaultIngestionError.unavailableFileSize
+        }
+        let byteCount = Int64(fileSize)
+        guard byteCount <= maximumSourceFileBytes else {
+            throw VaultIngestionError.fileTooLarge(actualBytes: byteCount, maximumBytes: maximumSourceFileBytes)
+        }
+    }
+
+    private static func readLimitedFileData(from url: URL) throws -> Data {
+        guard let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            throw VaultIngestionError.unavailableFileSize
+        }
+        let byteCount = Int64(fileSize)
+        guard byteCount <= maximumSourceFileBytes else {
+            throw VaultIngestionError.fileTooLarge(actualBytes: byteCount, maximumBytes: maximumSourceFileBytes)
+        }
+        return try Data(contentsOf: url, options: [.mappedIfSafe])
     }
 
     private static func extractText(from url: URL) async throws -> String {
+        let text: String
         switch url.pathExtension.lowercased() {
         case "pdf":
-            return try extractPDFText(from: url)
-        case "png", "jpg", "jpeg", "heic", "tiff":
-            return try await extractImageText(from: url)
+            text = try extractPDFText(from: url)
+        case "png", "jpg", "jpeg", "heic", "tif", "tiff":
+            text = try await extractImageText(from: url)
         default:
-            return try String(contentsOf: url, encoding: .utf8)
+            let data = try readLimitedFileData(from: url)
+            guard let decoded = String(data: data, encoding: .utf8) else {
+                throw VaultIngestionError.unsupportedTextEncoding
+            }
+            text = decoded
         }
+        try validateExtractedText(text)
+        return text
     }
 
     private static func extractPDFText(from url: URL) throws -> String {
         #if canImport(PDFKit)
         guard let document = PDFDocument(url: url) else {
-            return try String(contentsOf: url, encoding: .utf8)
+            let data = try readLimitedFileData(from: url)
+            guard let decoded = String(data: data, encoding: .utf8) else {
+                throw VaultIngestionError.unsupportedTextEncoding
+            }
+            return decoded
         }
-        var pages = [String]()
+        var extracted = ""
         for index in 0..<document.pageCount {
             if let page = document.page(at: index), let text = page.string {
-                pages.append(text)
+                try appendExtractedText(text, to: &extracted)
             }
         }
-        return pages.joined(separator: "\n\n")
+        return extracted
         #else
-        return try String(contentsOf: url, encoding: .utf8)
+        let data = try readLimitedFileData(from: url)
+        guard let decoded = String(data: data, encoding: .utf8) else {
+            throw VaultIngestionError.unsupportedTextEncoding
+        }
+        return decoded
         #endif
     }
 
     private static func extractImageText(from url: URL) async throws -> String {
-        #if canImport(Vision) && canImport(UIKit)
-        guard let image = UIImage(contentsOfFile: url.path), let cgImage = image.cgImage else {
-            return ""
-        }
+        #if canImport(Vision)
         return try await withCheckedThrowingContinuation { continuation in
             let request = VNRecognizeTextRequest { request, error in
                 if let error {
@@ -252,7 +317,7 @@ struct VaultIngestionService {
             request.usesLanguageCorrection = true
 
             do {
-                try VNImageRequestHandler(cgImage: cgImage).perform([request])
+                try VNImageRequestHandler(url: url).perform([request])
             } catch {
                 continuation.resume(throwing: error)
             }
@@ -273,16 +338,47 @@ struct VaultIngestionService {
         }
     }
 
-    private static func vaultFilesDirectory() throws -> URL {
-        let base = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let directory = base.appending(path: "Pines/VaultFiles", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
+    private static func appendExtractedText(_ next: String, to extracted: inout String) throws {
+        let separator = extracted.isEmpty ? "" : "\n\n"
+        guard extracted.count + separator.count + next.count <= maximumExtractedTextCharacters else {
+            throw VaultIngestionError.extractedTextTooLarge(maximumCharacters: maximumExtractedTextCharacters)
+        }
+        extracted += separator
+        extracted += next
+    }
+
+    private static func validateExtractedText(_ text: String) throws {
+        guard text.count <= maximumExtractedTextCharacters else {
+            throw VaultIngestionError.extractedTextTooLarge(maximumCharacters: maximumExtractedTextCharacters)
+        }
+    }
+}
+
+private enum VaultIngestionError: LocalizedError {
+    case unsupportedFileType(String)
+    case unsupportedTextEncoding
+    case unavailableFileSize
+    case fileTooLarge(actualBytes: Int64, maximumBytes: Int64)
+    case extractedTextTooLarge(maximumCharacters: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case let .unsupportedFileType(fileExtension):
+            let suffix = fileExtension.isEmpty ? "" : " .\(fileExtension)"
+            return "Vault imports support PDF, text, Markdown, CSV, JSON, and image files. This\(suffix) file is not supported."
+        case .unsupportedTextEncoding:
+            return "Vault text imports must use UTF-8 encoding."
+        case .unavailableFileSize:
+            return "Vault could not determine the file size before import."
+        case let .fileTooLarge(actualBytes, maximumBytes):
+            return "Vault imports are limited to \(Self.megabytes(maximumBytes)) MB. This file is \(Self.megabytes(actualBytes)) MB."
+        case let .extractedTextTooLarge(maximumCharacters):
+            return "Vault imports are limited to \(maximumCharacters.formatted()) extracted text characters."
+        }
+    }
+
+    private static func megabytes(_ bytes: Int64) -> Int64 {
+        max(1, (bytes + 1_048_575) / 1_048_576)
     }
 }
 

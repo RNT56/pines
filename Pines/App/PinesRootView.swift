@@ -178,6 +178,12 @@ struct PinesRootView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pinesRecoveredModelDownloadDidFinish)) { _ in
+            guard let services else { return }
+            Task {
+                await appModel.reconcileModelDownloads(services: services)
+            }
+        }
         .sheet(item: Binding(
             get: { workflowState.pendingToolApproval },
             set: { request in
@@ -371,7 +377,7 @@ struct PinesRootView: View {
                 .tabItem { Label(PinesTab.settings.title, systemImage: PinesTab.settings.systemImage) }
                 .tag(PinesTab.settings)
         }
-        .tabViewStyle(.sidebarAdaptable)
+        .pinesAdaptiveTabViewStyle()
         .tint(theme.colors.accent)
         .background {
             Rectangle()
@@ -394,6 +400,17 @@ struct PinesOpenModelsPageAction: Sendable {
     @MainActor
     func callAsFunction() {
         action()
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func pinesAdaptiveTabViewStyle() -> some View {
+        if #available(iOS 18.0, *) {
+            tabViewStyle(.sidebarAdaptable)
+        } else {
+            self
+        }
     }
 }
 
@@ -603,6 +620,7 @@ private struct MCPSamplingApprovalSheet: View {
                 }
             }
         }
+        .pinesDismissKeyboardOnSwipeDown()
     }
 }
 

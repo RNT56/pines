@@ -963,5 +963,6 @@ private struct MCPPromptInvocationSheet: View {
                 }
             }
         }
+        .pinesDismissKeyboardOnSwipeDown()
     }
 }

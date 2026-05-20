@@ -33,4 +33,9 @@ if ! grep -q 'NSPrivacyAccessedAPICategoryDiskSpace' "$manifest"; then
   exit 1
 fi
 
+if ! grep -q 'NSPrivacyAccessedAPICategoryUserDefaults' "$manifest"; then
+  echo "Privacy manifest must include UserDefaults required-reason API usage." >&2
+  exit 1
+fi
+
 echo "Privacy manifest checks passed."

@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct PinesBootMarkView: View {
     @Environment(\.pinesTheme) private var theme
@@ -2143,7 +2146,36 @@ private struct PinesAppBackgroundModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .pinesDismissKeyboardOnSwipeDown()
             .background(theme.colors.backgroundWash)
+    }
+}
+
+private struct PinesKeyboardDismissOnSwipeDownModifier: ViewModifier {
+    @State private var didDismissDuringDrag = false
+
+    func body(content: Content) -> some View {
+        content
+            .scrollDismissesKeyboard(.immediately)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12, coordinateSpace: .local)
+                    .onChanged { value in
+                        guard !didDismissDuringDrag else { return }
+                        guard value.translation.height > 12,
+                              abs(value.translation.height) > abs(value.translation.width) else { return }
+                        didDismissDuringDrag = true
+                        Self.dismissKeyboard()
+                    }
+                    .onEnded { _ in
+                        didDismissDuringDrag = false
+                    }
+            )
+    }
+
+    private static func dismissKeyboard() {
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
     }
 }
 
@@ -2224,6 +2256,10 @@ extension View {
 
     func pinesAppBackground() -> some View {
         modifier(PinesAppBackgroundModifier())
+    }
+
+    func pinesDismissKeyboardOnSwipeDown() -> some View {
+        modifier(PinesKeyboardDismissOnSwipeDownModifier())
     }
 
     func pinesFieldChrome() -> some View {

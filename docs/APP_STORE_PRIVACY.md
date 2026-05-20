@@ -25,8 +25,9 @@ Current manifest entries:
 
 - `NSPrivacyAccessedAPICategoryFileTimestamp` with reason `C617.1` for local file import, chat attachments, model download resume, SQLite/GRDB file management, and vault source metadata.
 - `NSPrivacyAccessedAPICategoryDiskSpace` with reason `E174.1` for model install preflight, resumable downloads, and user-visible storage/runtime readiness.
+- `NSPrivacyAccessedAPICategoryUserDefaults` with reason `CA92.1` for app-only settings such as the haptics preference.
 
-`Info.plist` also contains photo-library and camera usage descriptions for selected or captured image prompts/imports. Current chat and vault imports use user-selected files; final submission should keep these strings only if the direct photo/camera entry points remain in scope.
+`Info.plist` contains `NSFaceIDUsageDescription` for the optional app lock and `NSLocationWhenInUseUsageDescription` for user-approved provider web-search localization. Photo-library and camera usage strings are intentionally omitted until direct photo-library or camera entry points ship; current image imports use user-selected files.
 
 Final App Store submission must re-run this review after Xcode resolves the complete package graph for GRDB, SQLCipher, the pinned MLX forks, Swift Hugging Face, Swift Transformers, PDFKit, Vision, WebKit, and CloudKit.
 

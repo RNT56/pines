@@ -4,6 +4,10 @@ import OSLog
 
 private let modelDownloadSupportLogger = Logger(subsystem: "com.schtack.pines", category: "ModelDownloadSupport")
 
+extension Notification.Name {
+    static let pinesRecoveredModelDownloadDidFinish = Notification.Name("PinesRecoveredModelDownloadDidFinish")
+}
+
 actor ModelDownloadTaskCoordinator {
     private struct ActiveDownload {
         var id: UUID
@@ -310,8 +314,8 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
         configuration.sessionSendsLaunchEvents = true
         configuration.waitsForConnectivity = true
         configuration.isDiscretionary = false
-        configuration.allowsConstrainedNetworkAccess = true
-        configuration.allowsExpensiveNetworkAccess = true
+        configuration.allowsConstrainedNetworkAccess = false
+        configuration.allowsExpensiveNetworkAccess = false
         configuration.timeoutIntervalForRequest = 120
         configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
@@ -540,6 +544,12 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
         case let .failure(error):
             state.continuation?.finish(throwing: error)
         }
+        guard state.continuation == nil else { return }
+        NotificationCenter.default.post(
+            name: .pinesRecoveredModelDownloadDidFinish,
+            object: nil,
+            userInfo: ["repository": state.metadata.repository]
+        )
     }
 
     private func allTasks() async -> [URLSessionTask] {

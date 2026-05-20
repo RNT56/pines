@@ -34,9 +34,9 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Gemini provider lifecycle workflows for Files, context caches, token counting, Deep Research, Live sessions, generated media artifacts, batches, URL context metadata, Google Search grounding, and model capability rows.
 - Chat provenance surfaces for provider citations, hosted tool timelines, provider file references, request/message IDs, cache metrics, thinking mode, and generated artifacts.
 - Built-in calculator, time/date, attachment read, vault search/read, conversation search, Brave Search BYOK, web fetch, and WKWebView browser observe/action tools.
-- Vault file/PDF/image import pipeline with chunking, OCR, and embedding invocation.
+- Vault file/PDF/image import pipeline with scoped file types, bounded source size/text extraction, OCR, chunking, and embedding invocation.
 - TurboQuant runtime profile defaults, requested/active backend diagnostics, Metal codec and compressed-attention availability diagnostics, compressed vault embedding storage, approximate vector search, and FP16 rerank path.
-- iOS runtime guardrails: memory/thermal adaptive profiles, compact 6 GB device defaults, memory-warning unload, bounded vector scans, and batched vault embedding ingestion.
+- iOS runtime guardrails: memory/thermal adaptive profiles, compact 6 GB device defaults, memory-warning unload, bounded vector scans, batched vault embedding ingestion, foreground-only MLX execution, conservative background model-download network defaults, and recovered-download reconciliation.
 - Read-only runtime diagnostics and OSLog/MetricKit hooks for startup phases, generation speed, vault retrieval, and memory pressure.
 - CloudKit private database sync service for opt-in settings, conversations, vault chunks, and explicitly enabled embedding/code blobs.
 - Personal-team-safe default signing: generated Xcode builds omit iCloud entitlements and keep CloudKit runtime activation disabled unless a paid-team build overrides both iCloud settings.
@@ -47,7 +47,7 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Layered `.icon` source for the app icon.
 - Swift Testing core contract tests, iOS app surface tests, and framework-free verification runner.
 - Shared Xcode validation script used by CI and release validation for project generation, drift checking, unsigned iOS build, simulator build-for-testing, and simulator smoke tests.
-- CI privacy-manifest lint for the committed local-first manifest.
+- CI privacy-manifest lint for the committed local-first manifest, including required-reason entries for file timestamps, disk space, and app-only UserDefaults.
 - OAuth startup guardrails avoid crashing when authentication is attempted without an active foreground window.
 - Service bootstrap logs/audits recoverable built-in tool registration and store initialization failures instead of silently discarding them.
 - App architecture cleanup that splits large files into app model types, GRDB CloudKit sync, design components, MCP payloads, model download support, Settings detail, Models components, and MLX model-family files.

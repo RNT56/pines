@@ -2,7 +2,7 @@ name: Pines
 options:
   bundleIdPrefix: com.schtack
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "17.0"
   # CI and release scripts execute this exact pinned release through scripts/ci/xcodegen.sh.
   minimumXcodeGenVersion: "2.45.4"
 packages:
@@ -32,14 +32,14 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
-    WATCHOS_DEPLOYMENT_TARGET: "26.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    WATCHOS_DEPLOYMENT_TARGET: "10.0"
     TARGETED_DEVICE_FAMILY: "1,2"
 targets:
   Pines:
     type: application
     platform: iOS
-    deploymentTarget: "26.0"
+    deploymentTarget: "17.0"
     sources:
       - path: Pines
         excludes:
@@ -99,7 +99,7 @@ targets:
   PinesLiveActivities:
     type: app-extension
     platform: iOS
-    deploymentTarget: "26.0"
+    deploymentTarget: "17.0"
     sources:
       - path: PinesLiveActivities
       - path: Pines/Runtime/ModelDownloadActivityAttributes.swift
@@ -118,7 +118,7 @@ targets:
   PinesWatch:
     type: application
     platform: watchOS
-    deploymentTarget: "26.0"
+    deploymentTarget: "10.0"
     sources:
       - path: PinesWatch
     settings:
@@ -137,7 +137,7 @@ targets:
   PinesTests:
     type: bundle.unit-test
     platform: iOS
-    deploymentTarget: "26.0"
+    deploymentTarget: "17.0"
     sources:
       - path: PinesTests
     settings:

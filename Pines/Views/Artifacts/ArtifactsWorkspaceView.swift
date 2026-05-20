@@ -1644,6 +1644,8 @@ private struct ArtifactsWorkspaceModePicker: View {
     @Environment(\.pinesTheme) private var theme
     @Binding var selection: ArtifactsWorkspaceMode
     let onSelect: () -> Void
+    private static let labelWidth: CGFloat = 264
+    private static let labelMinHeight: CGFloat = 52
 
     var body: some View {
         Menu {
@@ -1664,6 +1666,9 @@ private struct ArtifactsWorkspaceModePicker: View {
         }
         .accessibilityLabel("Artifacts workspace")
         .accessibilityValue(selection.title)
+        .transaction { transaction in
+            transaction.animation = nil
+        }
     }
 
     private var pickerLabel: some View {
@@ -1676,19 +1681,22 @@ private struct ArtifactsWorkspaceModePicker: View {
                 Text(selection.title)
                     .font(theme.typography.callout.weight(.semibold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.82)
                 Text(selection.subtitle)
                     .font(theme.typography.caption)
                     .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Image(systemName: "chevron.down")
                 .font(.system(size: 10, weight: .semibold))
                 .padding(.leading, theme.spacing.xxsmall)
         }
         .foregroundStyle(theme.colors.accent)
         .padding(.horizontal, theme.spacing.medium)
-        .frame(minHeight: 44)
+        .frame(width: Self.labelWidth, alignment: .leading)
+        .frame(minHeight: Self.labelMinHeight, alignment: .leading)
         .background(pickerBackgroundStyle, in: shape)
         .overlay {
             shape.strokeBorder(pickerBorderStyle, lineWidth: theme.stroke.hairline)

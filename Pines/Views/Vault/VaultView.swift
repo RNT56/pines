@@ -100,7 +100,7 @@ struct VaultView: View {
             }
             .fileImporter(
                 isPresented: $showingImporter,
-                allowedContentTypes: [.item],
+                allowedContentTypes: VaultIngestionService.allowedContentTypes,
                 allowsMultipleSelection: false
             ) { result in
                 if case let .success(urls) = result, let url = urls.first {
