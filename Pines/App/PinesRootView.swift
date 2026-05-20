@@ -111,6 +111,14 @@ struct PinesRootView: View {
             await Task.yield()
             PinesRuntimeMetrics.shared.recordStartupPhase("boot_first_frame_yield", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
 
+            let installStateStartedAt = Date()
+            do {
+                try AppInstallStateCoordinator.prepareForLaunch()
+            } catch {
+                appModel.serviceError = error.localizedDescription
+            }
+            PinesRuntimeMetrics.shared.recordStartupPhase("install_state", elapsedSeconds: Date().timeIntervalSince(installStateStartedAt))
+
             let servicesStartedAt = Date()
             let services = PinesAppServices()
             self.services = services

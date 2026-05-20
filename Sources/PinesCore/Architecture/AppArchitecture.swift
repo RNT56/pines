@@ -968,3 +968,7 @@ public protocol AuditEventRepository: Sendable {
     func list(category: AuditCategory?, limit: Int) async throws -> [AuditEvent]
     func observeRecent(limit: Int) -> AsyncStream<[AuditEvent]>
 }
+
+public protocol AppDataResetRepository: Sendable {
+    func deleteAllUserRecords() async throws
+}

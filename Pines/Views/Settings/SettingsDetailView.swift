@@ -25,7 +25,9 @@ struct SettingsDetailView: View {
     @State private var providerName = "OpenAI"
     @State private var providerBaseURL = "https://api.openai.com/v1"
     @State private var providerAPIKey = ""
-    @State private var providerEnabled = false
+    @State private var providerEnabled = true
+    @State private var providerSaveConfirmation: String?
+    @State private var providerSaveError: String?
     @State private var mcpName = "Local MCP"
     @State private var mcpEndpointURL = "https://"
     @State private var mcpAuthMode: MCPAuthMode = .none
@@ -52,6 +54,7 @@ struct SettingsDetailView: View {
     @State private var mcpPromptSearch = ""
     @State private var huggingFaceToken = ""
     @State private var braveSearchKey = ""
+    @State private var showsEraseAllDataConfirmation = false
 
     private var iCloudSyncAvailable: Bool {
         services.cloudKitSyncService != nil
@@ -83,6 +86,18 @@ struct SettingsDetailView: View {
             .pinesExpressiveScrollHaptics()
         }
         .navigationTitle(section.title)
+        .confirmationDialog(
+            "Delete all Pines data?",
+            isPresented: $showsEraseAllDataConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete local and iCloud data", role: .destructive) {
+                Task { await appModel.eraseAllUserData(services: services) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes local models, chats, vault files, provider records, credentials, MCP servers, artifacts, and the private iCloud sync zone when available.")
+        }
         .task(id: section.destination) {
             guard section.destination == .tools else { return }
             await appModel.startMCPServersIfNeeded(services: services)
@@ -359,6 +374,18 @@ struct SettingsDetailView: View {
                 }
             ))
             .disabled(!iCloudSyncAvailable || !settingsState.storeConfiguration.iCloudSyncEnabled)
+
+            Button(role: .destructive) {
+                showsEraseAllDataConfirmation = true
+            } label: {
+                if appModel.isErasingAllData {
+                    ProgressView()
+                } else {
+                    Label("Delete all Pines data", systemImage: "trash")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(appModel.isErasingAllData)
         }
         .id(SettingsDetailAnchor.storageAndSync)
 
@@ -433,6 +460,9 @@ struct SettingsDetailView: View {
 
                     Button {
                         Task {
+                            providerSaveConfirmation = nil
+                            providerSaveError = nil
+                            let savedName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
                             let didSave = await appModel.saveCloudProvider(
                                 kind: providerKind,
                                 displayName: providerName,
@@ -443,6 +473,9 @@ struct SettingsDetailView: View {
                             )
                             if didSave {
                                 providerAPIKey = ""
+                                providerSaveConfirmation = "Saved \(savedName). Validating the key and refreshing models."
+                            } else {
+                                providerSaveError = appModel.serviceError ?? "Provider key could not be saved."
                             }
                         }
                     } label: {
@@ -458,6 +491,20 @@ struct SettingsDetailView: View {
                             || providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     )
                     .pinesButtonStyle(.primary, fillWidth: true)
+
+                    if let providerSaveConfirmation {
+                        Label(providerSaveConfirmation, systemImage: "checkmark.circle.fill")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.success)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let providerSaveError {
+                        Label(providerSaveError, systemImage: "exclamationmark.triangle.fill")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     if settingsState.isRefreshingCloudModels {
                         PinesStatusChip(status: .running)
@@ -546,6 +593,14 @@ struct SettingsDetailView: View {
 
             PinesMetricPillGroup(items: providerMetricItems(for: provider))
 
+            Toggle("Use for agents", isOn: Binding(
+                get: { provider.enabledForAgents },
+                set: { enabled in
+                    Task { await appModel.setCloudProviderEnabled(provider, enabled: enabled, services: services) }
+                }
+            ))
+            .disabled(provider.kind == .voyageAI)
+
             if let error = provider.lastValidationError?.nilIfEmpty {
                 Text(error)
                     .font(theme.typography.caption)
@@ -629,6 +684,15 @@ struct SettingsDetailView: View {
         }
         if capabilities.live || capabilities.batch {
             items.append(.init("Jobs", value: providerJobLabel(for: capabilities), systemImage: capabilities.live ? "dot.radiowaves.left.and.right" : "tray.full", tone: .warning))
+        }
+        let modelCount = settingsState.cloudModelCatalog[provider.id]?.count ?? 0
+        if modelCount > 0 {
+            items.append(.init("Catalog", value: "\(modelCount) models", systemImage: "list.bullet.rectangle", tone: .success))
+        } else if provider.validationStatus == .valid {
+            items.append(.init("Catalog", value: "refreshing", systemImage: "arrow.triangle.2.circlepath", tone: .info))
+        }
+        if let defaultModelID = provider.defaultModelID {
+            items.append(.init("Default", value: Self.compactModelName(defaultModelID.rawValue), systemImage: "checkmark.circle", tone: .success))
         }
         return items
     }
@@ -1372,9 +1436,17 @@ struct SettingsDetailView: View {
     private func applyProviderDefaults(_ kind: CloudProviderKind) {
         providerName = kind.defaultDisplayName
         providerBaseURL = kind.defaultBaseURL
-        if kind == .voyageAI {
-            providerEnabled = false
-        }
+        providerEnabled = kind != .voyageAI
+        providerSaveConfirmation = nil
+        providerSaveError = nil
+    }
+
+    private static func compactModelName(_ rawValue: String) -> String {
+        let name = rawValue
+            .split(separator: "/")
+            .last
+            .map(String.init) ?? rawValue
+        return name.replacingOccurrences(of: "_", with: " ")
     }
 
     private func loadMCPServer(_ server: MCPServerConfiguration) {

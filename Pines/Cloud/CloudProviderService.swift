@@ -18,6 +18,12 @@ struct CloudProviderService {
 
     func deleteProvider(_ provider: CloudProviderConfiguration) async throws {
         try await secretStore.delete(service: provider.keychainService, account: provider.keychainAccount)
+        for header in provider.headers where header.kind == .secretReference {
+            guard let service = header.keychainService,
+                  let account = header.keychainAccount
+            else { continue }
+            try await secretStore.delete(service: service, account: account)
+        }
         try await repository.deleteProvider(id: provider.id)
         try await auditRepository?.append(
             AuditEvent(category: .cloudProvider, summary: "Deleted provider \(provider.displayName)", providerID: provider.id)

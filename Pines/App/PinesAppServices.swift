@@ -21,6 +21,7 @@ typealias PinesLiveStore = any ConversationRepository
     & MCPServerRepository
     & ModelDownloadRepository
     & AuditEventRepository
+    & AppDataResetRepository
 
 final class PinesAppServices: Sendable {
     let secretStore: any SecretStore

@@ -24,6 +24,9 @@ struct PinesManagedCloudService: Sendable {
         static let installationAccount = "anonymous-installation-id"
     }
 
+    static let installationSecretService = Constants.secretService
+    static let installationSecretAccount = Constants.installationAccount
+
     var configuration: PinesManagedCloudServiceConfiguration
     var secretStore: any SecretStore
     var urlSession: URLSession

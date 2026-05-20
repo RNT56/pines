@@ -22,6 +22,9 @@ private struct ModelDownloadProgressWriteGate {
         guard elapsed >= Self.minimumInterval else { return false }
 
         let byteDelta = progress.bytesReceived - lastPersistedBytes
+        if byteDelta < 0 {
+            return true
+        }
         guard byteDelta >= Self.minimumByteDelta else {
             if progress.totalBytes != lastPersistedTotalBytes {
                 return true
@@ -51,7 +54,8 @@ private struct ModelDownloadProgressWriteGate {
 
 struct ModelLifecycleService: Sendable {
     private static let downloadTasks = ModelDownloadTaskCoordinator()
-    private static let rangedDownloadChunkBytes: Int64 = 64 * 1024 * 1024
+    private static let maxDownloadAttempts = 4
+    private static let baseDownloadRetryDelayNanoseconds: UInt64 = 750_000_000
 
     private struct StagingRecoveryState {
         static let empty = StagingRecoveryState(reusableBytes: 0)
@@ -445,9 +449,9 @@ struct ModelLifecycleService: Sendable {
                     stagingDirectory: stagingURL,
                     resumeOffset: currentFileBytes,
                     accessToken: accessToken
-                ) { bytes, expectedFileSize in
+                ) { fileBytes, expectedFileSize in
                     try Task.checkCancellation()
-                    currentFileBytes += bytes
+                    currentFileBytes = max(0, fileBytes)
                     progress.bytesReceived = received + currentFileBytes
                     if let expectedFileSize {
                         resolvedFileSizes[file.path] = expectedFileSize
@@ -564,6 +568,35 @@ struct ModelLifecycleService: Sendable {
         await ModelDownloadLiveActivityController.end(repository: repository)
         try await auditRepository?.append(
             AuditEvent(category: .modelDownload, summary: "Deleted \(repository)", modelID: ModelID(rawValue: repository))
+        )
+    }
+
+    func deleteAllLocalModelData() async throws {
+        let downloads = try await downloadRepository.listDownloads()
+        let installs = try await installRepository.listInstalledAndCuratedModels()
+        let repositories = Set(downloads.map(\.repository) + installs.map(\.repository))
+
+        for repository in repositories {
+            if await Self.downloadTasks.hasActiveDownload(for: repository) {
+                try? await cancelDownload(repository: repository)
+            } else {
+                await BackgroundModelFileDownloadCenter.shared.cancelBackgroundDownloads(for: repository)
+            }
+            await ModelDownloadLiveActivityController.end(repository: repository)
+        }
+
+        let directory = try Self.modelsDirectory()
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+        for install in installs {
+            try await installRepository.deleteInstall(repository: install.repository)
+        }
+        for download in downloads {
+            try await downloadRepository.deleteDownload(id: download.id)
+        }
+        try await auditRepository?.append(
+            AuditEvent(category: .modelDownload, summary: "Deleted all local model data.")
         )
     }
 
@@ -705,51 +738,47 @@ struct ModelLifecycleService: Sendable {
             throw URLError(.badURL)
         }
 
-        var offset = max(0, resumeOffset)
-        if let expectedSize = file.size, expectedSize > 0 {
-            guard offset < expectedSize else { return }
-            while offset < expectedSize {
-                try Task.checkCancellation()
-                let rangeEnd = min(offset + rangedDownloadChunkBytes - 1, expectedSize - 1)
-                var request = authorizedRequest(url: url, accessToken: accessToken)
-                request.addValue("bytes=\(offset)-\(rangeEnd)", forHTTPHeaderField: "Range")
-                let metadata = BackgroundModelFileDownloadMetadata(
-                    repository: repository,
-                    revision: revision,
-                    filePath: file.path,
-                    destinationPath: destination.path,
-                    stagingDirectoryPath: stagingDirectory.path,
-                    declaredSize: expectedSize,
-                    checksum: file.oid,
-                    resumeOffset: offset,
-                    rangeEnd: rangeEnd
-                )
-                try await downloadRequest(request, metadata: metadata, progress: progress)
-                let newOffset = try byteCount(for: destination)
-                guard newOffset > offset else {
-                    throw URLError(.networkConnectionLost)
-                }
-                offset = newOffset
-            }
-            return
-        }
+        var attempt = 1
+        while true {
+            try Task.checkCancellation()
+            let persistedBytes = (try? byteCount(for: destination)) ?? max(0, resumeOffset)
+            let plan = ModelDownloadResumePlan(expectedBytes: file.size, existingBytes: persistedBytes)
+            guard !plan.isComplete else { return }
 
-        var request = authorizedRequest(url: url, accessToken: accessToken)
-        if offset > 0 {
-            request.addValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
+            var request = authorizedRequest(url: url, accessToken: accessToken)
+            if let rangeHeader = plan.rangeHeader {
+                request.addValue(rangeHeader, forHTTPHeaderField: "Range")
+            }
+            let metadata = BackgroundModelFileDownloadMetadata(
+                repository: repository,
+                revision: revision,
+                filePath: file.path,
+                destinationPath: destination.path,
+                stagingDirectoryPath: stagingDirectory.path,
+                declaredSize: plan.expectedBytes,
+                checksum: file.oid,
+                resumeOffset: plan.resumeOffset,
+                rangeEnd: nil
+            )
+
+            do {
+                try await progress(plan.resumeOffset, plan.expectedBytes)
+                try await downloadRequest(request, metadata: metadata, progress: progress)
+                try validateCompletedDownload(repository: repository, file: file, destination: destination)
+                return
+            } catch {
+                guard shouldRetryDownload(error, attempt: attempt) else {
+                    throw error
+                }
+
+                let diskBytes = (try? byteCount(for: destination)) ?? plan.resumeOffset
+                try await progress(diskBytes, plan.expectedBytes)
+                let delay = retryDelayNanoseconds(forAttempt: attempt)
+                modelLifecycleLogger.warning("Retrying model download for \(repository, privacy: .public)/\(file.path, privacy: .public) after attempt \(attempt, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                try await Task.sleep(nanoseconds: delay)
+                attempt += 1
+            }
         }
-        let metadata = BackgroundModelFileDownloadMetadata(
-            repository: repository,
-            revision: revision,
-            filePath: file.path,
-            destinationPath: destination.path,
-            stagingDirectoryPath: stagingDirectory.path,
-            declaredSize: file.size,
-            checksum: file.oid,
-            resumeOffset: offset,
-            rangeEnd: nil
-        )
-        try await downloadRequest(request, metadata: metadata, progress: progress)
     }
 
     private static func authorizedRequest(url: URL, accessToken: String?) -> URLRequest {
@@ -771,10 +800,75 @@ struct ModelLifecycleService: Sendable {
         )
         for try await event in events {
             switch event {
-            case let .progress(bytesWritten, expectedFileSize):
-                try await progress(bytesWritten, expectedFileSize)
+            case let .progress(_, totalBytesWritten, expectedFileSize):
+                try await progress(metadata.resumeOffset + totalBytesWritten, expectedFileSize)
             }
         }
+    }
+
+    private static func validateCompletedDownload(
+        repository: String,
+        file: ModelFileInfo,
+        destination: URL
+    ) throws {
+        guard let expectedBytes = file.size, expectedBytes > 0 else { return }
+        let actualBytes = try byteCount(for: destination)
+        if actualBytes < expectedBytes {
+            throw ModelDownloadTransferError.incompleteFile(
+                repository: repository,
+                filePath: file.path,
+                expectedBytes: expectedBytes,
+                actualBytes: actualBytes
+            )
+        }
+        if actualBytes > expectedBytes {
+            throw ModelDownloadTransferError.unexpectedFileSize(
+                repository: repository,
+                filePath: file.path,
+                expectedBytes: expectedBytes,
+                actualBytes: actualBytes
+            )
+        }
+    }
+
+    private static func shouldRetryDownload(_ error: Error, attempt: Int) -> Bool {
+        guard attempt < maxDownloadAttempts else { return false }
+        if error is CancellationError {
+            return false
+        }
+        if let inferenceError = error as? InferenceError {
+            if case .cancelled = inferenceError {
+                return false
+            }
+        }
+        if let transferError = error as? ModelDownloadTransferError {
+            return transferError.isRetryable
+        }
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .networkConnectionLost,
+             .notConnectedToInternet,
+             .timedOut,
+             .cannotFindHost,
+             .cannotConnectToHost,
+             .dnsLookupFailed,
+             .resourceUnavailable,
+             .internationalRoamingOff,
+             .callIsActive,
+             .dataNotAllowed,
+             .secureConnectionFailed,
+             .badServerResponse:
+            return true
+        case .cancelled:
+            return false
+        default:
+            return false
+        }
+    }
+
+    private static func retryDelayNanoseconds(forAttempt attempt: Int) -> UInt64 {
+        let clampedAttempt = UInt64(max(1, min(attempt, 6)))
+        return baseDownloadRetryDelayNanoseconds * (UInt64(1) << (clampedAttempt - 1))
     }
 
     private static func remoteFileSize(
@@ -797,11 +891,18 @@ struct ModelLifecycleService: Sendable {
             request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
 
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard (200 ..< 300).contains(response.statusCode) else {
-            throw URLError(.badServerResponse)
+        let (_, http) = try await URLSession.shared.data(for: request)
+        guard (200 ..< 300).contains(http.statusCode) else {
+            throw ModelDownloadTransferError.httpStatus(
+                code: http.statusCode,
+                repository: repository,
+                filePath: file.path,
+                url: url,
+                requestID: http.value(forHTTPHeaderField: "X-Request-Id"),
+                contentRange: http.value(forHTTPHeaderField: "Content-Range")
+            )
         }
-        return Self.expectedFileSize(from: response, http: response, offset: 0, declaredSize: file.size)
+        return Self.expectedFileSize(from: http, http: http, offset: 0, declaredSize: file.size)
     }
 
     private static func removeStagingDirectory(for repository: String) throws {
@@ -828,13 +929,13 @@ struct ModelLifecycleService: Sendable {
             return .empty
         }
 
-        var reusableBytes = (try? ModelDownloadStagingManifestStore.read(from: stagingDirectory)?.reusableBytes) ?? 0
+        let manifestReusableBytes = (try? ModelDownloadStagingManifestStore.read(from: stagingDirectory)?.reusableBytes) ?? 0
         guard let enumerator = FileManager.default.enumerator(
             at: stagingDirectory,
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) else {
-            return StagingRecoveryState(reusableBytes: reusableBytes)
+            return StagingRecoveryState(reusableBytes: manifestReusableBytes)
         }
 
         var fileBytes: Int64 = 0
@@ -843,8 +944,7 @@ struct ModelLifecycleService: Sendable {
             guard values.isRegularFile == true else { continue }
             fileBytes += Int64(values.fileSize ?? 0)
         }
-        reusableBytes = max(reusableBytes, fileBytes)
-        return StagingRecoveryState(reusableBytes: reusableBytes)
+        return StagingRecoveryState(reusableBytes: fileBytes)
     }
 
     private static func validateStagedChecksumsIfPresent(_ stagingDirectory: URL) throws -> Bool {
@@ -939,6 +1039,29 @@ struct ModelLifecycleService: Sendable {
     private static func downloadFailureMessage(for error: Error) -> String {
         if let inferenceError = error as? InferenceError {
             return inferenceError.localizedDescription
+        }
+        if let transferError = error as? ModelDownloadTransferError {
+            switch transferError {
+            case let .httpStatus(code, _, _, _, _, _):
+                switch code {
+                case 401, 403:
+                    return "Hugging Face rejected access for this model file. Check the Hub token or request access for the model."
+                case 404:
+                    return "Hugging Face could not find a required model file. Refresh the model metadata and retry."
+                case 408, 425, 429, 500...599:
+                    return "The model host throttled or interrupted the download. Resume to continue."
+                default:
+                    return "The model host returned HTTP \(code). Resume to retry."
+                }
+            case .incompleteFile:
+                return "The model file download ended before all bytes arrived. Resume to continue."
+            case .unexpectedFileSize:
+                return "The downloaded model file size did not match Hugging Face metadata. Resume to retry the file."
+            case .destinationSizeMismatch:
+                return "The staged partial file no longer matches the resume point. Resume to retry from the bytes on disk."
+            case .missingHTTPResponse:
+                return "The model host returned a response without HTTP metadata. Resume to retry."
+            }
         }
         if let urlError = error as? URLError {
             switch urlError.code {

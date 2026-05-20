@@ -187,7 +187,7 @@ struct CloudKitSyncService {
         )
         let encryptedRecords = try await records(from: localSnapshot)
         try await save(encryptedRecords)
-        try? await database.modifyRecordZones(saving: [], deleting: [legacyZoneID])
+        _ = try? await database.modifyRecordZones(saving: [], deleting: [legacyZoneID])
 
         let remoteAfterUpload = try await fetchRemoteSnapshot(using: syncRepository)
         if !remoteAfterUpload.isEmpty {
@@ -199,6 +199,27 @@ struct CloudKitSyncService {
 
         try await auditRepository?.append(
             AuditEvent(category: .security, summary: "Completed iCloud private database bidirectional sync.")
+        )
+    }
+
+    func deleteAllRemoteData() async throws {
+        guard Self.hasRequiredEntitlements() else { return }
+        do {
+            _ = try await database.modifyRecordZones(saving: [], deleting: [zoneID, legacyZoneID])
+        } catch let error as CKError where error.code == .zoneNotFound {
+            // Already gone; the reset path is idempotent.
+        } catch let error as CKError where error.code == .partialFailure {
+            let partialErrors = error.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Error] ?? [:]
+            let onlyMissingZones = !partialErrors.isEmpty && partialErrors.values.allSatisfy { itemError in
+                (itemError as? CKError)?.code == .zoneNotFound
+            }
+            guard onlyMissingZones else {
+                throw error
+            }
+        }
+        try await syncRepository?.saveCloudKitServerChangeTokenData(nil, zoneName: zoneID.zoneName)
+        try await auditRepository?.append(
+            AuditEvent(category: .security, summary: "Deleted iCloud private sync records.")
         )
     }
 

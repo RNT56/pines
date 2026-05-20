@@ -523,6 +523,11 @@ final class PinesAppModel: ObservableObject {
         get { workflowState.hapticSignal }
         set { workflowState.hapticSignal = newValue }
     }
+
+    var isErasingAllData: Bool {
+        get { workflowState.isErasingAllData }
+        set { workflowState.isErasingAllData = newValue }
+    }
     private var didBootstrap = false
     private var didLoadStartupState = false
     private var isBootstrapping = false
@@ -1003,6 +1008,83 @@ final class PinesAppModel: ObservableObject {
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    func eraseAllUserData(services: PinesAppServices) async {
+        guard !isErasingAllData else { return }
+        setIfChanged(\.isErasingAllData, true)
+        defer { setIfChanged(\.isErasingAllData, false) }
+
+        currentRunTask?.cancel()
+        currentRunTask = nil
+        currentRunToken = nil
+        activeRunID = nil
+        chatState.removeAllLiveMessages()
+        cancelModelSearchMetadataEnrichment()
+        modelSearchRequestID = nil
+        vaultReindexToken = nil
+
+        do {
+            try await AppDataResetService(services: services).eraseAllData()
+            clearInMemoryStateAfterErase()
+            await refreshAll(services: services)
+            setIfChanged(\.serviceError, nil)
+        } catch {
+            setIfChanged(\.serviceError, services.redactor.redact(error.localizedDescription))
+        }
+    }
+
+    private func clearInMemoryStateAfterErase() {
+        applySettings(AppSettingsSnapshot())
+        setIfChanged(\.threads, [])
+        setIfChanged(\.chatError, nil)
+        setIfChanged(\.models, [])
+        setIfChanged(\.modelDownloads, [])
+        setIfChanged(\.isSearchingModels, false)
+        setIfChanged(\.modelSearchError, nil)
+        setIfChanged(\.vaultItems, [])
+        setIfChanged(\.vaultEmbeddingProfiles, [])
+        setIfChanged(\.vaultEmbeddingJobs, [])
+        setIfChanged(\.vaultRetrievalEvents, [])
+        setIfChanged(\.vaultSearchResults, [])
+        setIfChanged(\.isVaultSearchPresented, false)
+        setIfChanged(\.isVaultReindexing, false)
+        setIfChanged(\.auditEvents, [])
+        setIfChanged(\.cloudProviders, [])
+        setIfChanged(\.cloudModelCatalog, [:])
+        setIfChanged(\.isRefreshingCloudModels, false)
+        setIfChanged(\.isSavingCloudProvider, false)
+        setIfChanged(\.validatingCloudProviderIDs, [])
+        setIfChanged(\.huggingFaceCredentialStatus, "Not configured")
+        setIfChanged(\.braveSearchCredentialStatus, "Not configured")
+        setIfChanged(\.mcpServers, [])
+        setIfChanged(\.mcpTools, [])
+        setIfChanged(\.mcpResources, [])
+        setIfChanged(\.mcpResourceTemplates, [])
+        setIfChanged(\.mcpPrompts, [])
+        setIfChanged(\.providerFiles, [])
+        setIfChanged(\.providerFilePreviews, [])
+        setIfChanged(\.providerArtifacts, [])
+        setIfChanged(\.providerArtifactPreviews, [])
+        setIfChanged(\.providerCaches, [])
+        setIfChanged(\.providerCachePreviews, [])
+        setIfChanged(\.providerVectorStores, [])
+        setIfChanged(\.providerVectorStorePreviews, [])
+        setIfChanged(\.providerBatches, [])
+        setIfChanged(\.providerBatchPreviews, [])
+        setIfChanged(\.providerLiveSessions, [])
+        setIfChanged(\.providerLiveSessionPreviews, [])
+        setIfChanged(\.providerStructuredOutputs, [])
+        setIfChanged(\.providerStructuredOutputPreviews, [])
+        setIfChanged(\.providerModelCapabilities, [])
+        setIfChanged(\.providerModelCapabilityPreviews, [])
+        setIfChanged(\.providerResearchRuns, [])
+        setIfChanged(\.providerResearchRunPreviews, [])
+        setIfChanged(\.isRefreshingProviderLifecycle, false)
+        setIfChanged(\.providerLifecycleError, nil)
+        liveAgentActivitiesByMessageID.removeAll()
+        mcpSamplingRequestCountByServer.removeAll()
+        didStartMCPServers = false
     }
 
     private func refreshCloudProviders(services: PinesAppServices) async {
@@ -3935,61 +4017,48 @@ final class PinesAppModel: ObservableObject {
                 displayName: trimmedDisplayName,
                 baseURL: baseURL,
                 defaultModelID: existing?.defaultModelID,
-                validationStatus: existing?.validationStatus ?? .unvalidated,
-                lastValidationError: existing?.lastValidationError,
+                validationStatus: trimmedAPIKey.isEmpty ? (existing?.validationStatus ?? .unvalidated) : .unvalidated,
+                lastValidationError: trimmedAPIKey.isEmpty ? existing?.lastValidationError : nil,
                 headers: existing?.headers ?? [],
                 keychainService: existing?.keychainService ?? "com.schtack.pines.cloud",
                 keychainAccount: existing?.keychainAccount ?? providerID.rawValue,
                 allowInsecureLocalHTTP: existing?.allowInsecureLocalHTTP ?? false,
                 enabledForAgents: kind == .voyageAI ? false : enabledForAgents,
-                lastValidatedAt: existing?.lastValidatedAt
+                lastValidatedAt: trimmedAPIKey.isEmpty ? existing?.lastValidatedAt : nil
             )
-            var savedProvider = provider
-            var validationMessage: String?
             try await service.saveProvider(provider, apiKey: trimmedAPIKey.isEmpty ? nil : trimmedAPIKey)
-            upsertCloudProvider(savedProvider)
-            if !trimmedAPIKey.isEmpty {
-                validatingCloudProviderIDs.insert(providerID)
-                defer { validatingCloudProviderIDs.remove(providerID) }
-
-                do {
-                    let result = try await service.validate(provider)
-                    let redactedMessage = services.redactor.redact(result.message)
-                    savedProvider.validationStatus = result.status
-                    savedProvider.lastValidatedAt = result.validatedAt
-                    savedProvider.lastValidationError = result.status == .valid ? nil : redactedMessage
-                    if result.status != .valid {
-                        validationMessage = redactedMessage
-                    }
-                } catch {
-                    let redactedMessage = services.redactor.redact(error.localizedDescription)
-                    savedProvider.validationStatus = .invalid
-                    savedProvider.lastValidatedAt = Date()
-                    savedProvider.lastValidationError = redactedMessage
-                    validationMessage = redactedMessage
-                    try? await services.cloudProviderRepository?.upsertProvider(savedProvider)
-                }
-                upsertCloudProvider(savedProvider)
-            }
+            upsertCloudProvider(provider)
             await refreshCloudProviders(services: services)
             await refreshVaultEmbeddingState(services: services)
-            if let validationMessage {
-                setIfChanged(\.serviceError, validationMessage)
-            } else {
-                setIfChanged(\.serviceError, nil)
-            }
-            if savedProvider.validationStatus == .valid {
-                await refreshCloudModelCatalog(services: services)
-            } else {
-                Task { [weak self] in
-                    await self?.refreshCloudModelCatalog(services: services)
-                }
+            setIfChanged(\.serviceError, nil)
+            Task { [weak self] in
+                await self?.finishSavedCloudProviderActivation(
+                    providerID: providerID,
+                    shouldValidate: !trimmedAPIKey.isEmpty,
+                    services: services
+                )
             }
             return true
         } catch {
             serviceError = error.localizedDescription
             return false
         }
+    }
+
+    private func finishSavedCloudProviderActivation(
+        providerID: ProviderID,
+        shouldValidate: Bool,
+        services: PinesAppServices
+    ) async {
+        if shouldValidate {
+            await validateCloudProvider(id: providerID, services: services)
+        }
+        await refreshCloudModelCatalog(services: services)
+    }
+
+    private func validateCloudProvider(id providerID: ProviderID, services: PinesAppServices) async {
+        guard let provider = cloudProviders.first(where: { $0.id == providerID }) else { return }
+        await validateCloudProvider(provider, services: services)
     }
 
     func validateCloudProvider(_ provider: CloudProviderConfiguration, services: PinesAppServices) async {
@@ -4001,15 +4070,69 @@ final class PinesAppModel: ObservableObject {
                 serviceError = "Cloud provider service is unavailable."
                 return
             }
-            _ = try await service.validate(provider)
+            let result = try await service.validate(provider)
+            await applyCloudProviderValidationResult(result, providerID: provider.id, services: services)
             await refreshCloudProviders(services: services)
-            setIfChanged(\.serviceError, nil)
+            if result.status == .valid {
+                setIfChanged(\.serviceError, nil)
+            } else {
+                setIfChanged(\.serviceError, services.redactor.redact(result.message))
+            }
             Task { [weak self] in
                 await self?.refreshCloudModelCatalog(services: services)
             }
         } catch {
-            serviceError = error.localizedDescription
+            let redactedMessage = services.redactor.redact(error.localizedDescription)
+            await markCloudProvider(provider.id, validationStatus: .invalid, message: redactedMessage, services: services)
+            serviceError = redactedMessage
         }
+    }
+
+    private func applyCloudProviderValidationResult(
+        _ result: ProviderValidationResult,
+        providerID: ProviderID,
+        services: PinesAppServices
+    ) async {
+        guard var provider = cloudProviders.first(where: { $0.id == providerID }) else { return }
+        let redactedMessage = services.redactor.redact(result.message)
+        provider.validationStatus = result.status
+        provider.lastValidatedAt = result.validatedAt
+        provider.lastValidationError = result.status == .valid ? nil : redactedMessage
+        if provider.defaultModelID == nil, let firstModel = result.availableModels.first {
+            provider.defaultModelID = firstModel
+        }
+        do {
+            try await services.cloudProviderRepository?.upsertProvider(provider)
+        } catch {
+            setIfChanged(\.serviceError, services.redactor.redact(error.localizedDescription))
+        }
+        upsertCloudProvider(provider)
+        if !result.availableModels.isEmpty {
+            upsertCloudModelCatalog(
+                result.availableModels.enumerated().map { index, modelID in
+                    CloudProviderModel(
+                        id: modelID,
+                        displayName: Self.friendlyModelName(modelID.rawValue),
+                        rank: Double(result.availableModels.count - index)
+                    )
+                },
+                for: provider.id
+            )
+        }
+    }
+
+    private func markCloudProvider(
+        _ providerID: ProviderID,
+        validationStatus: ProviderValidationStatus,
+        message: String,
+        services: PinesAppServices
+    ) async {
+        guard var provider = cloudProviders.first(where: { $0.id == providerID }) else { return }
+        provider.validationStatus = validationStatus
+        provider.lastValidatedAt = Date()
+        provider.lastValidationError = message
+        try? await services.cloudProviderRepository?.upsertProvider(provider)
+        upsertCloudProvider(provider)
     }
 
     func deleteCloudProvider(_ provider: CloudProviderConfiguration, services: PinesAppServices) async {
@@ -4030,6 +4153,25 @@ final class PinesAppModel: ObservableObject {
         }
     }
 
+    func setCloudProviderEnabled(_ provider: CloudProviderConfiguration, enabled: Bool, services: PinesAppServices) async {
+        do {
+            guard let repository = services.cloudProviderRepository else {
+                serviceError = "Cloud provider repository is unavailable."
+                return
+            }
+            var updated = provider
+            updated.enabledForAgents = provider.kind == .voyageAI ? false : enabled
+            try await repository.upsertProvider(updated)
+            upsertCloudProvider(updated)
+            setIfChanged(\.serviceError, nil)
+            if updated.enabledForAgents {
+                await refreshCloudModelCatalog(services: services)
+            }
+        } catch {
+            serviceError = error.localizedDescription
+        }
+    }
+
     func refreshCloudModelCatalog(services: PinesAppServices) async {
         guard !isRefreshingCloudModels else {
             needsCloudModelCatalogRefresh = true
@@ -4040,26 +4182,57 @@ final class PinesAppModel: ObservableObject {
 
         repeat {
             needsCloudModelCatalogRefresh = false
-            var nextCatalog: [ProviderID: [CloudProviderModel]] = [:]
+            var nextCatalog = cloudModelCatalog.filter { providerID, _ in
+                cloudProviders.contains(where: { $0.id == providerID })
+            }
             for provider in cloudProviders {
                 do {
                     guard let apiKey = try await services.secretStore.read(
                         service: provider.keychainService,
                         account: provider.keychainAccount
                     )?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+                        nextCatalog[provider.id] = nil
                         continue
                     }
                     let inferenceProvider = BYOKCloudInferenceProvider(configuration: provider, secretStore: services.secretStore)
                     let models = try await inferenceProvider.listTextModels()
                     if !models.isEmpty {
                         nextCatalog[provider.id] = models
+                        await recordFirstCloudModelIfNeeded(models[0].id, providerID: provider.id, services: services)
                     }
                 } catch {
+                    recordRecoverableIssue("cloud.model_catalog.refresh.\(provider.id.rawValue)", error: error, services: services)
                     continue
                 }
             }
             setIfChanged(\.cloudModelCatalog, nextCatalog)
         } while needsCloudModelCatalogRefresh
+    }
+
+    private func upsertCloudModelCatalog(_ models: [CloudProviderModel], for providerID: ProviderID) {
+        guard !models.isEmpty else { return }
+        var catalog = cloudModelCatalog
+        catalog[providerID] = models
+        setIfChanged(\.cloudModelCatalog, catalog)
+    }
+
+    private func recordFirstCloudModelIfNeeded(
+        _ modelID: ModelID,
+        providerID: ProviderID,
+        services: PinesAppServices
+    ) async {
+        guard var provider = cloudProviders.first(where: { $0.id == providerID }),
+              provider.defaultModelID == nil
+        else {
+            return
+        }
+        provider.defaultModelID = modelID
+        do {
+            try await services.cloudProviderRepository?.upsertProvider(provider)
+            upsertCloudProvider(provider)
+        } catch {
+            recordRecoverableIssue("cloud.provider.default_model", error: error, services: services)
+        }
     }
 
     func modelPickerSections(services: PinesAppServices) -> [ModelPickerSection] {

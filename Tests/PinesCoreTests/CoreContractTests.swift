@@ -511,6 +511,39 @@ struct CoreContractTests {
     }
 
     @Test
+    func installBoundSecretEnvelopeRequiresSameInstallKeyAndContext() throws {
+        let installKey = Data(repeating: 0x11, count: InstallBoundSecretEnvelope.installKeyByteCount)
+        let otherInstallKey = Data(repeating: 0x22, count: InstallBoundSecretEnvelope.installKeyByteCount)
+        let plaintext = Data("sk-test-secret".utf8)
+        let sealed = try InstallBoundSecretEnvelope.seal(
+            plaintext,
+            installKey: installKey,
+            context: "com.schtack.pines.cloud::openai"
+        )
+
+        #expect(InstallBoundSecretEnvelope.isEnvelope(sealed))
+        #expect(try InstallBoundSecretEnvelope.open(
+            sealed,
+            installKey: installKey,
+            context: "com.schtack.pines.cloud::openai"
+        ) == plaintext)
+        #expect(throws: InstallBoundSecretEnvelopeError.authenticationFailed) {
+            try InstallBoundSecretEnvelope.open(
+                sealed,
+                installKey: otherInstallKey,
+                context: "com.schtack.pines.cloud::openai"
+            )
+        }
+        #expect(throws: InstallBoundSecretEnvelopeError.authenticationFailed) {
+            try InstallBoundSecretEnvelope.open(
+                sealed,
+                installKey: installKey,
+                context: "com.schtack.pines.cloud::anthropic"
+            )
+        }
+    }
+
+    @Test
     func securityConfigurationDefaultsToEncryptedE2EModel() {
         let configuration = SecurityConfiguration()
 
@@ -611,7 +644,8 @@ struct CoreContractTests {
         #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-pro-preview") == [.low, .medium, .high])
         #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-flash-lite") == [.minimal, .low, .medium, .high])
         #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-3-flash-preview") == [.minimal, .low, .medium, .high])
-        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-2.5-pro").isEmpty)
+        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-2.5-pro") == [.low, .medium, .high])
+        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-2.0-flash").isEmpty)
         #expect(CloudProviderModelEligibility.geminiThinkingLevel(for: "gemini-3.1-pro-preview", requested: .minimal) == .low)
     }
 
@@ -680,28 +714,29 @@ struct CoreContractTests {
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-nano-2026-03-17", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.6-mini", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-6", providerKind: .openAI))
-
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-mini", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-pro", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4.1-mini", providerKind: .openAI))
-
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o1", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o3", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o4-mini", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "openai/o3-mini", providerKind: .openRouter))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-4.1", providerKind: .openRouter))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-mini", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4.1-mini", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4o", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "chatgpt-4o-latest", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "o1", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "o3", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "o4-mini", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "openai/o3-mini", providerKind: .openRouter))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-4.1", providerKind: .openRouter))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-6", providerKind: .openRouter))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "meta/llama-4-maverick", providerKind: .openRouter))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "text-embedding-3-large", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-image-2", providerKind: .openAI))
 
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-4-7", providerKind: .anthropic))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-sonnet-4-6", providerKind: .anthropic))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-haiku-4-5-20251001", providerKind: .anthropic))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-5", providerKind: .anthropic))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-4-6", providerKind: .anthropic))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "claude-sonnet-4-5", providerKind: .anthropic))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "claude-3-7-sonnet-20250219", providerKind: .anthropic))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "anthropic/claude-sonnet-4-5", providerKind: .openRouter))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-4-6", providerKind: .anthropic))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-sonnet-4-5", providerKind: .anthropic))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-3-7-sonnet-20250219", providerKind: .anthropic))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "anthropic/claude-sonnet-4-5", providerKind: .openRouter))
 
         #expect(CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-3.1-pro-preview",
@@ -723,17 +758,22 @@ struct CoreContractTests {
             providerKind: .gemini,
             supportedGenerationMethods: ["generateContent"]
         ))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+        #expect(CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-3-pro-preview",
             providerKind: .gemini,
             supportedGenerationMethods: ["generateContent"]
         ))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+        #expect(CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-2.5-pro",
             providerKind: .gemini,
             supportedGenerationMethods: ["generateContent"]
         ))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "google/gemini-2.5-pro", providerKind: .openRouter))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "google/gemini-2.5-pro", providerKind: .openRouter))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/text-embedding-004",
+            providerKind: .gemini,
+            supportedGenerationMethods: ["embedContent"]
+        ))
     }
 
     @Test
@@ -2982,6 +3022,28 @@ struct CoreContractTests {
             #expect(name == "calculator.slow")
             #expect(timeoutSeconds == 1)
         }
+    }
+
+    @Test
+    func downloadResumePlanUsesDurableOpenEndedRanges() {
+        let plan = ModelDownloadResumePlan(
+            expectedBytes: 695_283_921,
+            existingBytes: 64 * 1024 * 1024
+        )
+
+        #expect(plan.isComplete == false)
+        #expect(plan.resumeOffset == 67_108_864)
+        #expect(plan.rangeHeader == "bytes=67108864-")
+        #expect(plan.expectedBytes == 695_283_921)
+    }
+
+    @Test
+    func downloadResumePlanRecognizesCompletedFiles() {
+        let plan = ModelDownloadResumePlan(expectedBytes: 128, existingBytes: 128)
+
+        #expect(plan.isComplete)
+        #expect(plan.rangeHeader == nil)
+        #expect(plan.resumeOffset == 128)
     }
 
     @Test

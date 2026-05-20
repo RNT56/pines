@@ -357,6 +357,7 @@ final class PinesWorkflowState: ObservableObject {
     @Published var pendingMCPSamplingResultReview: MCPSamplingResultReview?
     @Published var mcpSamplingPromptDraft: String
     @Published var hapticSignal: PinesHapticSignal?
+    @Published var isErasingAllData: Bool
 
     init(
         serviceError: String? = nil,
@@ -366,7 +367,8 @@ final class PinesWorkflowState: ObservableObject {
         pendingMCPSamplingRequest: MCPSamplingRequest? = nil,
         pendingMCPSamplingResultReview: MCPSamplingResultReview? = nil,
         mcpSamplingPromptDraft: String = "",
-        hapticSignal: PinesHapticSignal? = nil
+        hapticSignal: PinesHapticSignal? = nil,
+        isErasingAllData: Bool = false
     ) {
         self.serviceError = serviceError
         self.pendingToolApproval = pendingToolApproval
@@ -376,5 +378,6 @@ final class PinesWorkflowState: ObservableObject {
         self.pendingMCPSamplingResultReview = pendingMCPSamplingResultReview
         self.mcpSamplingPromptDraft = mcpSamplingPromptDraft
         self.hapticSignal = hapticSignal
+        self.isErasingAllData = isErasingAllData
     }
 }

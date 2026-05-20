@@ -24,7 +24,8 @@ actor GRDBPinesStore:
     ProviderResearchRunRepository,
     MCPServerRepository,
     ModelDownloadRepository,
-    AuditEventRepository
+    AuditEventRepository,
+    AppDataResetRepository
 {
     let database: DatabasePool
     private let encoder = JSONEncoder()
@@ -150,7 +151,7 @@ actor GRDBPinesStore:
             try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
         }
 
-        try fileManager.replaceItemAt(url, withItemAt: encryptedURL, backupItemName: backupName)
+        _ = try fileManager.replaceItemAt(url, withItemAt: encryptedURL, backupItemName: backupName)
         try removeDatabaseFiles(at: backupURL)
         try removeDatabaseFiles(at: encryptedURL)
         try removeDatabaseSidecars(for: url)
@@ -202,6 +203,8 @@ actor GRDBPinesStore:
         "provider_model_capabilities",
         "provider_research_runs",
     ]
+
+    private static let userResetTables = plaintextMigrationTables
 
     private static let criticalMigrationTables = [
         "conversations",
@@ -333,6 +336,26 @@ actor GRDBPinesStore:
         }
 
         return migrator
+    }
+
+    func deleteAllUserRecords() async throws {
+        try await database.write { db in
+            try db.execute(sql: "PRAGMA foreign_keys = OFF")
+            defer {
+                try? db.execute(sql: "PRAGMA foreign_keys = ON")
+            }
+            for table in Self.userResetTables.reversed() {
+                guard try Self.tableExists(table, in: "main", db: db) else { continue }
+                try db.execute(sql: "DELETE FROM \(Self.quotedIdentifier(table))")
+            }
+            if try Self.tableExists("messages_fts", in: "main", db: db) {
+                try db.execute(sql: "DELETE FROM messages_fts")
+            }
+            if try Self.tableExists("vault_chunks_fts", in: "main", db: db) {
+                try db.execute(sql: "DELETE FROM vault_chunks_fts")
+            }
+        }
+        try Self.seedCuratedModels(in: database)
     }
 
     // MARK: - Conversations
