@@ -173,10 +173,6 @@ struct ArtifactsWorkspaceView: View {
             ArtifactsMediaWorkspace(providerScope: providerScope, selection: $selection, pendingConfirmation: $pendingConfirmation)
         case .research:
             ArtifactsResearchWorkspace(providerScope: providerScope, selection: $selection, pendingConfirmation: $pendingConfirmation)
-        case .storage:
-            ArtifactsStorageWorkspace(providerScope: providerScope, selection: $selection, pendingConfirmation: $pendingConfirmation)
-        case .jobs:
-            ArtifactsJobsWorkspace(providerScope: providerScope, selection: $selection, pendingConfirmation: $pendingConfirmation)
         }
     }
 
@@ -317,9 +313,9 @@ private struct ArtifactsLibraryWorkspace: View {
     @Binding var pendingConfirmation: ArtifactsConfirmation?
 
     private var summaries: [ArtifactsResourceSummary] {
-        (
-            ArtifactsWorkspaceDeriver.artifactSummaries(artifacts: providerState.providerArtifacts, filter: filter)
-            + ArtifactsWorkspaceDeriver.structuredOutputSummaries(outputs: providerState.providerStructuredOutputs, filter: filter)
+        ArtifactsWorkspaceDeriver.artifactSummaries(
+            artifacts: providerState.providerArtifacts.filter(\.isVisibleInArtifactsGallery),
+            filter: filter
         )
         .sorted { lhs, rhs in
             switch filter.sort {
@@ -340,11 +336,12 @@ private struct ArtifactsLibraryWorkspace: View {
             ArtifactsLibraryControls(filter: $filter)
             responsiveListAndDetail(
                 list: {
-                    ArtifactsResourceList(
+                    ArtifactsArtifactGallery(
                         summaries: summaries,
+                        artifacts: providerState.providerArtifacts,
                         selection: $selection,
                         emptyTitle: "No artifacts",
-                        emptyDetail: "Generated media, source-backed answers, transcripts, background results, and verified fields appear here."
+                        emptyDetail: "Deep Research reports, generated images, videos, speech, and other viewable media appear here."
                     )
                 },
                 detail: {
@@ -400,16 +397,13 @@ private struct ArtifactsLibraryControls: View {
     private let kinds = [
         "All kinds",
         "image",
+        "generated_image",
         "video",
         "audio",
+        "speech",
+        "deep_research_report",
         "transcription",
         "translation",
-        "speech",
-        "tool_output",
-        "hosted_tool_call",
-        "file_reference",
-        "structured_output",
-        "batch_result",
     ]
 
     var body: some View {
@@ -433,7 +427,7 @@ private struct ArtifactsLibraryControls: View {
                 }
             } label: {
                 ArtifactsMenuPill(
-                    title: "Kind: \((filter.kind ?? "All kinds").readableArtifactKind)",
+                    title: (filter.kind ?? "All kinds").readableArtifactKind,
                     systemImage: "tag",
                     tone: .info
                 )
@@ -477,7 +471,8 @@ private struct ArtifactsMediaWorkspace: View {
         let filter = ArtifactsResourceFilter(query: "", providerScope: providerScope, kind: nil, sort: .newest)
         return ArtifactsWorkspaceDeriver.artifactSummaries(
             artifacts: providerState.providerArtifacts.filter { artifact in
-                ["image", "video", "audio", "speech", "transcription", "translation", "generated_media", "media_operation", "partial_image"].contains(artifact.kind)
+                artifact.isVisibleInArtifactsGallery
+                    && ["image", "generated_image", "video", "audio", "speech", "transcription", "translation", "generated_media", "media_operation", "partial_image", "video_job"].contains(artifact.kind)
             },
             filter: filter
         )
@@ -529,26 +524,19 @@ private struct ArtifactsMediaWorkspace: View {
             .onChange(of: provider?.id) { _, _ in normalizeSelectedModel() }
             .onChange(of: mediaKind) { _, _ in normalizeSelectedModel() }
 
-            ArtifactsResourceList(
+            ArtifactsArtifactGallery(
                 summaries: mediaSummaries,
+                artifacts: providerState.providerArtifacts,
                 selection: $selection,
                 emptyTitle: "No media artifacts",
-                emptyDetail: "Generated images, videos, audio, and provider media operations appear here."
+                emptyDetail: "Generated images, videos, and speech appear here after creation."
             )
         }
     }
 
     @ViewBuilder
     private func providerRequirement(allowed: String) -> some View {
-        if let provider {
-            HStack(spacing: theme.spacing.xsmall) {
-                ArtifactsMenuPill(title: provider.displayName, systemImage: "cloud", tone: .info)
-                Text(provider.kind.pinesLifecycleTitle)
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .lineLimit(1)
-            }
-        } else {
+        if provider == nil {
             PinesEmptyState(title: "Choose a provider", detail: "Set the page provider scope to \(allowed) before creating media.", systemImage: "cloud")
                 .pinesSurface(.inset, padding: theme.spacing.small)
         }
@@ -1138,7 +1126,6 @@ private struct ArtifactsResearchWorkspace: View {
     let providerScope: ArtifactsProviderScope
     @Binding var selection: ArtifactsSelection?
     @Binding var pendingConfirmation: ArtifactsConfirmation?
-    @State private var title = ""
     @State private var prompt = ""
     @State private var modelID = "gpt-5.5-pro"
     @State private var depth: OpenAIDeepResearchDepth = .standard
@@ -1146,6 +1133,7 @@ private struct ArtifactsResearchWorkspace: View {
     @State private var isStarting = false
     @State private var followUpPrompt = ""
     @State private var isSendingFollowUp = false
+    @State private var isActivityExpanded = true
 
     private var provider: CloudProviderConfiguration? {
         settingsState.cloudProviders.provider(in: providerScope, allowed: [.openAI, .gemini])
@@ -1187,6 +1175,11 @@ private struct ArtifactsResearchWorkspace: View {
             researchComposer
                 .onAppear { normalizeSelectedModel() }
                 .onChange(of: provider?.id) { _, _ in normalizeSelectedModel() }
+                .onChange(of: selectedRun?.status) { _, status in
+                    if status?.providerIsTerminal == true {
+                        isActivityExpanded = false
+                    }
+                }
 
             if let run = selectedRun {
                 researchConsole(for: run)
@@ -1200,20 +1193,27 @@ private struct ArtifactsResearchWorkspace: View {
             }
 
             ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No research runs", emptyDetail: "Source-backed research runs appear here.")
+
+            if case .artifact = selection {
+                ArtifactsDetailPanel(
+                    selection: selection,
+                    providerState: providerState,
+                    onImportArtifact: { artifact in
+                        Task { await importArtifact(artifact) }
+                    },
+                    onDeleteArtifactRecord: { artifact in
+                        pendingConfirmation = .deleteArtifactRecord(artifact)
+                    }
+                )
+            }
         }
     }
 
     private var researchComposer: some View {
-        PinesCardSection("New Deep Research", subtitle: nil, systemImage: "doc.text.magnifyingglass") {
+        PinesCardSection("Research Chat", subtitle: nil, systemImage: "doc.text.magnifyingglass") {
             VStack(alignment: .leading, spacing: theme.spacing.small) {
                 HStack(spacing: theme.spacing.xsmall) {
-                    if let provider {
-                        ArtifactsMenuPill(title: provider.displayName, systemImage: "cloud", tone: .info)
-                        Text(provider.kind.pinesLifecycleTitle)
-                            .font(theme.typography.caption)
-                            .foregroundStyle(theme.colors.secondaryText)
-                            .lineLimit(1)
-                    } else {
+                    if provider == nil {
                         PinesStatusChip(status: .custom("Choose OpenAI or Gemini", .warning), compact: true)
                     }
                     Spacer(minLength: theme.spacing.small)
@@ -1224,40 +1224,32 @@ private struct ArtifactsResearchWorkspace: View {
                     .buttonStyle(.borderless)
                 }
 
-                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                    TextField("Title", text: $title)
-                        .pinesFieldChrome()
-
-                    HStack(spacing: theme.spacing.small) {
-                        Menu {
-                            ForEach(modelOptions) { option in
-                                Button {
-                                    modelID = option.id
-                                } label: {
-                                    if option.id == modelID {
-                                        Label(option.title, systemImage: "checkmark")
-                                    } else {
-                                        Text(option.title)
-                                    }
-                                }
-                            }
-                        } label: {
-                            ArtifactsMenuPill(
-                                title: selectedModelLabel,
-                                systemImage: "cpu",
-                                tone: modelOptions.first(where: { $0.id == modelID })?.isFromProviderCapability == true ? .success : .info
-                            )
-                        }
-                        .disabled(modelOptions.isEmpty)
-                        Spacer(minLength: 0)
-                    }
-                }
-
-                TextField("Ask a research question", text: $prompt, axis: .vertical)
+                TextField("What's today's research question about?", text: $prompt, axis: .vertical)
                     .lineLimit(3...7)
                     .pinesFieldChrome()
 
                 HStack(spacing: theme.spacing.xsmall) {
+                    Menu {
+                        ForEach(modelOptions) { option in
+                            Button {
+                                modelID = option.id
+                            } label: {
+                                if option.id == modelID {
+                                    Label(option.title, systemImage: "checkmark")
+                                } else {
+                                    Text(option.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        ArtifactsMenuPill(
+                            title: selectedModelLabel,
+                            systemImage: "cpu",
+                            tone: modelOptions.first(where: { $0.id == modelID })?.isFromProviderCapability == true ? .success : .info
+                        )
+                    }
+                    .disabled(modelOptions.isEmpty)
+
                     Menu {
                         ForEach(OpenAIDeepResearchDepth.allCases, id: \.self) { option in
                             Button {
@@ -1295,7 +1287,7 @@ private struct ArtifactsResearchWorkspace: View {
                     Button {
                         Task { await startRun() }
                     } label: {
-                        Label(isStarting ? "Starting" : "Start", systemImage: isStarting ? "hourglass" : "play.fill")
+                        Label(isStarting ? "Researching" : "Send", systemImage: isStarting ? "hourglass" : "paperplane.fill")
                     }
                     .disabled(provider == nil || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isStarting || modelID.isEmpty)
                     .pinesButtonStyle(.primary)
@@ -1322,7 +1314,6 @@ private struct ArtifactsResearchWorkspace: View {
                         PinesMetricPillGroup(items: [
                             .init("Status", value: run.status.readableArtifactKind, systemImage: "circle.dashed", tone: run.status.providerCloudStatus.tone),
                             .init("Sources", value: "\(sources.count)", systemImage: "quote.bubble", tone: .info),
-                            .init("Tools", value: "\(run.toolCallCount)", systemImage: "wrench.and.screwdriver", tone: .warning),
                         ], minimumWidth: 108)
                     }
                     Spacer(minLength: theme.spacing.small)
@@ -1341,15 +1332,13 @@ private struct ArtifactsResearchWorkspace: View {
 
                 ArtifactsResearchBubble(role: .user, title: "You", text: run.prompt)
 
-                ArtifactsResearchTimeline(events: events)
+                ArtifactsResearchActivityDisclosure(events: events, sources: sources, isExpanded: $isActivityExpanded)
 
                 if let finalReport {
                     ArtifactsResearchReportPreview(artifact: finalReport) {
                         selection = .artifact(finalReport.id)
                     }
                 }
-
-                ArtifactsResearchSourcesPanel(sources: sources)
 
                 HStack(alignment: .bottom, spacing: theme.spacing.small) {
                     TextField("Ask a follow-up or add clarification", text: $followUpPrompt, axis: .vertical)
@@ -1375,8 +1364,8 @@ private struct ArtifactsResearchWorkspace: View {
         isStarting = true
         defer { isStarting = false }
         do {
-            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let resolvedTitle = trimmedTitle.isEmpty ? "Deep research" : trimmedTitle
+            let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedTitle = Self.derivedResearchTitle(from: trimmedPrompt)
             let model = ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines))
             let vectorStoreIDs = providerState.providerVectorStores.filter { $0.providerID == provider.id }.map(\.id)
             let providerFileIDs = providerState.providerFiles.filter { $0.providerID == provider.id }.map(\.id)
@@ -1386,7 +1375,7 @@ private struct ArtifactsResearchWorkspace: View {
                     providerID: provider.id,
                     modelID: model,
                     title: resolvedTitle,
-                    prompt: prompt,
+                    prompt: trimmedPrompt,
                     depth: depth,
                     sourcePolicy: .webAndFiles(
                         vectorStoreIDs: vectorStoreIDs.map { OpenAIVectorStoreID(rawValue: $0) },
@@ -1401,7 +1390,7 @@ private struct ArtifactsResearchWorkspace: View {
                     providerKind: provider.kind,
                     modelID: model,
                     title: resolvedTitle,
-                    prompt: prompt,
+                    prompt: trimmedPrompt,
                     depth: depth.rawValue,
                     reportFormat: reportFormat.rawValue,
                     vectorStoreIDs: vectorStoreIDs,
@@ -1412,6 +1401,16 @@ private struct ArtifactsResearchWorkspace: View {
                 throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) Deep Research is not supported here.")
             }
             prompt = ""
+            isActivityExpanded = true
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func importArtifact(_ artifact: ProviderArtifactRecord) async {
+        do {
+            _ = try await appModel.importProviderArtifactToVault(id: artifact.id, services: services)
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -1506,6 +1505,15 @@ private struct ArtifactsResearchWorkspace: View {
         if !options.contains(where: { $0.id == modelID }) {
             modelID = options[0].id
         }
+    }
+
+    private static func derivedResearchTitle(from prompt: String) -> String {
+        let trimmed = prompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        guard !trimmed.isEmpty else { return "Deep research" }
+        let clipped = String(trimmed.prefix(72)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return clipped.last == "?" ? String(clipped.dropLast()) : clipped
     }
 }
 
@@ -1817,6 +1825,35 @@ private struct ArtifactsResearchTimeline: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.vertical, theme.spacing.xxsmall)
+            }
+        }
+        .pinesSurface(.inset, padding: theme.spacing.small)
+    }
+}
+
+private struct ArtifactsResearchActivityDisclosure: View {
+    @Environment(\.pinesTheme) private var theme
+    let events: [ArtifactsResearchTimelineEvent]
+    let sources: [ArtifactsResearchSource]
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                ArtifactsResearchTimeline(events: events)
+                ArtifactsResearchSourcesPanel(sources: sources)
+            }
+            .padding(.top, theme.spacing.xsmall)
+        } label: {
+            HStack(spacing: theme.spacing.xsmall) {
+                Label("Research Activity", systemImage: "safari")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.secondaryText)
+                Spacer(minLength: theme.spacing.small)
+                Text("\(sources.count) sources")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .monospacedDigit()
             }
         }
         .pinesSurface(.inset, padding: theme.spacing.small)

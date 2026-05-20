@@ -544,19 +544,26 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
     private func finalOutputText(from json: JSONValue?) -> String? {
         switch json {
         case let .object(object):
+            if let type = object.string(for: "type"),
+               ["web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "function_call", "computer_call"].contains(type) {
+                return nil
+            }
             if let outputText = object.string(for: "output_text"), !outputText.isEmpty {
                 return outputText
             }
-            if let text = object.string(for: "text"), !text.isEmpty {
+            if let type = object.string(for: "type"),
+               ["output_text", "text", "message"].contains(type),
+               let text = object.string(for: "text"),
+               !text.isEmpty {
                 return text
             }
-            if let content = object["content"] {
+            if object.string(for: "type") == "message", let content = object["content"] {
                 return finalOutputText(from: content)
             }
             if let output = object["output"] {
                 return finalOutputText(from: output)
             }
-            return object.values.compactMap(finalOutputText(from:)).joined(separator: "\n\n").nilIfEmpty
+            return nil
         case let .array(values):
             return values.compactMap(finalOutputText(from:)).joined(separator: "\n\n").nilIfEmpty
         case let .string(value):

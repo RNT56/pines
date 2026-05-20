@@ -1,5 +1,6 @@
 import SwiftUI
 import PinesCore
+import AVKit
 
 struct ArtifactsResourceDescriptor: Identifiable, Hashable {
     let id: String
@@ -166,8 +167,183 @@ struct ArtifactsResourceList: View {
     }
 }
 
+struct ArtifactsArtifactGallery: View {
+    @Environment(\.pinesTheme) private var theme
+    let summaries: [ArtifactsResourceSummary]
+    let artifacts: [ProviderArtifactRecord]
+    @Binding var selection: ArtifactsSelection?
+    var emptyTitle: String
+    var emptyDetail: String
+
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: 220), spacing: theme.spacing.small)]
+    }
+
+    var body: some View {
+        PinesCardSection("Gallery", subtitle: "Viewable reports and generated media.", systemImage: "rectangle.stack") {
+            if summaries.isEmpty {
+                PinesEmptyState(title: emptyTitle, detail: emptyDetail, systemImage: "rectangle.stack.badge.minus")
+                    .pinesSurface(.inset, padding: theme.spacing.small)
+            } else {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: theme.spacing.small) {
+                    ForEach(summaries) { summary in
+                        if let artifact = artifacts.first(where: { summary.selection == .artifact($0.id) }) {
+                            ArtifactsGalleryCard(
+                                artifact: artifact,
+                                summary: summary,
+                                isSelected: selection == summary.selection
+                            ) {
+                                selection = summary.selection
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ArtifactsGalleryCard: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.openURL) private var openURL
+    let artifact: ProviderArtifactRecord
+    let summary: ArtifactsResourceSummary
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            ArtifactsArtifactPreviewSurface(artifact: artifact, maxHeight: 170)
+
+            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                Text(summary.title)
+                    .font(theme.typography.callout.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(summary.kind.readableArtifactKind)
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: theme.spacing.xsmall) {
+                PinesStatusChip(status: summary.status, compact: true)
+                Spacer(minLength: 0)
+                if let url = artifact.galleryURL {
+                    Button {
+                        openURL(url)
+                    } label: {
+                        Label("Open", systemImage: "arrow.up.forward.app")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Open artifact")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
+        .padding(theme.spacing.small)
+        .background(theme.colors.elevatedSurface, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
+                .strokeBorder(isSelected ? theme.colors.accent.opacity(0.46) : theme.colors.controlBorder, lineWidth: isSelected ? theme.stroke.selected : theme.stroke.hairline)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+private struct ArtifactsArtifactPreviewSurface: View {
+    @Environment(\.pinesTheme) private var theme
+    let artifact: ProviderArtifactRecord
+    var maxHeight: CGFloat = 280
+
+    var body: some View {
+        Group {
+            switch artifact.galleryPresentation {
+            case .image:
+                if let url = artifact.galleryURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFit()
+                        case .failure:
+                            placeholder(title: "Image unavailable", systemImage: "photo")
+                        case .empty:
+                            ProgressView()
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                } else {
+                    placeholder(title: "Image", systemImage: "photo")
+                }
+            case .video:
+                if let url = artifact.galleryURL {
+                    VideoPlayer(player: AVPlayer(url: url))
+                } else {
+                    placeholder(title: "Video", systemImage: "film")
+                }
+            case .audio:
+                if let url = artifact.galleryURL {
+                    VideoPlayer(player: AVPlayer(url: url))
+                } else {
+                    placeholder(title: "Audio", systemImage: "waveform")
+                }
+            case .report:
+                reportPreview
+            case .metadata:
+                placeholder(title: artifact.kind.readableArtifactKind, systemImage: artifact.kind.providerArtifactSystemImage)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 140, maxHeight: maxHeight)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+    }
+
+    private var reportPreview: some View {
+        ScrollView {
+            Text(reportPreviewText)
+                .font(.system(.caption, design: .default))
+                .foregroundStyle(theme.colors.primaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(theme.spacing.small)
+        }
+    }
+
+    private var reportPreviewText: String {
+        if let text = artifact.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            return String(text.prefix(1200))
+        }
+        if let content = artifact.content {
+            return String(content.prettyJSONString.prefix(1200))
+        }
+        return artifact.fileName ?? artifact.id
+    }
+
+    private func placeholder(title: String, systemImage: String) -> some View {
+        VStack(spacing: theme.spacing.xsmall) {
+            Image(systemName: systemImage)
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(theme.colors.secondaryText)
+            Text(title)
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.secondaryText)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 struct ArtifactsDetailPanel: View {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.openURL) private var openURL
     let selection: ArtifactsSelection?
     let providerState: PinesProviderLifecycleState
     var onImportArtifact: (ProviderArtifactRecord) -> Void
@@ -254,6 +430,17 @@ struct ArtifactsDetailPanel: View {
                         perform: { onImportArtifact(artifact) }
                     ),
                     ArtifactsResourceAction(
+                        id: "open-\(artifact.id)",
+                        title: "Open",
+                        systemImage: "arrow.up.forward.app",
+                        isDisabled: artifact.galleryURL == nil,
+                        perform: {
+                            if let url = artifact.galleryURL {
+                                openURL(url)
+                            }
+                        }
+                    ),
+                    ArtifactsResourceAction(
                         id: "delete-local-\(artifact.id)",
                         title: "Delete local record",
                         systemImage: "trash",
@@ -269,7 +456,11 @@ struct ArtifactsDetailPanel: View {
 
     @ViewBuilder
     private func artifactPreview(_ artifact: ProviderArtifactRecord) -> some View {
-        if let text = artifact.text, !text.isEmpty {
+        if artifact.galleryPresentation != .metadata {
+            previewSection(title: artifact.galleryPresentation.previewTitle, systemImage: artifact.kind.providerArtifactSystemImage) {
+                ArtifactsArtifactPreviewSurface(artifact: artifact, maxHeight: 320)
+            }
+        } else if let text = artifact.text, !text.isEmpty {
             previewSection(title: "Text Preview", systemImage: "text.alignleft") {
                 Text(text)
                     .font(.system(.caption, design: .monospaced))
@@ -284,24 +475,6 @@ struct ArtifactsDetailPanel: View {
                     .foregroundStyle(theme.colors.primaryText)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } else if artifact.contentType?.lowercased().hasPrefix("image/") == true, let url = artifact.localURL {
-            previewSection(title: "Image Preview", systemImage: "photo") {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxHeight: 280)
-                    case .failure:
-                        PinesEmptyState(title: "Preview unavailable", detail: url.lastPathComponent, systemImage: "photo")
-                    case .empty:
-                        ProgressView()
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
             }
         }
     }
@@ -655,7 +828,7 @@ extension ArtifactsResourceDescriptor {
         self.init(
             id: "artifact-\(artifact.id)",
             title: artifact.fileName ?? artifact.kind.readableArtifactKind,
-            detail: artifact.responseID ?? artifact.toolCallID ?? artifact.providerFileID ?? artifact.id,
+            detail: artifact.galleryDetail,
             systemImage: artifact.kind.providerArtifactSystemImage,
             status: artifact.responseID == nil ? .custom("Stored", .success) : .custom("Linked", .accent),
             secondaryStatus: artifact.byteCount.map { .custom(providerByteCountLabel($0), .neutral) },
@@ -674,7 +847,6 @@ extension ArtifactsResourceDescriptor {
                 .init("Kind", artifact.kind.readableArtifactKind, systemImage: "tag", tone: .info),
                 .init("Retention", artifact.retentionLabel.title, systemImage: "externaldrive.badge.icloud", tone: artifact.retentionLabel.tone),
                 .init("Response ID", artifact.responseID, systemImage: "bubble.left.and.text.bubble.right", tone: .neutral),
-                .init("Tool Call ID", artifact.toolCallID, systemImage: "wrench.and.screwdriver", tone: .neutral),
                 .init("Provider File ID", artifact.providerFileID, systemImage: "doc", tone: .neutral),
                 .init("Content Type", artifact.contentType, systemImage: "tag", tone: .neutral),
                 .init("Size", artifact.byteCount.map(providerByteCountLabel), systemImage: "internaldrive", tone: .neutral),
@@ -1225,6 +1397,18 @@ private extension ArtifactsRetentionLabel {
             .localOnly
         case .remoteLink:
             .inlineThisTurn
+        }
+    }
+}
+
+private extension ArtifactsGalleryPresentation {
+    var previewTitle: String {
+        switch self {
+        case .image: "Image Preview"
+        case .video: "Video Preview"
+        case .audio: "Audio Preview"
+        case .report: "Report Preview"
+        case .metadata: "Preview"
         }
     }
 }

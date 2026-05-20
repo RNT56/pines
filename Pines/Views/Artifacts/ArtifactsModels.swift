@@ -6,8 +6,10 @@ enum ArtifactsWorkspaceMode: String, CaseIterable, Identifiable, Hashable {
     case library
     case generate
     case research
-    case storage
-    case jobs
+
+    static var allCases: [ArtifactsWorkspaceMode] {
+        [.library, .generate, .research]
+    }
 
     var id: String { rawValue }
 
@@ -16,8 +18,6 @@ enum ArtifactsWorkspaceMode: String, CaseIterable, Identifiable, Hashable {
         case .library: "Library"
         case .generate: "Create"
         case .research: "Research"
-        case .storage: "Cloud Copies"
-        case .jobs: "Background"
         }
     }
 
@@ -26,18 +26,14 @@ enum ArtifactsWorkspaceMode: String, CaseIterable, Identifiable, Hashable {
         case .library: "rectangle.stack"
         case .generate: "sparkles"
         case .research: "doc.text.magnifyingglass"
-        case .storage: "externaldrive.badge.icloud"
-        case .jobs: "tray.full"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .library: "Images, audio, documents, reports"
+        case .library: "Reports and generated media"
         case .generate: "Images, video, and speech"
-        case .research: "Source-backed reports"
-        case .storage: "Reusable cloud context"
-        case .jobs: "Long-running processing"
+        case .research: "Ask, trace, follow up"
         }
     }
 }
@@ -175,7 +171,7 @@ struct ArtifactsMetricCounts: Hashable {
     var capabilities: Int
 
     var providerResources: Int {
-        files + artifacts + structuredOutputs + caches + batches + researchRuns + liveSessions + capabilities
+        artifacts + researchRuns
     }
 }
 
@@ -294,7 +290,7 @@ enum ArtifactsWorkspaceDeriver {
                 ArtifactsResourceSummary(
                     selection: .artifact(artifact.id),
                     title: artifact.fileName ?? artifact.kind.readableArtifactKind,
-                    detail: artifact.responseID ?? artifact.toolCallID ?? artifact.providerFileID ?? artifact.id,
+                    detail: artifact.galleryDetail,
                     providerID: artifact.providerID,
                     providerKind: artifact.providerKind,
                     kind: artifact.kind,
@@ -581,33 +577,10 @@ enum ArtifactsWorkspaceDeriver {
             ))
         }
 
-        let hostedToolEvents = run.providerMetadata.hostedToolAuditEntries.prefix(8).map { entry in
-            ArtifactsResearchTimelineEvent(
-                id: "tool-\(run.id)-\(entry.id)",
-                title: entry.kind.deepResearchDisplayTitle,
-                detail: entry.name ?? entry.serverLabel ?? entry.status?.rawValue ?? entry.type,
-                systemImage: entry.kind.deepResearchSystemImage,
-                tone: entry.status?.rawValue.providerCloudStatus.tone ?? .warning
-            )
-        }
-        events.append(contentsOf: hostedToolEvents)
-
-        for (index, object) in decodedJSONObjects(run.providerMetadata["gemini.deep_research.tool_calls_json"]).prefix(8).enumerated() {
-            let type = object.string(for: "type") ?? "tool"
-            let name = object.string(for: "name") ?? object.string(for: "language") ?? type
-            events.append(.init(
-                id: "gemini-tool-\(run.id)-\(index)-\(name)",
-                title: type.readableArtifactKind,
-                detail: name,
-                systemImage: "wrench.and.screwdriver",
-                tone: .warning
-            ))
-        }
-
-        for source in researchSources(for: run).prefix(5) {
+        for source in researchSources(for: run).prefix(8) {
             events.append(.init(
                 id: "source-event-\(source.id)",
-                title: "Source captured",
+                title: "Visited source",
                 detail: source.title,
                 systemImage: source.systemImage,
                 tone: source.tone
@@ -894,13 +867,60 @@ extension ProviderArtifactRecord {
         localURL != nil || text != nil || content != nil
     }
 
+    var isVisibleInArtifactsGallery: Bool {
+        if isInternalLifecycleArtifact { return false }
+        return galleryPresentation != .metadata
+            || kind.caseInsensitiveCompare("deep_research_report") == .orderedSame
+            || kind.caseInsensitiveCompare("research_report") == .orderedSame
+    }
+
+    var galleryPresentation: ArtifactsGalleryPresentation {
+        let normalizedKind = kind.lowercased()
+        let normalizedType = contentType?.lowercased() ?? ""
+        if normalizedKind.contains("research_report") || normalizedType.hasPrefix("text/markdown") {
+            return .report
+        }
+        if normalizedType.hasPrefix("image/") || ["image", "generated_image", "partial_image"].contains(normalizedKind) {
+            return .image
+        }
+        if normalizedType.hasPrefix("video/") || normalizedKind.contains("video") {
+            return .video
+        }
+        if normalizedType.hasPrefix("audio/") || ["audio", "speech", "transcription", "translation"].contains(normalizedKind) {
+            return .audio
+        }
+        if text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return .report
+        }
+        return .metadata
+    }
+
+    var galleryURL: URL? {
+        localURL ?? remoteURL
+    }
+
+    var galleryDetail: String {
+        if let fileName, !fileName.isEmpty { return fileName }
+        if let responseID, !responseID.isEmpty { return responseID }
+        if let providerFileID, !providerFileID.isEmpty { return providerFileID }
+        return id
+    }
+
+    private var isInternalLifecycleArtifact: Bool {
+        let normalizedKind = kind.lowercased()
+        if ["tool_output", "hosted_tool_call", "file_reference", "container_file", "code_execution", "batch_result", "deep_research_output"].contains(normalizedKind) {
+            return true
+        }
+        if normalizedKind.hasPrefix("batch_") { return true }
+        return false
+    }
+
     var searchText: String {
         [
             id,
             providerID?.rawValue,
             providerKind.rawValue,
             responseID,
-            toolCallID,
             providerFileID,
             kind,
             fileName,
@@ -911,6 +931,14 @@ extension ProviderArtifactRecord {
         .compactMap { $0 }
         .joined(separator: " ")
     }
+}
+
+enum ArtifactsGalleryPresentation: Hashable {
+    case image
+    case video
+    case audio
+    case report
+    case metadata
 }
 
 extension ProviderFileRecord {

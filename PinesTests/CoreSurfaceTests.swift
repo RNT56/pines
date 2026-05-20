@@ -87,17 +87,24 @@ final class CoreSurfaceTests: XCTestCase {
             encoding: .utf8
         )
 
-        for mode in ["Library", "Generate", "Research", "Storage", "Jobs"] {
+        for mode in ["Library", "Create", "Research"] {
             XCTAssertTrue(workspace.contains(mode), "Missing artifacts workspace mode \(mode)")
         }
+        XCTAssertFalse(workspace.contains("case .storage"))
+        XCTAssertFalse(workspace.contains("case .jobs"))
         XCTAssertTrue(workspace.contains("ArtifactsMediaModelOption"))
         XCTAssertTrue(workspace.contains("ArtifactsResearchModelOption"))
         XCTAssertTrue(workspace.contains("ArtifactsWorkspaceModePicker"))
         XCTAssertTrue(workspace.contains("Research Console"))
+        XCTAssertTrue(workspace.contains("Research Chat"))
+        XCTAssertTrue(workspace.contains("What's today's research question about?"))
+        XCTAssertTrue(workspace.contains("derivedResearchTitle"))
         XCTAssertFalse(workspace.contains("LazyVGrid(columns: [GridItem(.adaptive(minimum: 148)"))
+        XCTAssertTrue(workspace.contains("ArtifactsArtifactGallery"))
         XCTAssertTrue(workspace.contains("ArtifactsMenuPill"))
         XCTAssertTrue(workspace.contains("This removes only Pines' local lifecycle record"))
         XCTAssertTrue(models.contains("enum ArtifactsWorkspaceMode"))
+        XCTAssertTrue(models.contains("isVisibleInArtifactsGallery"))
         XCTAssertTrue(models.contains("static func counts"))
         XCTAssertTrue(models.contains("researchTimeline"))
         XCTAssertTrue(models.contains("researchSources"))
