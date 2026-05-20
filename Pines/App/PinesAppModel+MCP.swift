@@ -251,6 +251,9 @@ extension PinesAppModel {
         if providerID == services.mlxRuntime.localProviderID {
             return "Local"
         }
+        if providerID == ManagedCloudPolicy.providerID {
+            return "Pro Cloud"
+        }
         return cloudProviders.first(where: { $0.id == providerID })?.displayName ?? providerID.rawValue
     }
 
@@ -298,10 +301,16 @@ extension PinesAppModel {
         if providerID == services.mlxRuntime.localProviderID {
             return nil
         }
+        if providerID == ManagedCloudPolicy.providerID {
+            return .custom
+        }
         return cloudProviders.first(where: { $0.id == providerID })?.kind
     }
 
     func displayName(for modelID: ModelID, providerID: ProviderID) -> String {
+        if providerID == ManagedCloudPolicy.providerID {
+            return modelID == ManagedCloudPolicy.defaultModelID ? "Automatic" : Self.friendlyModelName(modelID.rawValue)
+        }
         if let install = installedModel(for: modelID), install.modelID == modelID {
             return Self.localModelDisplayName(install)
         }

@@ -14,10 +14,10 @@ enum ArtifactsWorkspaceMode: String, CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
         case .library: "Library"
-        case .generate: "Generate"
+        case .generate: "Create"
         case .research: "Research"
-        case .storage: "Storage"
-        case .jobs: "Jobs"
+        case .storage: "Cloud Copies"
+        case .jobs: "Background"
         }
     }
 
@@ -33,11 +33,11 @@ enum ArtifactsWorkspaceMode: String, CaseIterable, Identifiable, Hashable {
 
     var subtitle: String {
         switch self {
-        case .library: "Artifacts and structured outputs"
+        case .library: "Images, audio, documents, reports"
         case .generate: "Images, video, and speech"
-        case .research: "Deep research workspace"
-        case .storage: "Files, vector stores, caches"
-        case .jobs: "Batches and sessions"
+        case .research: "Source-backed reports"
+        case .storage: "Reusable cloud context"
+        case .jobs: "Long-running processing"
         }
     }
 }
@@ -976,15 +976,15 @@ extension ProviderModelCapabilityRecord {
 extension ProviderCapabilities {
     var artifactsSummary: String {
         var values = [String]()
-        if files { values.append("Files") }
-        if hostedTools { values.append("Hosted tools") }
-        if structuredOutputs { values.append("Structured") }
+        if files { values.append("Cloud copies") }
+        if hostedTools { values.append("Source-backed") }
+        if structuredOutputs { values.append("Verified fields") }
         if generatedImages { values.append("Images") }
         if generatedAudio || audioOutputs { values.append("Audio") }
         if generatedVideo || videoOutputs { values.append("Video") }
-        if contextCache { values.append("Context") }
-        if live { values.append("Realtime") }
-        if batch { values.append("Batches") }
+        if contextCache { values.append("Reusable context") }
+        if live { values.append("Live") }
+        if batch { values.append("Background") }
         return values.isEmpty ? "Metadata" : values.joined(separator: ", ")
     }
 }

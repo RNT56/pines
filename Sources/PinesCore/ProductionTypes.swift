@@ -1480,9 +1480,15 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let defaultAnthropicThinkingBudgetTokens = 4096
     public static let defaultGeminiThinkingLevel: GeminiThinkingLevel = .medium
     public static let defaultCloudWebSearchMode: CloudWebSearchMode = .off
+    public static let defaultCloudAccessMode: CloudAccessMode = .byok
+    public static let defaultProEntitlementStatus: ProEntitlementStatus = .inactive
+    public static let defaultManagedCloudConsent: ManagedCloudConsent = .notAsked
 
     public var securityConfiguration: SecurityConfiguration
     public var executionMode: AgentExecutionMode
+    public var cloudAccessMode: CloudAccessMode
+    public var proEntitlementStatus: ProEntitlementStatus
+    public var managedCloudConsent: ManagedCloudConsent
     public var storeConfiguration: LocalStoreConfiguration
     public var defaultProviderID: ProviderID?
     public var defaultModelID: ModelID?
@@ -1510,6 +1516,9 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case securityConfiguration
         case executionMode
+        case cloudAccessMode
+        case proEntitlementStatus
+        case managedCloudConsent
         case storeConfiguration
         case defaultProviderID
         case defaultModelID
@@ -1538,6 +1547,9 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public init(
         securityConfiguration: SecurityConfiguration = .init(),
         executionMode: AgentExecutionMode = .preferLocal,
+        cloudAccessMode: CloudAccessMode = Self.defaultCloudAccessMode,
+        proEntitlementStatus: ProEntitlementStatus = Self.defaultProEntitlementStatus,
+        managedCloudConsent: ManagedCloudConsent = Self.defaultManagedCloudConsent,
         storeConfiguration: LocalStoreConfiguration = .init(),
         defaultProviderID: ProviderID? = nil,
         defaultModelID: ModelID? = nil,
@@ -1564,6 +1576,9 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     ) {
         self.securityConfiguration = securityConfiguration
         self.executionMode = executionMode
+        self.cloudAccessMode = cloudAccessMode
+        self.proEntitlementStatus = proEntitlementStatus
+        self.managedCloudConsent = managedCloudConsent
         self.storeConfiguration = storeConfiguration
         self.defaultProviderID = defaultProviderID
         self.defaultModelID = defaultModelID
@@ -1593,6 +1608,9 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         securityConfiguration = try container.decodeIfPresent(SecurityConfiguration.self, forKey: .securityConfiguration) ?? .init()
         executionMode = try container.decodeIfPresent(AgentExecutionMode.self, forKey: .executionMode) ?? .preferLocal
+        cloudAccessMode = try container.decodeIfPresent(CloudAccessMode.self, forKey: .cloudAccessMode) ?? Self.defaultCloudAccessMode
+        proEntitlementStatus = try container.decodeIfPresent(ProEntitlementStatus.self, forKey: .proEntitlementStatus) ?? Self.defaultProEntitlementStatus
+        managedCloudConsent = try container.decodeIfPresent(ManagedCloudConsent.self, forKey: .managedCloudConsent) ?? Self.defaultManagedCloudConsent
         storeConfiguration = try container.decodeIfPresent(LocalStoreConfiguration.self, forKey: .storeConfiguration) ?? .init()
         defaultProviderID = try container.decodeIfPresent(ProviderID.self, forKey: .defaultProviderID)
         defaultModelID = try container.decodeIfPresent(ModelID.self, forKey: .defaultModelID)

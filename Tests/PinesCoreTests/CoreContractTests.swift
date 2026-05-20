@@ -65,6 +65,74 @@ struct CoreContractTests {
     }
 
     @Test
+    func executionRouterUsesManagedProOnlyWhenAccessModeAllowsIt() {
+        let managedID = ManagedCloudPolicy.providerID
+        let byokID = ProviderID(rawValue: "byok")
+        let decision = ExecutionRouter().routeChat(
+            mode: .cloudAllowed,
+            cloudAccessMode: .managedPro,
+            local: nil,
+            managedCloud: (managedID, ManagedCloudPolicy.defaultCapabilities),
+            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+            requiredInputs: .init(),
+            requiresTools: true
+        )
+
+        #expect(decision.destination == .cloud(managedID))
+    }
+
+    @Test
+    func executionRouterDoesNotUseBYOKAsImplicitManagedProFallback() {
+        let byokID = ProviderID(rawValue: "byok")
+        let decision = ExecutionRouter().routeChat(
+            mode: .cloudRequired,
+            cloudAccessMode: .managedProWithBYOKOverride,
+            local: nil,
+            managedCloud: nil,
+            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+            requiredInputs: .init(),
+            requiresTools: true
+        )
+
+        #expect(decision.destination == .denied(reason: .unsupportedCapability("No configured cloud provider satisfies this request.")))
+    }
+
+    @Test
+    func executionRouterUsesExplicitBYOKOverrideBeforeManagedPro() {
+        let managedID = ManagedCloudPolicy.providerID
+        let byokID = ProviderID(rawValue: "byok")
+        let decision = ExecutionRouter().routeChat(
+            mode: .cloudRequired,
+            cloudAccessMode: .managedProWithBYOKOverride,
+            local: nil,
+            managedCloud: (managedID, ManagedCloudPolicy.defaultCapabilities),
+            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+            requiredInputs: .init(),
+            requiresTools: true,
+            prefersBYOKOverride: true
+        )
+
+        #expect(decision.destination == .cloud(byokID))
+    }
+
+    @Test
+    func executionRouterKeepsBYOKAvailableForProUsers() {
+        let managedID = ManagedCloudPolicy.providerID
+        let byokID = ProviderID(rawValue: "byok")
+        let decision = ExecutionRouter().routeChat(
+            mode: .cloudAllowed,
+            cloudAccessMode: .byok,
+            local: nil,
+            managedCloud: (managedID, ManagedCloudPolicy.defaultCapabilities),
+            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+            requiredInputs: .init(),
+            requiresTools: true
+        )
+
+        #expect(decision.destination == .cloud(byokID))
+    }
+
+    @Test
     func providerInputRequirementsRouteByAttachmentSupport() {
         let imageRequirements = ProviderInputRequirements(
             messages: [
@@ -1415,8 +1483,14 @@ struct CoreContractTests {
         #expect(decoded.anthropicTokenCountPreflightEnabled == false)
         #expect(decoded.geminiThinkingLevel == .medium)
         #expect(decoded.cloudWebSearchMode == .off)
+        #expect(decoded.cloudAccessMode == .byok)
+        #expect(decoded.proEntitlementStatus == .inactive)
+        #expect(decoded.managedCloudConsent == .notAsked)
 
         let clamped = AppSettingsSnapshot(
+            cloudAccessMode: .managedPro,
+            proEntitlementStatus: .active,
+            managedCloudConsent: .optedIn,
             cloudMaxCompletionTokens: 1,
             localMaxCompletionTokens: 1_000_000,
             localMaxContextTokens: 1,
@@ -1436,6 +1510,9 @@ struct CoreContractTests {
         #expect(clamped.anthropicTokenCountPreflightEnabled == true)
         #expect(clamped.geminiThinkingLevel == .high)
         #expect(clamped.cloudWebSearchMode == .automatic)
+        #expect(clamped.cloudAccessMode == .managedPro)
+        #expect(clamped.proEntitlementStatus == .active)
+        #expect(clamped.managedCloudConsent == .optedIn)
 
         let legacySampling = try JSONDecoder().decode(ChatSampling.self, from: Data(#"{"maxTokens":256,"temperature":0.2}"#.utf8))
         #expect(legacySampling.maxTokens == 256)

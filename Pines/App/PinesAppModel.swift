@@ -219,6 +219,21 @@ final class PinesAppModel: ObservableObject {
         set { settingsState.executionMode = newValue }
     }
 
+    var cloudAccessMode: CloudAccessMode {
+        get { settingsState.cloudAccessMode }
+        set { settingsState.cloudAccessMode = newValue }
+    }
+
+    var proEntitlementStatus: ProEntitlementStatus {
+        get { settingsState.proEntitlementStatus }
+        set { settingsState.proEntitlementStatus = newValue }
+    }
+
+    var managedCloudConsent: ManagedCloudConsent {
+        get { settingsState.managedCloudConsent }
+        set { settingsState.managedCloudConsent = newValue }
+    }
+
     var storeConfiguration: LocalStoreConfiguration {
         get { settingsState.storeConfiguration }
         set { settingsState.storeConfiguration = newValue }
@@ -809,6 +824,9 @@ final class PinesAppModel: ObservableObject {
         settingsSections: [PinesSettingsSection] = PinesStaticSettings.sections,
         securityConfiguration: SecurityConfiguration = .init(),
         executionMode: AgentExecutionMode = .preferLocal,
+        cloudAccessMode: CloudAccessMode = AppSettingsSnapshot.defaultCloudAccessMode,
+        proEntitlementStatus: ProEntitlementStatus = AppSettingsSnapshot.defaultProEntitlementStatus,
+        managedCloudConsent: ManagedCloudConsent = AppSettingsSnapshot.defaultManagedCloudConsent,
         storeConfiguration: LocalStoreConfiguration = .init(),
         selectedThemeTemplate: PinesThemeTemplate = .evergreen,
         interfaceMode: PinesInterfaceMode = .system,
@@ -829,6 +847,9 @@ final class PinesAppModel: ObservableObject {
         self.settingsSections = settingsSections
         self.securityConfiguration = securityConfiguration
         self.executionMode = executionMode
+        self.cloudAccessMode = cloudAccessMode
+        self.proEntitlementStatus = proEntitlementStatus
+        self.managedCloudConsent = managedCloudConsent
         self.storeConfiguration = storeConfiguration
         self.selectedThemeTemplate = selectedThemeTemplate
         self.interfaceMode = interfaceMode
@@ -884,12 +905,14 @@ final class PinesAppModel: ObservableObject {
                 let settings = try await settingsRepository.loadSettings()
                 applySettings(settings)
             }
+            await refreshProEntitlementIfConfigured(services: services)
 
             await services.securityResetCoordinator.runIfNeeded()
             if let settingsRepository = services.settingsRepository {
                 let settings = try await settingsRepository.loadSettings()
                 applySettings(settings)
             }
+            await refreshProEntitlementIfConfigured(services: services)
 
             if let cloudProviderRepository = services.cloudProviderRepository {
                 setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
@@ -922,6 +945,7 @@ final class PinesAppModel: ObservableObject {
     private func refreshPostBootstrapState(services: PinesAppServices) async {
         do {
             shouldEnrichRuntimeModelPreviews = true
+            await refreshProEntitlementIfConfigured(services: services)
             try await refreshModelPreviews(services: services, enrichRuntime: true)
             await refreshCloudModelCatalog(services: services)
             await refreshVaultEmbeddingState(services: services)
@@ -940,6 +964,7 @@ final class PinesAppModel: ObservableObject {
                 let settings = try await settingsRepository.loadSettings()
                 applySettings(settings)
             }
+            await refreshProEntitlementIfConfigured(services: services)
 
             try await refreshModelPreviews(services: services)
             await normalizeDefaultModelIfNeeded(services: services)
@@ -987,6 +1012,30 @@ final class PinesAppModel: ObservableObject {
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    private func refreshProEntitlementIfConfigured(services: PinesAppServices) async {
+        guard services.proEntitlementService.isConfigured else { return }
+        var status = await services.proEntitlementService.currentStatus()
+        if status.enablesManagedCloud,
+           services.managedCloudService.isConfigured,
+           let transactionID = await services.proEntitlementService.verifiedTransactionID() {
+            do {
+                status = try await services.managedCloudService.validateEntitlement(transactionID: transactionID)
+            } catch {
+                recordRecoverableIssue("pro.entitlement_validation", error: error, services: services)
+            }
+        }
+
+        guard status != proEntitlementStatus else { return }
+        setIfChanged(\.proEntitlementStatus, status)
+        if !status.enablesManagedCloud, cloudAccessMode.usesManagedCloud {
+            setIfChanged(\.cloudAccessMode, .byok)
+        }
+        if status == .revoked {
+            setIfChanged(\.managedCloudConsent, .revoked)
+        }
+        await saveSettings(services: services)
     }
 
     private func refreshConversationPreviews(services: PinesAppServices) async {
@@ -1492,6 +1541,9 @@ final class PinesAppModel: ObservableObject {
     private func applySettings(_ settings: AppSettingsSnapshot) {
         setIfChanged(\.securityConfiguration, settings.securityConfiguration)
         setIfChanged(\.executionMode, settings.executionMode)
+        setIfChanged(\.cloudAccessMode, settings.cloudAccessMode)
+        setIfChanged(\.proEntitlementStatus, settings.proEntitlementStatus)
+        setIfChanged(\.managedCloudConsent, settings.managedCloudConsent)
         setIfChanged(\.storeConfiguration, settings.storeConfiguration)
         setIfChanged(\.defaultProviderID, settings.defaultProviderID)
         setIfChanged(\.defaultModelID, settings.defaultModelID)
@@ -2194,6 +2246,18 @@ final class PinesAppModel: ObservableObject {
             let vaultContext = userContent.isEmpty ? nil : await vaultContextMessage(for: userContent, services: services)
             let mcpContext = await mcpResourceContextMessages(services: services)
             let routeRequiredInputs = ProviderInputRequirements(messages: messages + mcpContext)
+            let managedEntitlement = settings?.proEntitlementStatus ?? proEntitlementStatus
+            let managedConsent = settings?.managedCloudConsent ?? managedCloudConsent
+            let managedAvailability = services.managedCloudService.availability(
+                entitlement: managedEntitlement,
+                consent: managedConsent
+            )
+            let effectiveCloudAccessMode = ManagedCloudPolicy.effectiveAccessMode(
+                preferredMode: settings?.cloudAccessMode ?? cloudAccessMode,
+                entitlement: managedEntitlement,
+                consent: managedConsent,
+                gatewayConfigured: services.managedCloudService.isConfigured
+            )
             let requestedSelection = selection(for: conversationID, services: services)
             let selectedProvider: any InferenceProvider
             let selectedProviderID: ProviderID
@@ -2220,6 +2284,21 @@ final class PinesAppModel: ObservableObject {
                     selectedProviderID = services.mlxRuntime.localProviderID
                     selectedModelID = localInstall.modelID
                     isLocalRun = true
+                } else if requestedSelection.providerID == ManagedCloudPolicy.providerID {
+                    let managedProvider = ManagedCloudInferenceProvider(service: services.managedCloudService, availability: managedAvailability)
+                    guard managedAvailability.supports(.chat) else {
+                        failPendingChatStart("Pro Cloud requires an active subscription, cloud opt-in, and a configured managed gateway.", runToken: runToken)
+                        return
+                    }
+                    guard routeRequiredInputs.isSatisfied(by: managedProvider.capabilities),
+                          !requiresTools || managedProvider.capabilities.toolCalling
+                    else {
+                        failPendingChatStart("Pro Cloud does not support this request.", runToken: runToken)
+                        return
+                    }
+                    selectedProvider = managedProvider
+                    selectedProviderID = ManagedCloudPolicy.providerID
+                    selectedModelID = requestedSelection.modelID
                 } else {
                     guard let cloudProvider = cloudProviders.first(where: { $0.id == requestedSelection.providerID }) else {
                         failPendingChatStart("The selected cloud provider is no longer configured.", runToken: runToken)
@@ -2237,7 +2316,7 @@ final class PinesAppModel: ObservableObject {
                 }
             } else {
                 let localInstall = preferredInstalledTextModel(for: conversationID)
-                let cloudCandidate = cloudProviders
+                let byokCandidate = cloudProviders
                     .first { $0.enabledForAgents && $0.capabilities.textGeneration }
                     .map { configuration in
                         (
@@ -2245,13 +2324,18 @@ final class PinesAppModel: ObservableObject {
                             BYOKCloudInferenceProvider(configuration: configuration, secretStore: services.secretStore)
                         )
                     }
+                let managedProvider = managedAvailability.supports(.chat)
+                    ? ManagedCloudInferenceProvider(service: services.managedCloudService, availability: managedAvailability)
+                    : nil
                 let localCandidate = isAgentMode && !Self.isLikelyAgentInstructModel(localInstall)
                     ? nil
                     : localRoutingCandidate(for: localInstall, services: services)
                 let route = services.executionRouter.routeChat(
                     mode: executionMode,
+                    cloudAccessMode: effectiveCloudAccessMode,
                     local: localCandidate,
-                    cloud: cloudCandidate.map { ($0.1.id, $0.1.capabilities) },
+                    managedCloud: managedProvider.map { ($0.id, $0.capabilities) },
+                    byokCloud: byokCandidate.map { ($0.1.id, $0.1.capabilities) },
                     requiredInputs: routeRequiredInputs,
                     requiresTools: requiresTools
                 )
@@ -2270,17 +2354,27 @@ final class PinesAppModel: ObservableObject {
                     selectedModelID = localInstall.modelID
                     isLocalRun = true
                 case let .cloud(providerID):
-                    guard let cloudCandidate else {
-                        failPendingChatStart("No enabled cloud provider is configured for agents.", runToken: runToken)
-                        return
+                    if providerID == ManagedCloudPolicy.providerID {
+                        guard let managedProvider else {
+                            failPendingChatStart("Pro Cloud requires an active subscription, cloud opt-in, and a configured managed gateway.", runToken: runToken)
+                            return
+                        }
+                        selectedProvider = managedProvider
+                        selectedProviderID = ManagedCloudPolicy.providerID
+                        selectedModelID = ManagedCloudPolicy.defaultModelID
+                    } else {
+                        guard let byokCandidate else {
+                            failPendingChatStart("No enabled cloud provider is configured for agents.", runToken: runToken)
+                            return
+                        }
+                        guard let cloudModelID = byokCandidate.0.defaultModelID ?? localInstall?.modelID else {
+                            failPendingChatStart("Configure a default model for the selected cloud provider.", runToken: runToken)
+                            return
+                        }
+                        selectedProvider = byokCandidate.1
+                        selectedProviderID = providerID
+                        selectedModelID = cloudModelID
                     }
-                    guard let cloudModelID = cloudCandidate.0.defaultModelID ?? localInstall?.modelID else {
-                        failPendingChatStart("Configure a default model for the selected cloud provider.", runToken: runToken)
-                        return
-                    }
-                    selectedProvider = cloudCandidate.1
-                    selectedProviderID = providerID
-                    selectedModelID = cloudModelID
                 case let .denied(reason):
                     failPendingChatStart("\(reason)", runToken: runToken)
                     return
@@ -2890,6 +2984,9 @@ final class PinesAppModel: ObservableObject {
 
     private func cloudNativeWebSearchModes(providerID: ProviderID, providerKind: CloudProviderKind?, modelID _: ModelID, services: PinesAppServices) -> [CloudWebSearchMode] {
         guard providerID != services.mlxRuntime.localProviderID else { return [] }
+        if providerID == ManagedCloudPolicy.providerID {
+            return [.off, .automatic, .required]
+        }
         switch providerKind {
         case .openAI, .anthropic:
             return [.off, .automatic, .required]
@@ -2911,6 +3008,9 @@ final class PinesAppModel: ObservableObject {
             let snapshot = AppSettingsSnapshot(
                 securityConfiguration: securityConfiguration,
                 executionMode: executionMode,
+                cloudAccessMode: cloudAccessMode,
+                proEntitlementStatus: proEntitlementStatus,
+                managedCloudConsent: managedCloudConsent,
                 storeConfiguration: storeConfiguration,
                 defaultProviderID: resolvedProviderID,
                 defaultModelID: resolvedDefaultModelID,
@@ -3983,6 +4083,29 @@ final class PinesAppModel: ObservableObject {
             }
         if !localModels.isEmpty {
             sections.append(ModelPickerSection(title: "Local", models: localModels))
+        }
+
+        let managedAvailability = services.managedCloudService.availability(
+            entitlement: proEntitlementStatus,
+            consent: managedCloudConsent
+        )
+        if managedAvailability.supports(.chat) {
+            sections.append(
+                ModelPickerSection(
+                    title: "Pro Cloud",
+                    models: [
+                        ModelPickerOption(
+                            providerID: ManagedCloudPolicy.providerID,
+                            providerName: "Pro Cloud",
+                            providerKind: .custom,
+                            modelID: ManagedCloudPolicy.defaultModelID,
+                            displayName: "Automatic",
+                            isLocal: false,
+                            rank: 100
+                        ),
+                    ]
+                )
+            )
         }
 
         for provider in cloudProviders.sorted(by: { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }) {

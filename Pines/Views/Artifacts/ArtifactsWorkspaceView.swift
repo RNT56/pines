@@ -61,7 +61,7 @@ struct ArtifactsWorkspaceView: View {
                     } label: {
                         Image(systemName: "cloud")
                     }
-                    .accessibilityLabel("Refresh provider storage")
+                    .accessibilityLabel("Refresh cloud resources")
                     .disabled(lifecycleProviders.isEmpty)
                 }
             }
@@ -191,7 +191,7 @@ struct ArtifactsWorkspaceView: View {
             case .gemini:
                 _ = try await appModel.refreshGeminiProviderStorage(providerID: provider.id, services: services)
             default:
-                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) provider storage is not supported here.")
+                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) cloud copies are not supported here.")
             }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
@@ -206,11 +206,11 @@ struct ArtifactsWorkspaceView: View {
                 Task { await deleteArtifactRecord(artifact) }
             }
         case .deleteProviderFile(let file):
-            Button("Delete provider file", role: .destructive) {
+            Button("Delete cloud copy", role: .destructive) {
                 Task { await deleteProviderFile(file) }
             }
         case .deleteProviderCache(let cache):
-            Button("Delete provider context", role: .destructive) {
+            Button("Delete cloud context", role: .destructive) {
                 Task { await deleteProviderCache(cache) }
             }
         case .cancelBatch(let batch):
@@ -344,7 +344,7 @@ private struct ArtifactsLibraryWorkspace: View {
                         summaries: summaries,
                         selection: $selection,
                         emptyTitle: "No artifacts",
-                        emptyDetail: "Generated media, hosted tool outputs, transcripts, batch results, and structured outputs appear here."
+                        emptyDetail: "Generated media, source-backed answers, transcripts, background results, and verified fields appear here."
                     )
                 },
                 detail: {
@@ -648,7 +648,7 @@ private struct ArtifactsFilesWorkspace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Provider Files", subtitle: "Upload, refresh, import from Vault, and delete provider-hosted files separately from local Vault documents.", systemImage: "doc.badge.arrow.up") {
+            PinesCardSection("Cloud Copies", subtitle: "Reusable remote copies for large files and background work. Local Vault files stay separate.", systemImage: "doc.badge.arrow.up") {
                 VStack(alignment: .leading, spacing: theme.spacing.small) {
                     providerRequirement(allowed: "OpenAI, Anthropic, or Gemini")
                     if provider?.kind == .openAI {
@@ -661,7 +661,7 @@ private struct ArtifactsFilesWorkspace: View {
                         Button {
                             isImporterPresented = true
                         } label: {
-                            Label(isUploading ? "Uploading" : "Upload local file", systemImage: isUploading ? "hourglass" : "square.and.arrow.up")
+                            Label(isUploading ? "Uploading" : "Create Cloud Copy", systemImage: isUploading ? "hourglass" : "square.and.arrow.up")
                         }
                         .disabled(provider == nil || isUploading)
                         .pinesButtonStyle(.primary)
@@ -705,7 +705,7 @@ private struct ArtifactsFilesWorkspace: View {
     @ViewBuilder
     private var fileActions: some View {
         if case .file(let id) = selection, let file = providerState.providerFiles.first(where: { $0.id == id }) {
-            PinesCardSection("File Actions", subtitle: "These operate on provider-hosted file state, not local Vault source files.", systemImage: "ellipsis.circle") {
+            PinesCardSection("Cloud Copy Actions", subtitle: "These operate on the cloud copy, not local Vault source files.", systemImage: "ellipsis.circle") {
                 HStack(spacing: theme.spacing.small) {
                     Button("Refresh") {
                         Task { await refreshFile(file) }
@@ -854,12 +854,12 @@ private struct ArtifactsContextWorkspace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Context Storage", subtitle: "Manage OpenAI vector stores and Gemini cached contexts as explicit provider-hosted resources.", systemImage: "externaldrive.badge.icloud") {
+            PinesCardSection("Reusable Context", subtitle: "Optimized repeated context for search, file analysis, and long conversations.", systemImage: "externaldrive.badge.icloud") {
                 VStack(alignment: .leading, spacing: theme.spacing.small) {
                     if let provider {
                         PinesStatusChip(status: .custom("\(provider.displayName) - \(provider.kind.pinesLifecycleTitle)", .info))
                     } else {
-                        PinesEmptyState(title: "Choose OpenAI or Gemini", detail: "Set the page provider scope before creating provider context.", systemImage: "cloud")
+                        PinesEmptyState(title: "Choose OpenAI or Gemini", detail: "Set the page provider scope before creating reusable context.", systemImage: "cloud")
                             .pinesSurface(.inset, padding: theme.spacing.small)
                     }
                     HStack(spacing: theme.spacing.small) {
@@ -880,23 +880,23 @@ private struct ArtifactsContextWorkspace: View {
                     Button {
                         Task { await createContext() }
                     } label: {
-                        Label(isCreating ? "Creating" : "Create context resource", systemImage: isCreating ? "hourglass" : "plus.circle")
+                        Label(isCreating ? "Creating" : "Create reusable context", systemImage: isCreating ? "hourglass" : "plus.circle")
                     }
                     .disabled(provider == nil || isCreating || (provider?.kind == .gemini && contextText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                     .pinesButtonStyle(.primary)
                 }
             }
 
-            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No context resources", emptyDetail: "OpenAI vector stores and Gemini context caches appear here.")
+            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No reusable context", emptyDetail: "Reusable cloud context appears here.")
 
             if case .cache(let id) = selection, let cache = providerState.providerCaches.first(where: { $0.id == id }) {
-                PinesCardSection("Context Actions", subtitle: "Refresh or remove provider-hosted context storage.", systemImage: "ellipsis.circle") {
+                PinesCardSection("Reusable Context Actions", subtitle: "Refresh or remove the cloud context separately from local data.", systemImage: "ellipsis.circle") {
                     HStack(spacing: theme.spacing.small) {
                         Button("Refresh") {
                             Task { await refreshCache(cache) }
                         }
                         .buttonStyle(.borderless)
-                        Button("Delete provider context", role: .destructive) {
+                        Button("Delete cloud context", role: .destructive) {
                             pendingConfirmation = .deleteProviderCache(cache)
                         }
                         .buttonStyle(.borderless)
@@ -977,7 +977,7 @@ private struct ArtifactsBatchesWorkspace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Batches", subtitle: "Create Anthropic prompt batches and manage provider batch records across OpenAI, Anthropic, and Gemini.", systemImage: "tray.full") {
+            PinesCardSection("Background Processing", subtitle: "Run long reports, multiple files, transcription queues, and Vault enrichment outside the chat stream.", systemImage: "tray.full") {
                 VStack(alignment: .leading, spacing: theme.spacing.small) {
                     if let provider {
                         PinesStatusChip(status: .custom("\(provider.displayName) - \(provider.kind.pinesLifecycleTitle)", .info))
@@ -1199,7 +1199,7 @@ private struct ArtifactsResearchWorkspace: View {
                 .pinesSurface(.panel, padding: theme.spacing.medium)
             }
 
-            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No research runs", emptyDetail: "Provider Deep Research runs appear here.")
+            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No research runs", emptyDetail: "Source-backed research runs appear here.")
         }
     }
 
@@ -1600,13 +1600,13 @@ private struct ArtifactsCapabilitiesWorkspace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Provider Model Capabilities", subtitle: "Provider metadata powers model picker gating and marks estimated fallbacks clearly.", systemImage: "cpu") {
+            PinesCardSection("Capability Diagnostics", subtitle: "Advanced metadata that powers model picker gating and attachment compatibility.", systemImage: "cpu") {
                 PinesMetricPillGroup(items: [
                     .init("Models", value: "\(summaries.count)", systemImage: "cpu", tone: .info),
                     .init("Providers", value: "\(Set(summaries.map(\.providerKind)).count)", systemImage: "cloud", tone: .warning),
                 ])
             }
-            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No capability metadata", emptyDetail: "Refresh provider storage to populate model capability rows.")
+            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No capability metadata", emptyDetail: "Refresh cloud resources to populate diagnostic rows.")
         }
     }
 }
@@ -1978,9 +1978,9 @@ enum ArtifactsConfirmation: Identifiable {
     var title: String {
         switch self {
         case .deleteArtifactRecord: "Delete local artifact record?"
-        case .deleteProviderFile: "Delete provider-hosted file?"
-        case .deleteProviderCache: "Delete provider-hosted context?"
-        case .cancelBatch: "Cancel provider batch?"
+        case .deleteProviderFile: "Delete cloud copy?"
+        case .deleteProviderCache: "Delete cloud context?"
+        case .cancelBatch: "Cancel background process?"
         case .cancelResearch: "Cancel research run?"
         }
     }
@@ -1988,7 +1988,7 @@ enum ArtifactsConfirmation: Identifiable {
     var message: String {
         switch self {
         case .deleteArtifactRecord(let artifact):
-            "This removes only Pines' local lifecycle record for \(artifact.fileName ?? artifact.id). It does not delete provider-hosted files or remote resources."
+            "This removes only Pines' local lifecycle record for \(artifact.fileName ?? artifact.id). It does not delete cloud copies or remote resources."
         case .deleteProviderFile(let file):
             "This asks \(file.providerKind.pinesLifecycleTitle) to delete \(file.fileName). The local Vault source, if any, is not deleted."
         case .deleteProviderCache(let cache):

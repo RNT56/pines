@@ -578,7 +578,7 @@ enum PinesStaticSettings {
                 PinesSettingsRow(
                     id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A21001")!,
                     title: "Execution policy",
-                    detail: "Local or BYOK cloud",
+                    detail: "Local, Pro, or keys",
                     systemImage: "sparkles"
                 ),
                 PinesSettingsRow(
@@ -598,7 +598,7 @@ enum PinesStaticSettings {
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20002")!,
             title: "Privacy",
-            subtitle: "Storage, sync, and bring-your-own-key providers.",
+            subtitle: "Storage, sync, Cloud Intelligence, and advanced keys.",
             systemImage: "lock.shield",
             rows: [
                 PinesSettingsRow(
@@ -610,7 +610,7 @@ enum PinesStaticSettings {
                 PinesSettingsRow(
                     id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A22002")!,
                     title: "Provider keys",
-                    detail: "Stored in Keychain",
+                    detail: "Advanced",
                     systemImage: "icloud"
                 )
             ]

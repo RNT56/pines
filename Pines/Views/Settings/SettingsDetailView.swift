@@ -366,69 +366,140 @@ struct SettingsDetailView: View {
     }
 
     private var cloudProviderCard: some View {
-        PinesCardSection("Cloud BYOK", subtitle: "Bring your own provider credentials without changing routing semantics.", systemImage: "key") {
-            Picker("Provider", selection: $providerKind) {
-                ForEach(CloudProviderKind.allCases, id: \.self) { kind in
-                    Text(kind.title).tag(kind)
+        let proToggleEnabled = settingsState.proEntitlementStatus.enablesManagedCloud && services.managedCloudService.isConfigured
+        return PinesCardSection("Cloud Intelligence", subtitle: "Managed Pro Cloud stays off until Pro is active and you opt in. Advanced Keys remain available for your own quota.", systemImage: "sparkles") {
+            PinesKeyValueGrid(items: [
+                .init("Pro", settingsState.proEntitlementStatus.title, systemImage: "crown"),
+                .init("Cloud", settingsState.managedCloudConsent.title, systemImage: "sparkles"),
+                .init("Pro service", services.managedCloudService.isConfigured ? "Ready" : "Unavailable", systemImage: "network"),
+                .init("Access", settingsState.cloudAccessMode.title, systemImage: "point.3.connected.trianglepath.dotted"),
+            ])
+
+            Toggle("Use Pro Cloud Intelligence", isOn: Binding(
+                get: {
+                    settingsState.proEntitlementStatus.enablesManagedCloud
+                        && settingsState.managedCloudConsent == .optedIn
+                        && settingsState.cloudAccessMode.usesManagedCloud
+                },
+                set: { enabled in
+                    if enabled {
+                        settingsState.managedCloudConsent = .optedIn
+                        settingsState.cloudAccessMode = .managedPro
+                    } else {
+                        settingsState.managedCloudConsent = .optedOut
+                        if settingsState.cloudAccessMode.usesManagedCloud {
+                            settingsState.cloudAccessMode = .byok
+                        }
+                    }
+                    Task { await appModel.saveSettings(services: services) }
                 }
-            }
-            .onChange(of: providerKind) { _, kind in applyProviderDefaults(kind) }
+            ))
+            .disabled(!proToggleEnabled)
 
-            TextField("Display name", text: $providerName)
-                .pinesFieldChrome()
-            TextField("Base URL", text: $providerBaseURL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .pinesFieldChrome()
-            SecureField("API key", text: $providerAPIKey)
-                .textContentType(.password)
-                .pinesFieldChrome()
-            Toggle("Enable for agents", isOn: $providerEnabled)
-                .disabled(providerKind == .voyageAI)
+            Toggle("Use Advanced Keys as explicit fallback", isOn: Binding(
+                get: { settingsState.cloudAccessMode == .managedProWithBYOKOverride },
+                set: { enabled in
+                    settingsState.cloudAccessMode = enabled ? .managedProWithBYOKOverride : .managedPro
+                    Task { await appModel.saveSettings(services: services) }
+                }
+            ))
+            .disabled(!settingsState.cloudAccessMode.usesManagedCloud || settingsState.cloudProviders.isEmpty)
 
-            Button {
-                Task {
-                    let didSave = await appModel.saveCloudProvider(
-                        kind: providerKind,
-                        displayName: providerName,
-                        baseURLString: providerBaseURL,
-                        apiKey: providerAPIKey,
-                        enabledForAgents: providerEnabled,
-                        services: services
+            Text(cloudIntelligenceSummary)
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                    Picker("Provider", selection: $providerKind) {
+                        ForEach(CloudProviderKind.allCases, id: \.self) { kind in
+                            Text(kind.title).tag(kind)
+                        }
+                    }
+                    .onChange(of: providerKind) { _, kind in applyProviderDefaults(kind) }
+
+                    TextField("Display name", text: $providerName)
+                        .pinesFieldChrome()
+                    TextField("Base URL", text: $providerBaseURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .pinesFieldChrome()
+                    SecureField("API key", text: $providerAPIKey)
+                        .textContentType(.password)
+                        .pinesFieldChrome()
+                    Toggle("Enable for agents", isOn: $providerEnabled)
+                        .disabled(providerKind == .voyageAI)
+
+                    Button {
+                        Task {
+                            let didSave = await appModel.saveCloudProvider(
+                                kind: providerKind,
+                                displayName: providerName,
+                                baseURLString: providerBaseURL,
+                                apiKey: providerAPIKey,
+                                enabledForAgents: providerEnabled,
+                                services: services
+                            )
+                            if didSave {
+                                providerAPIKey = ""
+                            }
+                        }
+                    } label: {
+                        if settingsState.isSavingCloudProvider {
+                            Label("Saving", systemImage: "hourglass")
+                        } else {
+                            Label("Save key", systemImage: "key")
+                        }
+                    }
+                    .disabled(
+                        settingsState.isSavingCloudProvider
+                            || providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     )
-                    if didSave {
-                        providerAPIKey = ""
+                    .pinesButtonStyle(.primary, fillWidth: true)
+
+                    if settingsState.isRefreshingCloudModels {
+                        PinesStatusChip(status: .running)
+                    }
+
+                    if settingsState.cloudProviders.isEmpty {
+                        Text("No advanced keys saved.")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                    } else {
+                        ForEach(settingsState.cloudProviders) { provider in
+                            providerRow(provider)
+                        }
                     }
                 }
             } label: {
-                if settingsState.isSavingCloudProvider {
-                    Label("Saving", systemImage: "hourglass")
-                } else {
-                    Label("Save provider", systemImage: "key")
-                }
-            }
-            .disabled(
-                settingsState.isSavingCloudProvider
-                    || providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            )
-            .pinesButtonStyle(.primary, fillWidth: true)
-
-            if settingsState.isRefreshingCloudModels {
-                PinesStatusChip(status: .running)
-            }
-
-            if settingsState.cloudProviders.isEmpty {
-                Text("No cloud providers saved yet.")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.secondaryText)
-            } else {
-                ForEach(settingsState.cloudProviders) { provider in
-                    providerRow(provider)
-                }
+                Label("Advanced Provider Keys", systemImage: "key")
+                    .font(theme.typography.headline)
             }
         }
         .id(SettingsDetailAnchor.cloudBYOK)
+    }
+
+    private var cloudIntelligenceSummary: String {
+        if !services.managedCloudService.isConfigured {
+            return "This build has no Pro Cloud service configured, so managed cloud calls cannot start. Local models and Advanced Keys still work."
+        }
+        if !settingsState.proEntitlementStatus.enablesManagedCloud {
+            return "Pro Cloud is inactive. No managed cloud call will be made."
+        }
+        switch settingsState.managedCloudConsent {
+        case .optedIn:
+            return settingsState.cloudAccessMode.usesManagedCloud
+                ? "Managed routing can use cloud chat, search, file analysis, background processing, cloud copies, token preflight, embeddings, reranking, and structured extraction. Select an Advanced Key provider any time to keep working on your own provider quota."
+                : "You are opted in, but managed routing is not selected."
+        case .optedOut:
+            return "Cloud Intelligence is off. Managed routes are disabled until you turn this back on."
+        case .notAsked:
+            return "Cloud Intelligence has not been enabled. Vault and chat content stay local unless you use an Advanced Key."
+        case .revoked:
+            return "Cloud Intelligence consent was revoked. Managed routes are disabled."
+        }
     }
 
     private func providerRow(_ provider: CloudProviderConfiguration) -> some View {
@@ -522,17 +593,17 @@ struct SettingsDetailView: View {
 
             PinesMetricPillGroup(items: [
                 .init("Responses", value: provider.kind == .anthropic ? settingsState.anthropicThinkingMode.rawValue : "\(settingsState.openAIReasoningEffort.rawValue)/\(settingsState.openAITextVerbosity.rawValue)", systemImage: "slider.horizontal.3", tone: .accent),
-                .init("Storage", value: "\(files.count) files", systemImage: "doc", tone: .warning),
-                .init("Vectors", value: "\(vectorStores.count)", systemImage: "square.stack.3d.up", tone: .warning),
+                .init("Cloud copies", value: "\(files.count)", systemImage: "doc", tone: .warning),
+                .init("Reusable context", value: "\(vectorStores.count)", systemImage: "square.stack.3d.up", tone: .warning),
                 .init("Artifacts", value: "\(artifacts.count)", systemImage: "sparkles", tone: .accent),
-                .init("Batches", value: "\(batches.count)", systemImage: "tray.full", tone: .info),
+                .init("Background", value: "\(batches.count)", systemImage: "tray.full", tone: .info),
                 .init("Live", value: "\(live.count)", systemImage: "dot.radiowaves.left.and.right", tone: .info),
                 .init("Research", value: "\(research.count)", systemImage: "doc.text.magnifyingglass", tone: .success),
             ], minimumWidth: 112)
 
             Text(provider.kind == .anthropic
-                ? "Anthropic Messages: prompt cache \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off"), citations \(settingsState.anthropicCitationsEnabled ? "on" : "off"), token preflight \(settingsState.anthropicTokenCountPreflightEnabled ? "on" : "off"), provider storage opt-in."
-                : "Advanced Responses: web search \(settingsState.cloudWebSearchMode.rawValue), provider storage opt-in, structured output records persisted.")
+                ? "Anthropic Messages: optimized repeated context \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off"), citations \(settingsState.anthropicCitationsEnabled ? "on" : "off"), token preflight \(settingsState.anthropicTokenCountPreflightEnabled ? "on" : "off"), cloud copies opt-in."
+                : "Advanced Responses: source-backed answer \(settingsState.cloudWebSearchMode.rawValue), cloud copies opt-in, verified fields persisted.")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1561,6 +1632,53 @@ private extension AgentExecutionMode {
             "Cloud allowed"
         case .cloudRequired:
             "Cloud required"
+        }
+    }
+}
+
+private extension CloudAccessMode {
+    var title: String {
+        switch self {
+        case .localOnly:
+            "Local only"
+        case .byok:
+            "Advanced Keys"
+        case .managedPro:
+            "Pro Cloud"
+        case .managedProWithBYOKOverride:
+            "Pro Cloud + Keys"
+        }
+    }
+}
+
+private extension ProEntitlementStatus {
+    var title: String {
+        switch self {
+        case .inactive:
+            "Inactive"
+        case .active:
+            "Active"
+        case .expired:
+            "Expired"
+        case .billingRetry:
+            "Billing retry"
+        case .revoked:
+            "Revoked"
+        }
+    }
+}
+
+private extension ManagedCloudConsent {
+    var title: String {
+        switch self {
+        case .notAsked:
+            "Not enabled"
+        case .optedIn:
+            "On"
+        case .optedOut:
+            "Off"
+        case .revoked:
+            "Revoked"
         }
     }
 }
