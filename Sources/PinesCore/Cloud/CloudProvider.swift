@@ -15,17 +15,47 @@ public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
     public var displayName: String
     public var createdAt: Date?
     public var rank: Double
+    public var capabilities: ProviderCapabilities?
+    public var supportedParameters: [String]
+    public var supportedGenerationMethods: [String]
 
     public init(
         id: ModelID,
         displayName: String,
         createdAt: Date? = nil,
-        rank: Double = 0
+        rank: Double = 0,
+        capabilities: ProviderCapabilities? = nil,
+        supportedParameters: [String] = [],
+        supportedGenerationMethods: [String] = []
     ) {
         self.id = id
         self.displayName = displayName
         self.createdAt = createdAt
         self.rank = rank
+        self.capabilities = capabilities
+        self.supportedParameters = supportedParameters
+        self.supportedGenerationMethods = supportedGenerationMethods
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case createdAt
+        case rank
+        case capabilities
+        case supportedParameters
+        case supportedGenerationMethods
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(ModelID.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        rank = try container.decodeIfPresent(Double.self, forKey: .rank) ?? 0
+        capabilities = try container.decodeIfPresent(ProviderCapabilities.self, forKey: .capabilities)
+        supportedParameters = try container.decodeIfPresent([String].self, forKey: .supportedParameters) ?? []
+        supportedGenerationMethods = try container.decodeIfPresent([String].self, forKey: .supportedGenerationMethods) ?? []
     }
 }
 
@@ -746,7 +776,9 @@ public enum CloudProviderModelEligibility: Sendable {
         guard version.major == 5 else { return false }
         if version.minor >= 5 { return true }
         if version.minor == 4 {
-            return modelName.hasPrefix("gpt-5.4-mini")
+            return modelName == "gpt-5.4"
+                || modelName.hasPrefix("gpt-5.4-2026")
+                || modelName.hasPrefix("gpt-5.4-mini")
                 || modelName.hasPrefix("gpt-5.4-nano")
         }
         return false

@@ -606,6 +606,8 @@ struct CoreContractTests {
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5-pro", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5-2026-04-23", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-2026-03-05", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-mini", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-nano-2026-03-17", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.6-mini", providerKind: .openAI))
@@ -613,7 +615,6 @@ struct CoreContractTests {
 
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-mini", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-pro", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4.1-mini", providerKind: .openAI))
 

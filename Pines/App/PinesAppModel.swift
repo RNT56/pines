@@ -3835,12 +3835,14 @@ final class PinesAppModel: ObservableObject {
                 displayName: trimmedDisplayName,
                 baseURL: baseURL,
                 defaultModelID: existing?.defaultModelID,
-                validationStatus: .unvalidated,
+                validationStatus: existing?.validationStatus ?? .unvalidated,
+                lastValidationError: existing?.lastValidationError,
                 headers: existing?.headers ?? [],
                 keychainService: existing?.keychainService ?? "com.schtack.pines.cloud",
                 keychainAccount: existing?.keychainAccount ?? providerID.rawValue,
                 allowInsecureLocalHTTP: existing?.allowInsecureLocalHTTP ?? false,
-                enabledForAgents: kind == .voyageAI ? false : enabledForAgents
+                enabledForAgents: kind == .voyageAI ? false : enabledForAgents,
+                lastValidatedAt: existing?.lastValidatedAt
             )
             var savedProvider = provider
             var validationMessage: String?
