@@ -19,15 +19,42 @@ actor KeychainSecretStore: SecretStore {
         guard let data = item as? Data else {
             throw KeychainSecretStoreError.invalidData
         }
-        return String(data: data, encoding: .utf8)
+        if InstallBoundSecretEnvelope.isEnvelope(data) {
+            do {
+                let plaintext = try InstallBoundSecretEnvelope.open(
+                    data,
+                    installKey: InstallIdentityKeyStore.loadOrCreateKey(),
+                    context: Self.installBindingContext(service: service, account: account)
+                )
+                guard let secret = String(data: plaintext, encoding: .utf8) else {
+                    throw KeychainSecretStoreError.invalidData
+                }
+                return secret
+            } catch InstallBoundSecretEnvelopeError.authenticationFailed,
+                    InstallBoundSecretEnvelopeError.malformedEnvelope {
+                try await delete(service: service, account: account)
+                return nil
+            }
+        }
+        guard let secret = String(data: data, encoding: .utf8) else {
+            throw KeychainSecretStoreError.invalidData
+        }
+        try await write(secret, service: service, account: account)
+        return secret
     }
 
     func write(_ secret: String, service: String, account: String) async throws {
-        let data = Data(secret.utf8)
+        let data = try InstallBoundSecretEnvelope.seal(
+            Data(secret.utf8),
+            installKey: InstallIdentityKeyStore.loadOrCreateKey(),
+            context: Self.installBindingContext(service: service, account: account)
+        )
         var query = baseQuery(service: service, account: account)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
 
-        let update: [String: Any] = [kSecValueData as String: data]
+        let update: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
         let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
         if status == errSecSuccess {
             return
@@ -36,6 +63,7 @@ actor KeychainSecretStore: SecretStore {
             throw KeychainSecretStoreError.unhandledStatus(status)
         }
 
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         query[kSecValueData as String] = data
         let addStatus = SecItemAdd(query as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
@@ -56,6 +84,10 @@ actor KeychainSecretStore: SecretStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
+    }
+
+    private static func installBindingContext(service: String, account: String) -> String {
+        "\(service)::\(account)"
     }
 }
 

@@ -145,10 +145,11 @@ private struct ChatModelPickerButton: View {
 
     var body: some View {
         let sections = appModel.modelPickerSections(services: services)
-        let currentModelLabel = currentModelLabel(in: sections)
+        let unavailableProviders = unavailableCloudProviders(in: sections)
+        let currentModelLabel = currentModelLabel(in: sections, unavailableProviders: unavailableProviders)
 
         Group {
-            if sections.isEmpty {
+            if sections.isEmpty && unavailableProviders.isEmpty {
                 Button {
                     haptics.play(.navigationSelected)
                     openModelsPage()
@@ -176,6 +177,22 @@ private struct ChatModelPickerButton: View {
                                         Image(systemName: option.systemImage)
                                     }
                                 }
+                            }
+                        }
+                    }
+                    if !unavailableProviders.isEmpty {
+                        Section("Saved Providers") {
+                            ForEach(unavailableProviders) { provider in
+                                Button {} label: {
+                                    Label {
+                                        Text(unavailableProviderStatus(for: provider))
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    } icon: {
+                                        Image(systemName: "line.3.horizontal.decrease.circle")
+                                    }
+                                }
+                                .disabled(true)
                             }
                         }
                     }
@@ -268,9 +285,14 @@ private struct ChatModelPickerButton: View {
         return theme.shadow.panelColor.opacity(0.18)
     }
 
-    private func currentModelLabel(in sections: [ModelPickerSection]) -> String {
+    private func currentModelLabel(
+        in sections: [ModelPickerSection],
+        unavailableProviders: [CloudProviderConfiguration]
+    ) -> String {
         let options = sections.flatMap(\.models)
-        guard !options.isEmpty else { return "None" }
+        guard !options.isEmpty else {
+            return unavailableProviders.isEmpty ? "None" : "No agent models"
+        }
 
         if let currentProviderID,
            let currentModelID,
@@ -285,6 +307,32 @@ private struct ChatModelPickerButton: View {
             return match.displayName
         }
         return fallbackLabel == "No model selected" ? "Select model" : (fallbackLabel ?? "Select model")
+    }
+
+    private func unavailableCloudProviders(in sections: [ModelPickerSection]) -> [CloudProviderConfiguration] {
+        let selectableProviderIDs = Set(sections.flatMap(\.models).map(\.providerID))
+        return appModel.cloudProviders
+            .filter { provider in
+                provider.enabledForAgents
+                    && provider.capabilities.textGeneration
+                    && !selectableProviderIDs.contains(provider.id)
+            }
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+    }
+
+    private func unavailableProviderStatus(for provider: CloudProviderConfiguration) -> String {
+        switch provider.validationStatus {
+        case .valid:
+            "\(provider.displayName): no curated agent models"
+        case .unvalidated:
+            "\(provider.displayName): validate key"
+        case .invalid:
+            "\(provider.displayName): key invalid"
+        case .rateLimited:
+            "\(provider.displayName): rate limited"
+        }
     }
 }
 
@@ -779,7 +827,7 @@ private struct ChatTranscriptHeader: View {
                 ChatModelSelector(thread: thread, fillWidth: false, maxWidth: 280)
             }
 
-            Text("\(thread.tokenCount) tokens - \(thread.status.title)")
+            Text("Approx. \(thread.tokenCount) tokens - \(thread.status.title)")
                 .font(theme.typography.callout)
                 .foregroundStyle(theme.colors.secondaryText)
                 .lineLimit(1)
@@ -1025,6 +1073,20 @@ private struct ChatProviderProvenancePills: View {
         }
         if let countedTokens = metadata[CloudProviderMetadataKeys.anthropicCountTokensInputTokens], countedTokens != "0" {
             values.append(.init("Token preflight", value: countedTokens, systemImage: "number", tone: .accent))
+        }
+        if let exactInputTokens = metadata[ChatContextMetadataKeys.exactInputTokens], exactInputTokens != "0" {
+            values.append(.init("Input exact", value: exactInputTokens, systemImage: "number", tone: .success))
+        } else if let estimatedInputTokens = metadata[ChatContextMetadataKeys.estimatedInputTokens], estimatedInputTokens != "0" {
+            values.append(.init("Input est.", value: estimatedInputTokens, systemImage: "number", tone: .neutral))
+        }
+        if let contextWindow = metadata[ChatContextMetadataKeys.contextWindowTokens], contextWindow != "0" {
+            values.append(.init("Context", value: contextWindow, systemImage: "text.word.spacing", tone: .info))
+        }
+        if metadata[ChatContextMetadataKeys.truncationApplied] == "true" {
+            let dropped = Int(metadata[ChatContextMetadataKeys.droppedMessageCount] ?? "0") ?? 0
+            let clipped = Int(metadata[ChatContextMetadataKeys.clippedMessageCount] ?? "0") ?? 0
+            let detail = dropped + clipped > 0 ? "\(dropped + clipped)" : "on"
+            values.append(.init("Trimmed", value: detail, systemImage: "scissors", tone: .warning))
         }
         if metadata[CloudProviderMetadataKeys.openAIResponseStored] == "true" {
             values.append(.init("Stored", value: "provider", systemImage: "cloud", tone: .warning))

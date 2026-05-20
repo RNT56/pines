@@ -3,6 +3,29 @@ import Foundation
 import FoundationNetworking
 #endif
 
+public struct ModelDownloadResumePlan: Hashable, Sendable {
+    public var expectedBytes: Int64?
+    public var resumeOffset: Int64
+    public var rangeHeader: String?
+    public var isComplete: Bool
+
+    public init(expectedBytes: Int64?, existingBytes: Int64) {
+        let normalizedExpectedBytes = expectedBytes.flatMap { $0 > 0 ? $0 : nil }
+        let normalizedExistingBytes = max(0, existingBytes)
+
+        self.expectedBytes = normalizedExpectedBytes
+        self.resumeOffset = normalizedExistingBytes
+
+        if let normalizedExpectedBytes, normalizedExistingBytes >= normalizedExpectedBytes {
+            rangeHeader = nil
+            isComplete = true
+        } else {
+            rangeHeader = normalizedExistingBytes > 0 ? "bytes=\(normalizedExistingBytes)-" : nil
+            isComplete = false
+        }
+    }
+}
+
 public enum HubTask: String, Codable, Sendable, CaseIterable {
     case textGeneration = "text-generation"
     case imageTextToText = "image-text-to-text"

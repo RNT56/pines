@@ -15,17 +15,47 @@ public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
     public var displayName: String
     public var createdAt: Date?
     public var rank: Double
+    public var capabilities: ProviderCapabilities?
+    public var supportedParameters: [String]
+    public var supportedGenerationMethods: [String]
 
     public init(
         id: ModelID,
         displayName: String,
         createdAt: Date? = nil,
-        rank: Double = 0
+        rank: Double = 0,
+        capabilities: ProviderCapabilities? = nil,
+        supportedParameters: [String] = [],
+        supportedGenerationMethods: [String] = []
     ) {
         self.id = id
         self.displayName = displayName
         self.createdAt = createdAt
         self.rank = rank
+        self.capabilities = capabilities
+        self.supportedParameters = supportedParameters
+        self.supportedGenerationMethods = supportedGenerationMethods
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case createdAt
+        case rank
+        case capabilities
+        case supportedParameters
+        case supportedGenerationMethods
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(ModelID.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        rank = try container.decodeIfPresent(Double.self, forKey: .rank) ?? 0
+        capabilities = try container.decodeIfPresent(ProviderCapabilities.self, forKey: .capabilities)
+        supportedParameters = try container.decodeIfPresent([String].self, forKey: .supportedParameters) ?? []
+        supportedGenerationMethods = try container.decodeIfPresent([String].self, forKey: .supportedGenerationMethods) ?? []
     }
 }
 
@@ -554,6 +584,17 @@ public enum CloudProviderError: Error, Equatable, Sendable {
 }
 
 public enum CloudProviderModelEligibility: Sendable {
+    /// Curated chat model visibility policy for the agent model picker.
+    ///
+    /// This is deliberately narrower than "all valid provider text models." The
+    /// provider catalog can contain older, transitional, or capability-specific
+    /// models that are technically callable but not approved for Pines' agent
+    /// surface. Keep this gate conservative: only expose model families that the
+    /// product has explicitly certified for agent use, and continue filtering
+    /// embeddings, media, realtime, and other non-chat resources out of the
+    /// picker. A provider can validate successfully while returning zero
+    /// curated models; the UI should report that as "no curated agent models,"
+    /// not as a failed key save.
     public static func isTextOutputModel(
         id rawID: String,
         providerKind: CloudProviderKind,
@@ -722,6 +763,11 @@ public enum CloudProviderModelEligibility: Sendable {
     public static func geminiThinkingLevelOptions(for modelID: ModelID) -> [GeminiThinkingLevel] {
         let modelName = normalizedModelName(modelID)
         guard isAllowedGeminiTextModel(modelName) else { return [] }
+        guard let version = modelVersion(after: "gemini-", in: modelName),
+              version.major > 2 || (version.major == 2 && version.minor >= 5)
+        else {
+            return []
+        }
         if modelName.contains("flash") {
             return [.minimal, .low, .medium, .high]
         }
@@ -746,7 +792,9 @@ public enum CloudProviderModelEligibility: Sendable {
         guard version.major == 5 else { return false }
         if version.minor >= 5 { return true }
         if version.minor == 4 {
-            return modelName.hasPrefix("gpt-5.4-mini")
+            return modelName == "gpt-5.4"
+                || modelName.hasPrefix("gpt-5.4-2026")
+                || modelName.hasPrefix("gpt-5.4-mini")
                 || modelName.hasPrefix("gpt-5.4-nano")
         }
         return false

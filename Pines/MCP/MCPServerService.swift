@@ -34,6 +34,10 @@ struct MCPServerService: Sendable {
         }
     }
 
+    func stopAll() async {
+        await Self.watchTasks.stopServers(excluding: [])
+    }
+
     func saveServer(_ server: MCPServerConfiguration, bearerToken: String?) async throws {
         if let bearerToken, !bearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             try await secretStore.write(bearerToken, service: server.keychainService, account: server.keychainAccount)

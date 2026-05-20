@@ -4,6 +4,58 @@ import Testing
 
 @Suite("Core contracts")
 struct CoreContractTests {
+    @Test
+    func chatContextPackerAnchorsCurrentUserAndDropsStaleFutureTurns() {
+        let anchorID = UUID()
+        let staleID = UUID()
+        let messages = [
+            ChatMessage(role: .system, content: "System instruction"),
+            ChatMessage(role: .user, content: "Earlier question"),
+            ChatMessage(role: .assistant, content: "Earlier answer"),
+            ChatMessage(id: anchorID, role: .user, content: "Current question"),
+            ChatMessage(id: staleID, role: .assistant, content: "Stale answer after the regenerated turn"),
+        ]
+
+        let result = ChatContextPacker.pack(
+            messages,
+            policy: ChatContextPackingPolicy(
+                maxContextTokens: 512,
+                reservedCompletionTokens: 64,
+                safetyMarginTokens: 64,
+                maximumMessages: 16,
+                anchorMessageID: anchorID
+            )
+        )
+
+        #expect(result.messages.contains { $0.id == anchorID })
+        #expect(!result.messages.contains { $0.id == staleID })
+        #expect(result.summary.droppedMessageCount >= 1)
+        #expect(result.summary.providerMetadata[ChatContextMetadataKeys.truncationApplied] == "true")
+    }
+
+    @Test
+    func chatContextPackerClipsOversizedAnchorWithinBudget() {
+        let anchorID = UUID()
+        let oversized = String(repeating: "abcd ", count: 2_000)
+
+        let result = ChatContextPacker.pack(
+            [ChatMessage(id: anchorID, role: .user, content: oversized)],
+            policy: ChatContextPackingPolicy(
+                maxContextTokens: 1_024,
+                reservedCompletionTokens: 128,
+                safetyMarginTokens: 64,
+                maximumMessages: 8,
+                anchorMessageID: anchorID
+            )
+        )
+
+        #expect(result.messages.count == 1)
+        #expect(result.messages[0].id == anchorID)
+        #expect(result.messages[0].content.count < oversized.count)
+        #expect(result.summary.clippedMessageCount == 1)
+        #expect(result.summary.estimatedInputTokens <= result.summary.inputBudgetTokens)
+    }
+
     private static func vaultChunk(id: String, documentID: UUID, text: String) -> VaultChunk {
         VaultChunk(
             id: id,
@@ -62,6 +114,74 @@ struct CoreContractTests {
         )
 
         #expect(decision.destination == .local(localID))
+    }
+
+    @Test
+    func executionRouterUsesManagedProOnlyWhenAccessModeAllowsIt() {
+        let managedID = ManagedCloudPolicy.providerID
+        let byokID = ProviderID(rawValue: "byok")
+        let decision = ExecutionRouter().routeChat(
+            mode: .cloudAllowed,
+            cloudAccessMode: .managedPro,
+            local: nil,
+            managedCloud: (managedID, ManagedCloudPolicy.defaultCapabilities),
+            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+            requiredInputs: .init(),
+            requiresTools: true
+        )
+
+        #expect(decision.destination == .cloud(managedID))
+    }
+
+    @Test
+    func executionRouterDoesNotUseBYOKAsImplicitManagedProFallback() {
+        let byokID = ProviderID(rawValue: "byok")
+        let decision = ExecutionRouter().routeChat(
+            mode: .cloudRequired,
+            cloudAccessMode: .managedProWithBYOKOverride,
+            local: nil,
+            managedCloud: nil,
+            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+            requiredInputs: .init(),
+            requiresTools: true
+        )
+
+        #expect(decision.destination == .denied(reason: .unsupportedCapability("No configured cloud provider satisfies this request.")))
+    }
+
+    @Test
+    func executionRouterUsesExplicitBYOKOverrideBeforeManagedPro() {
+        let managedID = ManagedCloudPolicy.providerID
+        let byokID = ProviderID(rawValue: "byok")
+        let decision = ExecutionRouter().routeChat(
+            mode: .cloudRequired,
+            cloudAccessMode: .managedProWithBYOKOverride,
+            local: nil,
+            managedCloud: (managedID, ManagedCloudPolicy.defaultCapabilities),
+            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+            requiredInputs: .init(),
+            requiresTools: true,
+            prefersBYOKOverride: true
+        )
+
+        #expect(decision.destination == .cloud(byokID))
+    }
+
+    @Test
+    func executionRouterKeepsBYOKAvailableForProUsers() {
+        let managedID = ManagedCloudPolicy.providerID
+        let byokID = ProviderID(rawValue: "byok")
+        let decision = ExecutionRouter().routeChat(
+            mode: .cloudAllowed,
+            cloudAccessMode: .byok,
+            local: nil,
+            managedCloud: (managedID, ManagedCloudPolicy.defaultCapabilities),
+            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+            requiredInputs: .init(),
+            requiresTools: true
+        )
+
+        #expect(decision.destination == .cloud(byokID))
     }
 
     @Test
@@ -443,6 +563,39 @@ struct CoreContractTests {
     }
 
     @Test
+    func installBoundSecretEnvelopeRequiresSameInstallKeyAndContext() throws {
+        let installKey = Data(repeating: 0x11, count: InstallBoundSecretEnvelope.installKeyByteCount)
+        let otherInstallKey = Data(repeating: 0x22, count: InstallBoundSecretEnvelope.installKeyByteCount)
+        let plaintext = Data("sk-test-secret".utf8)
+        let sealed = try InstallBoundSecretEnvelope.seal(
+            plaintext,
+            installKey: installKey,
+            context: "com.schtack.pines.cloud::openai"
+        )
+
+        #expect(InstallBoundSecretEnvelope.isEnvelope(sealed))
+        #expect(try InstallBoundSecretEnvelope.open(
+            sealed,
+            installKey: installKey,
+            context: "com.schtack.pines.cloud::openai"
+        ) == plaintext)
+        #expect(throws: InstallBoundSecretEnvelopeError.authenticationFailed) {
+            try InstallBoundSecretEnvelope.open(
+                sealed,
+                installKey: otherInstallKey,
+                context: "com.schtack.pines.cloud::openai"
+            )
+        }
+        #expect(throws: InstallBoundSecretEnvelopeError.authenticationFailed) {
+            try InstallBoundSecretEnvelope.open(
+                sealed,
+                installKey: installKey,
+                context: "com.schtack.pines.cloud::anthropic"
+            )
+        }
+    }
+
+    @Test
     func securityConfigurationDefaultsToEncryptedE2EModel() {
         let configuration = SecurityConfiguration()
 
@@ -544,6 +697,7 @@ struct CoreContractTests {
         #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-flash-lite") == [.minimal, .low, .medium, .high])
         #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-3-flash-preview") == [.minimal, .low, .medium, .high])
         #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-2.5-pro").isEmpty)
+        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-2.0-flash").isEmpty)
         #expect(CloudProviderModelEligibility.geminiThinkingLevel(for: "gemini-3.1-pro-preview", requested: .minimal) == .low)
     }
 
@@ -602,21 +756,21 @@ struct CoreContractTests {
     }
 
     @Test
-    func cloudModelEligibilityKeepsCurrentProviderModelsAndFutureFamilies() {
+    func cloudModelEligibilityEnforcesCuratedAgentModelPolicy() {
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5-pro", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5-2026-04-23", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4", providerKind: .openAI))
+        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-2026-03-05", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-mini", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-nano-2026-03-17", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.6-mini", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-6", providerKind: .openAI))
-
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-mini", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-pro", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4.1-mini", providerKind: .openAI))
-
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4o", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "chatgpt-4o-latest", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o1", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o3", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o4-mini", providerKind: .openAI))
@@ -624,6 +778,8 @@ struct CoreContractTests {
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-4.1", providerKind: .openRouter))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-6", providerKind: .openRouter))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "meta/llama-4-maverick", providerKind: .openRouter))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "text-embedding-3-large", providerKind: .openAI))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-image-2", providerKind: .openAI))
 
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-4-7", providerKind: .anthropic))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-sonnet-4-6", providerKind: .anthropic))
@@ -665,6 +821,11 @@ struct CoreContractTests {
             supportedGenerationMethods: ["generateContent"]
         ))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "google/gemini-2.5-pro", providerKind: .openRouter))
+        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+            id: "models/text-embedding-004",
+            providerKind: .gemini,
+            supportedGenerationMethods: ["embedContent"]
+        ))
     }
 
     @Test
@@ -1414,8 +1575,14 @@ struct CoreContractTests {
         #expect(decoded.anthropicTokenCountPreflightEnabled == false)
         #expect(decoded.geminiThinkingLevel == .medium)
         #expect(decoded.cloudWebSearchMode == .off)
+        #expect(decoded.cloudAccessMode == .byok)
+        #expect(decoded.proEntitlementStatus == .inactive)
+        #expect(decoded.managedCloudConsent == .notAsked)
 
         let clamped = AppSettingsSnapshot(
+            cloudAccessMode: .managedPro,
+            proEntitlementStatus: .active,
+            managedCloudConsent: .optedIn,
             cloudMaxCompletionTokens: 1,
             localMaxCompletionTokens: 1_000_000,
             localMaxContextTokens: 1,
@@ -1435,6 +1602,9 @@ struct CoreContractTests {
         #expect(clamped.anthropicTokenCountPreflightEnabled == true)
         #expect(clamped.geminiThinkingLevel == .high)
         #expect(clamped.cloudWebSearchMode == .automatic)
+        #expect(clamped.cloudAccessMode == .managedPro)
+        #expect(clamped.proEntitlementStatus == .active)
+        #expect(clamped.managedCloudConsent == .optedIn)
 
         let legacySampling = try JSONDecoder().decode(ChatSampling.self, from: Data(#"{"maxTokens":256,"temperature":0.2}"#.utf8))
         #expect(legacySampling.maxTokens == 256)
@@ -2904,6 +3074,28 @@ struct CoreContractTests {
             #expect(name == "calculator.slow")
             #expect(timeoutSeconds == 1)
         }
+    }
+
+    @Test
+    func downloadResumePlanUsesDurableOpenEndedRanges() {
+        let plan = ModelDownloadResumePlan(
+            expectedBytes: 695_283_921,
+            existingBytes: 64 * 1024 * 1024
+        )
+
+        #expect(plan.isComplete == false)
+        #expect(plan.resumeOffset == 67_108_864)
+        #expect(plan.rangeHeader == "bytes=67108864-")
+        #expect(plan.expectedBytes == 695_283_921)
+    }
+
+    @Test
+    func downloadResumePlanRecognizesCompletedFiles() {
+        let plan = ModelDownloadResumePlan(expectedBytes: 128, existingBytes: 128)
+
+        #expect(plan.isComplete)
+        #expect(plan.rangeHeader == nil)
+        #expect(plan.resumeOffset == 128)
     }
 
     @Test

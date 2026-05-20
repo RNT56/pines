@@ -182,12 +182,13 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         } else {
             do {
                 availableModels = try await listTextModels(apiKey: apiKey).map(\.id)
-                catalogWarning = nil
+                catalogWarning = availableModels.isEmpty ? "Model catalog returned no eligible chat models." : nil
             } catch {
                 availableModels = []
                 catalogWarning = "Model catalog unavailable: \(error.localizedDescription)"
             }
         }
+        let discoveredModelID = availableModels.first?.rawValue
 
         var request: URLRequest
         switch configuration.kind {
@@ -202,12 +203,12 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             request.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "model": modelID?.rawValue ?? configuration.defaultModelID?.rawValue ?? "claude-sonnet-4-6",
+                "model": modelID?.rawValue ?? configuration.defaultModelID?.rawValue ?? discoveredModelID ?? "claude-sonnet-4-6",
                 "max_tokens": 1,
                 "messages": [["role": "user", "content": "ping"]],
             ])
         case .gemini:
-            let model = modelID?.rawValue ?? configuration.defaultModelID?.rawValue ?? "gemini-2.5-flash"
+            let model = modelID?.rawValue ?? configuration.defaultModelID?.rawValue ?? discoveredModelID ?? "gemini-3.1-flash-lite"
             let version = Self.geminiAPIVersion(for: ModelID(rawValue: model))
             let components = URLComponents(url: configuration.baseURL.appending(path: "\(version)/models/\(model):generateContent"), resolvingAgainstBaseURL: false)!
             request = URLRequest(url: components.url!)
@@ -1565,6 +1566,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 rawID = item["id"] as? String
             }
             let supportedGenerationMethods = item["supportedGenerationMethods"] as? [String] ?? []
+            let supportedParameters = item["supported_parameters"] as? [String] ?? []
             guard let id = rawID,
                   CloudProviderModelEligibility.isTextOutputModel(
                       id: id,
@@ -1583,7 +1585,16 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 id: ModelID(rawValue: id),
                 displayName: displayName,
                 createdAt: createdAt,
-                rank: modelRank(id: id, providerKind: providerKind, createdAt: createdAt)
+                rank: modelRank(id: id, providerKind: providerKind, createdAt: createdAt),
+                capabilities: modelCapabilities(
+                    id: id,
+                    item: item,
+                    providerKind: providerKind,
+                    supportedParameters: supportedParameters,
+                    supportedGenerationMethods: supportedGenerationMethods
+                ),
+                supportedParameters: supportedParameters,
+                supportedGenerationMethods: supportedGenerationMethods
             )
         }
 
@@ -1597,6 +1608,138 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             .uniqued(by: \.id)
             .prefix(providerKind == .openAI ? 64 : 24)
             .map { $0 }
+    }
+
+    private static func modelCapabilities(
+        id: String,
+        item: [String: Any],
+        providerKind: CloudProviderKind,
+        supportedParameters: [String],
+        supportedGenerationMethods: [String]
+    ) -> ProviderCapabilities? {
+        switch providerKind {
+        case .openRouter:
+            let architecture = item["architecture"] as? [String: Any] ?? [:]
+            let inputModalities = Set((architecture["input_modalities"] as? [String] ?? []).map { $0.lowercased() })
+            let outputModalities = Set((architecture["output_modalities"] as? [String] ?? []).map { $0.lowercased() })
+            let topProvider = item["top_provider"] as? [String: Any] ?? [:]
+            let supported = Set(supportedParameters.map { $0.lowercased() })
+            return ProviderCapabilities(
+                local: false,
+                streaming: true,
+                textGeneration: outputModalities.isEmpty || outputModalities.contains("text"),
+                vision: inputModalities.contains("image"),
+                imageInputs: inputModalities.contains("image"),
+                audioInputs: inputModalities.contains("audio"),
+                audioOutputs: outputModalities.contains("audio"),
+                videoInputs: inputModalities.contains("video"),
+                videoOutputs: outputModalities.contains("video"),
+                pdfInputs: inputModalities.contains("pdf") || inputModalities.contains("file"),
+                textDocumentInputs: inputModalities.contains("file"),
+                files: inputModalities.contains("file"),
+                toolCalling: supported.contains("tools"),
+                jsonMode: supported.contains("response_format"),
+                structuredOutputs: supported.contains("structured_outputs"),
+                maxContextTokens: intValue(item["context_length"]) ?? intValue(topProvider["context_length"]),
+                maxOutputTokens: intValue(topProvider["max_completion_tokens"])
+            )
+        case .anthropic:
+            let capabilities = item["capabilities"] as? [String: Any] ?? [:]
+            return ProviderCapabilities(
+                local: false,
+                streaming: true,
+                textGeneration: true,
+                vision: capabilitySupported("image_input", in: capabilities),
+                imageInputs: capabilitySupported("image_input", in: capabilities),
+                pdfInputs: capabilitySupported("pdf_input", in: capabilities),
+                textDocumentInputs: true,
+                files: capabilitySupported("files", in: capabilities),
+                toolCalling: true,
+                hostedTools: capabilitySupported("web_search", in: capabilities)
+                    || capabilitySupported("web_fetch", in: capabilities)
+                    || capabilitySupported("code_execution", in: capabilities),
+                jsonMode: capabilitySupported("structured_outputs", in: capabilities),
+                structuredOutputs: capabilitySupported("structured_outputs", in: capabilities),
+                contextCache: capabilitySupported("prompt_caching", in: capabilities)
+                    || capabilitySupported("context_management", in: capabilities),
+                batch: capabilitySupported("batch", in: capabilities),
+                tokenCounting: capabilitySupported("token_counting", in: capabilities),
+                maxContextTokens: intValue(item["max_input_tokens"]),
+                maxOutputTokens: intValue(item["max_tokens"])
+            )
+        case .gemini:
+            return ProviderCapabilities(
+                local: false,
+                streaming: supportedGenerationMethods.contains("streamGenerateContent"),
+                textGeneration: supportedGenerationMethods.contains("generateContent")
+                    || supportedGenerationMethods.contains("streamGenerateContent")
+                    || supportedGenerationMethods.contains("createInteraction")
+                    || supportedGenerationMethods.contains("interactions"),
+                vision: true,
+                imageInputs: true,
+                audioInputs: true,
+                videoInputs: true,
+                pdfInputs: true,
+                textDocumentInputs: true,
+                files: true,
+                toolCalling: true,
+                hostedTools: true,
+                jsonMode: true,
+                structuredOutputs: true,
+                contextCache: true,
+                live: id.lowercased().contains("live"),
+                batch: true,
+                tokenCounting: true,
+                maxContextTokens: intValue(item["inputTokenLimit"]),
+                maxOutputTokens: intValue(item["outputTokenLimit"])
+            )
+        case .openAI:
+            return ProviderCapabilities(
+                local: false,
+                streaming: true,
+                textGeneration: true,
+                vision: true,
+                imageInputs: true,
+                audioInputs: true,
+                pdfInputs: true,
+                textDocumentInputs: true,
+                files: true,
+                toolCalling: true,
+                hostedTools: true,
+                jsonMode: true,
+                structuredOutputs: true,
+                live: true,
+                generatedImages: true,
+                batch: true,
+                maxContextTokens: id.lowercased().hasPrefix("gpt-5.4") ? 1_050_000 : nil
+            )
+        case .openAICompatible, .custom:
+            let supported = Set(supportedParameters.map { $0.lowercased() })
+            return supportedParameters.isEmpty ? nil : ProviderCapabilities(
+                local: false,
+                streaming: true,
+                textGeneration: true,
+                toolCalling: supported.contains("tools"),
+                jsonMode: supported.contains("response_format"),
+                structuredOutputs: supported.contains("structured_outputs")
+            )
+        case .voyageAI:
+            return nil
+        }
+    }
+
+    private static func capabilitySupported(_ key: String, in capabilities: [String: Any]) -> Bool {
+        if let value = capabilities[key] as? [String: Any] {
+            return value["supported"] as? Bool ?? false
+        }
+        return capabilities[key] as? Bool ?? false
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? Double { return Int(value) }
+        if let value = value as? String { return Int(value) }
+        return nil
     }
 
     private static func createdDate(from item: [String: Any]) -> Date? {

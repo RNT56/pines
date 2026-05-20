@@ -21,6 +21,7 @@ typealias PinesLiveStore = any ConversationRepository
     & MCPServerRepository
     & ModelDownloadRepository
     & AuditEventRepository
+    & AppDataResetRepository
 
 final class PinesAppServices: Sendable {
     let secretStore: any SecretStore
@@ -34,6 +35,8 @@ final class PinesAppServices: Sendable {
     let agentToolCatalog: any AgentToolCatalog
     let webSearchLocationProvider: DeviceWebSearchLocationProvider
     let redactor: Redactor
+    let proEntitlementService: PinesProEntitlementService
+    let managedCloudService: PinesManagedCloudService
     let mlxRuntime: MLXRuntimeBridge
     let runtimeMetrics: PinesRuntimeMetrics
     let liveStore: PinesLiveStore?
@@ -104,6 +107,8 @@ final class PinesAppServices: Sendable {
         )
         self.webSearchLocationProvider = webSearchLocationProvider
         self.redactor = redactor
+        self.proEntitlementService = PinesProEntitlementService()
+        self.managedCloudService = PinesManagedCloudService(secretStore: secretStore)
         self.mlxRuntime = mlxRuntime
         self.runtimeMetrics = runtimeMetrics
         self.liveStore = resolvedStore
@@ -246,6 +251,20 @@ final class PinesAppServices: Sendable {
                 name: "Tool Registry",
                 readiness: .ready,
                 summary: "Built-in tools register after first frame; enabled MCP tools start when Tools or MCP context needs them."
+            ),
+            ServiceHealth(
+                name: "Managed Pro Cloud",
+                readiness: managedCloudService.isConfigured ? .ready : .unavailable,
+                summary: managedCloudService.isConfigured
+                    ? "Gateway routing, quotas, and managed provider adapters are available after Pro opt-in."
+                    : "No managed cloud gateway URL is configured; local and BYOK paths remain available."
+            ),
+            ServiceHealth(
+                name: "StoreKit Pro",
+                readiness: proEntitlementService.isConfigured ? .ready : .unavailable,
+                summary: proEntitlementService.isConfigured
+                    ? "Configured product IDs can be observed and validated with the managed gateway."
+                    : "No Pro product IDs are configured in this build."
             ),
             ServiceHealth(
                 name: "MCP Servers",

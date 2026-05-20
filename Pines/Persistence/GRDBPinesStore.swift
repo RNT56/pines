@@ -24,7 +24,8 @@ actor GRDBPinesStore:
     ProviderResearchRunRepository,
     MCPServerRepository,
     ModelDownloadRepository,
-    AuditEventRepository
+    AuditEventRepository,
+    AppDataResetRepository
 {
     let database: DatabasePool
     private let encoder = JSONEncoder()
@@ -150,7 +151,7 @@ actor GRDBPinesStore:
             try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
         }
 
-        try fileManager.replaceItemAt(url, withItemAt: encryptedURL, backupItemName: backupName)
+        _ = try fileManager.replaceItemAt(url, withItemAt: encryptedURL, backupItemName: backupName)
         try removeDatabaseFiles(at: backupURL)
         try removeDatabaseFiles(at: encryptedURL)
         try removeDatabaseSidecars(for: url)
@@ -202,6 +203,8 @@ actor GRDBPinesStore:
         "provider_model_capabilities",
         "provider_research_runs",
     ]
+
+    private static let userResetTables = plaintextMigrationTables
 
     private static let criticalMigrationTables = [
         "conversations",
@@ -335,6 +338,26 @@ actor GRDBPinesStore:
         return migrator
     }
 
+    func deleteAllUserRecords() async throws {
+        try await database.write { db in
+            try db.execute(sql: "PRAGMA foreign_keys = OFF")
+            defer {
+                try? db.execute(sql: "PRAGMA foreign_keys = ON")
+            }
+            for table in Self.userResetTables.reversed() {
+                guard try Self.tableExists(table, in: "main", db: db) else { continue }
+                try db.execute(sql: "DELETE FROM \(Self.quotedIdentifier(table))")
+            }
+            if try Self.tableExists("messages_fts", in: "main", db: db) {
+                try db.execute(sql: "DELETE FROM messages_fts")
+            }
+            if try Self.tableExists("vault_chunks_fts", in: "main", db: db) {
+                try db.execute(sql: "DELETE FROM vault_chunks_fts")
+            }
+        }
+        try Self.seedCuratedModels(in: database)
+    }
+
     // MARK: - Conversations
 
     func listConversations() async throws -> [ConversationRecord] {
@@ -442,6 +465,17 @@ actor GRDBPinesStore:
     func messages(in conversationID: UUID) async throws -> [ChatMessage] {
         try await database.read { db in
             try Self.fetchMessages(db, conversationID: conversationID)
+        }
+    }
+
+    func recentMessages(in conversationID: UUID, limit: Int, requiredMessageIDs: Set<UUID>) async throws -> [ChatMessage] {
+        try await database.read { db in
+            try Self.fetchRecentMessages(
+                db,
+                conversationID: conversationID,
+                limit: limit,
+                requiredMessageIDs: requiredMessageIDs
+            )
         }
     }
 
@@ -2427,6 +2461,79 @@ actor GRDBPinesStore:
             ORDER BY created_at ASC, rowid ASC
             """,
             arguments: [conversationID.uuidString]
+        ).map(message(from:))
+
+        guard !messages.isEmpty else { return [] }
+
+        let messageIDs = messages.map { $0.id.uuidString }
+        let placeholders = Array(repeating: "?", count: messageIDs.count).joined(separator: ",")
+        let attachmentRows = try Row.fetchAll(
+            db,
+            sql: """
+            SELECT id, message_id, kind, file_name, content_type, local_path, byte_count
+            FROM attachments
+            WHERE message_id IN (\(placeholders))
+            ORDER BY created_at ASC
+            """,
+            arguments: StatementArguments(messageIDs)
+        )
+        let attachmentsByMessageID = Dictionary(grouping: attachmentRows, by: { row in
+            row["message_id"] as String
+        }).mapValues { rows in
+            rows.map(attachment(from:))
+        }
+
+        for index in messages.indices {
+            messages[index].attachments = attachmentsByMessageID[messages[index].id.uuidString] ?? []
+        }
+        return messages
+    }
+
+    private static func fetchRecentMessages(
+        _ db: Database,
+        conversationID: UUID,
+        limit: Int,
+        requiredMessageIDs: Set<UUID>
+    ) throws -> [ChatMessage] {
+        let normalizedLimit = max(1, limit)
+        let requiredIDs = requiredMessageIDs.map(\.uuidString).sorted()
+        let requiredClause: String
+        if requiredIDs.isEmpty {
+            requiredClause = ""
+        } else {
+            let placeholders = Array(repeating: "?", count: requiredIDs.count).joined(separator: ",")
+            requiredClause = " OR id IN (\(placeholders))"
+        }
+
+        var arguments: StatementArguments = [conversationID.uuidString, normalizedLimit]
+        if !requiredIDs.isEmpty {
+            _ = arguments.append(contentsOf: StatementArguments(requiredIDs))
+        }
+
+        var messages = try Row.fetchAll(
+            db,
+            sql: """
+            WITH ranked_messages AS (
+                SELECT
+                    rowid AS message_rowid,
+                    id,
+                    role,
+                    content,
+                    created_at,
+                    tool_call_id,
+                    tool_name,
+                    tool_calls_json,
+                    provider_metadata_json,
+                    ROW_NUMBER() OVER (ORDER BY created_at DESC, rowid DESC) AS recent_rank
+                FROM messages
+                WHERE conversation_id = ? AND deleted_at IS NULL
+            )
+            SELECT id, role, content, created_at, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
+            FROM ranked_messages
+            WHERE recent_rank <= ?\(requiredClause)
+            ORDER BY created_at ASC, message_rowid ASC
+            """,
+            arguments: arguments
         ).map(message(from:))
 
         guard !messages.isEmpty else { return [] }

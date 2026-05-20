@@ -86,7 +86,66 @@ extension URL {
 }
 
 enum BackgroundModelFileDownloadEvent: Sendable {
-    case progress(bytesWritten: Int64, expectedFileSize: Int64?)
+    case progress(bytesWritten: Int64, totalBytesWritten: Int64, expectedFileSize: Int64?)
+}
+
+enum ModelDownloadTransferError: Error, LocalizedError, Sendable {
+    case missingHTTPResponse(repository: String, filePath: String, url: URL?)
+    case httpStatus(code: Int, repository: String, filePath: String, url: URL?, requestID: String?, contentRange: String?)
+    case incompleteFile(repository: String, filePath: String, expectedBytes: Int64, actualBytes: Int64)
+    case unexpectedFileSize(repository: String, filePath: String, expectedBytes: Int64, actualBytes: Int64)
+    case destinationSizeMismatch(repository: String, filePath: String, expectedOffset: Int64, actualBytes: Int64)
+
+    var errorDescription: String? {
+        switch self {
+        case let .missingHTTPResponse(repository, filePath, url):
+            return "Download response for \(repository)/\(filePath) did not include HTTP metadata\(Self.urlSuffix(url))."
+        case let .httpStatus(code, repository, filePath, url, requestID, contentRange):
+            var details = "Hugging Face returned HTTP \(code) for \(repository)/\(filePath)\(Self.urlSuffix(url))."
+            if let requestID, !requestID.isEmpty {
+                details += " Request ID: \(requestID)."
+            }
+            if let contentRange, !contentRange.isEmpty {
+                details += " Content-Range: \(contentRange)."
+            }
+            return details
+        case let .incompleteFile(repository, filePath, expectedBytes, actualBytes):
+            return "Downloaded \(repository)/\(filePath) ended at \(actualBytes) bytes, expected \(expectedBytes) bytes."
+        case let .unexpectedFileSize(repository, filePath, expectedBytes, actualBytes):
+            return "Downloaded \(repository)/\(filePath) has \(actualBytes) bytes, expected \(expectedBytes) bytes."
+        case let .destinationSizeMismatch(repository, filePath, expectedOffset, actualBytes):
+            return "Resume for \(repository)/\(filePath) expected \(expectedOffset) bytes on disk, found \(actualBytes) bytes."
+        }
+    }
+
+    var isRetryable: Bool {
+        switch self {
+        case let .httpStatus(code, _, _, _, _, _):
+            return code == 408 || code == 425 || code == 429 || (500 ..< 600).contains(code)
+        case .incompleteFile:
+            return true
+        case .destinationSizeMismatch:
+            return true
+        case .missingHTTPResponse, .unexpectedFileSize:
+            return false
+        }
+    }
+
+    private static func urlSuffix(_ url: URL?) -> String {
+        guard let url else { return "" }
+        return " at \(url.pinesDownloadDiagnosticString)"
+    }
+}
+
+private extension URL {
+    var pinesDownloadDiagnosticString: String {
+        guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false) else {
+            return absoluteString
+        }
+        components.query = nil
+        components.fragment = nil
+        return components.url?.absoluteString ?? absoluteString
+    }
 }
 
 struct BackgroundModelFileDownloadMetadata: Hashable, Codable, Sendable {
@@ -209,7 +268,7 @@ enum ModelDownloadStagingManifestStore {
         }
     }
 
-    static func fail(metadata: BackgroundModelFileDownloadMetadata, error: Error) {
+    static func fail(metadata: BackgroundModelFileDownloadMetadata, error: Error, receivedBytes: Int64? = nil) {
         do {
             try update(
                 in: metadata.stagingDirectory,
@@ -218,6 +277,7 @@ enum ModelDownloadStagingManifestStore {
                 path: metadata.filePath,
                 expectedBytes: metadata.declaredSize,
                 checksum: metadata.checksum,
+                receivedBytes: receivedBytes,
                 status: .failed,
                 errorMessage: error.localizedDescription
             )
@@ -250,6 +310,10 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
         configuration.sessionSendsLaunchEvents = true
         configuration.waitsForConnectivity = true
         configuration.isDiscretionary = false
+        configuration.allowsConstrainedNetworkAccess = true
+        configuration.allowsExpensiveNetworkAccess = true
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
 
@@ -349,7 +413,11 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
             expectedBytes: expected,
             status: .downloading
         )
-        state.continuation?.yield(.progress(bytesWritten: bytesWritten, expectedFileSize: expected))
+        state.continuation?.yield(.progress(
+            bytesWritten: bytesWritten,
+            totalBytesWritten: totalBytesWritten,
+            expectedFileSize: expected
+        ))
     }
 
     func urlSession(
@@ -359,15 +427,46 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
     ) {
         guard let state = state(for: downloadTask) else { return }
         do {
-            guard let http = downloadTask.response as? HTTPURLResponse,
-                  (200 ..< 300).contains(http.statusCode)
-            else {
-                throw URLError(.badServerResponse)
+            let requestURL = downloadTask.currentRequest?.url ?? downloadTask.originalRequest?.url
+            guard let http = downloadTask.response as? HTTPURLResponse else {
+                throw ModelDownloadTransferError.missingHTTPResponse(
+                    repository: state.metadata.repository,
+                    filePath: state.metadata.filePath,
+                    url: requestURL
+                )
+            }
+            guard (200 ..< 300).contains(http.statusCode) else {
+                throw ModelDownloadTransferError.httpStatus(
+                    code: http.statusCode,
+                    repository: state.metadata.repository,
+                    filePath: state.metadata.filePath,
+                    url: requestURL,
+                    requestID: http.value(forHTTPHeaderField: "X-Request-Id"),
+                    contentRange: http.value(forHTTPHeaderField: "Content-Range")
+                )
             }
             try Self.persistDownloadedChunk(location: location, metadata: state.metadata, http: http)
             let receivedBytes = try Self.byteCount(for: state.metadata.destination)
             let expected = Self.expectedFileSize(http: http, responseExpectedLength: -1, metadata: state.metadata)
-            let isComplete = expected.map { receivedBytes >= $0 } ?? (state.metadata.rangeEnd == nil)
+            if let expected {
+                if receivedBytes < expected {
+                    throw ModelDownloadTransferError.incompleteFile(
+                        repository: state.metadata.repository,
+                        filePath: state.metadata.filePath,
+                        expectedBytes: expected,
+                        actualBytes: receivedBytes
+                    )
+                }
+                if receivedBytes > expected {
+                    throw ModelDownloadTransferError.unexpectedFileSize(
+                        repository: state.metadata.repository,
+                        filePath: state.metadata.filePath,
+                        expectedBytes: expected,
+                        actualBytes: receivedBytes
+                    )
+                }
+            }
+            let isComplete = expected.map { receivedBytes == $0 } ?? (state.metadata.rangeEnd == nil)
             ModelDownloadStagingManifestStore.update(
                 metadata: state.metadata,
                 receivedBytes: receivedBytes,
@@ -376,7 +475,11 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
             )
             complete(taskIdentifier: downloadTask.taskIdentifier, result: .success(()))
         } catch {
-            ModelDownloadStagingManifestStore.fail(metadata: state.metadata, error: error)
+            ModelDownloadStagingManifestStore.fail(
+                metadata: state.metadata,
+                error: error,
+                receivedBytes: try? Self.byteCount(for: state.metadata.destination)
+            )
             complete(taskIdentifier: downloadTask.taskIdentifier, result: .failure(error))
         }
     }
@@ -389,7 +492,11 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
         guard let error else { return }
         let state = state(for: task)
         if let metadata = state?.metadata {
-            ModelDownloadStagingManifestStore.fail(metadata: metadata, error: error)
+            ModelDownloadStagingManifestStore.fail(
+                metadata: metadata,
+                error: error,
+                receivedBytes: try? Self.byteCount(for: metadata.destination)
+            )
         }
         if (error as? URLError)?.code == .cancelled {
             complete(taskIdentifier: task.taskIdentifier, result: .failure(CancellationError()))
@@ -458,7 +565,12 @@ final class BackgroundModelFileDownloadCenter: NSObject, URLSessionDownloadDeleg
             if metadata.resumeOffset > 0 {
                 let existingSize = try byteCount(for: destination)
                 guard existingSize == metadata.resumeOffset else {
-                    throw URLError(.cannotWriteToFile)
+                    throw ModelDownloadTransferError.destinationSizeMismatch(
+                        repository: metadata.repository,
+                        filePath: metadata.filePath,
+                        expectedOffset: metadata.resumeOffset,
+                        actualBytes: existingSize
+                    )
                 }
                 try append(contentsOf: location, to: destination)
             } else {

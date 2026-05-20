@@ -790,6 +790,9 @@ struct PinesCoreTestRunner {
     private static func testProductionTypes() throws {
         let settings = AppSettingsSnapshot(
             executionMode: .cloudAllowed,
+            cloudAccessMode: .managedPro,
+            proEntitlementStatus: .active,
+            managedCloudConsent: .optedIn,
             storeConfiguration: .init(iCloudSyncEnabled: true),
             defaultModelID: "local-model",
             cloudMaxCompletionTokens: 32768,
@@ -804,6 +807,9 @@ struct PinesCoreTestRunner {
         )
         let decoded = try JSONDecoder().decode(AppSettingsSnapshot.self, from: JSONEncoder().encode(settings))
         try expectEqual(decoded.executionMode, .cloudAllowed)
+        try expectEqual(decoded.cloudAccessMode, .managedPro)
+        try expectEqual(decoded.proEntitlementStatus, .active)
+        try expectEqual(decoded.managedCloudConsent, .optedIn)
         try expectEqual(decoded.themeTemplate, "graphite")
         try expectEqual(decoded.cloudMaxCompletionTokens, 32768)
         try expectEqual(decoded.localMaxCompletionTokens, 2048)

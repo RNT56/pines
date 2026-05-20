@@ -25,7 +25,9 @@ struct SettingsDetailView: View {
     @State private var providerName = "OpenAI"
     @State private var providerBaseURL = "https://api.openai.com/v1"
     @State private var providerAPIKey = ""
-    @State private var providerEnabled = false
+    @State private var providerEnabled = true
+    @State private var providerSaveConfirmation: String?
+    @State private var providerSaveError: String?
     @State private var mcpName = "Local MCP"
     @State private var mcpEndpointURL = "https://"
     @State private var mcpAuthMode: MCPAuthMode = .none
@@ -52,6 +54,7 @@ struct SettingsDetailView: View {
     @State private var mcpPromptSearch = ""
     @State private var huggingFaceToken = ""
     @State private var braveSearchKey = ""
+    @State private var showsEraseAllDataConfirmation = false
 
     private var iCloudSyncAvailable: Bool {
         services.cloudKitSyncService != nil
@@ -83,6 +86,18 @@ struct SettingsDetailView: View {
             .pinesExpressiveScrollHaptics()
         }
         .navigationTitle(section.title)
+        .confirmationDialog(
+            "Delete all Pines data?",
+            isPresented: $showsEraseAllDataConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete local and iCloud data", role: .destructive) {
+                Task { await appModel.eraseAllUserData(services: services) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes local models, chats, vault files, provider records, credentials, MCP servers, artifacts, and the private iCloud sync zone when available.")
+        }
         .task(id: section.destination) {
             guard section.destination == .tools else { return }
             await appModel.startMCPServersIfNeeded(services: services)
@@ -219,7 +234,7 @@ struct SettingsDetailView: View {
             }
 
             Stepper(
-                "Local context tokens: \(settingsState.localMaxContextTokens.formatted())",
+                "Requested local context tokens: \(settingsState.localMaxContextTokens.formatted())",
                 value: $settingsState.localMaxContextTokens,
                 in: AppSettingsSnapshot.minLocalContextTokens...AppSettingsSnapshot.maxLocalContextTokens,
                 step: 1024
@@ -231,7 +246,7 @@ struct SettingsDetailView: View {
             PinesKeyValueGrid(items: [
                 .init("Cloud completion", "\(settingsState.cloudMaxCompletionTokens.formatted()) tokens", systemImage: "cloud"),
                 .init("Local completion", "\(settingsState.localMaxCompletionTokens.formatted()) tokens", systemImage: "cpu"),
-                .init("Local context", "\(settingsState.localMaxContextTokens.formatted()) tokens", systemImage: "text.word.spacing")
+                .init("Requested local context", "\(settingsState.localMaxContextTokens.formatted()) tokens", systemImage: "text.word.spacing")
             ])
         }
         .id(SettingsDetailAnchor.generationLimits)
@@ -359,6 +374,18 @@ struct SettingsDetailView: View {
                 }
             ))
             .disabled(!iCloudSyncAvailable || !settingsState.storeConfiguration.iCloudSyncEnabled)
+
+            Button(role: .destructive) {
+                showsEraseAllDataConfirmation = true
+            } label: {
+                if appModel.isErasingAllData {
+                    ProgressView()
+                } else {
+                    Label("Delete all Pines data", systemImage: "trash")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(appModel.isErasingAllData)
         }
         .id(SettingsDetailAnchor.storageAndSync)
 
@@ -366,63 +393,160 @@ struct SettingsDetailView: View {
     }
 
     private var cloudProviderCard: some View {
-        PinesCardSection("Cloud BYOK", subtitle: "Bring your own provider credentials without changing routing semantics.", systemImage: "key") {
-            Picker("Provider", selection: $providerKind) {
-                ForEach(CloudProviderKind.allCases, id: \.self) { kind in
-                    Text(kind.title).tag(kind)
+        let proToggleEnabled = settingsState.proEntitlementStatus.enablesManagedCloud && services.managedCloudService.isConfigured
+        return PinesCardSection("Cloud Intelligence", subtitle: "Managed Pro Cloud stays off until Pro is active and you opt in. Advanced Keys remain available for your own quota.", systemImage: "sparkles") {
+            PinesKeyValueGrid(items: [
+                .init("Pro", settingsState.proEntitlementStatus.title, systemImage: "crown"),
+                .init("Cloud", settingsState.managedCloudConsent.title, systemImage: "sparkles"),
+                .init("Pro service", services.managedCloudService.isConfigured ? "Ready" : "Unavailable", systemImage: "network"),
+                .init("Access", settingsState.cloudAccessMode.title, systemImage: "point.3.connected.trianglepath.dotted"),
+            ])
+
+            Toggle("Use Pro Cloud Intelligence", isOn: Binding(
+                get: {
+                    settingsState.proEntitlementStatus.enablesManagedCloud
+                        && settingsState.managedCloudConsent == .optedIn
+                        && settingsState.cloudAccessMode.usesManagedCloud
+                },
+                set: { enabled in
+                    if enabled {
+                        settingsState.managedCloudConsent = .optedIn
+                        settingsState.cloudAccessMode = .managedPro
+                    } else {
+                        settingsState.managedCloudConsent = .optedOut
+                        if settingsState.cloudAccessMode.usesManagedCloud {
+                            settingsState.cloudAccessMode = .byok
+                        }
+                    }
+                    Task { await appModel.saveSettings(services: services) }
                 }
-            }
-            .onChange(of: providerKind) { _, kind in applyProviderDefaults(kind) }
+            ))
+            .disabled(!proToggleEnabled)
 
-            TextField("Display name", text: $providerName)
-                .pinesFieldChrome()
-            TextField("Base URL", text: $providerBaseURL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .pinesFieldChrome()
-            SecureField("API key", text: $providerAPIKey)
-                .textContentType(.password)
-                .pinesFieldChrome()
-            Toggle("Enable for agents", isOn: $providerEnabled)
-                .disabled(providerKind == .voyageAI)
+            Toggle("Use Advanced Keys as explicit fallback", isOn: Binding(
+                get: { settingsState.cloudAccessMode == .managedProWithBYOKOverride },
+                set: { enabled in
+                    settingsState.cloudAccessMode = enabled ? .managedProWithBYOKOverride : .managedPro
+                    Task { await appModel.saveSettings(services: services) }
+                }
+            ))
+            .disabled(!settingsState.cloudAccessMode.usesManagedCloud || settingsState.cloudProviders.isEmpty)
 
-            Button {
-                Task {
-                    await appModel.saveCloudProvider(
-                        kind: providerKind,
-                        displayName: providerName,
-                        baseURLString: providerBaseURL,
-                        apiKey: providerAPIKey,
-                        enabledForAgents: providerEnabled,
-                        services: services
+            Text(cloudIntelligenceSummary)
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                    Picker("Provider", selection: $providerKind) {
+                        ForEach(CloudProviderKind.allCases, id: \.self) { kind in
+                            Text(kind.title).tag(kind)
+                        }
+                    }
+                    .onChange(of: providerKind) { _, kind in applyProviderDefaults(kind) }
+
+                    TextField("Display name", text: $providerName)
+                        .pinesFieldChrome()
+                    TextField("Base URL", text: $providerBaseURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .pinesFieldChrome()
+                    SecureField("API key", text: $providerAPIKey)
+                        .textContentType(.password)
+                        .pinesFieldChrome()
+                    Toggle("Enable for agents", isOn: $providerEnabled)
+                        .disabled(providerKind == .voyageAI)
+
+                    Button {
+                        Task {
+                            providerSaveConfirmation = nil
+                            providerSaveError = nil
+                            let savedName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let didSave = await appModel.saveCloudProvider(
+                                kind: providerKind,
+                                displayName: providerName,
+                                baseURLString: providerBaseURL,
+                                apiKey: providerAPIKey,
+                                enabledForAgents: providerEnabled,
+                                services: services
+                            )
+                            if didSave {
+                                providerAPIKey = ""
+                                providerSaveConfirmation = "Saved \(savedName). Validating the key and refreshing models."
+                            } else {
+                                providerSaveError = appModel.serviceError ?? "Provider key could not be saved."
+                            }
+                        }
+                    } label: {
+                        if settingsState.isSavingCloudProvider {
+                            Label("Saving", systemImage: "hourglass")
+                        } else {
+                            Label("Save key", systemImage: "key")
+                        }
+                    }
+                    .disabled(
+                        settingsState.isSavingCloudProvider
+                            || providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     )
-                    providerAPIKey = ""
+                    .pinesButtonStyle(.primary, fillWidth: true)
+
+                    if let providerSaveConfirmation {
+                        Label(providerSaveConfirmation, systemImage: "checkmark.circle.fill")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.success)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if let providerSaveError {
+                        Label(providerSaveError, systemImage: "exclamationmark.triangle.fill")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if settingsState.isRefreshingCloudModels {
+                        PinesStatusChip(status: .running)
+                    }
+
+                    if settingsState.cloudProviders.isEmpty {
+                        Text("No advanced keys saved.")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                    } else {
+                        ForEach(settingsState.cloudProviders) { provider in
+                            providerRow(provider)
+                        }
+                    }
                 }
             } label: {
-                if settingsState.isSavingCloudProvider {
-                    Label("Saving", systemImage: "hourglass")
-                } else {
-                    Label("Save provider", systemImage: "key")
-                }
-            }
-            .disabled(
-                settingsState.isSavingCloudProvider
-                    || providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            )
-            .pinesButtonStyle(.primary, fillWidth: true)
-
-            providerCapabilityPreview(for: providerKind)
-
-            if settingsState.isRefreshingCloudModels {
-                PinesStatusChip(status: .running)
-            }
-
-            ForEach(settingsState.cloudProviders) { provider in
-                providerRow(provider)
+                Label("Advanced Provider Keys", systemImage: "key")
+                    .font(theme.typography.headline)
             }
         }
         .id(SettingsDetailAnchor.cloudBYOK)
+    }
+
+    private var cloudIntelligenceSummary: String {
+        if !services.managedCloudService.isConfigured {
+            return "This build has no Pro Cloud service configured, so managed cloud calls cannot start. Local models and Advanced Keys still work."
+        }
+        if !settingsState.proEntitlementStatus.enablesManagedCloud {
+            return "Pro Cloud is inactive. No managed cloud call will be made."
+        }
+        switch settingsState.managedCloudConsent {
+        case .optedIn:
+            return settingsState.cloudAccessMode.usesManagedCloud
+                ? "Managed routing can use cloud chat, search, file analysis, background processing, cloud copies, token preflight, embeddings, reranking, and structured extraction. Select an Advanced Key provider any time to keep working on your own provider quota."
+                : "You are opted in, but managed routing is not selected."
+        case .optedOut:
+            return "Cloud Intelligence is off. Managed routes are disabled until you turn this back on."
+        case .notAsked:
+            return "Cloud Intelligence has not been enabled. Vault and chat content stay local unless you use an Advanced Key."
+        case .revoked:
+            return "Cloud Intelligence consent was revoked. Managed routes are disabled."
+        }
     }
 
     private func providerRow(_ provider: CloudProviderConfiguration) -> some View {
@@ -468,6 +592,14 @@ struct SettingsDetailView: View {
             }
 
             PinesMetricPillGroup(items: providerMetricItems(for: provider))
+
+            Toggle("Use for agents", isOn: Binding(
+                get: { provider.enabledForAgents },
+                set: { enabled in
+                    Task { await appModel.setCloudProviderEnabled(provider, enabled: enabled, services: services) }
+                }
+            ))
+            .disabled(provider.kind == .voyageAI)
 
             if let error = provider.lastValidationError?.nilIfEmpty {
                 Text(error)
@@ -516,17 +648,17 @@ struct SettingsDetailView: View {
 
             PinesMetricPillGroup(items: [
                 .init("Responses", value: provider.kind == .anthropic ? settingsState.anthropicThinkingMode.rawValue : "\(settingsState.openAIReasoningEffort.rawValue)/\(settingsState.openAITextVerbosity.rawValue)", systemImage: "slider.horizontal.3", tone: .accent),
-                .init("Storage", value: "\(files.count) files", systemImage: "doc", tone: .warning),
-                .init("Vectors", value: "\(vectorStores.count)", systemImage: "square.stack.3d.up", tone: .warning),
+                .init("Cloud copies", value: "\(files.count)", systemImage: "doc", tone: .warning),
+                .init("Reusable context", value: "\(vectorStores.count)", systemImage: "square.stack.3d.up", tone: .warning),
                 .init("Artifacts", value: "\(artifacts.count)", systemImage: "sparkles", tone: .accent),
-                .init("Batches", value: "\(batches.count)", systemImage: "tray.full", tone: .info),
+                .init("Background", value: "\(batches.count)", systemImage: "tray.full", tone: .info),
                 .init("Live", value: "\(live.count)", systemImage: "dot.radiowaves.left.and.right", tone: .info),
                 .init("Research", value: "\(research.count)", systemImage: "doc.text.magnifyingglass", tone: .success),
             ], minimumWidth: 112)
 
             Text(provider.kind == .anthropic
-                ? "Anthropic Messages: prompt cache \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off"), citations \(settingsState.anthropicCitationsEnabled ? "on" : "off"), token preflight \(settingsState.anthropicTokenCountPreflightEnabled ? "on" : "off"), provider storage opt-in."
-                : "Advanced Responses: web search \(settingsState.cloudWebSearchMode.rawValue), provider storage opt-in, structured output records persisted.")
+                ? "Anthropic Messages: optimized repeated context \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off"), citations \(settingsState.anthropicCitationsEnabled ? "on" : "off"), token preflight \(settingsState.anthropicTokenCountPreflightEnabled ? "on" : "off"), cloud copies opt-in."
+                : "Advanced Responses: source-backed answer \(settingsState.cloudWebSearchMode.rawValue), cloud copies opt-in, verified fields persisted.")
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -552,6 +684,19 @@ struct SettingsDetailView: View {
         }
         if capabilities.live || capabilities.batch {
             items.append(.init("Jobs", value: providerJobLabel(for: capabilities), systemImage: capabilities.live ? "dot.radiowaves.left.and.right" : "tray.full", tone: .warning))
+        }
+        let modelCount = settingsState.cloudModelCatalog[provider.id]?.count ?? 0
+        if modelCount > 0 {
+            items.append(.init("Catalog", value: "\(modelCount) models", systemImage: "list.bullet.rectangle", tone: .success))
+        } else if settingsState.isRefreshingCloudModels || settingsState.validatingCloudProviderIDs.contains(provider.id) {
+            items.append(.init("Catalog", value: "checking", systemImage: "arrow.triangle.2.circlepath", tone: .info))
+        } else if provider.validationStatus == .valid {
+            items.append(.init("Catalog", value: "no curated agent models", systemImage: "line.3.horizontal.decrease.circle", tone: .warning))
+        } else if provider.enabledForAgents {
+            items.append(.init("Catalog", value: "validate key", systemImage: "checkmark.seal", tone: .neutral))
+        }
+        if let defaultModelID = provider.defaultModelID {
+            items.append(.init("Default", value: Self.compactModelName(defaultModelID.rawValue), systemImage: "checkmark.circle", tone: .success))
         }
         return items
     }
@@ -599,137 +744,6 @@ struct SettingsDetailView: View {
             kinds.append(.cachedContext)
         }
         return kinds
-    }
-
-    private func providerCapabilityPreview(for kind: CloudProviderKind) -> some View {
-        let rows = providerCapabilityRows(for: kind)
-        return VStack(alignment: .leading, spacing: theme.spacing.small) {
-            Text("Capability Preview")
-                .font(theme.typography.headline)
-                .foregroundStyle(theme.colors.primaryText)
-
-            ForEach(rows) { row in
-                PinesCapabilityRow(
-                    title: row.title,
-                    detail: row.detail,
-                    systemImage: row.systemImage,
-                    status: row.status,
-                    secondaryStatus: row.secondaryStatus,
-                    metricItems: row.metrics
-                )
-            }
-        }
-    }
-
-    private func providerCapabilityRows(for kind: CloudProviderKind) -> [ProviderCapabilityPreviewRow] {
-        var rows: [ProviderCapabilityPreviewRow] = [
-            .init(
-                title: "Chat and Responses",
-                detail: kind == .voyageAI ? "Retrieval provider; chat generation stays unavailable." : "Text generation, streaming, and provider response metadata scaffolding.",
-                systemImage: kind == .voyageAI ? "square.stack.3d.up" : "text.bubble",
-                status: kind == .voyageAI ? .unavailable : .supported,
-                secondaryStatus: .needsValidation,
-                metrics: [.init("Route", value: kind == .openRouter ? "routed" : "direct", systemImage: "arrow.triangle.branch", tone: kind == .openRouter ? .warning : .accent)]
-            ),
-            .init(
-                title: "Tools and Structured Output",
-                detail: "Hosted tools, function tools, and schema support must be validated per provider/model.",
-                systemImage: "wrench.and.screwdriver",
-                status: (kind == .custom || kind == .voyageAI) ? .unknown : .supported,
-                secondaryStatus: kind == .custom ? .needsValidation : nil,
-                metrics: [.init("Schemas", value: (kind == .custom || kind == .voyageAI) ? "probe" : "available", systemImage: "curlybraces", tone: (kind == .custom || kind == .voyageAI) ? .warning : .success)]
-            ),
-            .init(
-                title: "Files and Provider Storage",
-                detail: "Inline attachments remain separate from provider-hosted files, vector stores, and cached context.",
-                systemImage: "folder.badge.gearshape",
-                status: (kind == .anthropic || kind == .gemini || kind == .openAI) ? .accountGated : .unknown,
-                secondaryStatus: .custom("Explicit storage", .warning),
-                metrics: [.init("Storage", value: "opt-in", systemImage: "lock.shield", tone: .warning)]
-            )
-        ]
-        if kind == .gemini {
-            rows.append(contentsOf: [
-                .init(
-                    title: "Gemini Media Inputs",
-                    detail: "Images, PDFs, text, audio, and video use explicit inline or provider-hosted state with visible retention wording.",
-                    systemImage: "photo.stack",
-                    status: .supported,
-                    secondaryStatus: .custom("No hidden uploads", .warning),
-                    metrics: [
-                        .init("Audio", value: "input", systemImage: "waveform", tone: .info),
-                        .init("Video", value: "input", systemImage: "film", tone: .info),
-                        .init("Files", value: "48h", systemImage: "cloud", tone: .warning),
-                    ]
-                ),
-                .init(
-                    title: "Gemini Tools and Grounding",
-                    detail: "Code execution, URL context, Google Search grounding, citations, and generated tool artifacts are parsed into durable metadata.",
-                    systemImage: "safari",
-                    status: .supported,
-                    secondaryStatus: .needsValidation,
-                    metrics: [
-                        .init("Code", value: "exec", systemImage: "chevron.left.forwardslash.chevron.right", tone: .success),
-                        .init("URLs", value: "context", systemImage: "link", tone: .success),
-                        .init("Search", value: "grounded", systemImage: "magnifyingglass", tone: .success),
-                    ]
-                ),
-                .init(
-                    title: "Gemini Operations",
-                    detail: "Context caches, token counting, Live sessions, generated media jobs, and batches use provider operation records.",
-                    systemImage: "rectangle.stack.badge.play",
-                    status: .accountGated,
-                    secondaryStatus: .custom("Provider-hosted", .warning),
-                    metrics: [
-                        .init("Cache", value: "TTL", systemImage: "memorychip", tone: .warning),
-                        .init("Live", value: "separate", systemImage: "dot.radiowaves.left.and.right", tone: .warning),
-                        .init("Batch", value: "jobs", systemImage: "tray.full", tone: .warning),
-                    ]
-                ),
-            ])
-        }
-        if kind == .anthropic {
-            rows.append(contentsOf: [
-                .init(
-                    title: "Anthropic Messages",
-                    detail: "Messages, Files, prompt caching, citations, and signed thinking blocks use shared provider records and per-model eligibility.",
-                    systemImage: "text.bubble",
-                    status: .accountGated,
-                    secondaryStatus: .needsValidation,
-                    metrics: [
-                        .init("Thinking", value: settingsState.anthropicThinkingMode.rawValue, systemImage: "brain", tone: .accent),
-                        .init("Cache", value: settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off", systemImage: "memorychip", tone: .warning),
-                        .init("Citations", value: settingsState.anthropicCitationsEnabled ? "on" : "off", systemImage: "quote.bubble", tone: .info),
-                        .init("Tokens", value: settingsState.anthropicTokenCountPreflightEnabled ? "preflight" : "manual", systemImage: "number", tone: .accent),
-                    ]
-                ),
-                .init(
-                    title: "Anthropic Hosted Tools",
-                    detail: "Web search/fetch can run with explicit enablement; code execution, remote MCP, text editor, and bash stay approval-gated.",
-                    systemImage: "wrench.and.screwdriver",
-                    status: .accountGated,
-                    secondaryStatus: .custom("Policy gated", .warning),
-                    metrics: [
-                        .init("Web", value: "search/fetch", systemImage: "safari", tone: .success),
-                        .init("Code", value: "approval", systemImage: "chevron.left.forwardslash.chevron.right", tone: .warning),
-                        .init("Computer", value: "disabled", systemImage: "display", tone: .neutral),
-                    ]
-                ),
-                .init(
-                    title: "Anthropic Operations",
-                    detail: "Files, token counting, message batches, generated files, and provider provenance participate in the lifecycle dashboard.",
-                    systemImage: "rectangle.stack.badge.play",
-                    status: .accountGated,
-                    secondaryStatus: .custom("Provider-hosted", .warning),
-                    metrics: [
-                        .init("Files", value: "API", systemImage: "doc", tone: .warning),
-                        .init("Batch", value: "messages", systemImage: "tray.full", tone: .info),
-                        .init("Tokens", value: "preflight", systemImage: "number", tone: .accent),
-                    ]
-                ),
-            ])
-        }
-        return rows
     }
 
     @ViewBuilder
@@ -1426,9 +1440,17 @@ struct SettingsDetailView: View {
     private func applyProviderDefaults(_ kind: CloudProviderKind) {
         providerName = kind.defaultDisplayName
         providerBaseURL = kind.defaultBaseURL
-        if kind == .voyageAI {
-            providerEnabled = false
-        }
+        providerEnabled = kind != .voyageAI
+        providerSaveConfirmation = nil
+        providerSaveError = nil
+    }
+
+    private static func compactModelName(_ rawValue: String) -> String {
+        let name = rawValue
+            .split(separator: "/")
+            .last
+            .map(String.init) ?? rawValue
+        return name.replacingOccurrences(of: "_", with: " ")
     }
 
     private func loadMCPServer(_ server: MCPServerConfiguration) {
@@ -1471,32 +1493,6 @@ struct SettingsDetailView: View {
         mcpBYOKSamplingEnabled = false
         mcpSubscriptionsEnabled = false
         mcpMaxSamplingRequests = 3
-    }
-}
-
-private struct ProviderCapabilityPreviewRow: Identifiable {
-    var id: String { title }
-    let title: String
-    let detail: String
-    let systemImage: String
-    let status: PinesCloudStatus
-    let secondaryStatus: PinesCloudStatus?
-    let metrics: [PinesMetricPillGroup.Item]
-
-    init(
-        title: String,
-        detail: String,
-        systemImage: String,
-        status: PinesCloudStatus,
-        secondaryStatus: PinesCloudStatus? = nil,
-        metrics: [PinesMetricPillGroup.Item] = []
-    ) {
-        self.title = title
-        self.detail = detail
-        self.systemImage = systemImage
-        self.status = status
-        self.secondaryStatus = secondaryStatus
-        self.metrics = metrics
     }
 }
 
@@ -1712,6 +1708,53 @@ private extension AgentExecutionMode {
             "Cloud allowed"
         case .cloudRequired:
             "Cloud required"
+        }
+    }
+}
+
+private extension CloudAccessMode {
+    var title: String {
+        switch self {
+        case .localOnly:
+            "Local only"
+        case .byok:
+            "Advanced Keys"
+        case .managedPro:
+            "Pro Cloud"
+        case .managedProWithBYOKOverride:
+            "Pro Cloud + Keys"
+        }
+    }
+}
+
+private extension ProEntitlementStatus {
+    var title: String {
+        switch self {
+        case .inactive:
+            "Inactive"
+        case .active:
+            "Active"
+        case .expired:
+            "Expired"
+        case .billingRetry:
+            "Billing retry"
+        case .revoked:
+            "Revoked"
+        }
+    }
+}
+
+private extension ManagedCloudConsent {
+    var title: String {
+        switch self {
+        case .notAsked:
+            "Not enabled"
+        case .optedIn:
+            "On"
+        case .optedOut:
+            "Off"
+        case .revoked:
+            "Revoked"
         }
     }
 }

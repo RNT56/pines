@@ -168,6 +168,9 @@ final class PinesSettingsState: ObservableObject {
     @Published var settingsSections: [PinesSettingsSection]
     @Published var securityConfiguration: SecurityConfiguration
     @Published var executionMode: AgentExecutionMode
+    @Published var cloudAccessMode: CloudAccessMode
+    @Published var proEntitlementStatus: ProEntitlementStatus
+    @Published var managedCloudConsent: ManagedCloudConsent
     @Published var storeConfiguration: LocalStoreConfiguration
     @Published var selectedThemeTemplate: PinesThemeTemplate
     @Published var interfaceMode: PinesInterfaceMode
@@ -203,6 +206,9 @@ final class PinesSettingsState: ObservableObject {
         settingsSections: [PinesSettingsSection] = PinesStaticSettings.sections,
         securityConfiguration: SecurityConfiguration = .init(),
         executionMode: AgentExecutionMode = .preferLocal,
+        cloudAccessMode: CloudAccessMode = AppSettingsSnapshot.defaultCloudAccessMode,
+        proEntitlementStatus: ProEntitlementStatus = AppSettingsSnapshot.defaultProEntitlementStatus,
+        managedCloudConsent: ManagedCloudConsent = AppSettingsSnapshot.defaultManagedCloudConsent,
         storeConfiguration: LocalStoreConfiguration = .init(),
         selectedThemeTemplate: PinesThemeTemplate = .evergreen,
         interfaceMode: PinesInterfaceMode = .system,
@@ -237,6 +243,9 @@ final class PinesSettingsState: ObservableObject {
         self.settingsSections = settingsSections
         self.securityConfiguration = securityConfiguration
         self.executionMode = executionMode
+        self.cloudAccessMode = cloudAccessMode
+        self.proEntitlementStatus = proEntitlementStatus
+        self.managedCloudConsent = managedCloudConsent
         self.storeConfiguration = storeConfiguration
         self.selectedThemeTemplate = selectedThemeTemplate
         self.interfaceMode = interfaceMode
@@ -348,6 +357,7 @@ final class PinesWorkflowState: ObservableObject {
     @Published var pendingMCPSamplingResultReview: MCPSamplingResultReview?
     @Published var mcpSamplingPromptDraft: String
     @Published var hapticSignal: PinesHapticSignal?
+    @Published var isErasingAllData: Bool
 
     init(
         serviceError: String? = nil,
@@ -357,7 +367,8 @@ final class PinesWorkflowState: ObservableObject {
         pendingMCPSamplingRequest: MCPSamplingRequest? = nil,
         pendingMCPSamplingResultReview: MCPSamplingResultReview? = nil,
         mcpSamplingPromptDraft: String = "",
-        hapticSignal: PinesHapticSignal? = nil
+        hapticSignal: PinesHapticSignal? = nil,
+        isErasingAllData: Bool = false
     ) {
         self.serviceError = serviceError
         self.pendingToolApproval = pendingToolApproval
@@ -367,5 +378,6 @@ final class PinesWorkflowState: ObservableObject {
         self.pendingMCPSamplingResultReview = pendingMCPSamplingResultReview
         self.mcpSamplingPromptDraft = mcpSamplingPromptDraft
         self.hapticSignal = hapticSignal
+        self.isErasingAllData = isErasingAllData
     }
 }

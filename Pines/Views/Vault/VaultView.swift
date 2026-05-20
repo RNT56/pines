@@ -166,14 +166,14 @@ private struct VaultProviderStorageSection: View {
     }
 
     var body: some View {
-        Section("Provider Storage") {
+        Section("Cloud Copies") {
             VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
                 HStack(spacing: theme.spacing.xsmall) {
                     PinesProviderStorageBadge(kind: .providerHosted, compact: true)
                     PinesProviderStorageBadge(kind: .vectorStore, compact: true)
                 }
 
-                Text("Uploads are opt-in and provider-hosted until deleted. Vault files stay local unless explicitly exported to cloud provider storage.")
+                Text("Cloud copies are opt-in and can be deleted separately. Vault files stay local unless explicitly exported.")
                     .font(theme.typography.caption)
                     .foregroundStyle(theme.colors.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -192,7 +192,7 @@ private struct VaultProviderStorageSection: View {
             Button {
                 Task { await refreshProviderStorage() }
             } label: {
-                Label(providerState.isRefreshingProviderLifecycle ? "Refreshing" : "Refresh provider storage", systemImage: "arrow.triangle.2.circlepath")
+                Label(providerState.isRefreshingProviderLifecycle ? "Refreshing" : "Refresh cloud copies", systemImage: "arrow.triangle.2.circlepath")
             }
             .disabled(providerStorageProviders.isEmpty || providerState.isRefreshingProviderLifecycle)
 
@@ -365,6 +365,7 @@ private struct VaultEmbeddingSetupSection: View {
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var vaultState: PinesVaultState
+    @EnvironmentObject private var settingsState: PinesSettingsState
 
     private var activeProfile: VaultEmbeddingProfile? {
         vaultState.vaultEmbeddingProfiles.first(where: \.isActive)
@@ -374,17 +375,33 @@ private struct VaultEmbeddingSetupSection: View {
         vaultState.vaultEmbeddingProfiles.filter { $0.status != .failed }
     }
 
+    private var managedCloudSearchHint: String {
+        guard settingsState.proEntitlementStatus.enablesManagedCloud else {
+            return "No cloud-enhanced Vault search runs without Pro Cloud or an advanced key."
+        }
+        guard settingsState.managedCloudConsent == .optedIn, settingsState.cloudAccessMode.usesManagedCloud else {
+            return "Pro Cloud search improvements stay off until Cloud Intelligence is enabled."
+        }
+        return "Pro Cloud can improve retrieval only after you approve the document or project scope."
+    }
+
     var body: some View {
-        Section("Embeddings") {
+        Section("Search Quality") {
             if let activeProfile {
                 VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                    Label(activeProfile.displayName, systemImage: activeProfile.kind.isCloud ? "cloud.fill" : "cpu")
+                    Label(activeProfile.kind.isCloud ? "Cloud-enhanced search" : "Local semantic search", systemImage: activeProfile.kind.isCloud ? "cloud.fill" : "cpu")
                         .font(theme.typography.callout.weight(.semibold))
                         .pinesFittingText()
-                    Text("\(activeProfile.modelID.rawValue) · \(activeProfile.dimensions > 0 ? "\(activeProfile.dimensions)d" : "native dimensions")")
+                    Text("\(activeProfile.displayName) · \(activeProfile.modelID.rawValue) · \(activeProfile.dimensions > 0 ? "\(activeProfile.dimensions)d" : "native dimensions")")
                         .font(theme.typography.caption)
                         .foregroundStyle(theme.colors.secondaryText)
                         .lineLimit(2)
+                    Text(activeProfile.kind.isCloud
+                        ? "Vault content is sent only for the selected embedding profile and approved scope."
+                        : managedCloudSearchHint)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, theme.spacing.xsmall)
 
@@ -424,7 +441,7 @@ private struct VaultEmbeddingSetupSection: View {
                 VStack(alignment: .leading, spacing: theme.spacing.small) {
                     Label("Semantic search disabled", systemImage: "exclamationmark.triangle")
                         .font(theme.typography.callout.weight(.semibold))
-                    Text("Install a local embedding model or add cloud credentials to enable vector search. Text search still works.")
+                    Text("Install a local embedding model or add an advanced key to enable semantic search. Text search still works.")
                         .font(theme.typography.caption)
                         .foregroundStyle(theme.colors.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -454,10 +471,10 @@ private struct VaultEmbeddingSetupSection: View {
                         Label("Qwen3 Embedding", systemImage: "link")
                     }
                     Link(destination: URL(string: "https://platform.openai.com/settings/organization/api-keys")!) {
-                        Label("OpenAI keys", systemImage: "key")
+                        Label("Advanced OpenAI key", systemImage: "key")
                     }
                     Link(destination: URL(string: "https://aistudio.google.com/app/apikey")!) {
-                        Label("Gemini keys", systemImage: "key")
+                        Label("Advanced Gemini key", systemImage: "key")
                     }
                     Link(destination: URL(string: "https://openrouter.ai/settings/keys")!) {
                         Label("OpenRouter keys", systemImage: "key")
@@ -576,7 +593,7 @@ private struct VaultDetailView: View {
                             .disabled(providerStorageExportInFlightID != nil)
                         }
 
-                        Text("Exported Vault documents become provider-hosted files and can be deleted from the shared Provider Storage views.")
+                        Text("Exported Vault documents become cloud copies and can be deleted separately from local Vault files.")
                             .font(theme.typography.caption)
                             .foregroundStyle(theme.colors.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
