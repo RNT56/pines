@@ -23,7 +23,7 @@ typealias PinesLiveStore = any ConversationRepository
     & AuditEventRepository
     & AppDataResetRepository
 
-final class PinesAppServices: Sendable {
+final class PinesAppServices: @unchecked Sendable {
     let secretStore: any SecretStore
     let secureKeyStore: SecureKeyStore
     let modelCatalog: HuggingFaceModelCatalogService
@@ -31,7 +31,6 @@ final class PinesAppServices: Sendable {
     let executionRouter: ExecutionRouter
     let toolRegistry: ToolRegistry
     let toolPolicyGate: ToolPolicyGate
-    let agentRuntimeFactory: any AgentRuntimeFactory
     let agentToolCatalog: any AgentToolCatalog
     let webSearchLocationProvider: DeviceWebSearchLocationProvider
     let redactor: Redactor
@@ -39,25 +38,15 @@ final class PinesAppServices: Sendable {
     let managedCloudService: PinesManagedCloudService
     let mlxRuntime: MLXRuntimeBridge
     let runtimeMetrics: PinesRuntimeMetrics
-    let liveStore: PinesLiveStore?
-    let conversationRepository: (any ConversationRepository)?
-    let modelInstallRepository: (any ModelInstallRepository)?
-    let vaultRepository: (any VaultRepository)?
-    let settingsRepository: (any SettingsRepository)?
-    let cloudProviderRepository: (any CloudProviderRepository)?
-    let providerFileRepository: (any ProviderFileRepository)?
-    let providerArtifactRepository: (any ProviderArtifactRepository)?
-    let providerCacheRepository: (any ProviderCacheRepository)?
-    let providerBatchRepository: (any ProviderBatchRepository)?
-    let providerLiveSessionRepository: (any ProviderLiveSessionRepository)?
-    let providerStructuredOutputRepository: (any ProviderStructuredOutputRepository)?
-    let providerModelCapabilityRepository: (any ProviderModelCapabilityRepository)?
-    let providerResearchRunRepository: (any ProviderResearchRunRepository)?
-    let mcpServerRepository: (any MCPServerRepository)?
-    let modelDownloadRepository: (any ModelDownloadRepository)?
-    let auditRepository: (any AuditEventRepository)?
-    private let defaultStoreStartupError: String?
+    private let explicitAgentRuntimeFactory: (any AgentRuntimeFactory)?
+    private let repositoryStateLock = NSLock()
+    private var repositoryState: RepositoryState
     private let bootstrapState = PinesAppServiceBootstrapState()
+
+    private struct RepositoryState {
+        var liveStore: PinesLiveStore?
+        var defaultStoreStartupError: String?
+    }
 
     init(
         secretStore: any SecretStore = KeychainSecretStore(),
@@ -96,11 +85,7 @@ final class PinesAppServices: Sendable {
         self.executionRouter = executionRouter
         self.toolRegistry = toolRegistry
         self.toolPolicyGate = toolPolicyGate
-        self.agentRuntimeFactory = agentRuntimeFactory ?? DefaultAgentRuntimeFactory(
-            toolRegistry: toolRegistry,
-            policyGate: toolPolicyGate,
-            auditRepository: resolvedStore
-        )
+        self.explicitAgentRuntimeFactory = agentRuntimeFactory
         self.agentToolCatalog = agentToolCatalog ?? RegistryAgentToolCatalog(
             secretStore: secretStore,
             toolRegistry: toolRegistry
@@ -111,28 +96,83 @@ final class PinesAppServices: Sendable {
         self.managedCloudService = PinesManagedCloudService(secretStore: secretStore)
         self.mlxRuntime = mlxRuntime
         self.runtimeMetrics = runtimeMetrics
-        self.liveStore = resolvedStore
-        defaultStoreStartupError = storeStartupError
-        conversationRepository = resolvedStore
-        modelInstallRepository = resolvedStore
-        vaultRepository = resolvedStore
-        settingsRepository = resolvedStore
-        cloudProviderRepository = resolvedStore
-        providerFileRepository = resolvedStore
-        providerArtifactRepository = resolvedStore
-        providerCacheRepository = resolvedStore
-        providerBatchRepository = resolvedStore
-        providerLiveSessionRepository = resolvedStore
-        providerStructuredOutputRepository = resolvedStore
-        providerModelCapabilityRepository = resolvedStore
-        providerResearchRunRepository = resolvedStore
-        mcpServerRepository = resolvedStore
-        modelDownloadRepository = resolvedStore
-        auditRepository = resolvedStore
+        repositoryState = RepositoryState(
+            liveStore: resolvedStore,
+            defaultStoreStartupError: storeStartupError
+        )
+    }
+
+    var liveStore: PinesLiveStore? {
+        withRepositoryState { $0.liveStore }
+    }
+
+    var conversationRepository: (any ConversationRepository)? { liveStore }
+    var modelInstallRepository: (any ModelInstallRepository)? { liveStore }
+    var vaultRepository: (any VaultRepository)? { liveStore }
+    var settingsRepository: (any SettingsRepository)? { liveStore }
+    var cloudProviderRepository: (any CloudProviderRepository)? { liveStore }
+    var providerFileRepository: (any ProviderFileRepository)? { liveStore }
+    var providerArtifactRepository: (any ProviderArtifactRepository)? { liveStore }
+    var providerCacheRepository: (any ProviderCacheRepository)? { liveStore }
+    var providerBatchRepository: (any ProviderBatchRepository)? { liveStore }
+    var providerLiveSessionRepository: (any ProviderLiveSessionRepository)? { liveStore }
+    var providerStructuredOutputRepository: (any ProviderStructuredOutputRepository)? { liveStore }
+    var providerModelCapabilityRepository: (any ProviderModelCapabilityRepository)? { liveStore }
+    var providerResearchRunRepository: (any ProviderResearchRunRepository)? { liveStore }
+    var mcpServerRepository: (any MCPServerRepository)? { liveStore }
+    var modelDownloadRepository: (any ModelDownloadRepository)? { liveStore }
+    var auditRepository: (any AuditEventRepository)? { liveStore }
+
+    var agentRuntimeFactory: any AgentRuntimeFactory {
+        explicitAgentRuntimeFactory ?? DefaultAgentRuntimeFactory(
+            toolRegistry: toolRegistry,
+            policyGate: toolPolicyGate,
+            auditRepository: auditRepository
+        )
+    }
+
+    var defaultStoreStartupError: String? {
+        withRepositoryState { $0.defaultStoreStartupError }
+    }
+
+    private func withRepositoryState<Value>(_ body: (RepositoryState) -> Value) -> Value {
+        repositoryStateLock.lock()
+        defer { repositoryStateLock.unlock() }
+        return body(repositoryState)
+    }
+
+    private func updateRepositoryState(_ update: (inout RepositoryState) -> Void) {
+        repositoryStateLock.lock()
+        defer { repositoryStateLock.unlock() }
+        update(&repositoryState)
     }
 
     func prepareForFirstFrame() async {
         runtimeMetrics.start()
+    }
+
+    @discardableResult
+    func loadDefaultStoreIfNeeded() async -> Bool {
+        if liveStore != nil {
+            return true
+        }
+        guard await bootstrapState.markDefaultStoreLoadStarted() else {
+            while liveStore == nil && defaultStoreStartupError == nil {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            return liveStore != nil
+        }
+
+        let runtimeMetrics = runtimeMetrics
+        let result = await Task.detached(priority: .userInitiated) {
+            Self.makeDefaultStore(runtimeMetrics: runtimeMetrics)
+        }.value
+        updateRepositoryState { state in
+            guard state.liveStore == nil else { return }
+            state.liveStore = result.store
+            state.defaultStoreStartupError = result.error
+        }
+        return liveStore != nil
     }
 
     func bootstrap() async {
@@ -612,10 +652,17 @@ struct DeviceWebSearchLocationProvider: Sendable {
 
 private actor PinesAppServiceBootstrapState {
     private var didBootstrapTools = false
+    private var didStartDefaultStoreLoad = false
 
     func markToolBootstrapStarted() -> Bool {
         guard !didBootstrapTools else { return false }
         didBootstrapTools = true
+        return true
+    }
+
+    func markDefaultStoreLoadStarted() -> Bool {
+        guard !didStartDefaultStoreLoad else { return false }
+        didStartDefaultStoreLoad = true
         return true
     }
 }

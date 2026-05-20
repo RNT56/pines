@@ -111,16 +111,8 @@ struct PinesRootView: View {
             await Task.yield()
             PinesRuntimeMetrics.shared.recordStartupPhase("boot_first_frame_yield", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
 
-            let installStateStartedAt = Date()
-            do {
-                try AppInstallStateCoordinator.prepareForLaunch()
-            } catch {
-                appModel.serviceError = error.localizedDescription
-            }
-            PinesRuntimeMetrics.shared.recordStartupPhase("install_state", elapsedSeconds: Date().timeIntervalSince(installStateStartedAt))
-
             let servicesStartedAt = Date()
-            let services = PinesAppServices()
+            let services = PinesAppServices(loadsDefaultStore: false)
             self.services = services
             services.runtimeMetrics.recordStartupPhase("services_init", elapsedSeconds: Date().timeIntervalSince(servicesStartedAt))
 
@@ -141,6 +133,20 @@ struct PinesRootView: View {
             bootstrapTask = Task { @MainActor in
                 defer { isBootstrapping = false }
                 await Task.yield()
+                let installStateStartedAt = Date()
+                do {
+                    try await Task.detached(priority: .userInitiated) {
+                        try AppInstallStateCoordinator.prepareForLaunch()
+                    }.value
+                } catch {
+                    appModel.serviceError = error.localizedDescription
+                }
+                services.runtimeMetrics.recordStartupPhase("install_state", elapsedSeconds: Date().timeIntervalSince(installStateStartedAt))
+
+                let storeReady = await services.loadDefaultStoreIfNeeded()
+                if !storeReady, let error = services.defaultStoreStartupError {
+                    appModel.serviceError = error
+                }
                 await appModel.bootstrap(services: services)
                 haptics.prepare()
                 services.runtimeMetrics.recordStartupPhase("root_bootstrap_complete", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
@@ -289,6 +295,11 @@ struct PinesRootView: View {
     private func handleScenePhase(_ phase: ScenePhase) {
         switch phase {
         case .active:
+            if let services {
+                Task {
+                    await services.mlxRuntime.setForegroundActive(true)
+                }
+            }
             if settingsState.securityConfiguration.appLockEnabled, isPrivacyLocked {
                 Task { await authenticateAppUnlock() }
             } else if !settingsState.securityConfiguration.appLockEnabled {
@@ -296,6 +307,11 @@ struct PinesRootView: View {
             }
         case .inactive, .background:
             isPrivacyCoverVisible = true
+            if let services {
+                Task {
+                    await appModel.stopLocalRuntimeForBackground(services: services)
+                }
+            }
             if settingsState.securityConfiguration.appLockEnabled {
                 isPrivacyLocked = true
             }

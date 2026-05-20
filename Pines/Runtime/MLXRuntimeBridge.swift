@@ -23,6 +23,30 @@ import MLXLMCommon
 import Tokenizers
 #endif
 
+private final class MLXGenerationCancellationBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+
+    func set(_ task: Task<Void, Never>) {
+        lock.lock()
+        self.task = task
+        lock.unlock()
+    }
+
+    func clear() {
+        lock.lock()
+        task = nil
+        lock.unlock()
+    }
+
+    func cancel() {
+        lock.lock()
+        let task = task
+        lock.unlock()
+        task?.cancel()
+    }
+}
+
 struct MLXRuntimeBridge: Sendable {
     private let state = MLXRuntimeState()
     private let deviceMonitor = DeviceRuntimeMonitor()
@@ -344,6 +368,10 @@ struct MLXRuntimeBridge: Sendable {
         await state.unload()
     }
 
+    func setForegroundActive(_ active: Bool) async {
+        await state.setForegroundActive(active)
+    }
+
     func handleMemoryPressure() async {
         await state.handleMemoryPressure()
     }
@@ -365,6 +393,8 @@ private actor MLXRuntimeState {
     private var activePartitionSummary: String?
     private var activeStopStrings = Set<String>()
     private var didRegisterModelAliases = false
+    private var foregroundActive = true
+    private var activeGenerationCancellation: MLXGenerationCancellationBox?
 
     #if canImport(MLXLMCommon)
     private var textContainer: MLXLMCommon.ModelContainer?
@@ -376,6 +406,7 @@ private actor MLXRuntimeState {
     #endif
 
     func load(_ install: ModelInstall, profile: RuntimeProfile) async throws {
+        try ensureForegroundActive()
         try Self.validateRuntimeCompatibility(install)
         activeInstall = install
         activeProfile = profile
@@ -482,6 +513,25 @@ private actor MLXRuntimeState {
     }
     #endif
 
+    func setForegroundActive(_ active: Bool) {
+        foregroundActive = active
+        if !active {
+            activeGenerationCancellation?.cancel()
+        }
+    }
+
+    private func ensureForegroundActive() throws {
+        guard foregroundActive else {
+            throw InferenceError.invalidRequest("Local MLX inference is available only while Pines is active in the foreground.")
+        }
+    }
+
+    private func clearActiveGenerationCancellation(_ box: MLXGenerationCancellationBox) {
+        if activeGenerationCancellation === box {
+            activeGenerationCancellation = nil
+        }
+    }
+
     func unload() async {
         activeInstall = nil
         #if canImport(MLXLMCommon)
@@ -504,6 +554,7 @@ private actor MLXRuntimeState {
 
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
         #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon)
+        try ensureForegroundActive()
         let requiresVLM = request.messages.contains { message in
             message.attachments.contains { attachment in
                 attachment.kind == .image || attachment.kind == .video || attachment.kind == .audio
@@ -554,11 +605,20 @@ private actor MLXRuntimeState {
         let parameters = Self.generateParameters(from: request, profile: profile, install: activeInstall)
         let toolSpecs = request.allowsTools ? Self.mlxToolSpecs(from: request.availableTools) : nil
         let stopStrings = activeStopStrings
+        let generationCancellation = MLXGenerationCancellationBox()
+        activeGenerationCancellation = generationCancellation
 
         return AsyncThrowingStream { continuation in
             let task = Task {
+                defer {
+                    generationCancellation.cancel()
+                    Task {
+                        await self.clearActiveGenerationCancellation(generationCancellation)
+                    }
+                }
                 do {
-                    let result = try await container.perform { context in
+                    let result = try await withTaskCancellationHandler {
+                        try await container.perform { context in
                         let images = imageURLs.map(UserInput.Image.url)
                         let audio = audioURLs.map(UserInput.Audio.url)
                         var tokenCount = 0
@@ -672,6 +732,7 @@ private actor MLXRuntimeState {
                                 tools: toolSpecs
                             )
                         }
+                        generationCancellation.set(generationTask)
                         var completionInfo: GenerateCompletionInfo?
 
                         generationLoop: for await item in stream {
@@ -735,6 +796,7 @@ private actor MLXRuntimeState {
                         }
 
                         await generationTask.value
+                        generationCancellation.clear()
                         let pendingText = stopFilter.flush()
                         if !pendingText.isEmpty {
                             continuation.yield(.token(TokenDelta(kind: .token, text: pendingText, tokenCount: 1)))
@@ -752,6 +814,9 @@ private actor MLXRuntimeState {
                             )
                         }
                         return (tokenCount: tokenCount, finish: finish)
+                        }
+                    } onCancel: {
+                        generationCancellation.cancel()
                     }
 
                     if let finish = result.finish {
@@ -781,6 +846,7 @@ private actor MLXRuntimeState {
             }
 
             continuation.onTermination = { _ in
+                generationCancellation.cancel()
                 task.cancel()
             }
         }
@@ -802,6 +868,7 @@ private actor MLXRuntimeState {
 
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
         #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
+        try ensureForegroundActive()
         return try await embeddingRuntime.embed(request)
         #else
         throw InferenceError.unsupportedCapability("MLXEmbedders is not linked in this build.")
