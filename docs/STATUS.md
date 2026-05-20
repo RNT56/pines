@@ -28,7 +28,7 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Split MLX compatibility implementations for Llama 4 and DeepSeek V4 model families.
 - Hugging Face preflight and resumable model install/delete service.
 - BYOK cloud streaming adapters for OpenAI-compatible, OpenRouter, Anthropic, and Gemini, including provider-specific stream metadata parsing.
-- Shared provider lifecycle records, repositories, previews, and dashboard surfaces for provider-hosted files, artifacts, caches/vector stores, batches, model capabilities, live sessions, and research runs.
+- Shared provider lifecycle records, repositories, previews, and the Artifacts workspace for provider-hosted files, artifacts, caches/vector stores, batches, model capabilities, live sessions, and research runs.
 - OpenAI provider lifecycle workflows for Files, vector stores, vector-store file batches, batches, Deep Research, realtime session records, generated image/video artifacts, speech, transcription, and translation artifacts.
 - Anthropic provider lifecycle workflows for Files, generated file download/import, prompt cache metrics, citations, thinking preservation, Message Batches, token counting, hosted tool metadata, and model capability rows.
 - Gemini provider lifecycle workflows for Files, context caches, token counting, Deep Research, Live sessions, generated media artifacts, batches, URL context metadata, Google Search grounding, and model capability rows.

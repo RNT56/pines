@@ -59,4 +59,42 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(refreshSupport.contains("preferredFrameRateRange"))
         XCTAssertFalse(refreshSupport.contains("requiresContinuousUpdates"))
     }
+
+    func testArtifactsTabRoutesToExtractedWorkspace() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let rootView = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesRootView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(rootView.contains("ArtifactsWorkspaceView()"))
+        XCTAssertFalse(rootView.contains("private struct ProviderWorkspaceView"))
+        XCTAssertFalse(rootView.contains("ProviderLifecycleDashboard"))
+    }
+
+    func testArtifactsWorkspaceDefinesFocusedModesAndConfirmations() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let workspace = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Artifacts/ArtifactsWorkspaceView.swift"),
+            encoding: .utf8
+        )
+        let models = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Artifacts/ArtifactsModels.swift"),
+            encoding: .utf8
+        )
+
+        for mode in ["Library", "Media", "Files", "Context", "Batches", "Research", "Realtime", "Capabilities"] {
+            XCTAssertTrue(workspace.contains(mode), "Missing artifacts workspace mode \(mode)")
+        }
+        XCTAssertTrue(workspace.contains("This removes only Pines' local lifecycle record"))
+        XCTAssertTrue(models.contains("enum ArtifactsWorkspaceMode"))
+        XCTAssertTrue(models.contains("static func counts"))
+        XCTAssertTrue(models.contains("Provider-hosted"))
+        XCTAssertTrue(models.contains("Local copy"))
+        XCTAssertTrue(models.contains("Vault-importable"))
+    }
 }
