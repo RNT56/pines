@@ -366,7 +366,7 @@ struct SettingsDetailView: View {
     }
 
     private var cloudProviderCard: some View {
-        PinesCardSection("Cloud BYOK", subtitle: "Bring your own provider credentials without changing routing semantics.", systemImage: "cloud.badge.key") {
+        PinesCardSection("Cloud BYOK", subtitle: "Bring your own provider credentials without changing routing semantics.", systemImage: "key") {
             Picker("Provider", selection: $providerKind) {
                 ForEach(CloudProviderKind.allCases, id: \.self) { kind in
                     Text(kind.title).tag(kind)
@@ -468,6 +468,14 @@ struct SettingsDetailView: View {
             }
 
             PinesMetricPillGroup(items: providerMetricItems(for: provider))
+
+            if let error = provider.lastValidationError?.nilIfEmpty {
+                Text(error)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.warning)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if provider.kind == .openAI || provider.kind == .anthropic {
                 openAIProviderLifecycleSummary(for: provider)

@@ -237,12 +237,51 @@ actor GRDBPinesStore:
             else {
                 continue
             }
+            let primaryKeys = try primaryKeyColumns(table: table, schema: "plaintext", db: db)
+            guard !primaryKeys.isEmpty else {
+                try verifyMigratedTableCount(table: table, db: db)
+                continue
+            }
             let sourceCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM plaintext.\(quotedIdentifier(table))") ?? 0
-            let destinationCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM main.\(quotedIdentifier(table))") ?? 0
-            guard sourceCount == destinationCount else {
-                throw StoreSecurityError.migrationVerificationFailed(table: table, expected: sourceCount, actual: destinationCount)
+            let primaryKeyPredicates = primaryKeys
+                .map { "destination.\(quotedIdentifier($0)) = source.\(quotedIdentifier($0))" }
+                .joined(separator: " AND ")
+            let migratedSourceCount = try Int.fetchOne(
+                db,
+                sql: """
+                SELECT COUNT(*)
+                FROM plaintext.\(quotedIdentifier(table)) AS source
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM main.\(quotedIdentifier(table)) AS destination
+                    WHERE \(primaryKeyPredicates)
+                )
+                """
+            ) ?? 0
+            guard sourceCount == migratedSourceCount else {
+                throw StoreSecurityError.migrationVerificationFailed(table: table, expected: sourceCount, actual: migratedSourceCount)
             }
         }
+    }
+
+    private static func verifyMigratedTableCount(table: String, db: Database) throws {
+        let sourceCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM plaintext.\(quotedIdentifier(table))") ?? 0
+        let destinationCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM main.\(quotedIdentifier(table))") ?? 0
+        guard sourceCount == destinationCount else {
+            throw StoreSecurityError.migrationVerificationFailed(table: table, expected: sourceCount, actual: destinationCount)
+        }
+    }
+
+    private static func primaryKeyColumns(table: String, schema: String, db: Database) throws -> [String] {
+        let rows = try Row.fetchAll(db, sql: "PRAGMA \(quotedIdentifier(schema)).table_info(\(quotedIdentifier(table)))")
+        return rows.compactMap { row -> (position: Int, name: String)? in
+            let name: String = row["name"]
+            let position: Int = row["pk"]
+            guard position > 0 else { return nil }
+            return (position, name)
+        }
+        .sorted { $0.position < $1.position }
+        .map(\.name)
     }
 
     private static func rebuildFTS(_ table: String, db: Database) throws {

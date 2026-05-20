@@ -988,6 +988,16 @@ final class PinesAppModel: ObservableObject {
         }
     }
 
+    private func refreshConversationPreviews(services: PinesAppServices) async {
+        do {
+            guard let conversationRepository = services.conversationRepository else { return }
+            let previews = try await conversationRepository.listConversationPreviews()
+            setIfChanged(\.threads, mergeThreadPreviews(previews.map(Self.threadPreview(from:))))
+        } catch {
+            setChatError(error.localizedDescription)
+        }
+    }
+
     private func refreshVaultEmbeddingState(services: PinesAppServices) async {
         do {
             if let embeddingService = services.vaultEmbeddingService {
@@ -2010,7 +2020,7 @@ final class PinesAppModel: ObservableObject {
             }
             try await repository.setConversationArchived(archived, conversationID: thread.id)
             emitHaptic(archived ? .destructiveAction : .primaryAction)
-            await refreshAll(services: services)
+            await refreshConversationPreviews(services: services)
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
@@ -2025,7 +2035,7 @@ final class PinesAppModel: ObservableObject {
             }
             try await repository.setConversationPinned(pinned, conversationID: thread.id)
             emitHaptic(.primaryAction)
-            await refreshAll(services: services)
+            await refreshConversationPreviews(services: services)
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
@@ -2042,8 +2052,9 @@ final class PinesAppModel: ObservableObject {
             if let activeRunID, thread.messages.contains(where: { $0.id == activeRunID }) {
                 stopCurrentRun()
             }
+            setIfChanged(\.threads, threads.filter { $0.id != thread.id })
             emitHaptic(.destructiveAction)
-            await refreshAll(services: services)
+            await refreshConversationPreviews(services: services)
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
@@ -3830,13 +3841,46 @@ final class PinesAppModel: ObservableObject {
                 allowInsecureLocalHTTP: existing?.allowInsecureLocalHTTP ?? false,
                 enabledForAgents: kind == .voyageAI ? false : enabledForAgents
             )
+            var savedProvider = provider
+            var validationMessage: String?
             try await service.saveProvider(provider, apiKey: trimmedAPIKey.isEmpty ? nil : trimmedAPIKey)
-            upsertCloudProvider(provider)
+            upsertCloudProvider(savedProvider)
+            if !trimmedAPIKey.isEmpty {
+                validatingCloudProviderIDs.insert(providerID)
+                defer { validatingCloudProviderIDs.remove(providerID) }
+
+                do {
+                    let result = try await service.validate(provider)
+                    let redactedMessage = services.redactor.redact(result.message)
+                    savedProvider.validationStatus = result.status
+                    savedProvider.lastValidatedAt = result.validatedAt
+                    savedProvider.lastValidationError = result.status == .valid ? nil : redactedMessage
+                    if result.status != .valid {
+                        validationMessage = redactedMessage
+                    }
+                } catch {
+                    let redactedMessage = services.redactor.redact(error.localizedDescription)
+                    savedProvider.validationStatus = .invalid
+                    savedProvider.lastValidatedAt = Date()
+                    savedProvider.lastValidationError = redactedMessage
+                    validationMessage = redactedMessage
+                    try? await services.cloudProviderRepository?.upsertProvider(savedProvider)
+                }
+                upsertCloudProvider(savedProvider)
+            }
             await refreshCloudProviders(services: services)
             await refreshVaultEmbeddingState(services: services)
-            setIfChanged(\.serviceError, nil)
-            Task { [weak self] in
-                await self?.refreshCloudModelCatalog(services: services)
+            if let validationMessage {
+                setIfChanged(\.serviceError, validationMessage)
+            } else {
+                setIfChanged(\.serviceError, nil)
+            }
+            if savedProvider.validationStatus == .valid {
+                await refreshCloudModelCatalog(services: services)
+            } else {
+                Task { [weak self] in
+                    await self?.refreshCloudModelCatalog(services: services)
+                }
             }
         } catch {
             serviceError = error.localizedDescription
