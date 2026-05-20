@@ -120,6 +120,7 @@ public protocol ConversationRepository: Sendable {
     func setConversationPinned(_ pinned: Bool, conversationID: UUID) async throws
     func deleteConversation(id: UUID) async throws
     func messages(in conversationID: UUID) async throws -> [ChatMessage]
+    func recentMessages(in conversationID: UUID, limit: Int, requiredMessageIDs: Set<UUID>) async throws -> [ChatMessage]
     func observeMessages(in conversationID: UUID) -> AsyncStream<[ChatMessage]>
     func appendMessage(_ message: ChatMessage, status: MessageStatus, conversationID: UUID, modelID: ModelID?, providerID: ProviderID?) async throws
     func deleteMessages(after messageID: UUID, in conversationID: UUID) async throws
@@ -136,6 +137,28 @@ public protocol ConversationRepository: Sendable {
 }
 
 public extension ConversationRepository {
+    func recentMessages(in conversationID: UUID, limit: Int, requiredMessageIDs: Set<UUID>) async throws -> [ChatMessage] {
+        let allMessages = try await messages(in: conversationID)
+        guard allMessages.count > limit || !requiredMessageIDs.isEmpty else { return allMessages }
+
+        var selectedIDs = Set<UUID>()
+        var selected = [ChatMessage]()
+        for message in allMessages.reversed() where selected.count < max(1, limit) || requiredMessageIDs.contains(message.id) {
+            selectedIDs.insert(message.id)
+            selected.append(message)
+        }
+        for message in allMessages where requiredMessageIDs.contains(message.id) && !selectedIDs.contains(message.id) {
+            selectedIDs.insert(message.id)
+            selected.append(message)
+        }
+        return selected.sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            return lhs.createdAt < rhs.createdAt
+        }
+    }
+
     func updateMessage(id: UUID, content: String, status: MessageStatus, tokenCount: Int?, providerMetadata: [String: String]?) async throws {
         try await updateMessage(
             id: id,

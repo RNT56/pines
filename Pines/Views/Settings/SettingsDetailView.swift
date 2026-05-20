@@ -234,7 +234,7 @@ struct SettingsDetailView: View {
             }
 
             Stepper(
-                "Local context tokens: \(settingsState.localMaxContextTokens.formatted())",
+                "Requested local context tokens: \(settingsState.localMaxContextTokens.formatted())",
                 value: $settingsState.localMaxContextTokens,
                 in: AppSettingsSnapshot.minLocalContextTokens...AppSettingsSnapshot.maxLocalContextTokens,
                 step: 1024
@@ -246,7 +246,7 @@ struct SettingsDetailView: View {
             PinesKeyValueGrid(items: [
                 .init("Cloud completion", "\(settingsState.cloudMaxCompletionTokens.formatted()) tokens", systemImage: "cloud"),
                 .init("Local completion", "\(settingsState.localMaxCompletionTokens.formatted()) tokens", systemImage: "cpu"),
-                .init("Local context", "\(settingsState.localMaxContextTokens.formatted()) tokens", systemImage: "text.word.spacing")
+                .init("Requested local context", "\(settingsState.localMaxContextTokens.formatted()) tokens", systemImage: "text.word.spacing")
             ])
         }
         .id(SettingsDetailAnchor.generationLimits)
@@ -688,8 +688,12 @@ struct SettingsDetailView: View {
         let modelCount = settingsState.cloudModelCatalog[provider.id]?.count ?? 0
         if modelCount > 0 {
             items.append(.init("Catalog", value: "\(modelCount) models", systemImage: "list.bullet.rectangle", tone: .success))
+        } else if settingsState.isRefreshingCloudModels || settingsState.validatingCloudProviderIDs.contains(provider.id) {
+            items.append(.init("Catalog", value: "checking", systemImage: "arrow.triangle.2.circlepath", tone: .info))
         } else if provider.validationStatus == .valid {
-            items.append(.init("Catalog", value: "refreshing", systemImage: "arrow.triangle.2.circlepath", tone: .info))
+            items.append(.init("Catalog", value: "no curated agent models", systemImage: "line.3.horizontal.decrease.circle", tone: .warning))
+        } else if provider.enabledForAgents {
+            items.append(.init("Catalog", value: "validate key", systemImage: "checkmark.seal", tone: .neutral))
         }
         if let defaultModelID = provider.defaultModelID {
             items.append(.init("Default", value: Self.compactModelName(defaultModelID.rawValue), systemImage: "checkmark.circle", tone: .success))

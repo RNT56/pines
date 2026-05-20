@@ -468,6 +468,17 @@ actor GRDBPinesStore:
         }
     }
 
+    func recentMessages(in conversationID: UUID, limit: Int, requiredMessageIDs: Set<UUID>) async throws -> [ChatMessage] {
+        try await database.read { db in
+            try Self.fetchRecentMessages(
+                db,
+                conversationID: conversationID,
+                limit: limit,
+                requiredMessageIDs: requiredMessageIDs
+            )
+        }
+    }
+
     nonisolated func observeMessages(in conversationID: UUID) -> AsyncStream<[ChatMessage]> {
         observationStream { db in
             try Self.fetchMessages(db, conversationID: conversationID)
@@ -2450,6 +2461,79 @@ actor GRDBPinesStore:
             ORDER BY created_at ASC, rowid ASC
             """,
             arguments: [conversationID.uuidString]
+        ).map(message(from:))
+
+        guard !messages.isEmpty else { return [] }
+
+        let messageIDs = messages.map { $0.id.uuidString }
+        let placeholders = Array(repeating: "?", count: messageIDs.count).joined(separator: ",")
+        let attachmentRows = try Row.fetchAll(
+            db,
+            sql: """
+            SELECT id, message_id, kind, file_name, content_type, local_path, byte_count
+            FROM attachments
+            WHERE message_id IN (\(placeholders))
+            ORDER BY created_at ASC
+            """,
+            arguments: StatementArguments(messageIDs)
+        )
+        let attachmentsByMessageID = Dictionary(grouping: attachmentRows, by: { row in
+            row["message_id"] as String
+        }).mapValues { rows in
+            rows.map(attachment(from:))
+        }
+
+        for index in messages.indices {
+            messages[index].attachments = attachmentsByMessageID[messages[index].id.uuidString] ?? []
+        }
+        return messages
+    }
+
+    private static func fetchRecentMessages(
+        _ db: Database,
+        conversationID: UUID,
+        limit: Int,
+        requiredMessageIDs: Set<UUID>
+    ) throws -> [ChatMessage] {
+        let normalizedLimit = max(1, limit)
+        let requiredIDs = requiredMessageIDs.map(\.uuidString).sorted()
+        let requiredClause: String
+        if requiredIDs.isEmpty {
+            requiredClause = ""
+        } else {
+            let placeholders = Array(repeating: "?", count: requiredIDs.count).joined(separator: ",")
+            requiredClause = " OR id IN (\(placeholders))"
+        }
+
+        var arguments: StatementArguments = [conversationID.uuidString, normalizedLimit]
+        if !requiredIDs.isEmpty {
+            _ = arguments.append(contentsOf: StatementArguments(requiredIDs))
+        }
+
+        var messages = try Row.fetchAll(
+            db,
+            sql: """
+            WITH ranked_messages AS (
+                SELECT
+                    rowid AS message_rowid,
+                    id,
+                    role,
+                    content,
+                    created_at,
+                    tool_call_id,
+                    tool_name,
+                    tool_calls_json,
+                    provider_metadata_json,
+                    ROW_NUMBER() OVER (ORDER BY created_at DESC, rowid DESC) AS recent_rank
+                FROM messages
+                WHERE conversation_id = ? AND deleted_at IS NULL
+            )
+            SELECT id, role, content, created_at, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
+            FROM ranked_messages
+            WHERE recent_rank <= ?\(requiredClause)
+            ORDER BY created_at ASC, message_rowid ASC
+            """,
+            arguments: arguments
         ).map(message(from:))
 
         guard !messages.isEmpty else { return [] }

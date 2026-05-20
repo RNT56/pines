@@ -584,6 +584,17 @@ public enum CloudProviderError: Error, Equatable, Sendable {
 }
 
 public enum CloudProviderModelEligibility: Sendable {
+    /// Curated chat model visibility policy for the agent model picker.
+    ///
+    /// This is deliberately narrower than "all valid provider text models." The
+    /// provider catalog can contain older, transitional, or capability-specific
+    /// models that are technically callable but not approved for Pines' agent
+    /// surface. Keep this gate conservative: only expose model families that the
+    /// product has explicitly certified for agent use, and continue filtering
+    /// embeddings, media, realtime, and other non-chat resources out of the
+    /// picker. A provider can validate successfully while returning zero
+    /// curated models; the UI should report that as "no curated agent models,"
+    /// not as a failed key save.
     public static func isTextOutputModel(
         id rawID: String,
         providerKind: CloudProviderKind,
@@ -602,9 +613,7 @@ public enum CloudProviderModelEligibility: Sendable {
 
         switch providerKind {
         case .openAI, .openAICompatible, .openRouter, .custom:
-            if isOpenAIOSeries(modelName) {
-                return true
-            }
+            guard !isOpenAIOSeries(modelName) else { return false }
         case .anthropic, .gemini, .voyageAI:
             break
         }
@@ -777,31 +786,53 @@ public enum CloudProviderModelEligibility: Sendable {
     }
 
     private static func isAllowedOpenAITextModel(_ modelName: String) -> Bool {
-        if modelName == "chatgpt-4o-latest" || modelName.hasPrefix("gpt-4o") {
-            return true
-        }
         guard modelName.hasPrefix("gpt-") else { return false }
         guard let version = modelVersion(after: "gpt-", in: modelName) else { return false }
-        return version.major >= 4
+        if version.major > 5 { return true }
+        guard version.major == 5 else { return false }
+        if version.minor >= 5 { return true }
+        if version.minor == 4 {
+            return modelName == "gpt-5.4"
+                || modelName.hasPrefix("gpt-5.4-2026")
+                || modelName.hasPrefix("gpt-5.4-mini")
+                || modelName.hasPrefix("gpt-5.4-nano")
+        }
+        return false
     }
 
     private static func isAllowedAnthropicTextModel(_ modelName: String) -> Bool {
-        guard modelName.hasPrefix("claude-") else { return false }
-        return modelName.contains("-opus-")
-            || modelName.contains("-sonnet-")
-            || modelName.contains("-haiku-")
+        let parts = modelName.split(separator: "-").map(String.init)
+        guard parts.count >= 3, parts[0] == "claude" else { return false }
+        let family = parts[1]
+        guard let major = Int(parts[2]) else { return false }
+        let minor = parts.dropFirst(3).first.flatMap { Int($0) } ?? 0
+        if major > 4 { return ["opus", "sonnet", "haiku"].contains(family) }
+        guard major == 4 else { return false }
+        switch family {
+        case "opus":
+            return minor >= 7
+        case "sonnet":
+            return minor >= 6
+        case "haiku":
+            return minor >= 5
+        default:
+            return false
+        }
     }
 
     private static func isAllowedGeminiTextModel(_ modelName: String) -> Bool {
-        modelName.hasPrefix("gemini-")
+        guard modelName.hasPrefix("gemini-") else { return false }
+        if modelName.hasPrefix("gemini-3-flash-preview") {
+            return true
+        }
+        guard let version = modelVersion(after: "gemini-", in: modelName) else { return false }
+        if version.major > 3 { return true }
+        return version.major == 3 && version.minor >= 1
     }
 
     private static func isAllowedKnownProviderTextModel(_ modelName: String) -> Bool? {
         if modelName.hasPrefix("gpt-") {
             return isAllowedOpenAITextModel(modelName)
-        }
-        if modelName == "chatgpt-4o-latest" || isOpenAIOSeries(modelName) {
-            return true
         }
         if modelName.hasPrefix("claude-") {
             return isAllowedAnthropicTextModel(modelName)

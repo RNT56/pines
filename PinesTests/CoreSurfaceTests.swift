@@ -123,17 +123,26 @@ final class CoreSurfaceTests: XCTestCase {
             contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModel.swift"),
             encoding: .utf8
         )
+        let chats = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Chats/ChatsView.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(settings.contains("@State private var providerEnabled = true"))
         XCTAssertTrue(settings.contains("providerSaveConfirmation"))
         XCTAssertTrue(settings.contains("Saved \\(savedName). Validating the key and refreshing models."))
         XCTAssertTrue(settings.contains("Use for agents"))
         XCTAssertTrue(settings.contains("Catalog\", value: \"\\(modelCount) models"))
+        XCTAssertTrue(settings.contains("no curated agent models"))
         XCTAssertTrue(appModel.contains("finishSavedCloudProviderActivation"))
         XCTAssertTrue(appModel.contains("applyCloudProviderValidationResult"))
         XCTAssertTrue(appModel.contains("recordFirstCloudModelIfNeeded"))
+        XCTAssertTrue(appModel.contains("replaceCloudModelCatalog"))
+        XCTAssertTrue(appModel.contains("models.isEmpty ? nil : models"))
         XCTAssertTrue(appModel.contains("var nextCatalog = cloudModelCatalog.filter"))
         XCTAssertTrue(appModel.contains("recordRecoverableIssue(\"cloud.model_catalog.refresh.\\(provider.id.rawValue)\""))
         XCTAssertTrue(appModel.contains("func setCloudProviderEnabled"))
+        XCTAssertTrue(chats.contains("No agent models"))
+        XCTAssertTrue(chats.contains("Saved Providers"))
     }
 }

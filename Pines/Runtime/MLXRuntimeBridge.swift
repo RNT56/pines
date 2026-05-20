@@ -563,30 +563,80 @@ private actor MLXRuntimeState {
                         let audio = audioURLs.map(UserInput.Audio.url)
                         var tokenCount = 0
                         var finish: InferenceFinish?
-                        var messages = [Chat.Message]()
-                        if !instructions.isEmpty {
-                            messages.append(.system(instructions))
-                        }
-                        if usesAgentTranscript {
-                            messages.append(
-                                contentsOf: Self.agentChatHistory(
-                                    from: historyMessages[...],
-                                    latestUserID: latestUser.id,
-                                    latestUserImages: images,
-                                    latestUserAudio: audio
+                        let initialHistoryCharacterBudget = Self.localHistoryCharacterBudget(
+                            maxContextTokens: profile.quantization.maxKVSize
+                        )
+                        let reservedCompletionTokens = request.sampling.maxTokens ?? 0
+                        var historyCharacterBudget = initialHistoryCharacterBudget
+                        var reducedHistoryForContext = false
+
+                        func makeMessages(historyCharacterBudget: Int) -> [Chat.Message] {
+                            var messages = [Chat.Message]()
+                            if !instructions.isEmpty {
+                                messages.append(.system(instructions))
+                            }
+                            if usesAgentTranscript {
+                                messages.append(
+                                    contentsOf: Self.agentChatHistory(
+                                        from: historyMessages[...],
+                                        latestUserID: latestUser.id,
+                                        latestUserImages: images,
+                                        latestUserAudio: audio,
+                                        maxCharacters: historyCharacterBudget,
+                                        latestUserMaxCharacters: Self.localAgentLatestUserCharacterBudget(
+                                            maxContextTokens: profile.quantization.maxKVSize
+                                        )
+                                    )
                                 )
-                            )
-                        } else {
-                            messages.append(contentsOf: Self.chatHistory(from: historyMessages[...]))
-                            messages.append(.user(latestPrompt, images: images, videos: [], audio: audio))
+                            } else {
+                                messages.append(
+                                    contentsOf: Self.chatHistory(
+                                        from: historyMessages[...],
+                                        maxCharacters: historyCharacterBudget
+                                    )
+                                )
+                                messages.append(.user(latestPrompt, images: images, videos: [], audio: audio))
+                            }
+                            return messages
                         }
 
-                        let userInput = UserInput(
-                            chat: messages,
+                        var userInput = UserInput(
+                            chat: makeMessages(historyCharacterBudget: historyCharacterBudget),
                             processing: .init(resize: CGSize(width: 512, height: 512)),
                             tools: toolSpecs
                         )
-                        let input = try await context.processor.prepare(input: userInput)
+                        var input = try await context.processor.prepare(input: userInput)
+                        while let maxContextTokens = profile.quantization.maxKVSize,
+                              input.text.tokens.size + reservedCompletionTokens > maxContextTokens,
+                              historyCharacterBudget > 0 {
+                            reducedHistoryForContext = true
+                            historyCharacterBudget = historyCharacterBudget <= 512 ? 0 : historyCharacterBudget / 2
+                            userInput = UserInput(
+                                chat: makeMessages(historyCharacterBudget: historyCharacterBudget),
+                                processing: .init(resize: CGSize(width: 512, height: 512)),
+                                tools: toolSpecs
+                            )
+                            input = try await context.processor.prepare(input: userInput)
+                        }
+                        if let maxContextTokens = profile.quantization.maxKVSize,
+                           input.text.tokens.size + reservedCompletionTokens > maxContextTokens {
+                            throw InferenceError.invalidRequest(
+                                "This local request needs \(input.text.tokens.size + reservedCompletionTokens) tokens (\(input.text.tokens.size) prompt + \(reservedCompletionTokens) completion), but \(request.modelID.rawValue) is configured for \(maxContextTokens). Shorten the latest message or reduce local completion tokens."
+                            )
+                        }
+                        var contextMetadata: [String: String] = [
+                            ChatContextMetadataKeys.exactInputTokens: String(input.text.tokens.size),
+                            ChatContextMetadataKeys.reservedCompletionTokens: String(reservedCompletionTokens),
+                        ]
+                        if let maxContextTokens = profile.quantization.maxKVSize {
+                            contextMetadata[ChatContextMetadataKeys.contextWindowTokens] = String(maxContextTokens)
+                            contextMetadata[ChatContextMetadataKeys.inputBudgetTokens] = String(max(0, maxContextTokens - reservedCompletionTokens))
+                        }
+                        if reducedHistoryForContext {
+                            contextMetadata[ChatContextMetadataKeys.truncationApplied] = "true"
+                            contextMetadata[ChatContextMetadataKeys.strategy] = "mlx-exact-token-preflight-v1"
+                            contextMetadata[ChatContextMetadataKeys.clippedMessageCount] = "1"
+                        }
                         let cache = context.model.newCache(parameters: parameters)
                         let stream: AsyncStream<Generation>
                         let generationTask: Task<Void, Never>
@@ -634,13 +684,15 @@ private actor MLXRuntimeState {
                                     continuation.yield(.token(TokenDelta(kind: .token, text: filtered.text, tokenCount: 1)))
                                 }
                                 if filtered.didStop {
+                                    var providerMetadata = Self.localProviderMetadata(
+                                        from: cache,
+                                        fallbackProfile: profile,
+                                        partitionSummary: partitionSummary
+                                    )
+                                    providerMetadata.merge(contextMetadata) { _, new in new }
                                     finish = InferenceFinish(
                                         reason: .stop,
-                                        providerMetadata: Self.localProviderMetadata(
-                                            from: cache,
-                                            fallbackProfile: profile,
-                                            partitionSummary: partitionSummary
-                                        )
+                                        providerMetadata: providerMetadata
                                     )
                                     generationTask.cancel()
                                     break generationLoop
@@ -688,13 +740,15 @@ private actor MLXRuntimeState {
                             continuation.yield(.token(TokenDelta(kind: .token, text: pendingText, tokenCount: 1)))
                         }
                         if finish == nil, let completionInfo {
+                            var providerMetadata = Self.localProviderMetadata(
+                                from: cache,
+                                fallbackProfile: profile,
+                                partitionSummary: partitionSummary
+                            )
+                            providerMetadata.merge(contextMetadata) { _, new in new }
                             finish = InferenceFinish(
                                 reason: Self.finishReason(from: completionInfo.stopReason),
-                                providerMetadata: Self.localProviderMetadata(
-                                    from: cache,
-                                    fallbackProfile: profile,
-                                    partitionSummary: partitionSummary
-                                )
+                                providerMetadata: providerMetadata
                             )
                         }
                         return (tokenCount: tokenCount, finish: finish)
@@ -1055,8 +1109,20 @@ private actor MLXRuntimeState {
         return schemas.isEmpty ? nil : schemas
     }
 
-    private static func chatHistory(from messages: ArraySlice<ChatMessage>) -> [Chat.Message] {
-        let maxCharacters = 24_000
+    private static func localHistoryCharacterBudget(maxContextTokens: Int?) -> Int {
+        guard let maxContextTokens else { return 24_000 }
+        return min(96_000, max(24_000, maxContextTokens * 2))
+    }
+
+    private static func localAgentLatestUserCharacterBudget(maxContextTokens: Int?) -> Int {
+        guard let maxContextTokens else { return 8_000 }
+        return min(32_000, max(8_000, maxContextTokens))
+    }
+
+    private static func chatHistory(
+        from messages: ArraySlice<ChatMessage>,
+        maxCharacters: Int = 24_000
+    ) -> [Chat.Message] {
         var selected = [Chat.Message]()
         var remaining = maxCharacters
 
@@ -1092,10 +1158,10 @@ private actor MLXRuntimeState {
         from messages: ArraySlice<ChatMessage>,
         latestUserID: UUID,
         latestUserImages: [UserInput.Image],
-        latestUserAudio: [UserInput.Audio]
+        latestUserAudio: [UserInput.Audio],
+        maxCharacters: Int = 24_000,
+        latestUserMaxCharacters: Int = 8_000
     ) -> [Chat.Message] {
-        let maxCharacters = 24_000
-        let latestUserMaxCharacters = 8_000
         let indexed = messages.enumerated().map { (offset: $0.offset, message: $0.element) }
         let latestUser = indexed.first { $0.message.id == latestUserID }
         let latestUserContent = latestUser?.message.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

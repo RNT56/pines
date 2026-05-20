@@ -69,6 +69,11 @@ private enum ChatMetadataKeys {
     static let agentActivities = "pines.agent.activities.v1"
 }
 
+private enum ChatContextAssembly {
+    static let maximumLoadedMessages = 256
+    static let defaultContextTokens = 65_536
+}
+
 private enum ChatLocalGenerationPerformance {
     static let minimumElapsedSeconds: TimeInterval = 0.05
 
@@ -2313,7 +2318,11 @@ final class PinesAppModel: ObservableObject {
                 return
             }
             let requiresTools = isAgentMode && !availableTools.isEmpty
-            let persistedMessages = try await repository.messages(in: conversationID)
+            let persistedMessages = try await repository.recentMessages(
+                in: conversationID,
+                limit: ChatContextAssembly.maximumLoadedMessages,
+                requiredMessageIDs: [userMessage.id]
+            )
             await persistDerivedTitleIfNeeded(
                 conversationID: conversationID,
                 storedTitleWasPlaceholder: titleWasPlaceholder,
@@ -2575,10 +2584,31 @@ final class PinesAppModel: ObservableObject {
                     requestMessages.insert(attachmentManifest, at: min(1, requestMessages.count))
                 }
             }
+            let sampling = chatSampling(for: selectedProviderID, settings: settings, services: services)
+            let contextPacking = ChatContextPacker.pack(
+                requestMessages,
+                policy: ChatContextPackingPolicy(
+                    maxContextTokens: contextWindowTokens(
+                        providerID: selectedProviderID,
+                        modelID: selectedModelID,
+                        providerCapabilities: selectedProvider.capabilities,
+                        isLocalRun: isLocalRun,
+                        settings: settings,
+                        services: services
+                    ),
+                    reservedCompletionTokens: sampling.maxTokens ?? 0,
+                    defaultContextTokens: ChatContextAssembly.defaultContextTokens,
+                    maximumMessages: ChatContextAssembly.maximumLoadedMessages,
+                    anchorMessageID: userMessage.id
+                )
+            )
+            requestMessages = contextPacking.messages
+            runProviderMetadata.merge(contextPacking.summary.providerMetadata) { _, new in new }
+
             let request = ChatRequest(
                 modelID: selectedModelID,
                 messages: requestMessages,
-                sampling: chatSampling(for: selectedProviderID, settings: settings, services: services),
+                sampling: sampling,
                 webSearchOptions: await webSearchOptions(for: selectedProviderID, settings: settings, services: services),
                 allowsTools: !availableTools.isEmpty,
                 availableTools: availableTools,
@@ -2965,6 +2995,30 @@ final class PinesAppModel: ObservableObject {
         }
 
         return installedTextModels.first
+    }
+
+    private func contextWindowTokens(
+        providerID: ProviderID,
+        modelID: ModelID,
+        providerCapabilities: ProviderCapabilities,
+        isLocalRun: Bool,
+        settings: AppSettingsSnapshot?,
+        services: PinesAppServices
+    ) -> Int? {
+        if isLocalRun, let install = installedModel(for: modelID) {
+            return localRuntimeProfile(
+                for: install,
+                settings: settings,
+                services: services
+            ).quantization.maxKVSize ?? providerCapabilities.maxContextTokens
+        }
+
+        let modelRecord = providerModelCapabilities.first { record in
+            record.providerID == providerID && record.modelID == modelID
+        }
+        return modelRecord?.contextWindowTokens
+            ?? modelRecord?.capabilities.maxContextTokens
+            ?? providerCapabilities.maxContextTokens
     }
 
     private func preferredModelSelection(services: PinesAppServices) -> ModelPickerOption? {
@@ -4107,18 +4161,16 @@ final class PinesAppModel: ObservableObject {
             setIfChanged(\.serviceError, services.redactor.redact(error.localizedDescription))
         }
         upsertCloudProvider(provider)
-        if !result.availableModels.isEmpty {
-            upsertCloudModelCatalog(
-                result.availableModels.enumerated().map { index, modelID in
-                    CloudProviderModel(
-                        id: modelID,
-                        displayName: Self.friendlyModelName(modelID.rawValue),
-                        rank: Double(result.availableModels.count - index)
-                    )
-                },
-                for: provider.id
-            )
-        }
+        replaceCloudModelCatalog(
+            result.availableModels.enumerated().map { index, modelID in
+                CloudProviderModel(
+                    id: modelID,
+                    displayName: Self.friendlyModelName(modelID.rawValue),
+                    rank: Double(result.availableModels.count - index)
+                )
+            },
+            for: provider.id
+        )
     }
 
     private func markCloudProvider(
@@ -4196,9 +4248,9 @@ final class PinesAppModel: ObservableObject {
                     }
                     let inferenceProvider = BYOKCloudInferenceProvider(configuration: provider, secretStore: services.secretStore)
                     let models = try await inferenceProvider.listTextModels()
-                    if !models.isEmpty {
-                        nextCatalog[provider.id] = models
-                        await recordFirstCloudModelIfNeeded(models[0].id, providerID: provider.id, services: services)
+                    nextCatalog[provider.id] = models.isEmpty ? nil : models
+                    if let firstModel = models.first {
+                        await recordFirstCloudModelIfNeeded(firstModel.id, providerID: provider.id, services: services)
                     }
                 } catch {
                     recordRecoverableIssue("cloud.model_catalog.refresh.\(provider.id.rawValue)", error: error, services: services)
@@ -4209,10 +4261,9 @@ final class PinesAppModel: ObservableObject {
         } while needsCloudModelCatalogRefresh
     }
 
-    private func upsertCloudModelCatalog(_ models: [CloudProviderModel], for providerID: ProviderID) {
-        guard !models.isEmpty else { return }
+    private func replaceCloudModelCatalog(_ models: [CloudProviderModel], for providerID: ProviderID) {
         var catalog = cloudModelCatalog
-        catalog[providerID] = models
+        catalog[providerID] = models.isEmpty ? nil : models
         setIfChanged(\.cloudModelCatalog, catalog)
     }
 
