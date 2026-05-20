@@ -208,7 +208,7 @@ enum AppInstallStateCoordinator {
         let value = Data("installed-v1".utf8)
         let update: [String: Any] = [
             kSecValueData as String: value,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
         let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
         if updateStatus == errSecSuccess {
@@ -219,7 +219,7 @@ enum AppInstallStateCoordinator {
         }
 
         query[kSecValueData as String] = value
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let addStatus = SecItemAdd(query as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
             throw AppInstallStateError.keychainStatus(addStatus)
