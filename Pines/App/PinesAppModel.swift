@@ -543,6 +543,7 @@ final class PinesAppModel: ObservableObject {
     private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
     private var currentRunToken: UUID?
+    private var currentRunUsesLocalRuntime = false
     private var vaultReindexToken: UUID?
     var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
     var cloudContextContinuation: CheckedContinuation<CloudContextApprovalDecision, Never>?
@@ -609,6 +610,7 @@ final class PinesAppModel: ObservableObject {
             activeRunID = nil
             currentRunTask = nil
             currentRunToken = nil
+            currentRunUsesLocalRuntime = false
         }
         setChatError(message)
         emitHaptic(.runFailed)
@@ -619,6 +621,12 @@ final class PinesAppModel: ObservableObject {
         activeRunID = nil
         currentRunTask = nil
         currentRunToken = nil
+        currentRunUsesLocalRuntime = false
+    }
+
+    private func markCurrentRunUsesLocalRuntime(_ runToken: UUID) {
+        guard currentRunToken == runToken else { return }
+        currentRunUsesLocalRuntime = true
     }
 
     private func upsertThreadPreview(_ preview: PinesThreadPreview, moveToFront: Bool) {
@@ -1023,6 +1031,7 @@ final class PinesAppModel: ObservableObject {
         currentRunTask?.cancel()
         currentRunTask = nil
         currentRunToken = nil
+        currentRunUsesLocalRuntime = false
         activeRunID = nil
         chatState.removeAllLiveMessages()
         cancelModelSearchMetadataEnrichment()
@@ -1710,6 +1719,7 @@ final class PinesAppModel: ObservableObject {
         currentRunTask?.cancel()
         let runToken = UUID()
         currentRunToken = runToken
+        currentRunUsesLocalRuntime = false
         currentRunTask = Task { [weak self] in
             await self?.sendMessage(
                 draft,
@@ -1728,6 +1738,7 @@ final class PinesAppModel: ObservableObject {
         currentRunTask?.cancel()
         currentRunTask = nil
         currentRunToken = nil
+        currentRunUsesLocalRuntime = false
         activeRunID = nil
         emitHaptic(.runCancelled)
         resolvePendingToolApproval(.denied)
@@ -1736,6 +1747,25 @@ final class PinesAppModel: ObservableObject {
         cancelVaultReindex()
         resolvePendingMCPSampling(false)
         resolvePendingMCPSamplingResultReview(false)
+    }
+
+    func stopLocalRuntimeForBackground(services: PinesAppServices) async {
+        await services.mlxRuntime.setForegroundActive(false)
+        cancelVaultReindex()
+        guard currentRunUsesLocalRuntime else { return }
+
+        currentRunTask?.cancel()
+        currentRunTask = nil
+        currentRunToken = nil
+        currentRunUsesLocalRuntime = false
+        activeRunID = nil
+        resolvePendingToolApproval(.denied)
+        resolvePendingCloudContextApproval(.cancel)
+        resolvePendingCloudVaultEmbeddingApproval(false)
+        resolvePendingMCPSampling(false)
+        resolvePendingMCPSamplingResultReview(false)
+        setChatError("Local generation was stopped because iOS does not allow MLX GPU inference while Pines is in the background.")
+        emitHaptic(.runCancelled)
     }
 
     func retryLastUserMessage(in thread: PinesThreadPreview, services: PinesAppServices) {
@@ -1841,6 +1871,7 @@ final class PinesAppModel: ObservableObject {
         currentRunTask?.cancel()
         let runToken = UUID()
         currentRunToken = runToken
+        currentRunUsesLocalRuntime = false
         currentRunTask = Task { [weak self] in
             await self?.sendMessage(
                 userMessage.content,
@@ -2367,6 +2398,7 @@ final class PinesAppModel: ObservableObject {
                         failPendingChatStart(agentReadinessFailureMessage(for: localInstall, requiresTools: requiresTools), runToken: runToken)
                         return
                     }
+                    markCurrentRunUsesLocalRuntime(runToken)
                     try await services.mlxRuntime.load(
                         localInstall,
                         profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
@@ -2436,6 +2468,7 @@ final class PinesAppModel: ObservableObject {
                         failPendingChatStart("Download and select a local text model before starting local chat.", runToken: runToken)
                         return
                     }
+                    markCurrentRunUsesLocalRuntime(runToken)
                     try await services.mlxRuntime.load(
                         localInstall,
                         profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
