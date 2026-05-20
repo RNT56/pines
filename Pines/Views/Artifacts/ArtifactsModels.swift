@@ -4,39 +4,40 @@ import SwiftUI
 
 enum ArtifactsWorkspaceMode: String, CaseIterable, Identifiable, Hashable {
     case library
-    case media
-    case files
-    case context
-    case batches
+    case generate
     case research
-    case realtime
-    case capabilities
+    case storage
+    case jobs
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .library: "Library"
-        case .media: "Media"
-        case .files: "Files"
-        case .context: "Context"
-        case .batches: "Batches"
+        case .generate: "Generate"
         case .research: "Research"
-        case .realtime: "Realtime"
-        case .capabilities: "Capabilities"
+        case .storage: "Storage"
+        case .jobs: "Jobs"
         }
     }
 
     var systemImage: String {
         switch self {
         case .library: "rectangle.stack"
-        case .media: "photo.stack"
-        case .files: "doc.badge.arrow.up"
-        case .context: "externaldrive.badge.icloud"
-        case .batches: "tray.full"
+        case .generate: "sparkles"
         case .research: "doc.text.magnifyingglass"
-        case .realtime: "dot.radiowaves.left.and.right"
-        case .capabilities: "cpu"
+        case .storage: "externaldrive.badge.icloud"
+        case .jobs: "tray.full"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .library: "Artifacts and structured outputs"
+        case .generate: "Images, video, and speech"
+        case .research: "Deep research workspace"
+        case .storage: "Files, vector stores, caches"
+        case .jobs: "Batches and sessions"
         }
     }
 }
@@ -192,6 +193,75 @@ struct ArtifactsResourceSummary: Identifiable, Hashable {
     let createdAt: Date?
     let systemImage: String
     let metricItems: [PinesMetricPillGroup.Item]
+}
+
+enum ArtifactsMediaKind: String, CaseIterable, Identifiable, Hashable {
+    case image
+    case video
+    case speech
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .image: "Image"
+        case .video: "Video"
+        case .speech: "Speech"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .image: "photo"
+        case .video: "film"
+        case .speech: "waveform"
+        }
+    }
+}
+
+struct ArtifactsMediaModelOption: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let detail: String
+    let isFromProviderCapability: Bool
+
+    init(id: String, title: String? = nil, detail: String, isFromProviderCapability: Bool) {
+        self.id = id
+        self.title = title ?? id
+        self.detail = detail
+        self.isFromProviderCapability = isFromProviderCapability
+    }
+}
+
+struct ArtifactsResearchModelOption: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let detail: String
+    let isFromProviderCapability: Bool
+
+    init(id: String, title: String? = nil, detail: String, isFromProviderCapability: Bool) {
+        self.id = id
+        self.title = title ?? id
+        self.detail = detail
+        self.isFromProviderCapability = isFromProviderCapability
+    }
+}
+
+struct ArtifactsResearchTimelineEvent: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let detail: String
+    let systemImage: String
+    let tone: PinesCloudStatusTone
+}
+
+struct ArtifactsResearchSource: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let detail: String
+    let url: String?
+    let systemImage: String
+    let tone: PinesCloudStatusTone
 }
 
 enum ArtifactsWorkspaceDeriver {
@@ -426,6 +496,289 @@ enum ArtifactsWorkspaceDeriver {
             .sorted(by: sorter(filter.sort))
     }
 
+    static func mediaModelOptions(
+        provider: CloudProviderConfiguration?,
+        kind: ArtifactsMediaKind,
+        capabilities: [ProviderModelCapabilityRecord]
+    ) -> [ArtifactsMediaModelOption] {
+        guard let provider else { return [] }
+
+        let capabilityOptions = capabilities
+            .filter { $0.providerID == provider.id }
+            .filter { capability in
+                switch kind {
+                case .image:
+                    capability.capabilities.generatedImages
+                case .video:
+                    capability.capabilities.generatedVideo || capability.capabilities.videoOutputs
+                case .speech:
+                    capability.capabilities.generatedAudio || capability.capabilities.audioOutputs
+                }
+            }
+            .map {
+                ArtifactsMediaModelOption(
+                    id: $0.modelID.rawValue,
+                    detail: $0.capabilities.artifactsSummary,
+                    isFromProviderCapability: true
+                )
+            }
+
+        let curatedOptions = curatedMediaModels(providerKind: provider.kind, kind: kind)
+        return stableMergedMediaModels(capabilityOptions + curatedOptions)
+    }
+
+    static func researchModelOptions(
+        provider: CloudProviderConfiguration?,
+        capabilities: [ProviderModelCapabilityRecord]
+    ) -> [ArtifactsResearchModelOption] {
+        guard let provider else { return [] }
+
+        let capabilityOptions = capabilities
+            .filter { $0.providerID == provider.id }
+            .filter { capability in
+                let model = capability.modelID.rawValue.lowercased()
+                guard capability.capabilities.textGeneration else { return false }
+                switch provider.kind {
+                case .openAI:
+                    return model.contains("deep-research")
+                        || model.contains("gpt-5.5")
+                        || model.contains("gpt-5-pro")
+                case .gemini:
+                    return model.contains("deep-research")
+                default:
+                    return false
+                }
+            }
+            .map {
+                ArtifactsResearchModelOption(
+                    id: $0.modelID.rawValue,
+                    detail: $0.capabilities.artifactsSummary,
+                    isFromProviderCapability: true
+                )
+            }
+
+        return stableMergedResearchModels(curatedResearchModels(providerKind: provider.kind) + capabilityOptions)
+    }
+
+    static func researchTimeline(for run: ProviderResearchRunRecord) -> [ArtifactsResearchTimelineEvent] {
+        var events: [ArtifactsResearchTimelineEvent] = [
+            .init(
+                id: "status-\(run.id)-\(run.status)",
+                title: run.status.providerCloudStatus.title,
+                detail: run.lastError ?? run.providerMetadata["activity"] ?? run.providerMetadata["status"] ?? run.depth,
+                systemImage: run.status.providerIsTerminal ? "checkmark.circle" : "point.3.connected.trianglepath.dotted",
+                tone: run.status.providerCloudStatus.tone
+            ),
+        ]
+
+        for (index, query) in decodedStrings(run.providerMetadata[CloudProviderMetadataKeys.webSearchQueriesJSON]).prefix(8).enumerated() {
+            events.append(.init(
+                id: "query-\(run.id)-\(index)-\(query)",
+                title: "Search query",
+                detail: query,
+                systemImage: "magnifyingglass",
+                tone: .info
+            ))
+        }
+
+        let hostedToolEvents = run.providerMetadata.hostedToolAuditEntries.prefix(8).map { entry in
+            ArtifactsResearchTimelineEvent(
+                id: "tool-\(run.id)-\(entry.id)",
+                title: entry.kind.deepResearchDisplayTitle,
+                detail: entry.name ?? entry.serverLabel ?? entry.status?.rawValue ?? entry.type,
+                systemImage: entry.kind.deepResearchSystemImage,
+                tone: entry.status?.rawValue.providerCloudStatus.tone ?? .warning
+            )
+        }
+        events.append(contentsOf: hostedToolEvents)
+
+        for (index, object) in decodedJSONObjects(run.providerMetadata["gemini.deep_research.tool_calls_json"]).prefix(8).enumerated() {
+            let type = object.string(for: "type") ?? "tool"
+            let name = object.string(for: "name") ?? object.string(for: "language") ?? type
+            events.append(.init(
+                id: "gemini-tool-\(run.id)-\(index)-\(name)",
+                title: type.readableArtifactKind,
+                detail: name,
+                systemImage: "wrench.and.screwdriver",
+                tone: .warning
+            ))
+        }
+
+        for source in researchSources(for: run).prefix(5) {
+            events.append(.init(
+                id: "source-event-\(source.id)",
+                title: "Source captured",
+                detail: source.title,
+                systemImage: source.systemImage,
+                tone: source.tone
+            ))
+        }
+
+        if let artifactID = run.finalReportArtifactID {
+            events.append(.init(
+                id: "final-\(run.id)-\(artifactID)",
+                title: "Final report artifact",
+                detail: artifactID,
+                systemImage: "doc.richtext",
+                tone: .success
+            ))
+        }
+
+        return events
+    }
+
+    static func researchSources(for run: ProviderResearchRunRecord) -> [ArtifactsResearchSource] {
+        var sources = [ArtifactsResearchSource]()
+
+        for citation in decodedWebSearchCitations(run.providerMetadata[CloudProviderMetadataKeys.webSearchCitationsJSON]) {
+            sources.append(.init(
+                id: "web-\(citation.id)",
+                title: citation.title,
+                detail: citation.source,
+                url: citation.url,
+                systemImage: "safari",
+                tone: .info
+            ))
+        }
+
+        for (index, object) in decodedJSONObjects(run.providerMetadata[CloudProviderMetadataKeys.webSearchCitationsJSON]).enumerated() {
+            let url = object.string(for: "url") ?? object.string(for: "uri")
+            let title = object.string(for: "title") ?? object.string(for: "file_id") ?? url ?? "Source"
+            let detail = object.string(for: "quote") ?? object.string(for: "source") ?? run.providerKind.pinesLifecycleTitle
+            sources.append(.init(
+                id: "generic-\(run.id)-\(index)-\(url ?? title)",
+                title: title,
+                detail: detail,
+                url: url,
+                systemImage: url == nil ? "doc" : "safari",
+                tone: url == nil ? .neutral : .info
+            ))
+        }
+
+        for citation in run.providerMetadata.providerCitations {
+            let url = citation.url
+            let title = citation.title ?? citation.fileID ?? citation.documentID ?? url ?? "Provider source"
+            let detail = citation.citedText ?? citation.source ?? citation.sourceType.rawValue.readableArtifactKind
+            sources.append(.init(
+                id: "provider-\(citation.id)",
+                title: title,
+                detail: detail,
+                url: url,
+                systemImage: citation.sourceType == .web ? "safari" : "doc.text",
+                tone: citation.sourceType == .web ? .info : .neutral
+            ))
+        }
+
+        var seen = Set<String>()
+        return sources.filter { source in
+            seen.insert(source.url ?? source.title).inserted
+        }
+    }
+
+    private static func curatedMediaModels(providerKind: CloudProviderKind, kind: ArtifactsMediaKind) -> [ArtifactsMediaModelOption] {
+        switch (providerKind, kind) {
+        case (.openAI, .image):
+            [
+                .init(id: "gpt-image-2", title: "GPT Image 2", detail: "Latest OpenAI image model", isFromProviderCapability: false),
+                .init(id: "gpt-image-1.5", title: "GPT Image 1.5", detail: "High fidelity image generation", isFromProviderCapability: false),
+                .init(id: "gpt-image-1", title: "GPT Image 1", detail: "General image generation", isFromProviderCapability: false),
+                .init(id: "gpt-image-1-mini", title: "GPT Image 1 mini", detail: "Lower-cost image generation", isFromProviderCapability: false),
+                .init(id: "dall-e-3", title: "DALL-E 3", detail: "Legacy image generation", isFromProviderCapability: false),
+            ]
+        case (.openAI, .video):
+            [
+                .init(id: "sora-2", title: "Sora 2", detail: "Video with synced audio", isFromProviderCapability: false),
+                .init(id: "sora-2-pro", title: "Sora 2 Pro", detail: "Highest quality Sora video", isFromProviderCapability: false),
+            ]
+        case (.openAI, .speech):
+            [
+                .init(id: "gpt-4o-mini-tts", title: "GPT-4o mini TTS", detail: "Fast text-to-speech", isFromProviderCapability: false),
+                .init(id: "tts-1", title: "TTS 1", detail: "Legacy fast speech", isFromProviderCapability: false),
+                .init(id: "tts-1-hd", title: "TTS 1 HD", detail: "Legacy high quality speech", isFromProviderCapability: false),
+            ]
+        case (.gemini, .image):
+            [
+                .init(id: "gemini-3.1-flash-image-preview", title: "Gemini 3.1 Flash Image", detail: "Fast Gemini 3 image generation", isFromProviderCapability: false),
+                .init(id: "gemini-3-pro-image-preview", title: "Gemini 3 Pro Image", detail: "Professional Gemini image generation", isFromProviderCapability: false),
+                .init(id: "gemini-2.5-flash-image", title: "Gemini 2.5 Flash Image", detail: "Fast native Gemini image generation", isFromProviderCapability: false),
+                .init(id: "imagen-4.0-generate-001", title: "Imagen 4", detail: "General Imagen generation", isFromProviderCapability: false),
+                .init(id: "imagen-4.0-ultra-generate-001", title: "Imagen 4 Ultra", detail: "Highest quality Imagen generation", isFromProviderCapability: false),
+                .init(id: "imagen-4.0-fast-generate-001", title: "Imagen 4 Fast", detail: "Fast Imagen generation", isFromProviderCapability: false),
+                .init(id: "imagen-3.0-generate-002", title: "Imagen 3", detail: "Previous high-quality Imagen generation", isFromProviderCapability: false),
+            ]
+        case (.gemini, .video):
+            [
+                .init(id: "veo-3.1-generate-preview", title: "Veo 3.1", detail: "Latest Gemini video generation", isFromProviderCapability: false),
+                .init(id: "veo-3.1-fast-generate-preview", title: "Veo 3.1 Fast", detail: "Fast Gemini video generation", isFromProviderCapability: false),
+                .init(id: "veo-3.1-lite-generate-preview", title: "Veo 3.1 Lite", detail: "Lowest-cost Gemini video generation", isFromProviderCapability: false),
+                .init(id: "veo-3.0-generate-001", title: "Veo 3", detail: "Stable Gemini video generation", isFromProviderCapability: false),
+                .init(id: "veo-3.0-fast-generate-001", title: "Veo 3 Fast", detail: "Fast stable Gemini video generation", isFromProviderCapability: false),
+            ]
+        case (.gemini, .speech):
+            [
+                .init(id: "gemini-3.1-flash-tts-preview", title: "Gemini 3.1 Flash TTS", detail: "Latest Gemini speech preview", isFromProviderCapability: false),
+                .init(id: "gemini-2.5-flash-preview-tts", title: "Gemini 2.5 Flash TTS", detail: "Fast Gemini speech", isFromProviderCapability: false),
+                .init(id: "gemini-2.5-pro-preview-tts", title: "Gemini 2.5 Pro TTS", detail: "Higher quality Gemini speech", isFromProviderCapability: false),
+            ]
+        default:
+            []
+        }
+    }
+
+    private static func curatedResearchModels(providerKind: CloudProviderKind) -> [ArtifactsResearchModelOption] {
+        switch providerKind {
+        case .openAI:
+            [
+                .init(id: "gpt-5.5-pro", title: "GPT-5.5 Pro", detail: "Deep research with highest reasoning budget", isFromProviderCapability: false),
+                .init(id: "gpt-5.5", title: "GPT-5.5", detail: "Deep research with high reasoning", isFromProviderCapability: false),
+                .init(id: "o3-deep-research-2025-06-26", title: "o3 Deep Research", detail: "Specialized OpenAI deep research model", isFromProviderCapability: false),
+                .init(id: "o4-mini-deep-research-2025-06-26", title: "o4 mini Deep Research", detail: "Faster specialized OpenAI research model", isFromProviderCapability: false),
+            ]
+        case .gemini:
+            [
+                .init(id: "deep-research-pro-preview-12-2025", title: "Gemini Deep Research Pro", detail: "Gemini 3 Pro Deep Research agent", isFromProviderCapability: false),
+            ]
+        default:
+            []
+        }
+    }
+
+    private static func stableMergedMediaModels(_ options: [ArtifactsMediaModelOption]) -> [ArtifactsMediaModelOption] {
+        var seen = Set<String>()
+        var merged = [ArtifactsMediaModelOption]()
+        for option in options where seen.insert(option.id).inserted {
+            merged.append(option)
+        }
+        return merged
+    }
+
+    private static func stableMergedResearchModels(_ options: [ArtifactsResearchModelOption]) -> [ArtifactsResearchModelOption] {
+        var seen = Set<String>()
+        var merged = [ArtifactsResearchModelOption]()
+        for option in options where seen.insert(option.id).inserted {
+            merged.append(option)
+        }
+        return merged
+    }
+
+    private static func decodedWebSearchCitations(_ raw: String?) -> [WebSearchCitation] {
+        guard let raw, let data = raw.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([WebSearchCitation].self, from: data)) ?? []
+    }
+
+    private static func decodedStrings(_ raw: String?) -> [String] {
+        guard let raw, let data = raw.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+
+    private static func decodedJSONObjects(_ raw: String?) -> [[String: JSONValue]] {
+        guard let raw, let data = raw.data(using: .utf8) else { return [] }
+        if let values = try? JSONDecoder().decode([JSONValue].self, from: data) {
+            return values.compactMap(\.objectValue)
+        }
+        return []
+    }
+
     private static func sorter(_ sort: ArtifactsSort) -> (ArtifactsResourceSummary, ArtifactsResourceSummary) -> Bool {
         { lhs, rhs in
             switch sort {
@@ -633,6 +986,45 @@ extension ProviderCapabilities {
         if live { values.append("Realtime") }
         if batch { values.append("Batches") }
         return values.isEmpty ? "Metadata" : values.joined(separator: ", ")
+    }
+}
+
+private extension OpenAIHostedToolKind {
+    var deepResearchDisplayTitle: String {
+        switch self {
+        case .webSearch: "Web search"
+        case .fileSearch: "File search"
+        case .codeInterpreter: "Code analysis"
+        case .mcp: "MCP source"
+        case .computerUse: "Computer use"
+        case .imageGeneration: "Image generation"
+        case .toolSearch: "Tool search"
+        case .webFetch: "Web fetch"
+        case .textEditor: "Text edit"
+        case .bash: "Shell tool"
+        case .custom: "Tool call"
+        }
+    }
+
+    var deepResearchSystemImage: String {
+        switch self {
+        case .webSearch, .webFetch: "safari"
+        case .fileSearch: "doc.text.magnifyingglass"
+        case .codeInterpreter: "chevron.left.forwardslash.chevron.right"
+        case .mcp: "network"
+        case .computerUse: "display"
+        case .imageGeneration: "photo"
+        case .toolSearch: "wrench.and.screwdriver"
+        case .textEditor: "text.cursor"
+        case .bash: "terminal"
+        case .custom: "gearshape"
+        }
+    }
+}
+
+private extension Dictionary where Key == String, Value == JSONValue {
+    func string(for key: String) -> String? {
+        self[key]?.stringValue
     }
 }
 

@@ -87,12 +87,25 @@ final class CoreSurfaceTests: XCTestCase {
             encoding: .utf8
         )
 
-        for mode in ["Library", "Media", "Files", "Context", "Batches", "Research", "Realtime", "Capabilities"] {
+        for mode in ["Library", "Generate", "Research", "Storage", "Jobs"] {
             XCTAssertTrue(workspace.contains(mode), "Missing artifacts workspace mode \(mode)")
         }
+        XCTAssertTrue(workspace.contains("ArtifactsMediaModelOption"))
+        XCTAssertTrue(workspace.contains("ArtifactsResearchModelOption"))
+        XCTAssertTrue(workspace.contains("ArtifactsWorkspaceModePicker"))
+        XCTAssertTrue(workspace.contains("Research Console"))
+        XCTAssertFalse(workspace.contains("LazyVGrid(columns: [GridItem(.adaptive(minimum: 148)"))
+        XCTAssertTrue(workspace.contains("ArtifactsMenuPill"))
         XCTAssertTrue(workspace.contains("This removes only Pines' local lifecycle record"))
         XCTAssertTrue(models.contains("enum ArtifactsWorkspaceMode"))
         XCTAssertTrue(models.contains("static func counts"))
+        XCTAssertTrue(models.contains("researchTimeline"))
+        XCTAssertTrue(models.contains("researchSources"))
+        XCTAssertTrue(models.contains("gpt-image-2"))
+        XCTAssertTrue(models.contains("sora-2"))
+        XCTAssertTrue(models.contains("gemini-3.1-flash-image-preview"))
+        XCTAssertTrue(models.contains("veo-3.1-generate-preview"))
+        XCTAssertTrue(models.contains("gemini-3.1-flash-tts-preview"))
         XCTAssertTrue(models.contains("Provider-hosted"))
         XCTAssertTrue(models.contains("Local copy"))
         XCTAssertTrue(models.contains("Vault-importable"))

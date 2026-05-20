@@ -514,6 +514,7 @@ final class PinesAppModel: ObservableObject {
     private var bootstrapBackgroundTask: Task<Void, Never>?
     private var didStartMCPServers = false
     private var shouldEnrichRuntimeModelPreviews = false
+    private var needsCloudModelCatalogRefresh = false
     private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
     private var currentRunToken: UUID?
@@ -3806,23 +3807,23 @@ final class PinesAppModel: ObservableObject {
         apiKey: String,
         enabledForAgents: Bool,
         services: PinesAppServices
-    ) async {
+    ) async -> Bool {
         setIfChanged(\.isSavingCloudProvider, true)
         defer { setIfChanged(\.isSavingCloudProvider, false) }
 
         do {
             guard let service = services.cloudProviderService else {
                 serviceError = "Cloud provider service is unavailable."
-                return
+                return false
             }
             let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmedDisplayName.isEmpty else {
                 serviceError = "Cloud provider display name is required."
-                return
+                return false
             }
             guard let baseURL = URL(string: baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
                 serviceError = "Cloud provider base URL is invalid."
-                return
+                return false
             }
             try EndpointSecurityPolicy().validate(baseURL, useCase: .cloudProvider)
             let providerID = ProviderID(rawValue: trimmedDisplayName.lowercased().replacingOccurrences(of: " ", with: "-"))
@@ -3882,8 +3883,10 @@ final class PinesAppModel: ObservableObject {
                     await self?.refreshCloudModelCatalog(services: services)
                 }
             }
+            return true
         } catch {
             serviceError = error.localizedDescription
+            return false
         }
     }
 
@@ -3926,29 +3929,35 @@ final class PinesAppModel: ObservableObject {
     }
 
     func refreshCloudModelCatalog(services: PinesAppServices) async {
-        guard !isRefreshingCloudModels else { return }
+        guard !isRefreshingCloudModels else {
+            needsCloudModelCatalogRefresh = true
+            return
+        }
         setIfChanged(\.isRefreshingCloudModels, true)
         defer { setIfChanged(\.isRefreshingCloudModels, false) }
 
-        var nextCatalog: [ProviderID: [CloudProviderModel]] = [:]
-        for provider in cloudProviders {
-            do {
-                guard let apiKey = try await services.secretStore.read(
-                    service: provider.keychainService,
-                    account: provider.keychainAccount
-                )?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+        repeat {
+            needsCloudModelCatalogRefresh = false
+            var nextCatalog: [ProviderID: [CloudProviderModel]] = [:]
+            for provider in cloudProviders {
+                do {
+                    guard let apiKey = try await services.secretStore.read(
+                        service: provider.keychainService,
+                        account: provider.keychainAccount
+                    )?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+                        continue
+                    }
+                    let inferenceProvider = BYOKCloudInferenceProvider(configuration: provider, secretStore: services.secretStore)
+                    let models = try await inferenceProvider.listTextModels()
+                    if !models.isEmpty {
+                        nextCatalog[provider.id] = models
+                    }
+                } catch {
                     continue
                 }
-                let inferenceProvider = BYOKCloudInferenceProvider(configuration: provider, secretStore: services.secretStore)
-                let models = try await inferenceProvider.listTextModels()
-                if !models.isEmpty {
-                    nextCatalog[provider.id] = models
-                }
-            } catch {
-                continue
             }
-        }
-        setIfChanged(\.cloudModelCatalog, nextCatalog)
+            setIfChanged(\.cloudModelCatalog, nextCatalog)
+        } while needsCloudModelCatalogRefresh
     }
 
     func modelPickerSections(services: PinesAppServices) -> [ModelPickerSection] {

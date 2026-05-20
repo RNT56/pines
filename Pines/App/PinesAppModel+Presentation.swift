@@ -265,12 +265,6 @@ extension PinesAppModel {
                 if lhsActive != rhsActive {
                     return lhsActive
                 }
-                if lhsActive,
-                   let lhsUpdated = lhs.element.downloadProgress?.updatedAt,
-                   let rhsUpdated = rhs.element.downloadProgress?.updatedAt,
-                   lhsUpdated != rhsUpdated {
-                    return lhsUpdated > rhsUpdated
-                }
                 return lhs.offset < rhs.offset
             }
             .map(\.element)

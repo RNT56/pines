@@ -388,7 +388,7 @@ struct SettingsDetailView: View {
 
             Button {
                 Task {
-                    await appModel.saveCloudProvider(
+                    let didSave = await appModel.saveCloudProvider(
                         kind: providerKind,
                         displayName: providerName,
                         baseURLString: providerBaseURL,
@@ -396,7 +396,9 @@ struct SettingsDetailView: View {
                         enabledForAgents: providerEnabled,
                         services: services
                     )
-                    providerAPIKey = ""
+                    if didSave {
+                        providerAPIKey = ""
+                    }
                 }
             } label: {
                 if settingsState.isSavingCloudProvider {
@@ -412,14 +414,18 @@ struct SettingsDetailView: View {
             )
             .pinesButtonStyle(.primary, fillWidth: true)
 
-            providerCapabilityPreview(for: providerKind)
-
             if settingsState.isRefreshingCloudModels {
                 PinesStatusChip(status: .running)
             }
 
-            ForEach(settingsState.cloudProviders) { provider in
-                providerRow(provider)
+            if settingsState.cloudProviders.isEmpty {
+                Text("No cloud providers saved yet.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+            } else {
+                ForEach(settingsState.cloudProviders) { provider in
+                    providerRow(provider)
+                }
             }
         }
         .id(SettingsDetailAnchor.cloudBYOK)
@@ -599,137 +605,6 @@ struct SettingsDetailView: View {
             kinds.append(.cachedContext)
         }
         return kinds
-    }
-
-    private func providerCapabilityPreview(for kind: CloudProviderKind) -> some View {
-        let rows = providerCapabilityRows(for: kind)
-        return VStack(alignment: .leading, spacing: theme.spacing.small) {
-            Text("Capability Preview")
-                .font(theme.typography.headline)
-                .foregroundStyle(theme.colors.primaryText)
-
-            ForEach(rows) { row in
-                PinesCapabilityRow(
-                    title: row.title,
-                    detail: row.detail,
-                    systemImage: row.systemImage,
-                    status: row.status,
-                    secondaryStatus: row.secondaryStatus,
-                    metricItems: row.metrics
-                )
-            }
-        }
-    }
-
-    private func providerCapabilityRows(for kind: CloudProviderKind) -> [ProviderCapabilityPreviewRow] {
-        var rows: [ProviderCapabilityPreviewRow] = [
-            .init(
-                title: "Chat and Responses",
-                detail: kind == .voyageAI ? "Retrieval provider; chat generation stays unavailable." : "Text generation, streaming, and provider response metadata scaffolding.",
-                systemImage: kind == .voyageAI ? "square.stack.3d.up" : "text.bubble",
-                status: kind == .voyageAI ? .unavailable : .supported,
-                secondaryStatus: .needsValidation,
-                metrics: [.init("Route", value: kind == .openRouter ? "routed" : "direct", systemImage: "arrow.triangle.branch", tone: kind == .openRouter ? .warning : .accent)]
-            ),
-            .init(
-                title: "Tools and Structured Output",
-                detail: "Hosted tools, function tools, and schema support must be validated per provider/model.",
-                systemImage: "wrench.and.screwdriver",
-                status: (kind == .custom || kind == .voyageAI) ? .unknown : .supported,
-                secondaryStatus: kind == .custom ? .needsValidation : nil,
-                metrics: [.init("Schemas", value: (kind == .custom || kind == .voyageAI) ? "probe" : "available", systemImage: "curlybraces", tone: (kind == .custom || kind == .voyageAI) ? .warning : .success)]
-            ),
-            .init(
-                title: "Files and Provider Storage",
-                detail: "Inline attachments remain separate from provider-hosted files, vector stores, and cached context.",
-                systemImage: "folder.badge.gearshape",
-                status: (kind == .anthropic || kind == .gemini || kind == .openAI) ? .accountGated : .unknown,
-                secondaryStatus: .custom("Explicit storage", .warning),
-                metrics: [.init("Storage", value: "opt-in", systemImage: "lock.shield", tone: .warning)]
-            )
-        ]
-        if kind == .gemini {
-            rows.append(contentsOf: [
-                .init(
-                    title: "Gemini Media Inputs",
-                    detail: "Images, PDFs, text, audio, and video use explicit inline or provider-hosted state with visible retention wording.",
-                    systemImage: "photo.stack",
-                    status: .supported,
-                    secondaryStatus: .custom("No hidden uploads", .warning),
-                    metrics: [
-                        .init("Audio", value: "input", systemImage: "waveform", tone: .info),
-                        .init("Video", value: "input", systemImage: "film", tone: .info),
-                        .init("Files", value: "48h", systemImage: "cloud", tone: .warning),
-                    ]
-                ),
-                .init(
-                    title: "Gemini Tools and Grounding",
-                    detail: "Code execution, URL context, Google Search grounding, citations, and generated tool artifacts are parsed into durable metadata.",
-                    systemImage: "safari",
-                    status: .supported,
-                    secondaryStatus: .needsValidation,
-                    metrics: [
-                        .init("Code", value: "exec", systemImage: "chevron.left.forwardslash.chevron.right", tone: .success),
-                        .init("URLs", value: "context", systemImage: "link", tone: .success),
-                        .init("Search", value: "grounded", systemImage: "magnifyingglass", tone: .success),
-                    ]
-                ),
-                .init(
-                    title: "Gemini Operations",
-                    detail: "Context caches, token counting, Live sessions, generated media jobs, and batches use provider operation records.",
-                    systemImage: "rectangle.stack.badge.play",
-                    status: .accountGated,
-                    secondaryStatus: .custom("Provider-hosted", .warning),
-                    metrics: [
-                        .init("Cache", value: "TTL", systemImage: "memorychip", tone: .warning),
-                        .init("Live", value: "separate", systemImage: "dot.radiowaves.left.and.right", tone: .warning),
-                        .init("Batch", value: "jobs", systemImage: "tray.full", tone: .warning),
-                    ]
-                ),
-            ])
-        }
-        if kind == .anthropic {
-            rows.append(contentsOf: [
-                .init(
-                    title: "Anthropic Messages",
-                    detail: "Messages, Files, prompt caching, citations, and signed thinking blocks use shared provider records and per-model eligibility.",
-                    systemImage: "text.bubble",
-                    status: .accountGated,
-                    secondaryStatus: .needsValidation,
-                    metrics: [
-                        .init("Thinking", value: settingsState.anthropicThinkingMode.rawValue, systemImage: "brain", tone: .accent),
-                        .init("Cache", value: settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off", systemImage: "memorychip", tone: .warning),
-                        .init("Citations", value: settingsState.anthropicCitationsEnabled ? "on" : "off", systemImage: "quote.bubble", tone: .info),
-                        .init("Tokens", value: settingsState.anthropicTokenCountPreflightEnabled ? "preflight" : "manual", systemImage: "number", tone: .accent),
-                    ]
-                ),
-                .init(
-                    title: "Anthropic Hosted Tools",
-                    detail: "Web search/fetch can run with explicit enablement; code execution, remote MCP, text editor, and bash stay approval-gated.",
-                    systemImage: "wrench.and.screwdriver",
-                    status: .accountGated,
-                    secondaryStatus: .custom("Policy gated", .warning),
-                    metrics: [
-                        .init("Web", value: "search/fetch", systemImage: "safari", tone: .success),
-                        .init("Code", value: "approval", systemImage: "chevron.left.forwardslash.chevron.right", tone: .warning),
-                        .init("Computer", value: "disabled", systemImage: "display", tone: .neutral),
-                    ]
-                ),
-                .init(
-                    title: "Anthropic Operations",
-                    detail: "Files, token counting, message batches, generated files, and provider provenance participate in the lifecycle dashboard.",
-                    systemImage: "rectangle.stack.badge.play",
-                    status: .accountGated,
-                    secondaryStatus: .custom("Provider-hosted", .warning),
-                    metrics: [
-                        .init("Files", value: "API", systemImage: "doc", tone: .warning),
-                        .init("Batch", value: "messages", systemImage: "tray.full", tone: .info),
-                        .init("Tokens", value: "preflight", systemImage: "number", tone: .accent),
-                    ]
-                ),
-            ])
-        }
-        return rows
     }
 
     @ViewBuilder
@@ -1471,32 +1346,6 @@ struct SettingsDetailView: View {
         mcpBYOKSamplingEnabled = false
         mcpSubscriptionsEnabled = false
         mcpMaxSamplingRequests = 3
-    }
-}
-
-private struct ProviderCapabilityPreviewRow: Identifiable {
-    var id: String { title }
-    let title: String
-    let detail: String
-    let systemImage: String
-    let status: PinesCloudStatus
-    let secondaryStatus: PinesCloudStatus?
-    let metrics: [PinesMetricPillGroup.Item]
-
-    init(
-        title: String,
-        detail: String,
-        systemImage: String,
-        status: PinesCloudStatus,
-        secondaryStatus: PinesCloudStatus? = nil,
-        metrics: [PinesMetricPillGroup.Item] = []
-    ) {
-        self.title = title
-        self.detail = detail
-        self.systemImage = systemImage
-        self.status = status
-        self.secondaryStatus = secondaryStatus
-        self.metrics = metrics
     }
 }
 
