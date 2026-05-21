@@ -613,7 +613,7 @@ private actor MLXRuntimeState {
                 defer {
                     generationCancellation.cancel()
                     Task {
-                        await self.clearActiveGenerationCancellation(generationCancellation)
+                        self.clearActiveGenerationCancellation(generationCancellation)
                     }
                 }
                 do {

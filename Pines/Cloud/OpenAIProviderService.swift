@@ -304,10 +304,7 @@ struct OpenAIProviderService {
         addOpenAIClientRequestID(to: &request)
         try await applyExtraHeaders(to: &request)
 
-        let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw CloudProviderError.invalidResponse
-        }
+        let (data, http) = try await urlSession.data(for: request)
         let providerResponse = OpenAIProviderResponse(data: data, httpResponse: http)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(

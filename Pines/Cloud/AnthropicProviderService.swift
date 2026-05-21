@@ -156,10 +156,7 @@ struct AnthropicProviderService: Sendable {
 
         var lastRetryableResponse: AnthropicProviderResponse?
         for attempt in 0..<3 {
-            let (data, response) = try await urlSession.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw CloudProviderError.invalidResponse
-            }
+            let (data, http) = try await urlSession.data(for: request)
             let providerResponse = AnthropicProviderResponse(data: data, httpResponse: http)
             if (200..<300).contains(http.statusCode) {
                 return providerResponse

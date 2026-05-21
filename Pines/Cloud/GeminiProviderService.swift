@@ -198,10 +198,7 @@ struct GeminiProviderService {
     }
 
     private func send(_ request: URLRequest) async throws -> GeminiProviderResponse {
-        let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw CloudProviderError.invalidResponse
-        }
+        let (data, http) = try await urlSession.data(for: request)
         let providerResponse = GeminiProviderResponse(data: data, httpResponse: http)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(

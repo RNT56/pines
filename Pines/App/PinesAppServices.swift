@@ -4,6 +4,9 @@ import PinesCore
 #if canImport(CoreLocation)
 import CoreLocation
 #endif
+#if canImport(MapKit)
+import MapKit
+#endif
 
 typealias PinesLiveStore = any ConversationRepository
     & ModelInstallRepository
@@ -562,12 +565,15 @@ struct DeviceWebSearchLocationProvider: Sendable {
         guard locationServicesEnabled else {
             return fallback.isEmpty ? nil : fallback
         }
-        guard let placemark = await requestPlacemark() else {
+        guard let location = await requestLocation() else {
             return fallback.isEmpty ? nil : fallback
         }
-        fallback.city = placemark.locality ?? placemark.subLocality ?? fallback.city
-        fallback.region = placemark.administrativeArea ?? fallback.region
-        fallback.country = placemark.isoCountryCode ?? fallback.country
+        guard let resolvedLocation = await resolvedUserLocation(for: location) else {
+            return fallback.isEmpty ? nil : fallback
+        }
+        fallback.city = resolvedLocation.city ?? fallback.city
+        fallback.region = resolvedLocation.region ?? fallback.region
+        fallback.country = resolvedLocation.country ?? fallback.country
         return fallback.isEmpty ? nil : fallback
         #else
         return fallback.isEmpty ? nil : fallback
@@ -583,7 +589,7 @@ struct DeviceWebSearchLocationProvider: Sendable {
 
     #if canImport(CoreLocation)
     @MainActor
-    private func requestPlacemark() async -> CLPlacemark? {
+    private func requestLocation() async -> CLLocation? {
         let manager = CLLocationManager()
         let delegate = OneShotLocationDelegate()
         manager.delegate = delegate
@@ -599,10 +605,42 @@ struct DeviceWebSearchLocationProvider: Sendable {
         guard authorizedStatus == .authorizedWhenInUse || authorizedStatus == .authorizedAlways else {
             return nil
         }
-        guard let location = await delegate.requestLocation(with: manager) else {
+        return await delegate.requestLocation(with: manager)
+    }
+
+    private func resolvedUserLocation(for location: CLLocation) async -> CloudWebSearchUserLocation? {
+        #if canImport(MapKit)
+        if #available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, *) {
+            return await mapKitUserLocation(for: location)
+        }
+        #endif
+        return await coreLocationUserLocation(for: location)
+    }
+
+    #if canImport(MapKit)
+    @available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, *)
+    private func mapKitUserLocation(for location: CLLocation) async -> CloudWebSearchUserLocation? {
+        guard let request = MKReverseGeocodingRequest(location: location),
+              let mapItem = try? await request.mapItems.first,
+              let address = mapItem.addressRepresentations else {
             return nil
         }
-        return try? await CLGeocoder().reverseGeocodeLocation(location).first
+        return CloudWebSearchUserLocation(
+            city: address.cityName,
+            country: address.region?.identifier
+        )
+    }
+    #endif
+
+    private func coreLocationUserLocation(for location: CLLocation) async -> CloudWebSearchUserLocation? {
+        guard let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first else {
+            return nil
+        }
+        return CloudWebSearchUserLocation(
+            city: placemark.locality ?? placemark.subLocality,
+            region: placemark.administrativeArea,
+            country: placemark.isoCountryCode
+        )
     }
 
     @MainActor

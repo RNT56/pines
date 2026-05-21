@@ -394,7 +394,7 @@ enum GeminiProviderRecordMapper {
     }
 
     private static func inputModalities(for name: String, methods: [String], text: Bool) -> [String] {
-        if methods.contains { $0.lowercased().contains("embed") } {
+        if methods.contains(where: { $0.lowercased().contains("embed") }) {
             return ["text"]
         }
         if name.lowercased().contains("imagen") {
@@ -404,7 +404,7 @@ enum GeminiProviderRecordMapper {
     }
 
     private static func outputModalities(for name: String, methods: [String], text: Bool) -> [String] {
-        if methods.contains { $0.lowercased().contains("embed") } {
+        if methods.contains(where: { $0.lowercased().contains("embed") }) {
             return ["embedding"]
         }
         if name.lowercased().contains("imagen") {
