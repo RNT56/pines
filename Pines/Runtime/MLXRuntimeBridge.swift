@@ -560,16 +560,32 @@ private actor MLXRuntimeState {
                 attachment.kind == .image || attachment.kind == .video || attachment.kind == .audio
             }
         }
+        let loadedInstall = activeInstall
+        let loadedInstallMatchesRequest = loadedInstall?.modelID == request.modelID
+        let loadedInstallUsesVLMRuntime = loadedInstallMatchesRequest
+            && (loadedInstall?.modalities.contains(.vision) == true
+                || loadedInstall?.modalities.contains(.audio) == true)
+        let useVLMRuntime = requiresVLM || loadedInstallUsesVLMRuntime
         let container: MLXLMCommon.ModelContainer
-        if requiresVLM {
+        if useVLMRuntime {
             if visionContainer == nil || activeInstall?.modelID != request.modelID {
-                try await load(Self.install(for: request.modelID, modalities: [.text, .vision, .audio]), profile: activeProfile)
+                try await load(
+                    loadedInstallMatchesRequest
+                        ? loadedInstall!
+                        : Self.install(for: request.modelID, modalities: [.text, .vision, .audio]),
+                    profile: activeProfile
+                )
             }
             guard let visionContainer else { throw InferenceError.modelNotLoaded(request.modelID) }
             container = visionContainer
         } else {
             if textContainer == nil || activeInstall?.modelID != request.modelID {
-                try await load(Self.install(for: request.modelID, modalities: [.text]), profile: activeProfile)
+                try await load(
+                    loadedInstallMatchesRequest
+                        ? loadedInstall!
+                        : Self.install(for: request.modelID, modalities: [.text]),
+                    profile: activeProfile
+                )
             }
             guard let textContainer else { throw InferenceError.modelNotLoaded(request.modelID) }
             container = textContainer
