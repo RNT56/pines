@@ -544,7 +544,10 @@ struct PinesCoreTestRunner {
         try expect(!sql.contains("INSERT INTO vault_chunks_fts(vault_chunks_fts"), "vault FTS trigger must not use external-content delete rows")
         try expect(sql.contains("PRIMARY KEY(chunk_id, embedding_model_id)"), "missing stable embedding merge key")
         try expect(sql.contains("PRIMARY KEY(chunk_id, profile_id)"), "missing profile-scoped embedding merge key")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 15)
+        try expect(sql.contains("CREATE TABLE IF NOT EXISTS projects"), "missing project spaces table")
+        try expect(sql.contains("ALTER TABLE conversations ADD COLUMN project_id"), "missing conversation project link")
+        try expect(sql.contains("ALTER TABLE vault_documents ADD COLUMN project_id"), "missing vault project link")
+        try expectEqual(PinesDatabaseSchema.currentVersion, 16)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")
