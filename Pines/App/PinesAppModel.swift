@@ -134,6 +134,16 @@ final class PinesAppModel: ObservableObject {
         set { chatState.threads = newValue }
     }
 
+    var projects: [PinesProjectPreview] {
+        get { chatState.projects }
+        set { chatState.projects = newValue }
+    }
+
+    var selectedProjectID: UUID? {
+        get { chatState.selectedProjectID }
+        set { chatState.selectedProjectID = newValue }
+    }
+
     var chatError: String? {
         get { chatState.chatError }
         set { chatState.chatError = newValue }
@@ -672,6 +682,7 @@ final class PinesAppModel: ObservableObject {
         upsertThreadPreview(
             PinesThreadPreview(
                 id: thread.id,
+                projectID: thread.projectID,
                 title: title,
                 modelName: thread.modelName,
                 modelID: thread.modelID,
@@ -997,6 +1008,14 @@ final class PinesAppModel: ObservableObject {
                 setIfChanged(\.threads, mergeThreadPreviews(previews.map(Self.threadPreview(from:))))
             }
 
+            if let projectRepository = services.projectRepository {
+                let projectPreviews = try await projectRepository.listProjects().map(Self.projectPreview(from:))
+                setIfChanged(\.projects, projectPreviews)
+                if let selectedProjectID, !projectPreviews.contains(where: { $0.id == selectedProjectID }) {
+                    setIfChanged(\.selectedProjectID, nil)
+                }
+            }
+
             if let vaultRepository = services.vaultRepository {
                 setIfChanged(\.vaultItems, try await vaultRepository.listDocuments().map(Self.vaultPreview(from:)))
             }
@@ -1055,6 +1074,8 @@ final class PinesAppModel: ObservableObject {
     private func clearInMemoryStateAfterErase() {
         applySettings(AppSettingsSnapshot())
         setIfChanged(\.threads, [])
+        setIfChanged(\.projects, [])
+        setIfChanged(\.selectedProjectID, nil)
         setIfChanged(\.chatError, nil)
         setIfChanged(\.models, [])
         setIfChanged(\.modelDownloads, [])
@@ -1611,6 +1632,7 @@ final class PinesAppModel: ObservableObject {
             }
             return PinesThreadPreview(
                 id: preview.id,
+                projectID: preview.projectID,
                 title: preview.title,
                 modelName: preview.modelName,
                 modelID: preview.modelID,
@@ -1694,7 +1716,8 @@ final class PinesAppModel: ObservableObject {
             let conversation = try await repository.createConversation(
                 title: "New chat",
                 defaultModelID: selection?.modelID,
-                defaultProviderID: selection?.providerID
+                defaultProviderID: selection?.providerID,
+                projectID: selectedProjectID
             )
             upsertThreadPreview(
                 Self.threadPreview(from: conversation, messages: []),
@@ -1706,6 +1729,67 @@ final class PinesAppModel: ObservableObject {
             setIfChanged(\.serviceError, error.localizedDescription)
             emitHaptic(.runFailed)
             return nil
+        }
+    }
+
+    func selectProject(_ projectID: UUID?) {
+        setIfChanged(\.selectedProjectID, projectID)
+    }
+
+    func createProject(name: String = "New project", services: PinesAppServices) async -> UUID? {
+        do {
+            guard let repository = services.projectRepository else {
+                serviceError = "Project repository is unavailable."
+                return nil
+            }
+            let project = try await repository.createProject(name: name)
+            setIfChanged(\.selectedProjectID, project.id)
+            await refreshAll(services: services)
+            emitHaptic(.primaryAction)
+            return project.id
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+            emitHaptic(.runFailed)
+            return nil
+        }
+    }
+
+    func setProjectVaultEnabled(_ enabled: Bool, projectID: UUID, services: PinesAppServices) async {
+        do {
+            guard let repository = services.projectRepository else { return }
+            try await repository.setProjectVaultEnabled(enabled, projectID: projectID)
+            await refreshAll(services: services)
+            emitHaptic(.primaryAction)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    func deleteProject(_ project: PinesProjectPreview, services: PinesAppServices) async {
+        do {
+            guard let repository = services.projectRepository else { return }
+            try await repository.deleteProject(id: project.id)
+            if selectedProjectID == project.id {
+                setIfChanged(\.selectedProjectID, nil)
+            }
+            await refreshAll(services: services)
+            emitHaptic(.destructiveAction)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    func moveThread(_ thread: PinesThreadPreview, toProject projectID: UUID?, services: PinesAppServices) async {
+        do {
+            guard let repository = services.conversationRepository else { return }
+            try await repository.moveConversation(thread.id, toProject: projectID)
+            await refreshConversationPreviews(services: services)
+            emitHaptic(.primaryAction)
+        } catch {
+            setChatError(error.localizedDescription)
+            emitHaptic(.runFailed)
         }
     }
 
@@ -2369,7 +2453,11 @@ final class PinesAppModel: ObservableObject {
                 persistedMessages,
                 requiredAttachmentMessageIDs: [userMessage.id]
             )
-            let vaultContext = userContent.isEmpty ? nil : await vaultContextMessage(for: userContent, services: services)
+            let vaultContext = await projectVaultContextMessage(
+                for: userContent,
+                conversationID: conversationID,
+                services: services
+            )
             let mcpContext = await mcpResourceContextMessages(services: services)
             let routeRequiredInputs = ProviderInputRequirements(messages: messages + mcpContext)
             let managedEntitlement = settings?.proEntitlementStatus ?? proEntitlementStatus
@@ -2889,6 +2977,63 @@ final class PinesAppModel: ObservableObject {
         services: PinesAppServices
     ) async -> (message: ChatMessage, documentIDs: [UUID])? {
         await services.vaultRetrievalService?.contextMessage(for: query, limit: 4)
+    }
+
+    private func projectVaultContextMessage(
+        for query: String,
+        conversationID: UUID,
+        services: PinesAppServices
+    ) async -> (message: ChatMessage, documentIDs: [UUID])? {
+        var projectID = threads.first(where: { $0.id == conversationID })?.projectID
+        if projectID == nil, let conversationRepository = services.conversationRepository {
+            let conversations = (try? await conversationRepository.listConversations()) ?? []
+            projectID = conversations.first { $0.id == conversationID }?.projectID
+        }
+        guard let projectID else { return nil }
+
+        var project = projects.first { $0.id == projectID }
+        if project == nil, let projectRepository = services.projectRepository {
+            let projectPreviews = ((try? await projectRepository.listProjects()) ?? []).map(Self.projectPreview(from:))
+            project = projectPreviews.first { $0.id == projectID }
+        }
+
+        guard project?.vaultEnabled == true,
+              let repository = services.vaultRepository
+        else {
+            return nil
+        }
+
+        let documents = (try? await repository.listDocuments().filter { $0.projectID == projectID }) ?? []
+        guard !documents.isEmpty else { return nil }
+
+        var sections = [String]()
+        var documentIDs = [UUID]()
+        for document in documents.prefix(6) {
+            let chunks = (try? await repository.chunks(documentID: document.id)) ?? []
+            let text = chunks
+                .prefix(3)
+                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+            guard !text.isEmpty else { continue }
+            sections.append("Document: \(document.title)\n\(String(text.prefix(3_000)))")
+            documentIDs.append(document.id)
+        }
+
+        guard !sections.isEmpty else { return nil }
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let queryLine = trimmedQuery.isEmpty ? "" : "\nUser query: \(trimmedQuery)"
+        return (
+            ChatMessage(
+                role: .system,
+                content: """
+                Use this project Vault context only when relevant. It belongs to the current project and is enabled for this project.\(queryLine)
+
+                \(sections.joined(separator: "\n\n---\n\n"))
+                """
+            ),
+            documentIDs
+        )
     }
 
     private func mcpResourceContextMessages(services: PinesAppServices) async -> [ChatMessage] {
@@ -3796,7 +3941,10 @@ final class PinesAppModel: ObservableObject {
                 return
             }
             _ = await ensureVaultEmbeddingProfile(services: services, reason: "Pines will send imported document chunks to this cloud embedding provider to build your private vault index.")
-            _ = try await ingestion.importFile(url: url)
+            let document = try await ingestion.importFile(url: url)
+            if let selectedProjectID, let repository = services.vaultRepository {
+                try await repository.moveDocument(document.id, toProject: selectedProjectID)
+            }
             await refreshAll(services: services)
         } catch {
             serviceError = error.localizedDescription
@@ -3928,6 +4076,7 @@ final class PinesAppModel: ObservableObject {
             var items = vaultItems
             items[index] = PinesVaultItemPreview(
                 id: item.id,
+                projectID: item.projectID,
                 title: item.title,
                 kind: item.kind,
                 detail: item.detail,
@@ -3936,12 +4085,69 @@ final class PinesAppModel: ObservableObject {
                 sensitivity: item.sensitivity,
                 linkedThreads: vaultRetrievalEvents.filter { $0.resultCount > 0 }.count,
                 activeProfileEmbeddedChunks: activeEmbeddingCount,
-                activeProfileTotalChunks: chunks.count
+                activeProfileTotalChunks: chunks.count,
+                sourceContentType: item.sourceContentType,
+                sourceData: await vaultSourceData(for: item.id, services: services)
             )
             setIfChanged(\.vaultItems, items)
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    func deleteVaultChunk(_ chunk: VaultChunk, documentID: UUID, services: PinesAppServices) async {
+        do {
+            guard let repository = services.vaultRepository else { return }
+            try await repository.deleteChunk(id: chunk.id, documentID: documentID)
+            await refreshAll(services: services)
+            await loadVaultItemDetails(id: documentID, services: services)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    func deleteVaultDocument(id: UUID, services: PinesAppServices) async {
+        do {
+            guard let repository = services.vaultRepository else { return }
+            try await repository.deleteDocument(id: id)
+            await refreshAll(services: services)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    func moveVaultDocument(id: UUID, toProject projectID: UUID?, services: PinesAppServices) async {
+        do {
+            guard let repository = services.vaultRepository else { return }
+            try await repository.moveDocument(id, toProject: projectID)
+            await refreshAll(services: services)
+            await loadVaultItemDetails(id: id, services: services)
+            emitHaptic(.primaryAction)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    private func vaultSourceData(for id: UUID, services: PinesAppServices) async -> Data? {
+        let store = services.encryptedBlobStore
+        guard let repository = services.vaultRepository,
+              let document = try? await repository.listDocuments().first(where: { $0.id == id }),
+              let localURL = document.localURL,
+              let checksum = document.checksum
+        else {
+            return nil
+        }
+
+        let metadata = EncryptedBlobMetadata(
+            id: localURL.deletingPathExtension().lastPathComponent,
+            contentType: document.sourceType,
+            byteCount: 0,
+            sha256: checksum,
+            keyID: SecureKeyStore.blobKeyID,
+            relativePath: localURL.lastPathComponent
+        )
+        return try? await store.read(metadata)
     }
 
     func reindexVault(services: PinesAppServices) async {
@@ -4423,6 +4629,7 @@ final class PinesAppModel: ObservableObject {
                 upsertThreadPreview(
                     PinesThreadPreview(
                         id: thread.id,
+                        projectID: thread.projectID,
                         title: thread.title,
                         modelName: option.displayName,
                         modelID: option.modelID,

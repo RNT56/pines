@@ -877,7 +877,7 @@ extension ProviderArtifactRecord {
     var galleryPresentation: ArtifactsGalleryPresentation {
         let normalizedKind = kind.lowercased()
         let normalizedType = contentType?.lowercased() ?? ""
-        if normalizedKind.contains("research_report") || normalizedType.hasPrefix("text/markdown") {
+        if normalizedKind.contains("research_report") || normalizedKind == "deep_research_output" || normalizedType.hasPrefix("text/markdown") {
             return .report
         }
         if normalizedType.hasPrefix("image/") || ["image", "generated_image", "partial_image"].contains(normalizedKind) {
@@ -899,6 +899,13 @@ extension ProviderArtifactRecord {
         localURL ?? remoteURL
     }
 
+    var localPreviewImageData: Data? {
+        if let localURL, localURL.isFileURL, let data = try? Data(contentsOf: localURL), !data.isEmpty {
+            return data
+        }
+        return content.flatMap(Self.firstBase64ImageData(in:))
+    }
+
     var galleryDetail: String {
         if let fileName, !fileName.isEmpty { return fileName }
         if let responseID, !responseID.isEmpty { return responseID }
@@ -908,11 +915,57 @@ extension ProviderArtifactRecord {
 
     private var isInternalLifecycleArtifact: Bool {
         let normalizedKind = kind.lowercased()
-        if ["tool_output", "hosted_tool_call", "file_reference", "container_file", "code_execution", "batch_result", "deep_research_output"].contains(normalizedKind) {
+        if ["tool_output", "hosted_tool_call", "file_reference", "container_file", "code_execution", "batch_result"].contains(normalizedKind) {
             return true
         }
         if normalizedKind.hasPrefix("batch_") { return true }
         return false
+    }
+
+    private static func firstBase64ImageData(in value: JSONValue) -> Data? {
+        switch value {
+        case let .object(object):
+            for key in ["b64_json", "base64", "image_base64", "result"] {
+                if let data = object[key]?.stringValue.flatMap(decodedBase64ImageData(from:)) {
+                    return data
+                }
+            }
+            for nested in object.values {
+                if let data = firstBase64ImageData(in: nested) {
+                    return data
+                }
+            }
+            return nil
+        case let .array(values):
+            for nested in values {
+                if let data = firstBase64ImageData(in: nested) {
+                    return data
+                }
+            }
+            return nil
+        case let .string(value):
+            return decodedBase64ImageData(from: value)
+        case .number, .bool, .null:
+            return nil
+        }
+    }
+
+    private static func decodedBase64ImageData(from raw: String) -> Data? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base64: String
+        if let comma = trimmed.firstIndex(of: ","),
+           trimmed[..<comma].lowercased().contains("base64") {
+            base64 = String(trimmed[trimmed.index(after: comma)...])
+        } else {
+            base64 = trimmed
+        }
+        guard base64.count > 128,
+              let data = Data(base64Encoded: base64, options: [.ignoreUnknownCharacters]),
+              !data.isEmpty
+        else {
+            return nil
+        }
+        return data
     }
 
     var searchText: String {

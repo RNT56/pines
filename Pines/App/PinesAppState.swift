@@ -61,16 +61,22 @@ final class PinesLiveChatMessage: ObservableObject, Identifiable {
 @MainActor
 final class PinesChatState: ObservableObject {
     @Published var threads: [PinesThreadPreview]
+    @Published var projects: [PinesProjectPreview]
+    @Published var selectedProjectID: UUID?
     @Published var chatError: String?
     @Published var activeRunID: UUID?
     private var liveMessages: [UUID: PinesLiveChatMessage]
 
     init(
         threads: [PinesThreadPreview] = [],
+        projects: [PinesProjectPreview] = [],
+        selectedProjectID: UUID? = nil,
         chatError: String? = nil,
         activeRunID: UUID? = nil
     ) {
         self.threads = threads
+        self.projects = projects
+        self.selectedProjectID = selectedProjectID
         self.chatError = chatError
         self.activeRunID = activeRunID
         liveMessages = [:]

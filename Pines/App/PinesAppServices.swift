@@ -9,6 +9,7 @@ import MapKit
 #endif
 
 typealias PinesLiveStore = any ConversationRepository
+    & ProjectRepository
     & ModelInstallRepository
     & VaultRepository
     & SettingsRepository
@@ -110,6 +111,7 @@ final class PinesAppServices: @unchecked Sendable {
     }
 
     var conversationRepository: (any ConversationRepository)? { liveStore }
+    var projectRepository: (any ProjectRepository)? { liveStore }
     var modelInstallRepository: (any ModelInstallRepository)? { liveStore }
     var vaultRepository: (any VaultRepository)? { liveStore }
     var settingsRepository: (any SettingsRepository)? { liveStore }

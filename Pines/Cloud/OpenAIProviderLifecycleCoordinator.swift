@@ -188,7 +188,7 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
     func createDeepResearchRun(_ request: OpenAIDeepResearchRequest) async throws -> ProviderResearchRunRecord {
         let result = try await service.createDeepResearchRunRecord(request)
         try await repositories.researchRuns?.upsertProviderResearchRun(result.run)
-        try await persistArtifacts(from: result.response, responseID: result.run.responseID, runID: result.run.id)
+        _ = try await persistArtifacts(from: result.response, responseID: result.run.responseID, runID: result.run.id)
         try await audit("Started OpenAI Deep Research run \(result.run.title)", modelID: result.run.modelID)
         return result.run
     }
@@ -196,13 +196,15 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
     func refreshDeepResearchRun(_ run: ProviderResearchRunRecord) async throws -> ProviderResearchRunRecord {
         let result = try await service.retrieveDeepResearchRunRecord(run)
         var updated = result.run
-        if updated.status == OpenAIBackgroundResponseStatus.completed.rawValue,
-           updated.finalReportArtifactID == nil,
-           let artifact = try await persistFinalReportArtifact(from: result.response, run: updated) {
-            updated.finalReportArtifactID = artifact.id
+        let responseArtifacts = try await persistArtifacts(from: result.response, responseID: updated.responseID, runID: updated.id)
+        if updated.status == OpenAIBackgroundResponseStatus.completed.rawValue, updated.finalReportArtifactID == nil {
+            if let outputArtifact = responseArtifacts.first(where: { $0.kind == "deep_research_output" && ($0.text?.isEmpty == false) }) {
+                updated.finalReportArtifactID = outputArtifact.id
+            } else if let artifact = try await persistFinalReportArtifact(from: result.response, run: updated) {
+                updated.finalReportArtifactID = artifact.id
+            }
         }
         try await repositories.researchRuns?.upsertProviderResearchRun(updated)
-        try await persistArtifacts(from: result.response, responseID: updated.responseID, runID: updated.id)
         return updated
     }
 
@@ -235,7 +237,7 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
 
     func createImageArtifacts(prompt: String, model: String? = nil, fields: [String: JSONValue] = [:]) async throws -> [ProviderArtifactRecord] {
         let response = try await service.createImage(OpenAIImageCreateRequest(prompt: prompt, model: model, rawFields: fields))
-        let artifacts = artifactRecords(fromImageResponse: response, prompt: prompt)
+        let artifacts = try artifactRecords(fromImageResponse: response, prompt: prompt)
         for artifact in artifacts {
             try await repositories.artifacts?.upsertProviderArtifact(artifact)
         }
@@ -327,11 +329,13 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         return artifact
     }
 
-    private func persistArtifacts(from response: OpenAIProviderResponse, responseID: String?, runID: String?) async throws {
+    @discardableResult
+    private func persistArtifacts(from response: OpenAIProviderResponse, responseID: String?, runID: String?) async throws -> [ProviderArtifactRecord] {
         let artifacts = artifactRecords(fromResponseOutput: response.json, responseID: responseID, runID: runID)
         for artifact in artifacts {
             try await repositories.artifacts?.upsertProviderArtifact(artifact)
         }
+        return artifacts
     }
 
     private func persistFinalReportArtifact(
@@ -355,20 +359,26 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         return artifact
     }
 
-    private func artifactRecords(fromImageResponse response: OpenAIProviderResponse, prompt: String) -> [ProviderArtifactRecord] {
-        response.listData.enumerated().map { index, value in
+    private func artifactRecords(fromImageResponse response: OpenAIProviderResponse, prompt: String) throws -> [ProviderArtifactRecord] {
+        try response.listData.enumerated().map { index, value in
             let fields = value.objectValue ?? [:]
             let remoteURL = fields.string(for: "url").flatMap(URL.init(string:))
+            let imageData = fields.string(for: "b64_json").flatMap { Data(base64Encoded: $0, options: [.ignoreUnknownCharacters]) }
+            let localURL = try imageData.map { data in
+                try artifactStore.write(data: data, fileName: uniqueArtifactFileName("image-\(UUID().uuidString).png"))
+            }
             let revisedPrompt = fields.string(for: "revised_prompt") ?? prompt
             return ProviderArtifactRecord(
                 id: fields.string(for: "id") ?? "image-\(UUID().uuidString)-\(index)",
                 providerID: providerID,
                 providerKind: .openAI,
                 kind: "image",
-                fileName: remoteURL?.lastPathComponent,
+                fileName: localURL?.lastPathComponent ?? remoteURL?.lastPathComponent,
                 contentType: "image/png",
+                byteCount: imageData.map { Int64($0.count) } ?? 0,
                 text: revisedPrompt,
                 content: value,
+                localURL: localURL,
                 remoteURL: remoteURL
             )
         }
@@ -454,6 +464,8 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
                 providerKind: .openAI,
                 responseID: responseID,
                 kind: "deep_research_output",
+                fileName: "Final report.md",
+                contentType: "text/markdown",
                 text: finalOutputText(from: .object(object)),
                 content: .object(object)
             )

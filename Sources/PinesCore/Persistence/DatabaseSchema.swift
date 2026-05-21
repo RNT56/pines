@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 15
+    public static let currentVersion = 16
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -1050,6 +1050,23 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_provider ON provider_research_runs(provider_id, provider_kind, created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_response ON provider_research_runs(provider_kind, response_id);",
             "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_status ON provider_research_runs(status, updated_at);",
+        ]),
+        DatabaseMigration(version: 16, name: "project-spaces", sql: [
+            """
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                vault_enabled INTEGER NOT NULL DEFAULT 1,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                deleted_at REAL
+            );
+            """,
+            "ALTER TABLE conversations ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;",
+            "ALTER TABLE vault_documents ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(deleted_at, updated_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id, updated_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_vault_documents_project ON vault_documents(project_id, updated_at DESC);",
         ]),
     ]
 }

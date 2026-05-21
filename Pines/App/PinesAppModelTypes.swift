@@ -131,6 +131,7 @@ extension RelativeDateTimeFormatter {
 
 struct PinesThreadPreview: Identifiable, Hashable {
     let id: UUID
+    let projectID: UUID?
     let title: String
     let modelName: String
     let modelID: ModelID
@@ -150,6 +151,13 @@ struct PinesThreadPreview: Identifiable, Hashable {
             vaultContextIDs: []
         )
     }
+}
+
+struct PinesProjectPreview: Identifiable, Hashable {
+    let id: UUID
+    let name: String
+    let vaultEnabled: Bool
+    let updatedLabel: String
 }
 
 struct ModelPickerSection: Identifiable, Hashable {
@@ -343,6 +351,7 @@ enum PinesModelStatus: String, Hashable, Sendable {
 
 struct PinesVaultItemPreview: Identifiable, Hashable {
     let id: UUID
+    let projectID: UUID?
     let title: String
     let kind: PinesVaultKind
     let detail: String
@@ -352,6 +361,8 @@ struct PinesVaultItemPreview: Identifiable, Hashable {
     let linkedThreads: Int
     let activeProfileEmbeddedChunks: Int
     let activeProfileTotalChunks: Int
+    let sourceContentType: String?
+    let sourceData: Data?
 }
 
 struct PinesProviderFilePreview: Identifiable, Hashable {

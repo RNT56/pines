@@ -114,6 +114,8 @@ public protocol ConversationRepository: Sendable {
     func observeConversations() -> AsyncStream<[ConversationRecord]>
     func observeConversationPreviews() -> AsyncStream<[ConversationPreviewRecord]>
     func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?) async throws -> ConversationRecord
+    func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?, projectID: UUID?) async throws -> ConversationRecord
+    func moveConversation(_ conversationID: UUID, toProject projectID: UUID?) async throws
     func updateConversationTitle(_ title: String, conversationID: UUID) async throws
     func updateConversationModel(modelID: ModelID?, providerID: ProviderID?, conversationID: UUID) async throws
     func setConversationArchived(_ archived: Bool, conversationID: UUID) async throws
@@ -137,6 +139,12 @@ public protocol ConversationRepository: Sendable {
 }
 
 public extension ConversationRepository {
+    func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?, projectID: UUID?) async throws -> ConversationRecord {
+        try await createConversation(title: title, defaultModelID: defaultModelID, defaultProviderID: defaultProviderID)
+    }
+
+    func moveConversation(_ conversationID: UUID, toProject projectID: UUID?) async throws {}
+
     func recentMessages(in conversationID: UUID, limit: Int, requiredMessageIDs: Set<UUID>) async throws -> [ChatMessage] {
         let allMessages = try await messages(in: conversationID)
         guard allMessages.count > limit || !requiredMessageIDs.isEmpty else { return allMessages }
@@ -211,12 +219,43 @@ public extension ConversationRepository {
     }
 }
 
+public protocol ProjectRepository: Sendable {
+    func listProjects() async throws -> [ProjectRecord]
+    func createProject(name: String) async throws -> ProjectRecord
+    func updateProjectName(_ name: String, projectID: UUID) async throws
+    func setProjectVaultEnabled(_ enabled: Bool, projectID: UUID) async throws
+    func deleteProject(id: UUID) async throws
+}
+
+public struct ProjectRecord: Identifiable, Hashable, Codable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var vaultEnabled: Bool
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        vaultEnabled: Bool = true,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.vaultEnabled = vaultEnabled
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {
     public var id: UUID
     public var title: String
     public var updatedAt: Date
     public var defaultModelID: ModelID?
     public var defaultProviderID: ProviderID?
+    public var projectID: UUID?
     public var archived: Bool
     public var pinned: Bool
 
@@ -226,6 +265,7 @@ public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {
         updatedAt: Date = Date(),
         defaultModelID: ModelID? = nil,
         defaultProviderID: ProviderID? = nil,
+        projectID: UUID? = nil,
         archived: Bool = false,
         pinned: Bool = false
     ) {
@@ -234,6 +274,7 @@ public struct ConversationRecord: Identifiable, Hashable, Codable, Sendable {
         self.updatedAt = updatedAt
         self.defaultModelID = defaultModelID
         self.defaultProviderID = defaultProviderID
+        self.projectID = projectID
         self.archived = archived
         self.pinned = pinned
     }
@@ -245,6 +286,7 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
     public var updatedAt: Date
     public var defaultModelID: ModelID?
     public var defaultProviderID: ProviderID?
+    public var projectID: UUID?
     public var archived: Bool
     public var pinned: Bool
     public var lastMessage: String?
@@ -258,6 +300,7 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
         updatedAt: Date = Date(),
         defaultModelID: ModelID? = nil,
         defaultProviderID: ProviderID? = nil,
+        projectID: UUID? = nil,
         archived: Bool = false,
         pinned: Bool = false,
         lastMessage: String? = nil,
@@ -270,6 +313,7 @@ public struct ConversationPreviewRecord: Identifiable, Hashable, Codable, Sendab
         self.updatedAt = updatedAt
         self.defaultModelID = defaultModelID
         self.defaultProviderID = defaultProviderID
+        self.projectID = projectID
         self.archived = archived
         self.pinned = pinned
         self.lastMessage = lastMessage
@@ -350,6 +394,8 @@ public protocol VaultRepository: Sendable {
     func observeDocuments() -> AsyncStream<[VaultDocumentRecord]>
     func upsertDocument(_ document: VaultDocumentRecord, localURL: URL?, checksum: String?) async throws
     func deleteDocument(id: UUID) async throws
+    func deleteChunk(id: String, documentID: UUID) async throws
+    func moveDocument(_ documentID: UUID, toProject projectID: UUID?) async throws
     func chunks(documentID: UUID) async throws -> [VaultChunk]
     func embeddings(documentID: UUID) async throws -> [VaultStoredEmbedding]
     func listEmbeddingProfiles() async throws -> [VaultEmbeddingProfile]
@@ -392,6 +438,13 @@ public extension VaultRepository {
     }
 
     func upsertEmbeddingProfile(_ profile: VaultEmbeddingProfile) async throws {}
+
+    func deleteChunk(id: String, documentID: UUID) async throws {
+        let remaining = try await chunks(documentID: documentID).filter { $0.id != id }
+        try await replaceChunks(remaining, documentID: documentID, embeddingModelID: nil)
+    }
+
+    func moveDocument(_ documentID: UUID, toProject projectID: UUID?) async throws {}
 
     func setActiveEmbeddingProfile(id: String?) async throws {}
 
@@ -447,19 +500,28 @@ public struct VaultDocumentRecord: Identifiable, Hashable, Codable, Sendable {
     public var sourceType: String
     public var updatedAt: Date
     public var chunkCount: Int
+    public var checksum: String?
+    public var localURL: URL?
+    public var projectID: UUID?
 
     public init(
         id: UUID = UUID(),
         title: String,
         sourceType: String,
         updatedAt: Date = Date(),
-        chunkCount: Int
+        chunkCount: Int,
+        checksum: String? = nil,
+        localURL: URL? = nil,
+        projectID: UUID? = nil
     ) {
         self.id = id
         self.title = title
         self.sourceType = sourceType
         self.updatedAt = updatedAt
         self.chunkCount = chunkCount
+        self.checksum = checksum
+        self.localURL = localURL
+        self.projectID = projectID
     }
 }
 

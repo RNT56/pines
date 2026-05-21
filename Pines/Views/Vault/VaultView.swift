@@ -1,6 +1,9 @@
 import SwiftUI
 import PinesCore
 import UniformTypeIdentifiers
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct VaultView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -8,6 +11,7 @@ struct VaultView: View {
     @Environment(\.pinesServices) private var services
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var chatState: PinesChatState
     @EnvironmentObject private var vaultState: PinesVaultState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedItemID: PinesVaultItemPreview.ID?
@@ -19,15 +23,24 @@ struct VaultView: View {
             return nil
         }
 
-        return vaultState.vaultItems.first { $0.id == selectedItemID }
+        return visibleVaultItems.first { $0.id == selectedItemID }
     }
 
     private var defaultItemID: PinesVaultItemPreview.ID? {
-        shouldAutoSelectSidebarItem ? vaultState.vaultItems.first?.id : nil
+        shouldAutoSelectSidebarItem ? visibleVaultItems.first?.id : nil
     }
 
     private var vaultItemIDs: [PinesVaultItemPreview.ID] {
-        vaultState.vaultItems.map(\.id)
+        visibleVaultItems.map(\.id)
+    }
+
+    private var visibleVaultItems: [PinesVaultItemPreview] {
+        vaultState.vaultItems.filter { item in
+            if let selectedProjectID = chatState.selectedProjectID {
+                return item.projectID == selectedProjectID
+            }
+            return item.projectID == nil
+        }
     }
 
     private var shouldAutoSelectSidebarItem: Bool {
@@ -51,8 +64,8 @@ struct VaultView: View {
                     }
                 }
 
-                Section("Vault") {
-                    ForEach(vaultState.vaultItems) { item in
+                Section(chatState.selectedProjectID == nil ? "Vault" : "Project Vault") {
+                    ForEach(visibleVaultItems) { item in
                         NavigationLink(value: item.id) {
                             VaultItemRow(item: item, isSelected: selectedItemID == item.id)
                         }
@@ -95,6 +108,10 @@ struct VaultView: View {
                 }
                 selectDefaultItemIfNeeded()
             }
+            .onChange(of: chatState.selectedProjectID) { _, _ in
+                selectedItemID = nil
+                selectDefaultItemIfNeeded()
+            }
             .onChange(of: selectedItemID) { _, _ in
                 haptics.play(.navigationSelected)
             }
@@ -125,7 +142,7 @@ struct VaultView: View {
 
     private func selectDefaultItemIfNeeded() {
         guard shouldAutoSelectSidebarItem else { return }
-        selectedItemID = selectedItemID ?? vaultState.vaultItems.first?.id
+        selectedItemID = selectedItemID ?? visibleVaultItems.first?.id
     }
 
     private var vaultSearchBinding: Binding<String> {
@@ -529,6 +546,7 @@ private struct VaultDetailView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var chatState: PinesChatState
     @EnvironmentObject private var vaultState: PinesVaultState
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
@@ -546,6 +564,32 @@ private struct VaultDetailView: View {
                     PinesMetricPill(title: "\(item.linkedThreads) links", systemImage: "link")
                 }
 
+                HStack {
+                    Menu {
+                        Button("Personal Vault") {
+                            Task { await appModel.moveVaultDocument(id: item.id, toProject: nil, services: services) }
+                        }
+                        ForEach(chatState.projects) { project in
+                            Button(project.name) {
+                                Task { await appModel.moveVaultDocument(id: item.id, toProject: project.id, services: services) }
+                            }
+                        }
+                    } label: {
+                        Label(projectLabel, systemImage: "folder")
+                    }
+                    .buttonStyle(.borderless)
+
+                    Spacer()
+                    Button(role: .destructive) {
+                        Task { await appModel.deleteVaultDocument(id: item.id, services: services) }
+                    } label: {
+                        Label("Delete Vault file", systemImage: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                }
+
+                VaultSourcePreview(item: item)
+
                 VStack(alignment: .leading, spacing: theme.spacing.medium) {
                     Label("Private context", systemImage: "lock.shield")
                         .font(theme.typography.section)
@@ -557,9 +601,19 @@ private struct VaultDetailView: View {
 
                     ForEach(item.chunks.prefix(4)) { chunk in
                         VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                            Text("Chunk \(chunk.ordinal + 1) · \(chunk.characterCount) characters")
-                                .font(theme.typography.caption.weight(.semibold))
-                                .foregroundStyle(theme.colors.tertiaryText)
+                            HStack(alignment: .firstTextBaseline) {
+                                Text("Chunk \(chunk.ordinal + 1) · \(chunk.characterCount) characters")
+                                    .font(theme.typography.caption.weight(.semibold))
+                                    .foregroundStyle(theme.colors.tertiaryText)
+                                Spacer(minLength: theme.spacing.xsmall)
+                                Button(role: .destructive) {
+                                    Task { await appModel.deleteVaultChunk(chunk, documentID: item.id, services: services) }
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Delete chunk \(chunk.ordinal + 1)")
+                            }
                             Text(chunk.text)
                                 .font(theme.typography.caption)
                                 .foregroundStyle(theme.colors.secondaryText)
@@ -649,6 +703,15 @@ private struct VaultDetailView: View {
         return "\(item.chunks.count) chunks are available for text search. Add an embedding provider for semantic retrieval."
     }
 
+    private var projectLabel: String {
+        guard let projectID = item.projectID,
+              let project = chatState.projects.first(where: { $0.id == projectID })
+        else {
+            return "Personal Vault"
+        }
+        return project.name
+    }
+
     private var providerStorageExportProviders: [CloudProviderConfiguration] {
         settingsState.cloudProviders.filter { provider in
             provider.kind == .openAI || provider.kind == .anthropic
@@ -709,6 +772,62 @@ private struct VaultDetailView: View {
         }
         rows.append(("\(vaultState.vaultRetrievalEvents.count) recent retrieval events", "magnifyingglass"))
         return rows.map { (title: $0.0, image: $0.1) }
+    }
+}
+
+private struct VaultSourcePreview: View {
+    @Environment(\.pinesTheme) private var theme
+    let item: PinesVaultItemPreview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.medium) {
+            Label("File preview", systemImage: item.kind.systemImage)
+                .font(theme.typography.section)
+
+            if let data = item.sourceData {
+                preview(for: data)
+            } else {
+                PinesEmptyState(title: "Preview unavailable", detail: "Extracted content appears below.", systemImage: "eye.slash")
+            }
+        }
+        .pinesSurface(.panel)
+    }
+
+    @ViewBuilder
+    private func preview(for data: Data) -> some View {
+        switch item.kind {
+        case .image:
+            #if canImport(UIKit)
+            if let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 320)
+                    .frame(maxWidth: .infinity)
+                    .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+            } else {
+                fallbackTextPreview(data)
+            }
+            #else
+            fallbackTextPreview(data)
+            #endif
+        case .note, .document, .key:
+            fallbackTextPreview(data)
+        }
+    }
+
+    private func fallbackTextPreview(_ data: Data) -> some View {
+        let text = String(data: data.prefix(48_000), encoding: .utf8)
+        return ScrollView {
+            Text(text ?? "\(data.count) bytes")
+                .font(.system(.caption, design: text == nil ? .default : .monospaced))
+                .foregroundStyle(theme.colors.primaryText)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(theme.spacing.small)
+        }
+        .frame(maxHeight: 320)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
     }
 }
 
