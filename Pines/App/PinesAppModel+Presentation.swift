@@ -12,6 +12,7 @@ extension PinesAppModel {
         let lastMessage = previewText(for: messages.last)
         return PinesThreadPreview(
             id: record.id,
+            projectID: record.projectID,
             title: ConversationTitleDeriver.title(forStoredTitle: record.title, messages: messages),
             modelName: record.defaultModelID.map { friendlyModelName($0.rawValue) } ?? "No model selected",
             modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
@@ -46,6 +47,7 @@ extension PinesAppModel {
         let status: PinesThreadStatus = record.archived ? .archived : .local
         return PinesThreadPreview(
             id: record.id,
+            projectID: record.projectID,
             title: ConversationTitleDeriver.title(forStoredTitle: record.title, titleSource: record.titleSourceMessage),
             modelName: record.defaultModelID.map { friendlyModelName($0.rawValue) } ?? "No model selected",
             modelID: record.defaultModelID ?? ModelID(rawValue: "unselected-local-model"),
@@ -69,6 +71,7 @@ extension PinesAppModel {
         let resolvedStatus = existing.status == .archived ? PinesThreadStatus.archived : (status ?? existing.status)
         return PinesThreadPreview(
             id: existing.id,
+            projectID: existing.projectID,
             title: ConversationTitleDeriver.title(forStoredTitle: existing.title, messages: messages),
             modelName: existing.modelName,
             modelID: existing.modelID,
@@ -79,6 +82,15 @@ extension PinesAppModel {
             isPinned: existing.isPinned,
             updatedLabel: RelativeDateTimeFormatter.shortLabel(for: updatedAt),
             tokenCount: resolvedStatus == .streaming ? existing.tokenCount : threadTokenCount(messages)
+        )
+    }
+
+    static func projectPreview(from record: ProjectRecord) -> PinesProjectPreview {
+        PinesProjectPreview(
+            id: record.id,
+            name: record.name,
+            vaultEnabled: record.vaultEnabled,
+            updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt)
         )
     }
 
@@ -312,6 +324,7 @@ extension PinesAppModel {
 
         return PinesVaultItemPreview(
             id: record.id,
+            projectID: record.projectID,
             title: record.title,
             kind: kind,
             detail: "\(record.chunkCount) indexed chunks",
@@ -320,7 +333,9 @@ extension PinesAppModel {
             sensitivity: .local,
             linkedThreads: 0,
             activeProfileEmbeddedChunks: 0,
-            activeProfileTotalChunks: record.chunkCount
+            activeProfileTotalChunks: record.chunkCount,
+            sourceContentType: record.sourceType,
+            sourceData: nil
         )
     }
 

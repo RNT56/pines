@@ -1869,9 +1869,10 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 15)
+        #expect(PinesDatabaseSchema.currentVersion == 16)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
         let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
+        let projectSpacesMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 16 })
         let sql = openAIMigration.sql.joined(separator: "\n")
 
         for table in [
@@ -1917,6 +1918,11 @@ struct CoreContractTests {
         }
         #expect(genericSQL.contains("credential_keychain_account"))
         #expect(!genericSQL.contains("client_secret_keychain_account"))
+
+        let projectSQL = projectSpacesMigration.sql.joined(separator: "\n")
+        #expect(projectSQL.contains("CREATE TABLE IF NOT EXISTS projects"))
+        #expect(projectSQL.contains("ALTER TABLE conversations ADD COLUMN project_id"))
+        #expect(projectSQL.contains("ALTER TABLE vault_documents ADD COLUMN project_id"))
     }
 
     @Test

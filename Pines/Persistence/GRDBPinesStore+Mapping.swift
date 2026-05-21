@@ -46,6 +46,7 @@ extension GRDBPinesStore {
             updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
             defaultModelID: (row["default_model_id"] as String?).map(ModelID.init(rawValue:)),
             defaultProviderID: (row["default_provider_id"] as String?).map(ProviderID.init(rawValue:)),
+            projectID: (row["project_id"] as String?).flatMap(UUID.init(uuidString:)),
             archived: (row["archived_at"] as Double?) != nil,
             pinned: (row["pinned"] as Int) == 1
         )
@@ -58,12 +59,23 @@ extension GRDBPinesStore {
             updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
             defaultModelID: (row["default_model_id"] as String?).map(ModelID.init(rawValue:)),
             defaultProviderID: (row["default_provider_id"] as String?).map(ProviderID.init(rawValue:)),
+            projectID: (row["project_id"] as String?).flatMap(UUID.init(uuidString:)),
             archived: (row["archived_at"] as Double?) != nil,
             pinned: (row["pinned"] as Int) == 1,
             lastMessage: row["last_message"] as String?,
             lastMessageStatus: (row["last_message_status"] as String?).flatMap(MessageStatus.init(rawValue:)),
             titleSourceMessage: row["title_source_message"] as String?,
             tokenCount: row["token_count"] as Int
+        )
+    }
+
+    static func project(from row: Row) -> ProjectRecord {
+        ProjectRecord(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            name: row["name"],
+            vaultEnabled: (row["vault_enabled"] as Int) == 1,
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"])
         )
     }
 
@@ -117,7 +129,10 @@ extension GRDBPinesStore {
             title: row["title"],
             sourceType: row["source_type"],
             updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
-            chunkCount: row["chunk_count"]
+            chunkCount: row["chunk_count"],
+            checksum: row["sha256"] as String?,
+            localURL: (row["local_path"] as String?).map(URL.init(fileURLWithPath:)),
+            projectID: (row["project_id"] as String?).flatMap(UUID.init(uuidString:))
         )
     }
 

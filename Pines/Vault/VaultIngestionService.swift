@@ -70,9 +70,11 @@ struct VaultIngestionService {
             title: sourceURL.deletingPathExtension().lastPathComponent,
             sourceType: Self.sourceType(for: sourceURL),
             updatedAt: Date(),
-            chunkCount: 0
+            chunkCount: 0,
+            checksum: encryptedMetadata.sha256,
+            localURL: encryptedURL
         )
-        let checksum = StableFileHash.hexDigest(for: text)
+        let checksum = encryptedMetadata.sha256
         try await vaultRepository.upsertDocument(document, localURL: encryptedURL, checksum: checksum)
 
         let chunks = chunker.chunks(for: text, sourceID: document.id.uuidString)

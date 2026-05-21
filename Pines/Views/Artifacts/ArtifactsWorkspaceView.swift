@@ -1172,24 +1172,29 @@ private struct ArtifactsResearchWorkspace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            researchComposer
-                .onAppear { normalizeSelectedModel() }
-                .onChange(of: provider?.id) { _, _ in normalizeSelectedModel() }
-                .onChange(of: selectedRun?.status) { _, status in
-                    if status?.providerIsTerminal == true {
-                        isActivityExpanded = false
+            PinesCardSection("Deep Research", subtitle: provider?.displayName, systemImage: "doc.text.magnifyingglass") {
+                VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                    researchComposerContent
+
+                    if let run = selectedRun {
+                        Divider()
+                        researchRunContent(for: run)
+                    } else {
+                        PinesEmptyState(
+                            title: "No research selected",
+                            detail: "Start a run or select an existing Deep Research record.",
+                            systemImage: "doc.text.magnifyingglass"
+                        )
+                        .pinesSurface(.inset, padding: theme.spacing.medium)
                     }
                 }
-
-            if let run = selectedRun {
-                researchConsole(for: run)
-            } else {
-                PinesEmptyState(
-                    title: "No research selected",
-                    detail: "Start a run or select an existing Deep Research record.",
-                    systemImage: "doc.text.magnifyingglass"
-                )
-                .pinesSurface(.panel, padding: theme.spacing.medium)
+            }
+            .onAppear { normalizeSelectedModel() }
+            .onChange(of: provider?.id) { _, _ in normalizeSelectedModel() }
+            .onChange(of: selectedRun?.status) { _, status in
+                if status?.providerIsTerminal == true {
+                    isActivityExpanded = false
+                }
             }
 
             ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No research runs", emptyDetail: "Source-backed research runs appear here.")
@@ -1209,151 +1214,147 @@ private struct ArtifactsResearchWorkspace: View {
         }
     }
 
-    private var researchComposer: some View {
-        PinesCardSection("Research Chat", subtitle: nil, systemImage: "doc.text.magnifyingglass") {
-            VStack(alignment: .leading, spacing: theme.spacing.small) {
-                HStack(spacing: theme.spacing.xsmall) {
-                    if provider == nil {
-                        PinesStatusChip(status: .custom("Choose OpenAI or Gemini", .warning), compact: true)
+    private var researchComposerContent: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack(spacing: theme.spacing.xsmall) {
+                if provider == nil {
+                    PinesStatusChip(status: .custom("Choose OpenAI or Gemini", .warning), compact: true)
+                }
+                Spacer(minLength: theme.spacing.small)
+                Button("Resume") {
+                    Task { await resumeRuns() }
+                }
+                .disabled(provider == nil)
+                .buttonStyle(.borderless)
+            }
+
+            TextField("What's today's research question about?", text: $prompt, axis: .vertical)
+                .lineLimit(3...7)
+                .pinesFieldChrome()
+
+            HStack(spacing: theme.spacing.xsmall) {
+                Menu {
+                    ForEach(modelOptions) { option in
+                        Button {
+                            modelID = option.id
+                        } label: {
+                            if option.id == modelID {
+                                Label(option.title, systemImage: "checkmark")
+                            } else {
+                                Text(option.title)
+                            }
+                        }
                     }
-                    Spacer(minLength: theme.spacing.small)
-                    Button("Resume") {
-                        Task { await resumeRuns() }
+                } label: {
+                    ArtifactsMenuPill(
+                        title: selectedModelLabel,
+                        systemImage: "cpu",
+                        tone: modelOptions.first(where: { $0.id == modelID })?.isFromProviderCapability == true ? .success : .info
+                    )
+                }
+                .disabled(modelOptions.isEmpty)
+
+                Menu {
+                    ForEach(OpenAIDeepResearchDepth.allCases, id: \.self) { option in
+                        Button {
+                            depth = option
+                        } label: {
+                            if option == depth {
+                                Label(option.rawValue.readableArtifactKind, systemImage: "checkmark")
+                            } else {
+                                Text(option.rawValue.readableArtifactKind)
+                            }
+                        }
                     }
-                    .disabled(provider == nil)
-                    .buttonStyle(.borderless)
+                } label: {
+                    ArtifactsMenuPill(title: depth.rawValue.readableArtifactKind, systemImage: "slider.horizontal.3", tone: .neutral)
                 }
 
-                TextField("What's today's research question about?", text: $prompt, axis: .vertical)
-                    .lineLimit(3...7)
-                    .pinesFieldChrome()
-
-                HStack(spacing: theme.spacing.xsmall) {
-                    Menu {
-                        ForEach(modelOptions) { option in
-                            Button {
-                                modelID = option.id
-                            } label: {
-                                if option.id == modelID {
-                                    Label(option.title, systemImage: "checkmark")
-                                } else {
-                                    Text(option.title)
-                                }
+                Menu {
+                    ForEach(OpenAIDeepResearchReportFormat.allCases, id: \.self) { option in
+                        Button {
+                            reportFormat = option
+                        } label: {
+                            if option == reportFormat {
+                                Label(option.rawValue.readableArtifactKind, systemImage: "checkmark")
+                            } else {
+                                Text(option.rawValue.readableArtifactKind)
                             }
                         }
-                    } label: {
-                        ArtifactsMenuPill(
-                            title: selectedModelLabel,
-                            systemImage: "cpu",
-                            tone: modelOptions.first(where: { $0.id == modelID })?.isFromProviderCapability == true ? .success : .info
-                        )
                     }
-                    .disabled(modelOptions.isEmpty)
-
-                    Menu {
-                        ForEach(OpenAIDeepResearchDepth.allCases, id: \.self) { option in
-                            Button {
-                                depth = option
-                            } label: {
-                                if option == depth {
-                                    Label(option.rawValue.readableArtifactKind, systemImage: "checkmark")
-                                } else {
-                                    Text(option.rawValue.readableArtifactKind)
-                                }
-                            }
-                        }
-                    } label: {
-                        ArtifactsMenuPill(title: depth.rawValue.readableArtifactKind, systemImage: "slider.horizontal.3", tone: .neutral)
-                    }
-
-                    Menu {
-                        ForEach(OpenAIDeepResearchReportFormat.allCases, id: \.self) { option in
-                            Button {
-                                reportFormat = option
-                            } label: {
-                                if option == reportFormat {
-                                    Label(option.rawValue.readableArtifactKind, systemImage: "checkmark")
-                                } else {
-                                    Text(option.rawValue.readableArtifactKind)
-                                }
-                            }
-                        }
-                    } label: {
-                        ArtifactsMenuPill(title: reportFormat.rawValue.readableArtifactKind, systemImage: "doc.text", tone: .neutral)
-                    }
-
-                    Spacer(minLength: theme.spacing.small)
-
-                    Button {
-                        Task { await startRun() }
-                    } label: {
-                        Label(isStarting ? "Researching" : "Send", systemImage: isStarting ? "hourglass" : "paperplane.fill")
-                    }
-                    .disabled(provider == nil || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isStarting || modelID.isEmpty)
-                    .pinesButtonStyle(.primary)
+                } label: {
+                    ArtifactsMenuPill(title: reportFormat.rawValue.readableArtifactKind, systemImage: "doc.text", tone: .neutral)
                 }
+
+                Spacer(minLength: theme.spacing.small)
+
+                Button {
+                    Task { await startRun() }
+                } label: {
+                    Label(isStarting ? "Researching" : "Send", systemImage: isStarting ? "hourglass" : "paperplane.fill")
+                }
+                .disabled(provider == nil || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isStarting || modelID.isEmpty)
+                .pinesButtonStyle(.primary)
             }
         }
     }
 
-    private func researchConsole(for run: ProviderResearchRunRecord) -> some View {
+    private func researchRunContent(for run: ProviderResearchRunRecord) -> some View {
         let sources = ArtifactsWorkspaceDeriver.researchSources(for: run)
         let events = ArtifactsWorkspaceDeriver.researchTimeline(for: run)
         let finalReport = run.finalReportArtifactID.flatMap { id in
             providerState.providerArtifacts.first { $0.id == id }
         }
 
-        return PinesCardSection("Research Console", subtitle: run.modelID.rawValue, systemImage: "bubble.left.and.text.bubble.right") {
-            VStack(alignment: .leading, spacing: theme.spacing.medium) {
-                HStack(alignment: .top, spacing: theme.spacing.small) {
-                    VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                        Text(run.title)
-                            .font(theme.typography.headline)
-                            .foregroundStyle(theme.colors.primaryText)
-                            .lineLimit(2)
-                        PinesMetricPillGroup(items: [
-                            .init("Status", value: run.status.readableArtifactKind, systemImage: "circle.dashed", tone: run.status.providerCloudStatus.tone),
-                            .init("Sources", value: "\(sources.count)", systemImage: "quote.bubble", tone: .info),
-                        ], minimumWidth: 108)
-                    }
-                    Spacer(minLength: theme.spacing.small)
-                    VStack(alignment: .trailing, spacing: theme.spacing.xsmall) {
-                        Button("Refresh") {
-                            Task { await refreshRun(run) }
-                        }
-                        .buttonStyle(.borderless)
-                        Button("Cancel", role: .destructive) {
-                            pendingConfirmation = .cancelResearch(run)
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(run.status.providerIsTerminal)
-                    }
+        return VStack(alignment: .leading, spacing: theme.spacing.medium) {
+            HStack(alignment: .top, spacing: theme.spacing.small) {
+                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                    Text(run.title)
+                        .font(theme.typography.headline)
+                        .foregroundStyle(theme.colors.primaryText)
+                        .lineLimit(2)
+                    PinesMetricPillGroup(items: [
+                        .init("Status", value: run.status.readableArtifactKind, systemImage: "circle.dashed", tone: run.status.providerCloudStatus.tone),
+                        .init("Sources", value: "\(sources.count)", systemImage: "quote.bubble", tone: .info),
+                    ], minimumWidth: 108)
                 }
-
-                ArtifactsResearchBubble(role: .user, title: "You", text: run.prompt)
-
-                ArtifactsResearchActivityDisclosure(events: events, sources: sources, isExpanded: $isActivityExpanded)
-
-                if let finalReport {
-                    ArtifactsResearchReportPreview(artifact: finalReport) {
-                        selection = .artifact(finalReport.id)
+                Spacer(minLength: theme.spacing.small)
+                VStack(alignment: .trailing, spacing: theme.spacing.xsmall) {
+                    Button("Refresh") {
+                        Task { await refreshRun(run) }
                     }
-                }
-
-                HStack(alignment: .bottom, spacing: theme.spacing.small) {
-                    TextField("Ask a follow-up or add clarification", text: $followUpPrompt, axis: .vertical)
-                        .lineLimit(1...4)
-                        .pinesFieldChrome()
-                    Button {
-                        Task { await sendFollowUp(to: run) }
-                    } label: {
-                        Image(systemName: isSendingFollowUp ? "hourglass" : "paperplane.fill")
-                            .frame(width: 18, height: 18)
+                    .buttonStyle(.borderless)
+                    Button("Cancel", role: .destructive) {
+                        pendingConfirmation = .cancelResearch(run)
                     }
-                    .disabled(isSendingFollowUp || followUpPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .pinesButtonStyle(.primary)
-                    .accessibilityLabel("Send follow-up")
+                    .buttonStyle(.borderless)
+                    .disabled(run.status.providerIsTerminal)
                 }
+            }
+
+            ArtifactsResearchBubble(role: .user, title: "You", text: run.prompt)
+
+            ArtifactsResearchActivityDisclosure(events: events, sources: sources, isExpanded: $isActivityExpanded)
+
+            if let finalReport {
+                ArtifactsResearchReportPreview(artifact: finalReport) {
+                    selection = .artifact(finalReport.id)
+                }
+            }
+
+            HStack(alignment: .bottom, spacing: theme.spacing.small) {
+                TextField("Ask a follow-up or add clarification", text: $followUpPrompt, axis: .vertical)
+                    .lineLimit(1...4)
+                    .pinesFieldChrome()
+                Button {
+                    Task { await sendFollowUp(to: run) }
+                } label: {
+                    Image(systemName: isSendingFollowUp ? "hourglass" : "paperplane.fill")
+                        .frame(width: 18, height: 18)
+                }
+                .disabled(isSendingFollowUp || followUpPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .pinesButtonStyle(.primary)
+                .accessibilityLabel("Send follow-up")
             }
         }
     }

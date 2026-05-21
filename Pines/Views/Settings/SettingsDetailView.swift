@@ -14,7 +14,6 @@ struct SettingsDetailView: View {
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var settingsState: PinesSettingsState
-    @EnvironmentObject private var providerLifecycleState: PinesProviderLifecycleState
     @EnvironmentObject private var haptics: PinesHaptics
     let section: PinesSettingsSection
     let executionMode: AgentExecutionMode
@@ -394,7 +393,7 @@ struct SettingsDetailView: View {
 
     private var cloudProviderCard: some View {
         let proToggleEnabled = settingsState.proEntitlementStatus.enablesManagedCloud && services.managedCloudService.isConfigured
-        return PinesCardSection("Cloud Intelligence", subtitle: "Managed Pro Cloud stays off until Pro is active and you opt in. Advanced Keys remain available for your own quota.", systemImage: "sparkles") {
+        return PinesCardSection("Cloud Intelligence", subtitle: "Use managed cloud or your own provider keys explicitly.", systemImage: "sparkles") {
             PinesKeyValueGrid(items: [
                 .init("Pro", settingsState.proEntitlementStatus.title, systemImage: "crown"),
                 .init("Cloud", settingsState.managedCloudConsent.title, systemImage: "sparkles"),
@@ -511,7 +510,7 @@ struct SettingsDetailView: View {
                     }
 
                     if settingsState.cloudProviders.isEmpty {
-                        Text("No advanced keys saved.")
+                        Text("No cloud providers saved.")
                             .font(theme.typography.caption)
                             .foregroundStyle(theme.colors.secondaryText)
                     } else {
@@ -521,7 +520,7 @@ struct SettingsDetailView: View {
                     }
                 }
             } label: {
-                Label("Advanced Provider Keys", systemImage: "key")
+                Label("Cloud Providers", systemImage: "cloud")
                     .font(theme.typography.headline)
             }
         }
@@ -530,7 +529,7 @@ struct SettingsDetailView: View {
 
     private var cloudIntelligenceSummary: String {
         if !services.managedCloudService.isConfigured {
-            return "This build has no Pro Cloud service configured, so managed cloud calls cannot start. Local models and Advanced Keys still work."
+            return "Managed cloud is unavailable in this build. Local models and saved provider keys still work."
         }
         if !settingsState.proEntitlementStatus.enablesManagedCloud {
             return "Pro Cloud is inactive. No managed cloud call will be made."
@@ -538,12 +537,12 @@ struct SettingsDetailView: View {
         switch settingsState.managedCloudConsent {
         case .optedIn:
             return settingsState.cloudAccessMode.usesManagedCloud
-                ? "Managed routing can use cloud chat, search, file analysis, background processing, cloud copies, token preflight, embeddings, reranking, and structured extraction. Select an Advanced Key provider any time to keep working on your own provider quota."
+                ? "Managed cloud is available for selected routes. Saved provider keys remain available when you choose them."
                 : "You are opted in, but managed routing is not selected."
         case .optedOut:
             return "Cloud Intelligence is off. Managed routes are disabled until you turn this back on."
         case .notAsked:
-            return "Cloud Intelligence has not been enabled. Vault and chat content stay local unless you use an Advanced Key."
+            return "Cloud Intelligence has not been enabled. Vault and chat content stay local unless you choose a saved provider key."
         case .revoked:
             return "Cloud Intelligence consent was revoked. Managed routes are disabled."
         }
@@ -551,9 +550,14 @@ struct SettingsDetailView: View {
 
     private func providerRow(_ provider: CloudProviderConfiguration) -> some View {
         let isValidating = settingsState.validatingCloudProviderIDs.contains(provider.id)
-        let capabilities = provider.capabilities
-        return VStack(alignment: .leading, spacing: theme.spacing.small) {
-            HStack(alignment: .top, spacing: theme.spacing.medium) {
+        return VStack(alignment: .leading, spacing: theme.spacing.medium) {
+            HStack(alignment: .center, spacing: theme.spacing.small) {
+                Image(systemName: provider.kind.providerSystemImage)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 34, height: 34)
+                    .background(theme.colors.accentSoft, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+
                 VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
                     Text(provider.displayName)
                         .font(theme.typography.headline)
@@ -568,6 +572,37 @@ struct SettingsDetailView: View {
                 Spacer(minLength: theme.spacing.small)
 
                 PinesStatusChip(status: isValidating ? .running : provider.validationStatus.cloudStatus, compact: true)
+            }
+
+            VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                providerDetailLine(
+                    title: "Endpoint",
+                    value: providerEndpointSummary(provider.baseURL),
+                    systemImage: "network"
+                )
+
+                if let defaultModelID = provider.defaultModelID {
+                    providerDetailLine(
+                        title: "Default model",
+                        value: Self.compactModelName(defaultModelID.rawValue),
+                        systemImage: "checkmark.circle"
+                    )
+                }
+            }
+
+            Divider()
+                .overlay(theme.colors.separator)
+
+            HStack(alignment: .center, spacing: theme.spacing.small) {
+                Toggle("Use for agents", isOn: Binding(
+                    get: { provider.enabledForAgents },
+                    set: { enabled in
+                        Task { await appModel.setCloudProviderEnabled(provider, enabled: enabled, services: services) }
+                    }
+                ))
+                .disabled(provider.kind == .voyageAI)
+
+                Spacer(minLength: theme.spacing.small)
 
                 Button {
                     Task { await appModel.validateCloudProvider(provider, services: services) }
@@ -591,16 +626,6 @@ struct SettingsDetailView: View {
                 .pinesButtonStyle(.icon)
             }
 
-            PinesMetricPillGroup(items: providerMetricItems(for: provider))
-
-            Toggle("Use for agents", isOn: Binding(
-                get: { provider.enabledForAgents },
-                set: { enabled in
-                    Task { await appModel.setCloudProviderEnabled(provider, enabled: enabled, services: services) }
-                }
-            ))
-            .disabled(provider.kind == .voyageAI)
-
             if let error = provider.lastValidationError?.nilIfEmpty {
                 Text(error)
                     .font(theme.typography.caption)
@@ -608,142 +633,36 @@ struct SettingsDetailView: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            if provider.kind == .openAI || provider.kind == .anthropic {
-                openAIProviderLifecycleSummary(for: provider)
-            }
-
-            HStack(spacing: theme.spacing.xsmall) {
-                ForEach(providerStorageKinds(for: capabilities), id: \.self) { kind in
-                    PinesProviderStorageBadge(kind: kind, compact: true)
-                }
-            }
         }
         .frame(minHeight: theme.row.minHeight)
         .pinesSurface(.inset, padding: theme.spacing.small)
     }
 
-    private func openAIProviderLifecycleSummary(for provider: CloudProviderConfiguration) -> some View {
-        let files = providerLifecycleState.providerFiles.filter { $0.providerID == provider.id }
-        let vectorStores = providerLifecycleState.providerVectorStores.filter { $0.providerID == provider.id }
-        let artifacts = providerLifecycleState.providerArtifacts.filter { $0.providerID == provider.id }
-        let batches = providerLifecycleState.providerBatches.filter { $0.providerID == provider.id }
-        let live = providerLifecycleState.providerLiveSessions.filter { $0.providerID == provider.id }
-        let research = providerLifecycleState.providerResearchRuns.filter { $0.providerID == provider.id }
+    private func providerDetailLine(title: String, value: String, systemImage: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: theme.spacing.xsmall) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.colors.tertiaryText)
+                .frame(width: 14)
 
-        return VStack(alignment: .leading, spacing: theme.spacing.small) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("\(provider.kind.title) Dashboard")
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.primaryText)
-                Spacer()
-                Button {
-                    Task { await appModel.refreshProviderLifecycleState(services: services) }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.triangle.2.circlepath")
-                }
-                .buttonStyle(.borderless)
-                .font(theme.typography.caption)
-            }
+            Text(title)
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.tertiaryText)
 
-            PinesMetricPillGroup(items: [
-                .init("Responses", value: provider.kind == .anthropic ? settingsState.anthropicThinkingMode.rawValue : "\(settingsState.openAIReasoningEffort.rawValue)/\(settingsState.openAITextVerbosity.rawValue)", systemImage: "slider.horizontal.3", tone: .accent),
-                .init("Cloud copies", value: "\(files.count)", systemImage: "doc", tone: .warning),
-                .init("Reusable context", value: "\(vectorStores.count)", systemImage: "square.stack.3d.up", tone: .warning),
-                .init("Artifacts", value: "\(artifacts.count)", systemImage: "sparkles", tone: .accent),
-                .init("Background", value: "\(batches.count)", systemImage: "tray.full", tone: .info),
-                .init("Live", value: "\(live.count)", systemImage: "dot.radiowaves.left.and.right", tone: .info),
-                .init("Research", value: "\(research.count)", systemImage: "doc.text.magnifyingglass", tone: .success),
-            ], minimumWidth: 112)
-
-            Text(provider.kind == .anthropic
-                ? "Anthropic Messages: optimized repeated context \(settingsState.anthropicPromptCachingEnabled ? settingsState.anthropicPromptCacheTTL.rawValue : "off"), citations \(settingsState.anthropicCitationsEnabled ? "on" : "off"), token preflight \(settingsState.anthropicTokenCountPreflightEnabled ? "on" : "off"), cloud copies opt-in."
-                : "Advanced Responses: source-backed answer \(settingsState.cloudWebSearchMode.rawValue), cloud copies opt-in, verified fields persisted.")
+            Text(value)
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
+        .accessibilityElement(children: .combine)
     }
 
-    private func providerMetricItems(for provider: CloudProviderConfiguration) -> [PinesMetricPillGroup.Item] {
-        let capabilities = provider.capabilities
-        var items: [PinesMetricPillGroup.Item] = [
-            .init("Agents", value: provider.enabledForAgents ? "enabled" : "off", systemImage: "person.2.badge.gearshape", tone: provider.enabledForAgents ? .success : .neutral),
-            .init("Models", value: capabilities.textGeneration ? "chat" : "retrieval", systemImage: capabilities.textGeneration ? "text.bubble" : "square.stack.3d.up", tone: capabilities.textGeneration ? .accent : .info),
-            .init("Tools", value: capabilities.toolCalling ? "available" : "off", systemImage: "wrench.and.screwdriver", tone: capabilities.toolCalling ? .success : .neutral),
-        ]
-        let inputLabels = providerInputLabels(for: capabilities)
-        if !inputLabels.isEmpty {
-            items.append(.init("Inputs", value: inputLabels.joined(separator: "/"), systemImage: "paperclip", tone: .info))
+    private func providerEndpointSummary(_ url: URL) -> String {
+        if let host = url.host {
+            return host
         }
-        if capabilities.contextCache || capabilities.tokenCounting {
-            items.append(.init("Context", value: capabilities.contextCache ? "cache" : "count", systemImage: capabilities.contextCache ? "memorychip" : "number", tone: capabilities.contextCache ? .warning : .accent))
-        }
-        if capabilities.generatedImages || capabilities.generatedAudio || capabilities.generatedVideo {
-            items.append(.init("Media", value: providerGeneratedMediaLabel(for: capabilities), systemImage: "sparkles", tone: .warning))
-        }
-        if capabilities.live || capabilities.batch {
-            items.append(.init("Jobs", value: providerJobLabel(for: capabilities), systemImage: capabilities.live ? "dot.radiowaves.left.and.right" : "tray.full", tone: .warning))
-        }
-        let modelCount = settingsState.cloudModelCatalog[provider.id]?.count ?? 0
-        if modelCount > 0 {
-            items.append(.init("Catalog", value: "\(modelCount) models", systemImage: "list.bullet.rectangle", tone: .success))
-        } else if settingsState.isRefreshingCloudModels || settingsState.validatingCloudProviderIDs.contains(provider.id) {
-            items.append(.init("Catalog", value: "checking", systemImage: "arrow.triangle.2.circlepath", tone: .info))
-        } else if provider.validationStatus == .valid {
-            items.append(.init("Catalog", value: "no curated agent models", systemImage: "line.3.horizontal.decrease.circle", tone: .warning))
-        } else if provider.enabledForAgents {
-            items.append(.init("Catalog", value: "validate key", systemImage: "checkmark.seal", tone: .neutral))
-        }
-        if let defaultModelID = provider.defaultModelID {
-            items.append(.init("Default", value: Self.compactModelName(defaultModelID.rawValue), systemImage: "checkmark.circle", tone: .success))
-        }
-        return items
-    }
-
-    private func providerInputLabels(for capabilities: ProviderCapabilities) -> [String] {
-        var labels = [String]()
-        if capabilities.imageInputs { labels.append("image") }
-        if capabilities.audioInputs { labels.append("audio") }
-        if capabilities.videoInputs { labels.append("video") }
-        if capabilities.pdfInputs { labels.append("PDF") }
-        if capabilities.textDocumentInputs { labels.append("text") }
-        return labels
-    }
-
-    private func providerGeneratedMediaLabel(for capabilities: ProviderCapabilities) -> String {
-        var labels = [String]()
-        if capabilities.generatedImages { labels.append("image") }
-        if capabilities.generatedAudio { labels.append("audio") }
-        if capabilities.generatedVideo { labels.append("video") }
-        return labels.joined(separator: "/")
-    }
-
-    private func providerJobLabel(for capabilities: ProviderCapabilities) -> String {
-        switch (capabilities.live, capabilities.batch) {
-        case (true, true):
-            "live/batch"
-        case (true, false):
-            "live"
-        case (false, true):
-            "batch"
-        case (false, false):
-            "off"
-        }
-    }
-
-    private func providerStorageKinds(for capabilities: ProviderCapabilities) -> [PinesProviderStorageKind] {
-        var kinds: [PinesProviderStorageKind] = [.localOnly]
-        if capabilities.textDocumentInputs || capabilities.pdfInputs || capabilities.imageInputs || capabilities.audioInputs || capabilities.videoInputs {
-            kinds.append(.inlineThisTurn)
-        }
-        if capabilities.files || capabilities.generatedImages || capabilities.generatedAudio || capabilities.generatedVideo || capabilities.batch || capabilities.live {
-            kinds.append(.providerHosted)
-        }
-        if capabilities.contextCache {
-            kinds.append(.cachedContext)
-        }
-        return kinds
+        return url.absoluteString
     }
 
     @ViewBuilder
@@ -1827,6 +1746,19 @@ private extension CloudProviderKind {
             "https://api.voyageai.com/v1"
         case .custom:
             "https://"
+        }
+    }
+
+    var providerSystemImage: String {
+        switch self {
+        case .openAI, .openAICompatible, .openRouter, .custom:
+            "cloud"
+        case .anthropic:
+            "text.bubble"
+        case .gemini:
+            "sparkles"
+        case .voyageAI:
+            "square.stack.3d.up"
         }
     }
 

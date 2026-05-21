@@ -10,6 +10,7 @@ import SQLCipher
 
 actor GRDBPinesStore:
     ConversationRepository,
+    ProjectRepository,
     ModelInstallRepository,
     VaultRepository,
     SettingsRepository,
@@ -202,6 +203,7 @@ actor GRDBPinesStore:
         "provider_structured_outputs",
         "provider_model_capabilities",
         "provider_research_runs",
+        "projects",
     ]
 
     private static let userResetTables = plaintextMigrationTables
@@ -377,13 +379,17 @@ actor GRDBPinesStore:
     }
 
     func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?) async throws -> ConversationRecord {
-        let record = ConversationRecord(title: title, defaultModelID: defaultModelID, defaultProviderID: defaultProviderID)
+        try await createConversation(title: title, defaultModelID: defaultModelID, defaultProviderID: defaultProviderID, projectID: nil)
+    }
+
+    func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?, projectID: UUID?) async throws -> ConversationRecord {
+        let record = ConversationRecord(title: title, defaultModelID: defaultModelID, defaultProviderID: defaultProviderID, projectID: projectID)
         let now = Date()
         try await database.write { db in
             try db.execute(
                 sql: """
-                INSERT INTO conversations (id, title, created_at, updated_at, default_model_id, default_provider_id, sync_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO conversations (id, title, created_at, updated_at, default_model_id, default_provider_id, project_id, sync_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 arguments: [
                     record.id.uuidString,
@@ -392,11 +398,76 @@ actor GRDBPinesStore:
                     now.timeIntervalSinceReferenceDate,
                     record.defaultModelID?.rawValue,
                     record.defaultProviderID?.rawValue,
+                    record.projectID?.uuidString,
                     SyncState.local.rawValue,
                 ]
             )
         }
         return record
+    }
+
+    func moveConversation(_ conversationID: UUID, toProject projectID: UUID?) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE conversations SET project_id = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [projectID?.uuidString, Date().timeIntervalSinceReferenceDate, SyncState.local.rawValue, conversationID.uuidString]
+            )
+        }
+    }
+
+    // MARK: - Projects
+
+    func listProjects() async throws -> [ProjectRecord] {
+        try await database.read(Self.fetchProjects)
+    }
+
+    func createProject(name: String) async throws -> ProjectRecord {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let now = Date()
+        let record = ProjectRecord(name: trimmed.isEmpty ? "New project" : trimmed, createdAt: now, updatedAt: now)
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO projects (id, name, vault_enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                arguments: [
+                    record.id.uuidString,
+                    record.name,
+                    record.vaultEnabled ? 1 : 0,
+                    record.createdAt.timeIntervalSinceReferenceDate,
+                    record.updatedAt.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+        return record
+    }
+
+    func updateProjectName(_ name: String, projectID: UUID) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
+                arguments: [name.trimmingCharacters(in: .whitespacesAndNewlines), Date().timeIntervalSinceReferenceDate, projectID.uuidString]
+            )
+        }
+    }
+
+    func setProjectVaultEnabled(_ enabled: Bool, projectID: UUID) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE projects SET vault_enabled = ?, updated_at = ? WHERE id = ?",
+                arguments: [enabled ? 1 : 0, Date().timeIntervalSinceReferenceDate, projectID.uuidString]
+            )
+        }
+    }
+
+    func deleteProject(id: UUID) async throws {
+        try await database.write { db in
+            let now = Date().timeIntervalSinceReferenceDate
+            try db.execute(sql: "UPDATE projects SET deleted_at = ?, updated_at = ? WHERE id = ?", arguments: [now, now, id.uuidString])
+            try db.execute(sql: "UPDATE conversations SET project_id = NULL, updated_at = ? WHERE project_id = ?", arguments: [now, id.uuidString])
+            try db.execute(sql: "UPDATE vault_documents SET project_id = NULL, updated_at = ? WHERE project_id = ?", arguments: [now, id.uuidString])
+        }
     }
 
     func updateConversationTitle(_ title: String, conversationID: UUID) async throws {
@@ -760,13 +831,14 @@ actor GRDBPinesStore:
             try db.execute(
                 sql: """
                 INSERT INTO vault_documents
-                    (id, title, source_type, local_path, sha256, created_at, updated_at, sync_state)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, title, source_type, local_path, sha256, project_id, created_at, updated_at, sync_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title = excluded.title,
                     source_type = excluded.source_type,
                     local_path = excluded.local_path,
                     sha256 = excluded.sha256,
+                    project_id = excluded.project_id,
                     updated_at = excluded.updated_at,
                     sync_state = excluded.sync_state
                 """,
@@ -776,6 +848,7 @@ actor GRDBPinesStore:
                     document.sourceType,
                     localURL?.path,
                     checksum,
+                    document.projectID?.uuidString,
                     now.timeIntervalSinceReferenceDate,
                     document.updatedAt.timeIntervalSinceReferenceDate,
                     SyncState.local.rawValue,
@@ -789,6 +862,33 @@ actor GRDBPinesStore:
             try db.execute(
                 sql: "UPDATE vault_documents SET sync_state = ?, updated_at = ? WHERE id = ?",
                 arguments: [SyncState.deleted.rawValue, Date().timeIntervalSinceReferenceDate, id.uuidString]
+            )
+        }
+    }
+
+    func deleteChunk(id: String, documentID: UUID) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "DELETE FROM vault_chunks WHERE id = ? AND document_id = ?",
+                arguments: [id, documentID.uuidString]
+            )
+            try db.execute(
+                sql: "UPDATE vault_documents SET updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [Date().timeIntervalSinceReferenceDate, SyncState.local.rawValue, documentID.uuidString]
+            )
+        }
+    }
+
+    func moveDocument(_ documentID: UUID, toProject projectID: UUID?) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE vault_documents SET project_id = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [
+                    projectID?.uuidString,
+                    Date().timeIntervalSinceReferenceDate,
+                    SyncState.local.rawValue,
+                    documentID.uuidString,
+                ]
             )
         }
     }
@@ -2387,12 +2487,24 @@ actor GRDBPinesStore:
         try Row.fetchAll(
             db,
             sql: """
-            SELECT id, title, updated_at, default_model_id, default_provider_id, archived_at, pinned
+            SELECT id, title, updated_at, default_model_id, default_provider_id, project_id, archived_at, pinned
             FROM conversations
             WHERE deleted_at IS NULL
             ORDER BY pinned DESC, updated_at DESC
             """
         ).map(conversation(from:))
+    }
+
+    private static func fetchProjects(_ db: Database) throws -> [ProjectRecord] {
+        try Row.fetchAll(
+            db,
+            sql: """
+            SELECT id, name, vault_enabled, created_at, updated_at
+            FROM projects
+            WHERE deleted_at IS NULL
+            ORDER BY updated_at DESC, name COLLATE NOCASE ASC
+            """
+        ).map(project(from:))
     }
 
     private static func fetchConversationPreviews(_ db: Database) throws -> [ConversationPreviewRecord] {
@@ -2405,6 +2517,7 @@ actor GRDBPinesStore:
                 c.updated_at,
                 c.default_model_id,
                 c.default_provider_id,
+                c.project_id,
                 c.archived_at,
                 c.pinned,
                 lm.content AS last_message,
@@ -2592,7 +2705,7 @@ actor GRDBPinesStore:
         try Row.fetchAll(
             db,
             sql: """
-            SELECT d.id, d.title, d.source_type, d.updated_at, COUNT(c.id) AS chunk_count
+            SELECT d.id, d.title, d.source_type, d.local_path, d.sha256, d.project_id, d.updated_at, COUNT(c.id) AS chunk_count
             FROM vault_documents d
             LEFT JOIN vault_chunks c ON c.document_id = d.id
             WHERE d.sync_state != ?

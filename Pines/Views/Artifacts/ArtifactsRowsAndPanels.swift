@@ -1,6 +1,9 @@
 import SwiftUI
 import PinesCore
 import AVKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct ArtifactsResourceDescriptor: Identifiable, Hashable {
     let id: String
@@ -112,18 +115,21 @@ struct ArtifactsResourceActionBar: View {
     @Environment(\.pinesTheme) private var theme
     let actions: [ArtifactsResourceAction]
 
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: 128), spacing: theme.spacing.xsmall)]
+    }
+
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: theme.spacing.xsmall) {
-                ForEach(actions) { action in
-                    Button(action: action.perform) {
-                        Label(action.title, systemImage: action.systemImage)
-                    }
-                    .disabled(action.isDisabled)
-                    .pinesButtonStyle(action.kind)
+        LazyVGrid(columns: columns, alignment: .leading, spacing: theme.spacing.xsmall) {
+            ForEach(actions) { action in
+                Button(action: action.perform) {
+                    Label(action.title, systemImage: action.systemImage)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
                 }
+                .disabled(action.isDisabled)
+                .pinesButtonStyle(action.kind, fillWidth: true)
             }
-            .padding(.horizontal, theme.spacing.xxsmall)
         }
         .pinesSurface(.inset, padding: theme.spacing.xsmall)
     }
@@ -266,24 +272,7 @@ private struct ArtifactsArtifactPreviewSurface: View {
         Group {
             switch artifact.galleryPresentation {
             case .image:
-                if let url = artifact.galleryURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFit()
-                        case .failure:
-                            placeholder(title: "Image unavailable", systemImage: "photo")
-                        case .empty:
-                            ProgressView()
-                        @unknown default:
-                            EmptyView()
-                        }
-                    }
-                } else {
-                    placeholder(title: "Image", systemImage: "photo")
-                }
+                imagePreview
             case .video:
                 if let url = artifact.galleryURL {
                     VideoPlayer(player: AVPlayer(url: url))
@@ -305,6 +294,32 @@ private struct ArtifactsArtifactPreviewSurface: View {
         .frame(maxWidth: .infinity, minHeight: 140, maxHeight: maxHeight)
         .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var imagePreview: some View {
+        if let data = artifact.localPreviewImageData {
+            ArtifactsLocalImage(data: data) {
+                placeholder(title: "Image unavailable", systemImage: "photo")
+            }
+        } else if let url = artifact.galleryURL {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                case .failure:
+                    placeholder(title: "Image unavailable", systemImage: "photo")
+                case .empty:
+                    ProgressView()
+                @unknown default:
+                    EmptyView()
+                }
+            }
+        } else {
+            placeholder(title: "Image", systemImage: "photo")
+        }
     }
 
     private var reportPreview: some View {
@@ -338,6 +353,25 @@ private struct ArtifactsArtifactPreviewSurface: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ArtifactsLocalImage<Placeholder: View>: View {
+    let data: Data
+    @ViewBuilder var placeholder: () -> Placeholder
+
+    var body: some View {
+        #if canImport(UIKit)
+        if let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+        } else {
+            placeholder()
+        }
+        #else
+        placeholder()
+        #endif
     }
 }
 

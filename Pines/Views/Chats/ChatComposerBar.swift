@@ -10,12 +10,14 @@ struct ChatComposerBar: View {
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var chatState: PinesChatState
     @EnvironmentObject private var modelState: PinesModelState
+    @EnvironmentObject private var vaultState: PinesVaultState
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var draft = ""
     @State private var attachments: [ChatAttachment] = []
     @State private var attachmentError: String?
     @State private var isImportingAttachments = false
+    @State private var isImportingVaultAttachment = false
     @State private var showingAttachmentImporter = false
     @State private var didCommitSend = false
     @State private var selectedMCPPrompt: MCPPromptRecord?
@@ -236,7 +238,7 @@ struct ChatComposerBar: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if isImportingAttachments {
+            if isImportingAttachments || isImportingVaultAttachment {
                 Label("Adding attachments", systemImage: "paperclip")
                     .font(theme.typography.caption.weight(.medium))
                     .foregroundStyle(theme.colors.secondaryText)
@@ -290,15 +292,33 @@ struct ChatComposerBar: View {
     }
 
     private var attachButton: some View {
-        Button {
-            haptics.play(.primaryAction)
-            attachmentError = nil
-            showingAttachmentImporter = true
+        Menu {
+            Button {
+                haptics.play(.primaryAction)
+                attachmentError = nil
+                showingAttachmentImporter = true
+            } label: {
+                Label("From Files", systemImage: "folder")
+            }
+
+            Section("Vault") {
+                if attachableVaultItems.isEmpty {
+                    Label("No compatible Vault files", systemImage: "shippingbox")
+                } else {
+                    ForEach(attachableVaultItems.prefix(12)) { item in
+                        Button {
+                            addVaultAttachment(item)
+                        } label: {
+                            Label(item.title, systemImage: item.kind.systemImage)
+                        }
+                    }
+                }
+            }
         } label: {
             Image(systemName: "paperclip")
         }
         .accessibilityLabel("Attach")
-        .disabled(chatState.activeRunID != nil || isImportingAttachments || attachments.count >= Self.maxAttachmentCount)
+        .disabled(chatState.activeRunID != nil || isImportingAttachments || isImportingVaultAttachment || attachments.count >= Self.maxAttachmentCount)
         .pinesButtonStyle(.icon)
     }
 
@@ -366,6 +386,16 @@ struct ChatComposerBar: View {
 
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+    }
+
+    private var attachableVaultItems: [PinesVaultItemPreview] {
+        vaultState.vaultItems.filter { item in
+            if let contentType = item.sourceContentType?.lowercased(),
+               Self.attachmentKind(for: contentType) != nil {
+                return true
+            }
+            return item.kind == .document || item.kind == .note
+        }
     }
 
     private var sendButtonStyle: PinesButtonKind {
@@ -527,6 +557,27 @@ struct ChatComposerBar: View {
         }
     }
 
+    private func addVaultAttachment(_ item: PinesVaultItemPreview) {
+        let remainingSlots = Self.maxAttachmentCount - attachments.count
+        guard remainingSlots > 0 else {
+            attachmentError = "Remove an attachment before adding another file."
+            return
+        }
+        attachmentError = nil
+        isImportingVaultAttachment = true
+        Task {
+            do {
+                let attachment = try await Self.chatAttachment(fromVaultItem: item, services: services)
+                attachments.append(attachment)
+                haptics.play(.primaryAction)
+            } catch {
+                attachmentError = "\(item.title): \(error.localizedDescription)"
+                haptics.play(.runFailed)
+            }
+            isImportingVaultAttachment = false
+        }
+    }
+
     private static let maxAttachmentCount = 8
     nonisolated private static let maxInlineImageBytes = 20 * 1024 * 1024
     nonisolated private static let maxInlineFileBytes = 50 * 1024 * 1024
@@ -606,6 +657,81 @@ struct ChatComposerBar: View {
             contentType: contentType,
             localURL: destination,
             byteCount: byteCount
+        )
+    }
+
+    private static func chatAttachment(fromVaultItem item: PinesVaultItemPreview, services: PinesAppServices) async throws -> ChatAttachment {
+        guard let repository = services.vaultRepository else {
+            throw InferenceError.invalidRequest("Vault storage is unavailable.")
+        }
+        guard let document = try await repository.listDocuments().first(where: { $0.id == item.id }) else {
+            throw InferenceError.invalidRequest("Vault file was not found.")
+        }
+
+        let sourceData: Data
+        let sourceContentType: String
+        if let localURL = document.localURL, let checksum = document.checksum {
+            let metadata = EncryptedBlobMetadata(
+                id: localURL.deletingPathExtension().lastPathComponent,
+                contentType: document.sourceType,
+                byteCount: 0,
+                sha256: checksum,
+                keyID: SecureKeyStore.blobKeyID,
+                relativePath: localURL.lastPathComponent
+            )
+            sourceData = try await services.encryptedBlobStore.read(metadata)
+            sourceContentType = document.sourceType
+        } else {
+            let text = try await repository.chunks(documentID: document.id)
+                .map(\.text)
+                .joined(separator: "\n\n")
+            guard let data = text.data(using: .utf8), !data.isEmpty else {
+                throw InferenceError.invalidRequest("Vault file has no readable content.")
+            }
+            sourceData = data
+            sourceContentType = "text/plain"
+        }
+
+        return try chatAttachment(
+            from: sourceData,
+            fileNameHint: document.title,
+            contentType: sourceContentType
+        )
+    }
+
+    nonisolated private static func chatAttachment(
+        from data: Data,
+        fileNameHint: String,
+        contentType rawContentType: String
+    ) throws -> ChatAttachment {
+        let contentType = rawContentType.lowercased()
+        guard let kind = attachmentKind(for: contentType) else {
+            throw InferenceError.unsupportedCapability("Unsupported attachment type \(contentType).")
+        }
+        guard !data.isEmpty else {
+            throw InferenceError.invalidRequest("Attachment is empty.")
+        }
+
+        let maxBytes = kind == .image ? maxInlineImageBytes : maxInlineFileBytes
+        guard data.count <= maxBytes else {
+            throw InferenceError.invalidRequest("Attachment exceeds the \(ByteCountFormatter.string(fromByteCount: Int64(maxBytes), countStyle: .file)) limit.")
+        }
+
+        let directory = try chatAttachmentsDirectory()
+        let fileName = sanitizedAttachmentFileName(
+            fileNameHint,
+            fallbackExtension: fileExtension(for: contentType)
+        )
+        let destination = directory.appending(path: "\(UUID().uuidString)-\(fileName)")
+        try data.write(to: destination, options: [.atomic, .completeFileProtection])
+        try excludeFromBackup(destination)
+
+        return ChatAttachment(
+            kind: kind,
+            fileName: fileName,
+            contentType: contentType,
+            localURL: destination,
+            byteCount: data.count
         )
     }
 

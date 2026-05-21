@@ -20,15 +20,24 @@ struct ChatsView: View {
             return nil
         }
 
-        return chatState.threads.first { $0.id == selectedThreadID }
+        return visibleThreads.first { $0.id == selectedThreadID }
     }
 
     private var defaultThreadID: PinesThreadPreview.ID? {
-        shouldAutoSelectSidebarItem ? chatState.threads.first?.id : nil
+        shouldAutoSelectSidebarItem ? visibleThreads.first?.id : nil
+    }
+
+    private var visibleThreads: [PinesThreadPreview] {
+        chatState.threads.filter { thread in
+            if let selectedProjectID = chatState.selectedProjectID {
+                return thread.projectID == selectedProjectID
+            }
+            return thread.projectID == nil
+        }
     }
 
     private var threadIDs: [PinesThreadPreview.ID] {
-        chatState.threads.map(\.id)
+        visibleThreads.map(\.id)
     }
 
     private var shouldAutoSelectSidebarItem: Bool {
@@ -39,11 +48,75 @@ struct ChatsView: View {
         NavigationSplitView {
             List(selection: $selectedThreadID) {
                 Section {
-                    ForEach(chatState.threads) { thread in
+                    Button {
+                        appModel.selectProject(nil)
+                        selectedThreadID = nil
+                    } label: {
+                        ChatProjectRow(
+                            title: "All Chats",
+                            subtitle: "Personal chat space",
+                            systemImage: "tray",
+                            isSelected: chatState.selectedProjectID == nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .pinesSidebarListRow()
+
+                    ForEach(chatState.projects) { project in
+                        Button {
+                            appModel.selectProject(project.id)
+                            selectedThreadID = nil
+                        } label: {
+                            ChatProjectRow(
+                                title: project.name,
+                                subtitle: project.vaultEnabled ? "Project Vault on" : "Project Vault off",
+                                systemImage: project.vaultEnabled ? "folder.badge.gearshape" : "folder",
+                                isSelected: chatState.selectedProjectID == project.id
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .pinesSidebarListRow()
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button {
+                                Task {
+                                    await appModel.setProjectVaultEnabled(!project.vaultEnabled, projectID: project.id, services: services)
+                                }
+                            } label: {
+                                Label(project.vaultEnabled ? "Vault Off" : "Vault On", systemImage: project.vaultEnabled ? "folder.badge.minus" : "folder.badge.gearshape")
+                            }
+                            .tint(theme.colors.accent)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                Task { await appModel.deleteProject(project, services: services) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Projects")
+                        .font(theme.typography.section)
+                        .foregroundStyle(theme.colors.tertiaryText)
+                        .textCase(nil)
+                }
+
+                Section {
+                    ForEach(visibleThreads) { thread in
                         NavigationLink(value: thread.id) {
                             ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
                         }
                         .pinesSidebarListRow()
+                        .contextMenu {
+                            Button("All Chats") {
+                                Task { await appModel.moveThread(thread, toProject: nil, services: services) }
+                            }
+                            ForEach(chatState.projects) { project in
+                                Button(project.name) {
+                                    Task { await appModel.moveThread(thread, toProject: project.id, services: services) }
+                                }
+                            }
+                        }
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button {
                                 Task {
@@ -84,16 +157,31 @@ struct ChatsView: View {
             .pinesExpressiveScrollHaptics()
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        Task {
-                            if let threadID = await appModel.createChat(services: services) {
-                                selectedThreadID = threadID
+                    Menu {
+                        Button {
+                            Task {
+                                if let threadID = await appModel.createChat(services: services) {
+                                    selectedThreadID = threadID
+                                }
                             }
+                        } label: {
+                            Label("New chat", systemImage: "square.and.pencil")
+                        }
+
+                        Button {
+                            Task {
+                                if let projectID = await appModel.createProject(services: services) {
+                                    appModel.selectProject(projectID)
+                                    selectedThreadID = nil
+                                }
+                            }
+                        } label: {
+                            Label("New project", systemImage: "folder.badge.plus")
                         }
                     } label: {
-                        Image(systemName: "square.and.pencil")
+                        Image(systemName: "plus")
                     }
-                    .accessibilityLabel("New chat")
+                    .accessibilityLabel("Create")
                 }
             }
             .onAppear(perform: selectDefaultThreadIfNeeded)
@@ -104,6 +192,10 @@ struct ChatsView: View {
                 if let selectedThreadID, !ids.contains(selectedThreadID) {
                     self.selectedThreadID = nil
                 }
+                selectDefaultThreadIfNeeded()
+            }
+            .onChange(of: chatState.selectedProjectID) { _, _ in
+                selectedThreadID = nil
                 selectDefaultThreadIfNeeded()
             }
             .onChange(of: selectedThreadID) { _, _ in
@@ -125,9 +217,29 @@ struct ChatsView: View {
 
     private func selectDefaultThreadIfNeeded() {
         guard shouldAutoSelectSidebarItem else { return }
-        selectedThreadID = selectedThreadID ?? chatState.threads.first?.id
+        selectedThreadID = selectedThreadID ?? visibleThreads.first?.id
     }
 }
+
+private struct ChatProjectRow: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let isSelected: Bool
+
+    var body: some View {
+        PinesSidebarRow(
+            title: title,
+            subtitle: subtitle,
+            systemImage: systemImage,
+            detail: "",
+            tint: theme.colors.accent,
+            isSelected: isSelected
+        )
+    }
+}
+
 private struct ChatModelPickerButton: View {
     @Environment(\.openPinesModelsPage) private var openModelsPage
     @Environment(\.pinesTheme) private var theme
