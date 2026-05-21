@@ -458,6 +458,9 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
             )
         }
         if let runID, type == "message", object["content"] != nil {
+            guard let text = finalOutputText(from: .object(object)), !text.isEmpty else {
+                return nil
+            }
             return ProviderArtifactRecord(
                 id: "deep-research-output-\(runID)",
                 providerID: providerID,
@@ -466,7 +469,7 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
                 kind: "deep_research_output",
                 fileName: "Final report.md",
                 contentType: "text/markdown",
-                text: finalOutputText(from: .object(object)),
+                text: text,
                 content: .object(object)
             )
         }
@@ -557,7 +560,7 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         switch json {
         case let .object(object):
             if let type = object.string(for: "type"),
-               ["web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "function_call", "computer_call"].contains(type) {
+               ["reasoning", "web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "function_call", "computer_call"].contains(type) {
                 return nil
             }
             if let outputText = object.string(for: "output_text"), !outputText.isEmpty {

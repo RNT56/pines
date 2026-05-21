@@ -1133,7 +1133,6 @@ private struct ArtifactsResearchWorkspace: View {
     @State private var isStarting = false
     @State private var followUpPrompt = ""
     @State private var isSendingFollowUp = false
-    @State private var isActivityExpanded = true
 
     private var provider: CloudProviderConfiguration? {
         settingsState.cloudProviders.provider(in: providerScope, allowed: [.openAI, .gemini])
@@ -1172,32 +1171,24 @@ private struct ArtifactsResearchWorkspace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Deep Research", subtitle: provider?.displayName, systemImage: "doc.text.magnifyingglass") {
+            PinesCardSection("Deep Research", subtitle: provider?.displayName, systemImage: "doc.text.magnifyingglass", kind: .glass) {
                 VStack(alignment: .leading, spacing: theme.spacing.medium) {
-                    researchComposerContent
-
                     if let run = selectedRun {
+                        researchChatHeader(for: run)
                         Divider()
-                        researchRunContent(for: run)
+                            .overlay(theme.colors.separator)
+                        researchChatTranscript(for: run)
                     } else {
-                        PinesEmptyState(
-                            title: "No research selected",
-                            detail: "Start a run or select an existing Deep Research record.",
-                            systemImage: "doc.text.magnifyingglass"
-                        )
-                        .pinesSurface(.inset, padding: theme.spacing.medium)
+                        researchEmptyTranscript
                     }
+
+                    Divider()
+                        .overlay(theme.colors.separator)
+                    researchChatComposer(for: selectedRun)
                 }
             }
             .onAppear { normalizeSelectedModel() }
             .onChange(of: provider?.id) { _, _ in normalizeSelectedModel() }
-            .onChange(of: selectedRun?.status) { _, status in
-                if status?.providerIsTerminal == true {
-                    isActivityExpanded = false
-                }
-            }
-
-            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No research runs", emptyDetail: "Source-backed research runs appear here.")
 
             if case .artifact = selection {
                 ArtifactsDetailPanel(
@@ -1214,92 +1205,73 @@ private struct ArtifactsResearchWorkspace: View {
         }
     }
 
-    private var researchComposerContent: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
-            HStack(spacing: theme.spacing.xsmall) {
-                if provider == nil {
-                    PinesStatusChip(status: .custom("Choose OpenAI or Gemini", .warning), compact: true)
-                }
-                Spacer(minLength: theme.spacing.small)
-                Button("Resume") {
-                    Task { await resumeRuns() }
-                }
-                .disabled(provider == nil)
-                .buttonStyle(.borderless)
+    private func researchChatHeader(for run: ProviderResearchRunRecord) -> some View {
+        HStack(alignment: .center, spacing: theme.spacing.small) {
+            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                Text(run.title)
+                    .font(theme.typography.headline)
+                    .foregroundStyle(theme.colors.primaryText)
+                    .lineLimit(2)
+                Text("\(run.providerKind.pinesLifecycleTitle) · \(run.modelID.rawValue)")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
+            Spacer(minLength: theme.spacing.small)
 
-            TextField("What's today's research question about?", text: $prompt, axis: .vertical)
-                .lineLimit(3...7)
-                .pinesFieldChrome()
-
-            HStack(spacing: theme.spacing.xsmall) {
-                Menu {
-                    ForEach(modelOptions) { option in
-                        Button {
-                            modelID = option.id
-                        } label: {
-                            if option.id == modelID {
-                                Label(option.title, systemImage: "checkmark")
-                            } else {
-                                Text(option.title)
-                            }
-                        }
+            Menu {
+                ForEach(summaries) { summary in
+                    Button {
+                        selection = summary.selection
+                    } label: {
+                        Label(summary.title, systemImage: summary.systemImage)
                     }
-                } label: {
-                    ArtifactsMenuPill(
-                        title: selectedModelLabel,
-                        systemImage: "cpu",
-                        tone: modelOptions.first(where: { $0.id == modelID })?.isFromProviderCapability == true ? .success : .info
-                    )
                 }
-                .disabled(modelOptions.isEmpty)
+            } label: {
+                Image(systemName: "list.bullet")
+                    .frame(width: 18, height: 18)
+            }
+            .disabled(summaries.isEmpty)
+            .pinesButtonStyle(.icon)
+            .accessibilityLabel("Research threads")
 
-                Menu {
-                    ForEach(OpenAIDeepResearchDepth.allCases, id: \.self) { option in
-                        Button {
-                            depth = option
-                        } label: {
-                            if option == depth {
-                                Label(option.rawValue.readableArtifactKind, systemImage: "checkmark")
-                            } else {
-                                Text(option.rawValue.readableArtifactKind)
-                            }
-                        }
-                    }
+            Button {
+                Task { await refreshRun(run) }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .frame(width: 18, height: 18)
+            }
+            .pinesButtonStyle(.icon)
+            .accessibilityLabel("Refresh research")
+
+            if !run.status.providerIsTerminal {
+                Button(role: .destructive) {
+                    pendingConfirmation = .cancelResearch(run)
                 } label: {
-                    ArtifactsMenuPill(title: depth.rawValue.readableArtifactKind, systemImage: "slider.horizontal.3", tone: .neutral)
+                    Image(systemName: "xmark")
+                        .frame(width: 18, height: 18)
                 }
-
-                Menu {
-                    ForEach(OpenAIDeepResearchReportFormat.allCases, id: \.self) { option in
-                        Button {
-                            reportFormat = option
-                        } label: {
-                            if option == reportFormat {
-                                Label(option.rawValue.readableArtifactKind, systemImage: "checkmark")
-                            } else {
-                                Text(option.rawValue.readableArtifactKind)
-                            }
-                        }
-                    }
-                } label: {
-                    ArtifactsMenuPill(title: reportFormat.rawValue.readableArtifactKind, systemImage: "doc.text", tone: .neutral)
-                }
-
-                Spacer(minLength: theme.spacing.small)
-
-                Button {
-                    Task { await startRun() }
-                } label: {
-                    Label(isStarting ? "Researching" : "Send", systemImage: isStarting ? "hourglass" : "paperplane.fill")
-                }
-                .disabled(provider == nil || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isStarting || modelID.isEmpty)
-                .pinesButtonStyle(.primary)
+                .pinesButtonStyle(.icon)
+                .accessibilityLabel("Cancel research")
             }
         }
     }
 
-    private func researchRunContent(for run: ProviderResearchRunRecord) -> some View {
+    private var researchEmptyTranscript: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            ArtifactsResearchBubble(
+                role: .agent,
+                title: provider?.displayName ?? "Deep Research",
+                text: provider == nil
+                    ? "Choose an OpenAI or Gemini provider to start a research chat."
+                    : "Ask a research question to start."
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func researchChatTranscript(for run: ProviderResearchRunRecord) -> some View {
         let sources = ArtifactsWorkspaceDeriver.researchSources(for: run)
         let events = ArtifactsWorkspaceDeriver.researchTimeline(for: run)
         let finalReport = run.finalReportArtifactID.flatMap { id in
@@ -1307,56 +1279,149 @@ private struct ArtifactsResearchWorkspace: View {
         }
 
         return VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            HStack(alignment: .top, spacing: theme.spacing.small) {
-                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                    Text(run.title)
-                        .font(theme.typography.headline)
-                        .foregroundStyle(theme.colors.primaryText)
-                        .lineLimit(2)
-                    PinesMetricPillGroup(items: [
-                        .init("Status", value: run.status.readableArtifactKind, systemImage: "circle.dashed", tone: run.status.providerCloudStatus.tone),
-                        .init("Sources", value: "\(sources.count)", systemImage: "quote.bubble", tone: .info),
-                    ], minimumWidth: 108)
-                }
-                Spacer(minLength: theme.spacing.small)
-                VStack(alignment: .trailing, spacing: theme.spacing.xsmall) {
-                    Button("Refresh") {
-                        Task { await refreshRun(run) }
-                    }
-                    .buttonStyle(.borderless)
-                    Button("Cancel", role: .destructive) {
-                        pendingConfirmation = .cancelResearch(run)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(run.status.providerIsTerminal)
-                }
-            }
-
             ArtifactsResearchBubble(role: .user, title: "You", text: run.prompt)
 
-            ArtifactsResearchActivityDisclosure(events: events, sources: sources, isExpanded: $isActivityExpanded)
+            ForEach(events) { event in
+                ArtifactsResearchBubble(
+                    role: .agent,
+                    title: event.title,
+                    text: event.detail,
+                    systemImage: event.systemImage,
+                    tone: event.tone
+                )
+            }
+
+            if !sources.isEmpty {
+                ArtifactsResearchSourcesMessage(sources: sources)
+            }
 
             if let finalReport {
                 ArtifactsResearchReportPreview(artifact: finalReport) {
                     selection = .artifact(finalReport.id)
                 }
-            }
-
-            HStack(alignment: .bottom, spacing: theme.spacing.small) {
-                TextField("Ask a follow-up or add clarification", text: $followUpPrompt, axis: .vertical)
-                    .lineLimit(1...4)
-                    .pinesFieldChrome()
-                Button {
-                    Task { await sendFollowUp(to: run) }
-                } label: {
-                    Image(systemName: isSendingFollowUp ? "hourglass" : "paperplane.fill")
-                        .frame(width: 18, height: 18)
-                }
-                .disabled(isSendingFollowUp || followUpPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .pinesButtonStyle(.primary)
-                .accessibilityLabel("Send follow-up")
+            } else if run.status.providerIsTerminal {
+                ArtifactsResearchBubble(
+                    role: .agent,
+                    title: "Finished",
+                    text: run.lastError ?? "The run completed without a saved report artifact.",
+                    systemImage: run.lastError == nil ? "checkmark.circle" : "exclamationmark.triangle",
+                    tone: run.lastError == nil ? .success : .warning
+                )
+            } else {
+                ArtifactsResearchBubble(
+                    role: .agent,
+                    title: "Working",
+                    text: "I'll keep this thread updated as searches, sources, and report output arrive.",
+                    systemImage: "ellipsis.message",
+                    tone: .info
+                )
             }
         }
+    }
+
+    private func researchChatComposer(for run: ProviderResearchRunRecord?) -> some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack(spacing: theme.spacing.xsmall) {
+                Menu {
+                    ForEach(modelOptions) { option in
+                        Button {
+                            modelID = option.id
+                        } label: {
+                            Label(option.title, systemImage: option.id == modelID ? "checkmark" : "cpu")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "cpu")
+                        .frame(width: 18, height: 18)
+                }
+                .disabled(modelOptions.isEmpty)
+                .pinesButtonStyle(.icon)
+                .accessibilityLabel(selectedModelLabel)
+
+                Menu {
+                    ForEach(OpenAIDeepResearchDepth.allCases, id: \.self) { option in
+                        Button {
+                            depth = option
+                        } label: {
+                            Label(option.rawValue.readableArtifactKind, systemImage: option == depth ? "checkmark" : "slider.horizontal.3")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .frame(width: 18, height: 18)
+                }
+                .pinesButtonStyle(.icon)
+                .accessibilityLabel(depth.rawValue.readableArtifactKind)
+
+                Menu {
+                    ForEach(OpenAIDeepResearchReportFormat.allCases, id: \.self) { option in
+                        Button {
+                            reportFormat = option
+                        } label: {
+                            Label(option.rawValue.readableArtifactKind, systemImage: option == reportFormat ? "checkmark" : "doc.text")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "doc.text")
+                        .frame(width: 18, height: 18)
+                }
+                .pinesButtonStyle(.icon)
+                .accessibilityLabel(reportFormat.rawValue.readableArtifactKind)
+
+                Spacer(minLength: theme.spacing.small)
+
+                Button {
+                    Task { await resumeRuns() }
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .frame(width: 18, height: 18)
+                }
+                .disabled(provider == nil)
+                .pinesButtonStyle(.icon)
+                .accessibilityLabel("Resume research")
+            }
+
+            researchInputRow(for: run)
+        }
+    }
+
+    @ViewBuilder
+    private func researchInputRow(for run: ProviderResearchRunRecord?) -> some View {
+        HStack(alignment: .bottom, spacing: theme.spacing.small) {
+            if run == nil {
+                TextField("Ask a research question", text: $prompt, axis: .vertical)
+                    .lineLimit(1...5)
+                    .pinesFieldChrome()
+            } else {
+                TextField("Ask follow-up or clarify", text: $followUpPrompt, axis: .vertical)
+                    .lineLimit(1...5)
+                    .pinesFieldChrome()
+            }
+
+            Button {
+                if let run {
+                    Task { await sendFollowUp(to: run) }
+                } else {
+                    Task { await startRun() }
+                }
+            } label: {
+                Image(systemName: isStarting || isSendingFollowUp ? "hourglass" : "paperplane.fill")
+                    .frame(width: 18, height: 18)
+            }
+            .disabled(sendDisabled(for: run))
+            .pinesButtonStyle(.primary)
+            .accessibilityLabel(run == nil ? "Start research" : "Send follow-up")
+        }
+    }
+
+    private func sendDisabled(for run: ProviderResearchRunRecord?) -> Bool {
+        if provider == nil || modelID.isEmpty {
+            return true
+        }
+        if run == nil {
+            return prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isStarting
+        }
+        return followUpPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingFollowUp
     }
 
     @MainActor
@@ -1402,7 +1467,6 @@ private struct ArtifactsResearchWorkspace: View {
                 throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) Deep Research is not supported here.")
             }
             prompt = ""
-            isActivityExpanded = true
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -1765,12 +1829,14 @@ private struct ArtifactsResearchBubble: View {
     let role: ArtifactsResearchBubbleRole
     let title: String
     let text: String
+    var systemImage: String?
+    var tone: PinesCloudStatusTone?
 
     var body: some View {
         HStack(alignment: .top, spacing: theme.spacing.small) {
-            Image(systemName: role.systemImage)
+            Image(systemName: systemImage ?? role.systemImage)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(role == .user ? theme.colors.accent : theme.colors.success)
+                .foregroundStyle(iconColor)
                 .frame(width: 24, height: 24)
                 .background(theme.colors.controlFill, in: Circle())
 
@@ -1791,6 +1857,13 @@ private struct ArtifactsResearchBubble: View {
             RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
                 .strokeBorder(role == .user ? theme.colors.accent.opacity(0.22) : theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
         }
+    }
+
+    private var iconColor: Color {
+        if let tone {
+            return tone.color(in: theme)
+        }
+        return role == .user ? theme.colors.accent : theme.colors.success
     }
 }
 
@@ -1923,6 +1996,60 @@ private struct ArtifactsResearchSourcesPanel: View {
     }
 }
 
+private struct ArtifactsResearchSourcesMessage: View {
+    @Environment(\.pinesTheme) private var theme
+    let sources: [ArtifactsResearchSource]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack(spacing: theme.spacing.xsmall) {
+                Label("Sources", systemImage: "quote.bubble")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.secondaryText)
+                Spacer(minLength: theme.spacing.small)
+                Text("\(sources.count)")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .monospacedDigit()
+            }
+
+            ForEach(sources.prefix(6)) { source in
+                sourceRow(source)
+            }
+        }
+        .pinesSurface(.inset, padding: theme.spacing.small)
+    }
+
+    @ViewBuilder
+    private func sourceRow(_ source: ArtifactsResearchSource) -> some View {
+        let row = HStack(alignment: .top, spacing: theme.spacing.small) {
+            Image(systemName: source.systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(source.tone.color(in: theme))
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                Text(source.title)
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                    .lineLimit(2)
+                Text(source.url ?? source.detail)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, theme.spacing.xxsmall)
+
+        if let urlString = source.url, let url = URL(string: urlString) {
+            Link(destination: url) { row }
+        } else {
+            row
+        }
+    }
+}
+
 private struct ArtifactsResearchReportPreview: View {
     @Environment(\.pinesTheme) private var theme
     let artifact: ProviderArtifactRecord
@@ -1930,12 +2057,53 @@ private struct ArtifactsResearchReportPreview: View {
 
     private var previewText: String {
         if let text = artifact.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
-            return String(text.prefix(900))
+            return String(Self.userFacingExcerpt(from: text).prefix(900))
         }
-        if let content = artifact.content {
-            return String(String(describing: content).prefix(900))
+        if let text = Self.userFacingText(from: artifact.content) {
+            return String(Self.userFacingExcerpt(from: text).prefix(900))
         }
-        return artifact.fileName ?? artifact.id
+        return "Report saved. Open the full report to view the complete output."
+    }
+
+    private static func userFacingExcerpt(from text: String) -> String {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = cleaned.range(of: "Executive summary", options: [.caseInsensitive, .diacriticInsensitive]) {
+            return String(cleaned[range.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return cleaned
+    }
+
+    private static func userFacingText(from json: JSONValue?) -> String? {
+        switch json {
+        case let .object(object):
+            if let type = object["type"]?.stringValue,
+               ["reasoning", "web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "function_call", "computer_call"].contains(type) {
+                return nil
+            }
+            if let outputText = object["output_text"]?.stringValue, !outputText.isEmpty {
+                return outputText
+            }
+            if let type = object["type"]?.stringValue,
+               ["output_text", "text", "message"].contains(type),
+               let text = object["text"]?.stringValue,
+               !text.isEmpty {
+                return text
+            }
+            if object["type"]?.stringValue == "message", let content = object["content"] {
+                return userFacingText(from: content)
+            }
+            if let output = object["output"] {
+                return userFacingText(from: output)
+            }
+            return nil
+        case let .array(values):
+            let text = values.compactMap(userFacingText(from:)).joined(separator: "\n\n")
+            return text.isEmpty ? nil : text
+        case let .string(value):
+            return value
+        case .number, .bool, .null, nil:
+            return nil
+        }
     }
 
     var body: some View {
