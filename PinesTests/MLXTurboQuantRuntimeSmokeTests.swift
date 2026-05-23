@@ -100,6 +100,16 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
             valueHeadDimension: 64
         ))
         XCTAssertEqual(smolLM.id, "smollm-small")
+
+        let llama32ThreeB = try XCTUnwrap(registry.profile(
+            for: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            modelType: "llama",
+            parameterCountB: 3,
+            keyHeadDimension: 128,
+            valueHeadDimension: 128,
+            contextLength: 16_384
+        ))
+        XCTAssertEqual(llama32ThreeB.id, "llama-3.2-3b")
     }
 
     func testBundledTurboQuantProfileRegistryMatchesExpandedGemmaFamilies() throws {

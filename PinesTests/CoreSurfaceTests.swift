@@ -255,6 +255,9 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(lifecycle.contains("currentDirectory"))
         XCTAssertTrue(lifecycle.contains("legacyDirectory"))
         XCTAssertTrue(lifecycle.contains("repaired.localURL = resolvedURL"))
+        XCTAssertTrue(lifecycle.contains("refreshLocalMetadata"))
+        XCTAssertTrue(lifecycle.contains("localPreflightInput"))
+        XCTAssertTrue(lifecycle.contains("classifier.classify(input)"))
         XCTAssertTrue(runtime.contains("ModelLifecycleService.installedModelDirectory(for: install)"))
     }
 
@@ -344,6 +347,10 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(lifecycle.contains("valueHeadDimension: result.valueHeadDimension"))
         XCTAssertTrue(lifecycle.contains("routedExperts: result.routedExperts"))
         XCTAssertTrue(lifecycle.contains("expertsPerToken: result.expertsPerToken"))
+        XCTAssertTrue(lifecycle.contains("set(\\.modelType, result.modelType)"))
+        XCTAssertTrue(lifecycle.contains("set(\\.textConfigModelType, result.textConfigModelType)"))
+        XCTAssertTrue(lifecycle.contains("set(\\.parameterCount, result.parameterCount)"))
+        XCTAssertTrue(lifecycle.contains("localModelFiles(in: resolvedURL)"))
     }
 
     func testMemoryPressureCancellationIsTypedAndRecoverableInStressHarness() throws {
@@ -391,10 +398,17 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(runtime.contains("Memory.cacheLimit = mlxCacheLimit(for: profile)"))
         XCTAssertTrue(runtime.contains("Memory.clearCache()"))
         XCTAssertTrue(runtime.contains("resetMLXPeakMemory()"))
+        XCTAssertTrue(runtime.contains("waitForActiveGenerationCancellationToDrain"))
+        XCTAssertTrue(runtime.contains("pressureUnloadDrainTimeoutSeconds"))
+        XCTAssertTrue(runtime.contains("generationSafety.constrainedRuntimeProfile(activeProfile)"))
+        XCTAssertTrue(runtime.contains("maxTokensOverride"))
+        XCTAssertTrue(runtime.contains("local.generation.max_tokens_clamped"))
         XCTAssertTrue(runtime.contains("#if targetEnvironment(simulator)"))
         XCTAssertTrue(runtime.contains("mlx_cache_memory_bytes"))
         XCTAssertTrue(runtimeTypes.contains("mlxCacheMemoryBytes"))
         XCTAssertTrue(runtimeTypes.contains("constrainedModeActive"))
+        XCTAssertTrue(runtimeTypes.contains("constrained.quantization.runtimePressureReason = pressureReason"))
+        XCTAssertTrue(runtimeTypes.contains("constrainedAvailableMemoryBytes: Int64 = 2_000_000_000"))
         XCTAssertTrue(runtimeTypes.contains("requiresImmediateUnload: false"))
         XCTAssertTrue(monitor.contains("MLX.Memory.snapshot()"))
         XCTAssertTrue(monitor.contains("#if targetEnvironment(simulator)"))
@@ -404,6 +418,7 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(stress.contains("stress.iteration.memory_pressure_cooldown"))
         XCTAssertTrue(stress.contains("stress.iteration.thermal_pressure_recovered"))
         XCTAssertTrue(stress.contains("stress.iteration.thermal_pressure_cooldown"))
+        XCTAssertTrue(stress.contains("recoverableLocalStressPressureReason(from message: ChatMessage?)"))
         XCTAssertTrue(stress.contains("settledLastAssistantMessage"))
         XCTAssertTrue(stress.contains("Recovered from memory-pressure cancellation"))
         XCTAssertTrue(diagnostics.contains("PINES_STRESS_RECOVERY_COOLDOWN_SECONDS"))
@@ -413,11 +428,17 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(stress.contains("context_plan_preview"))
         XCTAssertTrue(stress.contains("runtimeMaxContextTokens"))
         XCTAssertTrue(stress.contains("targetContextTokens"))
+        XCTAssertTrue(stress.contains("\"model_type\": install.modelType"))
+        XCTAssertTrue(stress.contains("\"key_head_dimension\": install.keyHeadDimension"))
+        XCTAssertTrue(stress.contains("\"value_head_dimension\": install.valueHeadDimension"))
         XCTAssertTrue(script.contains("PINES_STRESS_RECOVERY_COOLDOWN_SECONDS"))
         XCTAssertTrue(script.contains("PINES_STRESS_CONTEXT_MODE"))
         XCTAssertTrue(script.contains("off|sweep|high|max|suite"))
         XCTAssertTrue(script.contains("PINES_STRESS_CONTEXT_TARGET_TOKENS"))
         XCTAssertTrue(script.contains("PINES_STRESS_CONTEXT_RESERVE_TOKENS"))
+        XCTAssertTrue(script.contains("app_process_alive"))
+        XCTAssertTrue(script.contains("--signal 0"))
+        XCTAssertTrue(script.contains("app process $pid exited"))
     }
 
     func testArtifactsWorkspaceDefinesFocusedModesAndConfirmations() throws {

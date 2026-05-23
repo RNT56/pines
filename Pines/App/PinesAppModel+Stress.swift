@@ -107,6 +107,13 @@ extension PinesAppModel {
                 "runtime_pressure_reason": stressRuntimeProfile.quantization.runtimePressureReason.rawValue,
                 "turboquant_profile_id": stressRuntimeProfile.quantization.turboQuantProfileID ?? "none",
                 "turboquant_profile_source": stressRuntimeProfile.quantization.turboQuantProfileSource ?? "none",
+                "model_type": install.modelType ?? "unknown",
+                "text_config_model_type": install.textConfigModelType ?? "none",
+                "parameter_count": install.parameterCount.map(String.init) ?? "unknown",
+                "key_head_dimension": install.keyHeadDimension.map(String.init) ?? "unknown",
+                "value_head_dimension": install.valueHeadDimension.map(String.init) ?? "unknown",
+                "routed_experts": install.routedExperts.map(String.init) ?? "none",
+                "experts_per_token": install.expertsPerToken.map(String.init) ?? "none",
             ],
             enabled: true
         )
@@ -212,9 +219,7 @@ extension PinesAppModel {
                     enabled: true
                 )
                 if status != .complete {
-                    if status == .cancelled,
-                       let pressureReason = lastAssistant?.providerMetadata[LocalProviderMetadataKeys.generationCancellationReason],
-                       Self.isRecoverableLocalStressPressureReason(pressureReason) {
+                    if let pressureReason = Self.recoverableLocalStressPressureReason(from: lastAssistant) {
                         let thermal = pressureReason == "thermal_pressure"
                         let recoveryMessage = thermal
                             ? "Recovered from thermal-pressure cancellation at iteration \(iteration)."
@@ -416,6 +421,23 @@ extension PinesAppModel {
             || lowercased.contains("device to cool down")
             || lowercased.contains("let the device cool down") {
             return "thermal_pressure"
+        }
+        return nil
+    }
+
+    private static func recoverableLocalStressPressureReason(from message: ChatMessage?) -> String? {
+        guard let message else { return nil }
+        if let pressureReason = message.providerMetadata[LocalProviderMetadataKeys.generationCancellationReason],
+           isRecoverableLocalStressPressureReason(pressureReason) {
+            return pressureReason
+        }
+        if let pressureReason = recoverableLocalStressPressureReason(from: message.content) {
+            return pressureReason
+        }
+        for value in message.providerMetadata.values {
+            if let pressureReason = recoverableLocalStressPressureReason(from: value) {
+                return pressureReason
+            }
         }
         return nil
     }

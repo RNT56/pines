@@ -149,15 +149,39 @@ struct ModelLifecycleService: Sendable {
             if resolvedURL != install.localURL {
                 var repaired = install
                 repaired.localURL = resolvedURL
+                let metadataChanged = Self.refreshLocalMetadata(
+                    for: resolvedURL,
+                    classifier: classifier,
+                    install: &repaired
+                )
                 try await installRepository.upsertInstall(repaired)
                 repairedCount += 1
                 try await auditRepository?.append(
                     AuditEvent(
                         category: .modelDownload,
-                        summary: "Repaired installed model path: \(install.repository)",
+                        summary: metadataChanged
+                            ? "Repaired installed model path and metadata: \(install.repository)"
+                            : "Repaired installed model path: \(install.repository)",
                         modelID: install.modelID
                     )
                 )
+            } else {
+                var repaired = install
+                if Self.refreshLocalMetadata(
+                    for: resolvedURL,
+                    classifier: classifier,
+                    install: &repaired
+                ) {
+                    try await installRepository.upsertInstall(repaired)
+                    repairedCount += 1
+                    try await auditRepository?.append(
+                        AuditEvent(
+                            category: .modelDownload,
+                            summary: "Refreshed installed model metadata: \(install.repository)",
+                            modelID: install.modelID
+                        )
+                    )
+                }
             }
         }
         return repairedCount
@@ -757,6 +781,127 @@ struct ModelLifecycleService: Sendable {
             result.reasons.append(reason)
         }
         return result
+    }
+
+    @discardableResult
+    private static func refreshLocalMetadata(
+        for resolvedURL: URL,
+        classifier: ModelPreflightClassifier,
+        install: inout ModelInstall
+    ) -> Bool {
+        guard let input = localPreflightInput(for: install, resolvedURL: resolvedURL) else {
+            return false
+        }
+        let result = classifier.classify(input)
+        return applyLocalMetadata(result, resolvedURL: resolvedURL, to: &install)
+    }
+
+    @discardableResult
+    private static func applyLocalMetadata(
+        _ result: ModelPreflightResult,
+        resolvedURL: URL,
+        to install: inout ModelInstall
+    ) -> Bool {
+        var changed = false
+
+        func set<T: Equatable>(_ keyPath: WritableKeyPath<ModelInstall, T?>, _ value: T?) {
+            guard let value, install[keyPath: keyPath] != value else { return }
+            install[keyPath: keyPath] = value
+            changed = true
+        }
+
+        if install.localURL != resolvedURL {
+            install.localURL = resolvedURL
+            changed = true
+        }
+        if !result.modalities.isEmpty, install.modalities != result.modalities {
+            install.modalities = result.modalities
+            changed = true
+        }
+        if result.verification != .unsupported, install.verification != result.verification {
+            install.verification = result.verification
+            changed = true
+        }
+        if result.estimatedBytes > 0, install.estimatedBytes != result.estimatedBytes {
+            install.estimatedBytes = result.estimatedBytes
+            changed = true
+        }
+
+        set(\.parameterCount, result.parameterCount)
+        set(\.modelType, result.modelType)
+        set(\.textConfigModelType, result.textConfigModelType)
+        set(\.processorClass, result.processorClass)
+        set(\.keyHeadDimension, result.keyHeadDimension)
+        set(\.valueHeadDimension, result.valueHeadDimension)
+        set(\.routedExperts, result.routedExperts)
+        set(\.expertsPerToken, result.expertsPerToken)
+        set(\.license, result.license)
+
+        return changed
+    }
+
+    private static func localPreflightInput(
+        for install: ModelInstall,
+        resolvedURL: URL
+    ) -> ModelPreflightInput? {
+        let configJSON = safeLocalJSONData(resolvedURL.appending(path: "config.json"))
+        guard configJSON != nil else { return nil }
+        return ModelPreflightInput(
+            repository: install.repository,
+            configJSON: configJSON,
+            generationConfigJSON: safeLocalJSONData(resolvedURL.appending(path: "generation_config.json")),
+            processorConfigJSON: localProcessorConfigJSON(in: resolvedURL),
+            files: localModelFiles(in: resolvedURL),
+            tags: [],
+            license: install.license
+        )
+    }
+
+    private static func localProcessorConfigJSON(in directory: URL) -> Data? {
+        for filename in ["preprocessor_config.json", "processor_config.json", "image_processor_config.json", "video_preprocessor_config.json"] {
+            if let data = safeLocalJSONData(directory.appending(path: filename)) {
+                return data
+            }
+        }
+        return nil
+    }
+
+    private static func localModelFiles(in directory: URL) -> [ModelFileInfo] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+
+        let rootPath = directory.standardizedFileURL.path
+        let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        var files = [ModelFileInfo]()
+        for case let fileURL as URL in enumerator {
+            guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true
+            else { continue }
+
+            let path = fileURL.standardizedFileURL.path
+            let relativePath = path.hasPrefix(rootPrefix)
+                ? String(path.dropFirst(rootPrefix.count))
+                : fileURL.lastPathComponent
+            files.append(ModelFileInfo(path: relativePath, size: values.fileSize.map(Int64.init)))
+        }
+        return files.sorted { $0.path < $1.path }
+    }
+
+    private static func safeLocalJSONData(_ url: URL) -> Data? {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true,
+              let fileSize = values.fileSize,
+              fileSize > 0,
+              fileSize <= 16 * 1024 * 1024
+        else {
+            return nil
+        }
+        return try? Data(contentsOf: url)
     }
 
     private static func downloadFile(

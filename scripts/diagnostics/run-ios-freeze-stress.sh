@@ -159,6 +159,19 @@ print("" if value is None else value)
 PY
 }
 
+app_process_alive() {
+  local probe_json="$1"
+  local probe_log="$2"
+  [ -n "$pid" ] || return 0
+  xcrun devicectl device process signal \
+    --device "$device_id" \
+    --pid "$pid" \
+    --signal 0 \
+    --timeout 15 \
+    --json-output "$probe_json" \
+    --quiet >"$probe_log" 2>&1
+}
+
 collect_failure_diagnostics() {
   local reason="$1"
   if [ "$collect_diagnostics_on_failure" != "1" ]; then
@@ -420,6 +433,12 @@ while [ "$SECONDS" -lt "$deadline" ]; do
       die "Stress run failed. Artifacts: $artifacts"
       ;;
   esac
+
+  if [ -n "$pid" ] && ! app_process_alive "$artifacts/polls/process-$poll_index.json" "$artifacts/logs/process-probe-$poll_index.log"; then
+    collect_failure_diagnostics "app process exited"
+    write_summary "failed" "app process $pid exited before the stress run completed"
+    die "App process $pid exited before the stress run completed. Artifacts: $artifacts"
+  fi
 
   if [ -n "$pid" ] && [ "$memory_warning_every" -gt 0 ] && [ $((poll_index % memory_warning_every)) -eq 0 ]; then
     log "Sending memory warning to PID $pid."

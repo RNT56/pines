@@ -815,6 +815,9 @@ extension MLXRuntimeBridge: InferenceProvider {
 }
 
 private actor MLXRuntimeState {
+    private static let pressureUnloadDrainTimeoutSeconds: TimeInterval = 5
+    private static let pressureUnloadDrainPollNanoseconds: UInt64 = 100_000_000
+
     private let deviceMonitor = DeviceRuntimeMonitor()
     private var activeInstall: ModelInstall?
     private var activeProfile = RuntimeProfile()
@@ -1127,9 +1130,20 @@ private actor MLXRuntimeState {
             return .ignoredDuringLoad
         }
         await willCancel()
-        activeGenerationCancellation?.cancel()
+        let generationCancellation = activeGenerationCancellation
+        generationCancellation?.cancel()
+        if let generationCancellation {
+            await waitForActiveGenerationCancellationToDrain(generationCancellation)
+        }
         await unload()
         return .unloaded
+    }
+
+    private func waitForActiveGenerationCancellationToDrain(_ box: MLXGenerationCancellationBox) async {
+        let deadline = Date().addingTimeInterval(Self.pressureUnloadDrainTimeoutSeconds)
+        while activeGenerationCancellation === box, Date() < deadline {
+            try? await Task.sleep(nanoseconds: Self.pressureUnloadDrainPollNanoseconds)
+        }
     }
 
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
@@ -1171,7 +1185,8 @@ private actor MLXRuntimeState {
             container = textContainer
         }
 
-        let profile = activeProfile
+        let generationSafety = try deviceMonitor.requireLocalGenerationSafety()
+        let profile = generationSafety.constrainedRuntimeProfile(activeProfile)
         guard let latestUserIndex = request.messages.lastIndex(where: { $0.role == .user }) else {
             throw InferenceError.invalidRequest("A local chat request requires a user message.")
         }
@@ -1198,7 +1213,7 @@ private actor MLXRuntimeState {
         let partitionSummary = activePartitionSummary
         let usesAgentTranscript = request.executionContext == .agent
         let historyMessages = usesAgentTranscript ? request.messages : Array(request.messages[..<latestUserIndex])
-        let parameters = Self.generateParameters(from: request, profile: profile, install: activeInstall)
+        let install = activeInstall
         let toolSpecs = request.allowsTools ? Self.mlxToolSpecs(from: request.availableTools) : nil
         let stopStrings = activeStopStrings
         let generationCancellation = MLXGenerationCancellationBox()
@@ -1226,7 +1241,9 @@ private actor MLXRuntimeState {
                         let initialHistoryCharacterBudget = Self.localHistoryCharacterBudget(
                             maxContextTokens: profile.quantization.maxKVSize
                         )
-                        let reservedCompletionTokens = request.sampling.maxTokens ?? 0
+                        let requestedCompletionTokens = request.sampling.maxTokens
+                        var reservedCompletionTokens = requestedCompletionTokens ?? 0
+                        var clampedCompletionTokens = false
                         var historyCharacterBudget = initialHistoryCharacterBudget
                         var reducedHistoryForContext = false
 
@@ -1284,10 +1301,22 @@ private actor MLXRuntimeState {
                         let prepareElapsedSeconds = Date().timeIntervalSince(prepareStartedAt)
                         if let maxContextTokens = profile.quantization.maxKVSize,
                            input.text.tokens.size + reservedCompletionTokens > maxContextTokens {
-                            throw InferenceError.invalidRequest(
-                                "This local request needs \(input.text.tokens.size + reservedCompletionTokens) tokens (\(input.text.tokens.size) prompt + \(reservedCompletionTokens) completion), but \(request.modelID.rawValue) is configured for \(maxContextTokens). Shorten the latest message or reduce local completion tokens."
-                            )
+                            let availableCompletionTokens = maxContextTokens - input.text.tokens.size
+                            if requestedCompletionTokens != nil, availableCompletionTokens > 0 {
+                                reservedCompletionTokens = min(reservedCompletionTokens, availableCompletionTokens)
+                                clampedCompletionTokens = true
+                            } else {
+                                throw InferenceError.invalidRequest(
+                                    "This local request needs \(input.text.tokens.size + reservedCompletionTokens) tokens (\(input.text.tokens.size) prompt + \(reservedCompletionTokens) completion), but \(request.modelID.rawValue) is configured for \(maxContextTokens). Shorten the latest message or reduce local completion tokens."
+                                )
+                            }
                         }
+                        let parameters = Self.generateParameters(
+                            from: request,
+                            profile: profile,
+                            install: install,
+                            maxTokensOverride: requestedCompletionTokens == nil ? nil : reservedCompletionTokens
+                        )
                         var contextMetadata: [String: String] = [
                             ChatContextMetadataKeys.exactInputTokens: String(input.text.tokens.size),
                             ChatContextMetadataKeys.reservedCompletionTokens: String(reservedCompletionTokens),
@@ -1296,6 +1325,9 @@ private actor MLXRuntimeState {
                             LocalProviderMetadataKeys.turboQuantProfileSource: profile.quantization.turboQuantProfileSource ?? "none",
                             LocalProviderMetadataKeys.generationPrepareElapsedSeconds: String(prepareElapsedSeconds),
                             LocalProviderMetadataKeys.generationPreflightAttempts: String(preflightAttempts),
+                            "local.generation.requested_max_tokens": requestedCompletionTokens.map(String.init) ?? "none",
+                            "local.generation.effective_max_tokens": requestedCompletionTokens == nil ? "none" : String(reservedCompletionTokens),
+                            "local.generation.max_tokens_clamped": String(clampedCompletionTokens),
                         ]
                         if let profileID = profile.quantization.turboQuantProfileID {
                             contextMetadata[LocalProviderMetadataKeys.turboQuantProfileID] = profileID
@@ -1621,7 +1653,8 @@ private actor MLXRuntimeState {
     private static func generateParameters(
         from request: ChatRequest,
         profile: RuntimeProfile,
-        install: ModelInstall?
+        install: ModelInstall?,
+        maxTokensOverride: Int? = nil
     ) -> GenerateParameters {
         let turboQuantSeed: UInt64? =
             profile.quantization.kvCacheStrategy == .turboQuant
@@ -1633,7 +1666,7 @@ private actor MLXRuntimeState {
             : nil
 
         return GenerateParameters(
-            maxTokens: request.sampling.maxTokens,
+            maxTokens: maxTokensOverride ?? request.sampling.maxTokens,
             maxKVSize: profile.quantization.maxKVSize,
             kvBits: profile.quantization.kvCacheStrategy == .turboQuant ? nil : profile.quantization.kvBits,
             kvGroupSize: profile.quantization.kvGroupSize,

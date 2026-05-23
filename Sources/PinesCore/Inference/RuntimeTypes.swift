@@ -1232,6 +1232,7 @@ public struct LocalRuntimeSafetyAssessment: Hashable, Codable, Sendable {
             constrained.quantization.maxKVSize = recommendedMaxContextTokens
         }
         constrained.prefillStepSize = min(constrained.prefillStepSize, recommendedPrefillStepSize)
+        constrained.quantization.runtimePressureReason = pressureReason
         if constrainedModeActive {
             constrained.unloadOnMemoryPressure = true
             constrained.streamExperts = false
@@ -1245,7 +1246,7 @@ public struct LocalRuntimeSafetyAssessment: Hashable, Codable, Sendable {
 
 public enum LocalRuntimeSafetyPolicy {
     public static let minimumAvailableMemoryBytes: Int64 = 1_000_000_000
-    public static let constrainedAvailableMemoryBytes: Int64 = 1_500_000_000
+    public static let constrainedAvailableMemoryBytes: Int64 = 2_000_000_000
 
     public static func assess(snapshot: RuntimeMemorySnapshot) -> LocalRuntimeSafetyAssessment {
         let profile = DeviceProfile.recommended(for: snapshot)
