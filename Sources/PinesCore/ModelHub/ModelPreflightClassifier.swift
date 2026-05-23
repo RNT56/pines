@@ -20,7 +20,7 @@ public struct ModelPreflightClassifier: Sendable {
         let processor = input.processorConfigJSON.flatMap(Self.decodeJSONObject)
         let modelType = config?["model_type"] as? String ?? inferredModelType(from: input.tags)
         let processorClass = processor?["processor_class"] as? String
-        let headDimension = Self.headDimension(from: config)
+        let headDimension = Self.headDimension(from: config, modelType: modelType)
         let parameterCount = ModelDiscoveryResourcePolicy.inferredParameterCount(
             repository: input.repository,
             tags: input.tags
@@ -143,7 +143,7 @@ public struct ModelPreflightClassifier: Sendable {
         path.split(separator: "/").last.map { String($0).lowercased() } ?? path.lowercased()
     }
 
-    private static func headDimension(from config: [String: Any]?) -> Int? {
+    private static func headDimension(from config: [String: Any]?, modelType: String?) -> Int? {
         guard let config else { return nil }
         if let explicit = positiveInt(config["head_dim"]) {
             return explicit
@@ -152,9 +152,17 @@ public struct ModelPreflightClassifier: Sendable {
            let explicit = positiveInt(textConfig["head_dim"]) {
             return explicit
         }
+        if let modelType, modelTypesWithNonInferredHeadDimension.contains(modelType) {
+            return nil
+        }
         return inferredHeadDimension(from: config)
             ?? (config["text_config"] as? [String: Any]).flatMap(inferredHeadDimension(from:))
     }
+
+    private static let modelTypesWithNonInferredHeadDimension: Set<String> = [
+        "gemma3", "gemma3_text", "gemma3n", "gemma3n_text",
+        "gemma4", "gemma4_text", "gemma4_assistant",
+    ]
 
     private static func inferredHeadDimension(from config: [String: Any]) -> Int? {
         guard let hiddenSize = positiveInt(config["hidden_size"]),

@@ -102,6 +102,70 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         XCTAssertEqual(smolLM.id, "smollm-small")
     }
 
+    func testBundledTurboQuantProfileRegistryMatchesExpandedGemmaFamilies() throws {
+        let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
+
+        let gemma3270m = try XCTUnwrap(registry.profile(
+            for: "mlx-community/gemma-3-270m-it-qat-4bit",
+            modelType: "gemma3_text",
+            parameterCountB: 0.27,
+            keyHeadDimension: 256,
+            valueHeadDimension: 256
+        ))
+        XCTAssertEqual(gemma3270m.id, "gemma-3-270m")
+
+        let gemma312b = try XCTUnwrap(registry.profile(
+            for: "mlx-community/gemma-3-12b-it-qat-4bit",
+            modelType: "gemma3",
+            parameterCountB: 12,
+            keyHeadDimension: 256,
+            valueHeadDimension: 256
+        ))
+        XCTAssertEqual(gemma312b.id, "gemma-3-12b")
+
+        let gemma3n = try XCTUnwrap(registry.profile(
+            for: "mlx-community/gemma-3n-E4B-it-lm-4bit",
+            modelType: "gemma3n",
+            parameterCountB: 4,
+            keyHeadDimension: 256,
+            valueHeadDimension: 256
+        ))
+        XCTAssertEqual(gemma3n.id, "gemma-3n-e4b")
+
+        let gemma4 = try XCTUnwrap(registry.profile(
+            for: "mlx-community/gemma-4-31b-it-4bit",
+            modelType: "gemma4",
+            parameterCountB: 31,
+            keyHeadDimension: 512,
+            valueHeadDimension: 512
+        ))
+        XCTAssertEqual(gemma4.id, "gemma-4-31b")
+    }
+
+    func testBundledTurboQuantProfileRegistryFailsClosedForGemmaMetadataGaps() throws {
+        let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
+
+        XCTAssertNil(registry.profile(
+            for: "mlx-community/gemma-3-12b-it-4bit",
+            modelType: "gemma3",
+            parameterCountB: 12
+        ))
+        XCTAssertNil(registry.profile(
+            for: "mlx-community/gemma-3-12b-it-4bit",
+            modelType: "gemma3",
+            parameterCountB: 12,
+            keyHeadDimension: 240,
+            valueHeadDimension: 240
+        ))
+        XCTAssertNil(registry.profile(
+            for: "mlx-community/embeddinggemma-300m-4bit",
+            modelType: "gemma3_text",
+            parameterCountB: 0.3,
+            keyHeadDimension: 256,
+            valueHeadDimension: 256
+        ))
+    }
+
     func testBundledTurboQuantProfileRegistryDoesNotMatchKnownVLMTextProfiles() throws {
         let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
 

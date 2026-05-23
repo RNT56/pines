@@ -2871,6 +2871,120 @@ struct CoreContractTests {
     }
 
     @Test
+    func gemmaTurboQuantPreflightCarriesProfileMetadataForExpandedFamilies() throws {
+        let classifier = ModelPreflightClassifier()
+
+        for spec in gemmaTurboQuantProfileCases {
+            let result = classifier.classify(spec.preflightInput)
+
+            #expect(result.repository == spec.repository)
+            #expect(result.verification == .installable)
+            #expect(result.modalities == spec.modalities)
+            #expect(result.modelType == spec.modelType)
+            #expect(result.processorClass == spec.processorClass)
+            #expect(result.parameterCount == spec.parameterCount)
+            #expect(result.keyHeadDimension == spec.headDimension)
+            #expect(result.valueHeadDimension == spec.headDimension)
+            #expect(result.estimatedBytes == spec.expectedDownloadBytes)
+            #expect(result.reasons.isEmpty)
+
+            let install = ModelInstall(
+                modelID: ModelID(rawValue: spec.repository),
+                displayName: spec.displayName,
+                repository: spec.repository,
+                modalities: result.modalities,
+                verification: result.verification,
+                parameterCount: result.parameterCount,
+                estimatedBytes: result.estimatedBytes,
+                modelType: result.modelType,
+                processorClass: result.processorClass,
+                keyHeadDimension: result.keyHeadDimension,
+                valueHeadDimension: result.valueHeadDimension
+            )
+            let roundTrippedInstall = try JSONDecoder().decode(
+                ModelInstall.self,
+                from: JSONEncoder().encode(install)
+            )
+
+            #expect(roundTrippedInstall.repository == spec.repository)
+            #expect(roundTrippedInstall.modelType == spec.modelType)
+            #expect(roundTrippedInstall.parameterCount == spec.parameterCount)
+            #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
+            #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
+
+            let hints = ModelRuntimeConfigurationHints.infer(
+                repository: spec.repository,
+                modelType: result.modelType,
+                processorClass: result.processorClass,
+                metadataFiles: [
+                    "config.json": spec.configJSON,
+                    "tokenizer_config.json": spec.tokenizerConfigJSON,
+                ]
+            )
+
+            #expect(hints.extraEOSTokens.contains("<end_of_turn>"))
+            #expect(hints.extraEOSTokens.contains("<turn|>"))
+            #expect(!hints.stopStrings.contains("<start_of_turn>"))
+        }
+    }
+
+    @Test
+    func gemmaTurboQuantResourcePolicyKeepsLargeModelsBehindDownloadGates() throws {
+        let compactPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 3_800_000_000)
+        let proPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 5_500_000_000)
+        let maxPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 8_000_000_000)
+        let specsByRepository = Dictionary(uniqueKeysWithValues: gemmaTurboQuantProfileCases.map { ($0.repository, $0) })
+
+        for repository in [
+            "mlx-community/gemma-3-270m-it-qat-4bit",
+            "mlx-community/gemma-3-1b-it-qat-4bit",
+            "mlx-community/gemma-3n-E2B-it-lm-4bit",
+        ] {
+            let spec = try #require(specsByRepository[repository])
+            let decision = compactPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
+            #expect(!decision.isRejected)
+            #expect(decision.knownDownloadBytes == spec.expectedDownloadBytes)
+            #expect(decision.inferredParameterCount == spec.parameterCount)
+            #expect(decision.inferredWeightBits == 4)
+            #expect(decision.inferredWeightBitsAreExplicit)
+        }
+
+        let gemma4E2B = try #require(specsByRepository["mlx-community/gemma-4-e2b-it-OptiQ-4bit"])
+        let gemma4E2BDecision = proPolicy.evaluate(gemma4E2B.preflightInput, modalities: gemma4E2B.modalities)
+        #expect(!gemma4E2BDecision.isRejected)
+        #expect(gemma4E2BDecision.knownDownloadBytes == gemma4E2B.expectedDownloadBytes)
+
+        let gemma4E4B = try #require(specsByRepository["mlx-community/gemma-4-e4b-it-OptiQ-4bit"])
+        let gemma4E4BDecision = proPolicy.evaluate(gemma4E4B.preflightInput, modalities: gemma4E4B.modalities)
+        #expect(gemma4E4BDecision.isRejected)
+        #expect(gemma4E4BDecision.knownDownloadBytes == gemma4E4B.expectedDownloadBytes)
+        #expect(gemma4E4BDecision.reason?.contains("on-device discovery limit") == true)
+
+        for repository in [
+            "mlx-community/gemma-2-9b-it-4bit",
+            "mlx-community/gemma-2-27b-it-4bit",
+            "mlx-community/gemma-3-12b-it-qat-4bit",
+            "mlx-community/gemma-3-27b-it-qat-4bit",
+            "mlx-community/gemma-4-26b-it-OptiQ-4bit",
+            "mlx-community/gemma-4-31b-it-OptiQ-4bit",
+        ] {
+            let spec = try #require(specsByRepository[repository])
+            let decision = maxPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
+            #expect(decision.isRejected)
+            #expect(decision.knownDownloadBytes == spec.expectedDownloadBytes)
+            #expect(decision.inferredParameterCount == spec.parameterCount)
+            #expect(decision.inferredWeightBits == 4)
+            #expect(decision.inferredWeightBitsAreExplicit)
+            if spec.expectedDownloadBytes > maxPolicy.maxDownloadBytes {
+                #expect(decision.reason?.contains("on-device discovery limit") == true)
+            } else {
+                #expect(decision.estimatedWeightBytes ?? 0 > maxPolicy.maxDownloadBytes)
+                #expect(decision.reason?.contains("device profile limit") == true)
+            }
+        }
+    }
+
+    @Test
     func preflightMarksQwen17BRuntimeGateExperimental() throws {
         let config = try JSONSerialization.data(withJSONObject: ["model_type": "qwen3"])
         let input = ModelPreflightInput(
@@ -2927,6 +3041,26 @@ struct CoreContractTests {
         #expect(nestedResult.valueHeadDimension == 96)
         #expect(inferredResult.keyHeadDimension == 128)
         #expect(inferredResult.valueHeadDimension == 128)
+    }
+
+    @Test
+    func preflightDoesNotInferGemmaHeadDimensionFromHiddenSizeWhenConfigOmitsHeadDim() throws {
+        let input = ModelPreflightInput(
+            repository: "mlx-community/gemma-3-12b-it-4bit",
+            configJSON: #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":3840,"num_attention_heads":16}}"#.data(using: .utf8),
+            processorConfigJSON: #"{"processor_class":"Gemma3Processor"}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+                ModelFileInfo(path: "processor_config.json"),
+            ]
+        )
+
+        let result = ModelPreflightClassifier().classify(input)
+
+        #expect(result.verification == .installable)
+        #expect(result.keyHeadDimension == nil)
+        #expect(result.valueHeadDimension == nil)
     }
 
     @Test
@@ -3894,10 +4028,182 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
     private static func geminiToolCallCount(_ metadata: [String: String]) -> Int {
         jsonArray(fromJSONString: metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]).count
     }
+}
 
-    private static func iso8601Date(_ raw: String) -> Date? {
-        ISO8601DateFormatter().date(from: raw)
+private var gemmaTurboQuantProfileCases: [GemmaTurboQuantProfileCase] {
+        [
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-2-9b-it-4bit",
+                displayName: "Gemma 2 9B IT 4-bit",
+                modelType: "gemma2",
+                parameterCount: 9_000_000_000,
+                headDimension: 256,
+                modelBytes: 5_900_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-2-27b-it-4bit",
+                displayName: "Gemma 2 27B IT 4-bit",
+                modelType: "gemma2",
+                parameterCount: 27_000_000_000,
+                headDimension: 128,
+                modelBytes: 16_200_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-270m-it-qat-4bit",
+                displayName: "Gemma 3 270M IT QAT 4-bit",
+                modelType: "gemma3_text",
+                parameterCount: 270_000_000,
+                headDimension: 256,
+                modelBytes: 340_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-1b-it-qat-4bit",
+                displayName: "Gemma 3 1B IT QAT 4-bit",
+                modelType: "gemma3_text",
+                parameterCount: 1_000_000_000,
+                headDimension: 256,
+                modelBytes: 770_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-4b-it-qat-4bit",
+                displayName: "Gemma 3 4B IT QAT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 4_000_000_000,
+                headDimension: 256,
+                modelBytes: 2_900_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-12b-it-qat-4bit",
+                displayName: "Gemma 3 12B IT QAT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 12_000_000_000,
+                headDimension: 256,
+                modelBytes: 7_800_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-27b-it-qat-4bit",
+                displayName: "Gemma 3 27B IT QAT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 27_000_000_000,
+                headDimension: 128,
+                modelBytes: 16_300_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3n-E2B-it-lm-4bit",
+                displayName: "Gemma 3n E2B IT LM 4-bit",
+                modelType: "gemma3n",
+                parameterCount: 2_000_000_000,
+                headDimension: 256,
+                modelBytes: 2_550_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3n-E4B-it-lm-4bit",
+                displayName: "Gemma 3n E4B IT LM 4-bit",
+                modelType: "gemma3n",
+                parameterCount: 4_000_000_000,
+                headDimension: 256,
+                modelBytes: 4_400_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-4-e2b-it-OptiQ-4bit",
+                displayName: "Gemma 4 E2B IT OptiQ 4-bit",
+                modelType: "gemma4",
+                parameterCount: 2_000_000_000,
+                headDimension: 256,
+                modelBytes: 4_330_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma4Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-4-e4b-it-OptiQ-4bit",
+                displayName: "Gemma 4 E4B IT OptiQ 4-bit",
+                modelType: "gemma4",
+                parameterCount: 4_000_000_000,
+                headDimension: 256,
+                modelBytes: 6_570_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma4Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-4-26b-it-OptiQ-4bit",
+                displayName: "Gemma 4 26B IT OptiQ 4-bit",
+                modelType: "gemma4",
+                parameterCount: 26_000_000_000,
+                headDimension: 256,
+                modelBytes: 15_800_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma4Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-4-31b-it-OptiQ-4bit",
+                displayName: "Gemma 4 31B IT OptiQ 4-bit",
+                modelType: "gemma4",
+                parameterCount: 31_000_000_000,
+                headDimension: 256,
+                modelBytes: 18_600_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma4Processor"
+            ),
+        ]
     }
+
+private struct GemmaTurboQuantProfileCase {
+        static let configBytes: Int64 = 10_000
+        static let tokenizerBytes: Int64 = 8_000_000
+        static let processorBytes: Int64 = 12_000
+
+        var repository: String
+        var displayName: String
+        var modelType: String
+        var parameterCount: Int64
+        var headDimension: Int
+        var modelBytes: Int64
+        var modalities: Set<ModelModality> = [.text]
+        var processorClass: String?
+
+        var expectedDownloadBytes: Int64 {
+            modelBytes + Self.configBytes + Self.tokenizerBytes + (processorClass == nil ? 0 : Self.processorBytes)
+        }
+
+        var configJSON: Data {
+            Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension)}"#.utf8)
+        }
+
+        var tokenizerConfigJSON: Data {
+            Data(#"{"chat_template":"<start_of_turn>user\n{{ content }}<end_of_turn>\n<start_of_turn>model\n","additional_special_tokens":["<start_of_turn>","<end_of_turn>","<turn|>"]}"#.utf8)
+        }
+
+        var processorConfigJSON: Data? {
+            processorClass.map { Data(#"{"processor_class":"\#($0)"}"#.utf8) }
+        }
+
+        var preflightInput: ModelPreflightInput {
+            var files = [
+                ModelFileInfo(path: "config.json", size: Self.configBytes),
+                ModelFileInfo(path: "tokenizer.json", size: Self.tokenizerBytes),
+                ModelFileInfo(path: "model.safetensors", size: modelBytes),
+            ]
+            if processorClass != nil {
+                files.append(ModelFileInfo(path: "processor_config.json", size: Self.processorBytes))
+            }
+            return ModelPreflightInput(
+                repository: repository,
+                configJSON: configJSON,
+                processorConfigJSON: processorConfigJSON,
+                files: files,
+                tags: ["mlx", modelType, "4bit"]
+            )
+        }
+    }
+
+private func iso8601Date(_ raw: String) -> Date? {
+    ISO8601DateFormatter().date(from: raw)
 }
 
 private extension Dictionary where Key == String, Value == JSONValue {

@@ -272,8 +272,12 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(runtime.contains("parameterCountB: Self.parameterCountBillionScale(for: install)"))
         XCTAssertTrue(runtime.contains("keyHeadDimension: install.keyHeadDimension"))
         XCTAssertTrue(runtime.contains("valueHeadDimension: install.valueHeadDimension"))
+        XCTAssertTrue(runtime.contains("contextLength: contextLength"))
+        XCTAssertTrue(runtime.contains("let identifiers = [install.repository, install.modelID.rawValue, install.displayName]"))
         XCTAssertTrue(runtime.contains("preset: .conservativeFallback"))
         XCTAssertTrue(runtime.contains("profileSource: \"generic_conservative_fallback\""))
+        XCTAssertTrue(runtime.contains("LocalProviderMetadataKeys.turboQuantProfileSource"))
+        XCTAssertTrue(runtime.contains("LocalProviderMetadataKeys.turboQuantProfileID"))
 
         guard let valueBitsLookup = runtime.range(of: "private static func resolvedTurboQuantValueBits") else {
             XCTFail("Missing TurboQuant value-bit resolver.")
