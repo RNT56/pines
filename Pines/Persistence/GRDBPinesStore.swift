@@ -777,8 +777,8 @@ actor GRDBPinesStore:
             try db.execute(
                 sql: """
                 INSERT INTO model_installs
-                    (id, repository, display_name, revision, local_path, modalities, verification, state, parameter_count, model_type, text_config_model_type, processor_class, key_head_dimension, value_head_dimension, routed_experts, experts_per_token, estimated_bytes, license, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, repository, display_name, revision, local_path, modalities, verification, state, parameter_count, model_type, text_config_model_type, processor_class, key_head_dimension, value_head_dimension, routed_experts, experts_per_token, cache_topology, turbo_quant_family_support, estimated_bytes, license, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(repository) DO UPDATE SET
                     display_name = excluded.display_name,
                     revision = excluded.revision,
@@ -794,6 +794,8 @@ actor GRDBPinesStore:
                     value_head_dimension = excluded.value_head_dimension,
                     routed_experts = excluded.routed_experts,
                     experts_per_token = excluded.experts_per_token,
+                    cache_topology = excluded.cache_topology,
+                    turbo_quant_family_support = excluded.turbo_quant_family_support,
                     estimated_bytes = excluded.estimated_bytes,
                     license = excluded.license,
                     updated_at = excluded.updated_at
@@ -815,6 +817,8 @@ actor GRDBPinesStore:
                     install.valueHeadDimension,
                     install.routedExperts,
                     install.expertsPerToken,
+                    install.cacheTopology.rawValue,
+                    install.turboQuantFamilySupport.rawValue,
                     install.estimatedBytes,
                     install.license,
                     install.createdAt.timeIntervalSinceReferenceDate,

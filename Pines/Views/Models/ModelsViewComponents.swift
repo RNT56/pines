@@ -750,11 +750,15 @@ struct ModelDetailView: View {
             .init("Runtime", model.runtime, systemImage: "cpu"),
             .init("Profile", model.runtimeProfile.name, systemImage: "slider.horizontal.3"),
             .init("KV cache", quantization.algorithm.title, systemImage: "memorychip"),
+            .init("Family support", model.install.turboQuantFamilySupport.displayName, systemImage: "checklist"),
+            .init("Topology", model.install.cacheTopology.displayName, systemImage: "point.3.connected.trianglepath.dotted"),
             .init("Metal codec", quantization.metalCodecAvailable ? "Available" : "Unavailable", systemImage: "bolt.horizontal"),
             .init("Metal attention", quantization.metalAttentionAvailable ? "Available" : "Unavailable", systemImage: "scope"),
             .init("Optimization", quantization.turboQuantOptimizationPolicy.displayName, systemImage: "gauge")
         ]
         if let preset = quantization.preset { items.append(.init("KV preset", preset.displayName)) }
+        if let profileID = quantization.turboQuantProfileID { items.append(.init("Profile ID", profileID, copyable: true)) }
+        if let profileSource = quantization.turboQuantProfileSource { items.append(.init("Profile source", profileSource)) }
         if let valueBits = quantization.turboQuantValueBits { items.append(.init("Value bits", "\(valueBits)")) }
         if let requestedBackend = quantization.requestedBackend { items.append(.init("Requested backend", requestedBackend.displayName)) }
         if let activeBackend = quantization.activeBackend { items.append(.init("Active backend", activeBackend.displayName)) }
@@ -767,6 +771,9 @@ struct ModelDetailView: View {
         }
         if quantization.thermalDownshiftActive {
             items.append(.init("Pressure downshift", "Active"))
+        }
+        if !quantization.turboQuantProfileDiagnostics.isEmpty {
+            items.append(.init("Profile diagnostics", quantization.turboQuantProfileDiagnostics.joined(separator: " | "), copyable: true))
         }
         if let unsupportedShape = quantization.lastUnsupportedAttentionShape { items.append(.init("Unsupported shape", unsupportedShape, copyable: true)) }
         if let fallback = quantization.activeFallbackReason { items.append(.init("Fallback", fallback, copyable: true)) }

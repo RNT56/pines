@@ -196,9 +196,30 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
     public var valueHeadDimension: Int?
     public var routedExperts: Int?
     public var expertsPerToken: Int?
+    public var cacheTopology: ModelCacheTopology
+    public var turboQuantFamilySupport: TurboQuantFamilySupport
     public var estimatedBytes: Int64
     public var reasons: [String]
     public var license: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case repository
+        case verification
+        case modalities
+        case modelType
+        case textConfigModelType
+        case processorClass
+        case parameterCount
+        case keyHeadDimension
+        case valueHeadDimension
+        case routedExperts
+        case expertsPerToken
+        case cacheTopology
+        case turboQuantFamilySupport
+        case estimatedBytes
+        case reasons
+        case license
+    }
 
     public init(
         repository: String,
@@ -212,6 +233,8 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
         valueHeadDimension: Int? = nil,
         routedExperts: Int? = nil,
         expertsPerToken: Int? = nil,
+        cacheTopology: ModelCacheTopology = .unsupported,
+        turboQuantFamilySupport: TurboQuantFamilySupport = .none,
         estimatedBytes: Int64 = 0,
         reasons: [String] = [],
         license: String? = nil
@@ -227,9 +250,31 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
         self.valueHeadDimension = valueHeadDimension
         self.routedExperts = routedExperts
         self.expertsPerToken = expertsPerToken
+        self.cacheTopology = cacheTopology
+        self.turboQuantFamilySupport = turboQuantFamilySupport
         self.estimatedBytes = estimatedBytes
         self.reasons = reasons
         self.license = license
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        repository = try container.decode(String.self, forKey: .repository)
+        verification = try container.decode(ModelVerificationState.self, forKey: .verification)
+        modalities = try container.decodeIfPresent(Set<ModelModality>.self, forKey: .modalities) ?? []
+        modelType = try container.decodeIfPresent(String.self, forKey: .modelType)
+        textConfigModelType = try container.decodeIfPresent(String.self, forKey: .textConfigModelType)
+        processorClass = try container.decodeIfPresent(String.self, forKey: .processorClass)
+        parameterCount = try container.decodeIfPresent(Int64.self, forKey: .parameterCount)
+        keyHeadDimension = try container.decodeIfPresent(Int.self, forKey: .keyHeadDimension)
+        valueHeadDimension = try container.decodeIfPresent(Int.self, forKey: .valueHeadDimension)
+        routedExperts = try container.decodeIfPresent(Int.self, forKey: .routedExperts)
+        expertsPerToken = try container.decodeIfPresent(Int.self, forKey: .expertsPerToken)
+        cacheTopology = try container.decodeIfPresent(ModelCacheTopology.self, forKey: .cacheTopology) ?? .unsupported
+        turboQuantFamilySupport = try container.decodeIfPresent(TurboQuantFamilySupport.self, forKey: .turboQuantFamilySupport) ?? .none
+        estimatedBytes = try container.decodeIfPresent(Int64.self, forKey: .estimatedBytes) ?? 0
+        reasons = try container.decodeIfPresent([String].self, forKey: .reasons) ?? []
+        license = try container.decodeIfPresent(String.self, forKey: .license)
     }
 }
 

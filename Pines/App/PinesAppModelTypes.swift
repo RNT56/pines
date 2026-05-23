@@ -24,6 +24,8 @@ extension ModelInstall {
         copy.valueHeadDimension = preflight.valueHeadDimension ?? copy.valueHeadDimension
         copy.routedExperts = preflight.routedExperts ?? copy.routedExperts
         copy.expertsPerToken = preflight.expertsPerToken ?? copy.expertsPerToken
+        copy.cacheTopology = preflight.cacheTopology
+        copy.turboQuantFamilySupport = preflight.turboQuantFamilySupport
         return copy
     }
 }

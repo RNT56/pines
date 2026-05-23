@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 18
+    public static let currentVersion = 19
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -1077,6 +1077,10 @@ public enum PinesDatabaseSchema {
             "ALTER TABLE model_installs ADD COLUMN text_config_model_type TEXT;",
             "ALTER TABLE model_installs ADD COLUMN routed_experts INTEGER;",
             "ALTER TABLE model_installs ADD COLUMN experts_per_token INTEGER;",
+        ]),
+        DatabaseMigration(version: 19, name: "model-install-cache-topology-support", sql: [
+            "ALTER TABLE model_installs ADD COLUMN cache_topology TEXT NOT NULL DEFAULT 'standardAttention';",
+            "ALTER TABLE model_installs ADD COLUMN turbo_quant_family_support TEXT NOT NULL DEFAULT 'attentionKVFull';",
         ]),
     ]
 }

@@ -130,6 +130,9 @@ struct MLXRuntimeBridge: Sendable {
         let counters = deviceMonitor.memoryCounters()
         Self.add(counters.physicalMemoryBytes, forKey: "physical_memory_bytes", to: &metadata)
         Self.add(counters.availableMemoryBytes, forKey: "available_memory_bytes", to: &metadata)
+        Self.add(counters.processResidentMemoryBytes, forKey: "process_resident_memory_bytes", to: &metadata)
+        Self.add(counters.processPhysicalFootprintBytes, forKey: "process_physical_footprint_bytes", to: &metadata)
+        Self.add(counters.processPeakResidentMemoryBytes, forKey: "process_peak_resident_memory_bytes", to: &metadata)
         if let thermalState = counters.thermalState {
             metadata["thermal_state"] = thermalState
         }
@@ -307,6 +310,7 @@ struct MLXRuntimeBridge: Sendable {
                 runtimePressureReason: deviceProfile.runtimePressureReason,
                 turboQuantProfileID: turboQuantDefaults?.profileID,
                 turboQuantProfileSource: turboQuantDefaults?.profileSource,
+                turboQuantProfileDiagnostics: turboQuantDefaults?.profileDiagnostics ?? [],
                 lastUnsupportedAttentionShape: usesTurboQuant ? backend.lastUnsupportedAttentionShape : nil,
                 activeFallbackReason: linked ? fallbackReason : "MLX runtime packages are not linked in this build.",
                 memoryCounters: deviceMonitor.memoryCounters()
@@ -332,7 +336,13 @@ struct MLXRuntimeBridge: Sendable {
     }
 
     private static func usesTurboQuantByDefault(for install: ModelInstall) -> Bool {
-        install.modalities.contains(.text)
+        guard install.modalities.contains(.text) else { return false }
+        switch install.turboQuantFamilySupport {
+        case .attentionKVFull, .hybridFull:
+            return true
+        case .none, .unsupportedTopology:
+            return false
+        }
     }
 
     private struct TurboQuantRuntimeDefaults {
@@ -343,6 +353,7 @@ struct MLXRuntimeBridge: Sendable {
         var optimizationPolicy: PinesCore.TurboQuantOptimizationPolicy
         var profileID: String?
         var profileSource: String
+        var profileDiagnostics: [String]
     }
 
     private static func turboQuantRuntimeDefaults(
@@ -350,22 +361,30 @@ struct MLXRuntimeBridge: Sendable {
         contextLength: Int?,
         deviceOptimizationPolicy: PinesCore.TurboQuantOptimizationPolicy
     ) -> TurboQuantRuntimeDefaults {
+        var rejectionDiagnostics: [String] = []
         #if canImport(MLXLMCommon) && canImport(MLX)
         let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
         let identifiers = [install.repository, install.modelID.rawValue, install.displayName]
         for identifier in identifiers {
-	            guard let profile = registry.profile(
-	                for: identifier,
-	                modelType: install.modelType,
-	                textConfigModelType: install.textConfigModelType,
-	                modality: Self.turboQuantModality(for: install),
-	                parameterCountB: Self.parameterCountBillionScale(for: install),
-	                routedExperts: install.routedExperts,
-	                expertsPerToken: install.expertsPerToken,
-	                keyHeadDimension: install.keyHeadDimension,
-	                valueHeadDimension: install.valueHeadDimension,
+            let descriptor = MLXLMCommon.TurboQuantModelDescriptor(
+                modelID: identifier,
+                modelType: install.modelType,
+                textConfigModelType: install.textConfigModelType,
+                modality: Self.turboQuantModality(for: install),
+                parameterCountB: Self.parameterCountBillionScale(for: install),
+                routedExperts: install.routedExperts,
+                expertsPerToken: install.expertsPerToken
+            )
+            let selection = registry.selection(
+                for: descriptor,
+                keyHeadDimension: install.keyHeadDimension,
+                valueHeadDimension: install.valueHeadDimension,
                 contextLength: contextLength
-            ) else { continue }
+            )
+            if rejectionDiagnostics.isEmpty {
+                rejectionDiagnostics = Array(selection.rejectionReasons.prefix(6))
+            }
+            guard let profile = selection.profile else { continue }
             let profilePolicy = Self.coreTurboQuantOptimizationPolicy(from: profile.optimizationPolicy)
             return TurboQuantRuntimeDefaults(
                 preset: Self.coreTurboQuantPreset(from: profile.recommendedScheme.preset),
@@ -374,7 +393,8 @@ struct MLXRuntimeBridge: Sendable {
                 valueBits: profile.valueBits,
                 optimizationPolicy: profilePolicy == .auto ? deviceOptimizationPolicy : profilePolicy,
                 profileID: profile.id,
-                profileSource: "bundled"
+                profileSource: "bundled",
+                profileDiagnostics: Array(selection.rejectionReasons.prefix(6))
             )
         }
         #endif
@@ -386,7 +406,8 @@ struct MLXRuntimeBridge: Sendable {
             valueBits: PinesCore.TurboQuantPreset.conservativeFallback.defaultValueBits,
             optimizationPolicy: deviceOptimizationPolicy,
             profileID: nil,
-            profileSource: "generic_conservative_fallback"
+            profileSource: "generic_conservative_fallback",
+            profileDiagnostics: rejectionDiagnostics
         )
     }
 
@@ -827,6 +848,7 @@ extension MLXRuntimeBridge: InferenceProvider {
 private actor MLXRuntimeState {
     private static let pressureUnloadDrainTimeoutSeconds: TimeInterval = 5
     private static let pressureUnloadDrainPollNanoseconds: UInt64 = 100_000_000
+    private static let memoryPressureSoftRecoveryMinimumAvailableBytes: Int64 = 1_250_000_000
     private static let maxSoftMemoryWarningsPerGeneration = 4
 
     private let deviceMonitor = DeviceRuntimeMonitor()
@@ -847,6 +869,9 @@ private actor MLXRuntimeState {
         let counters = deviceMonitor.memoryCounters()
         Self.add(counters.physicalMemoryBytes, forKey: "physical_memory_bytes", to: &metadata)
         Self.add(counters.availableMemoryBytes, forKey: "available_memory_bytes", to: &metadata)
+        Self.add(counters.processResidentMemoryBytes, forKey: "process_resident_memory_bytes", to: &metadata)
+        Self.add(counters.processPhysicalFootprintBytes, forKey: "process_physical_footprint_bytes", to: &metadata)
+        Self.add(counters.processPeakResidentMemoryBytes, forKey: "process_peak_resident_memory_bytes", to: &metadata)
         if let thermalState = counters.thermalState {
             metadata["thermal_state"] = thermalState
         }
@@ -935,18 +960,20 @@ private actor MLXRuntimeState {
         activeInstall = install
         activeProfile = profile
 
-        #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
+        #if canImport(MLX) && canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await registerModelAliasesIfNeeded()
         try Self.configureGlobalRuntimePolicy(profile: profile, install: install)
         if install.modalities.contains(.vision) || install.modalities.contains(.audio) {
             var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .visionLanguage)
             resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
             activeStopStrings = resolvedConfiguration.hints.stopStrings
-            visionContainer = try await VLMModelFactory.shared.loadContainer(
-                from: PinesHubDownloader(),
-                using: PinesTokenizerLoader(),
-                configuration: resolvedConfiguration.configuration
-            )
+            visionContainer = try await MLX.withError {
+                try await VLMModelFactory.shared.loadContainer(
+                    from: PinesHubDownloader(),
+                    using: PinesTokenizerLoader(),
+                    configuration: resolvedConfiguration.configuration
+                )
+            }
             activePartitionSummary = await Self.configureLoadedContainer(
                 visionContainer, profile: profile)
             textContainer = nil
@@ -954,11 +981,13 @@ private actor MLXRuntimeState {
             var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .language)
             resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
             activeStopStrings = resolvedConfiguration.hints.stopStrings
-            textContainer = try await LLMModelFactory.shared.loadContainer(
-                from: PinesHubDownloader(),
-                using: PinesTokenizerLoader(),
-                configuration: resolvedConfiguration.configuration
-            )
+            textContainer = try await MLX.withError {
+                try await LLMModelFactory.shared.loadContainer(
+                    from: PinesHubDownloader(),
+                    using: PinesTokenizerLoader(),
+                    configuration: resolvedConfiguration.configuration
+                )
+            }
             activePartitionSummary = await Self.configureLoadedContainer(
                 textContainer, profile: profile)
             visionContainer = nil
@@ -1167,11 +1196,15 @@ private actor MLXRuntimeState {
         Self.applySoftMemoryPressureMLXPolicy()
         #endif
         let generationCancellation = activeGenerationCancellation
-        let hasHardMemoryPressure = deviceMonitor.memoryCounters().availableMemoryBytes
+        let availableMemoryBytes = deviceMonitor.memoryCounters().availableMemoryBytes
+        let hasHardMemoryPressure = availableMemoryBytes
             .map { $0 < LocalRuntimeSafetyPolicy.minimumAvailableMemoryBytes } ?? true
+        let hasSoftRecoveryHeadroom = availableMemoryBytes
+            .map { $0 >= Self.memoryPressureSoftRecoveryMinimumAvailableBytes } ?? false
         if allowsSoftRecovery,
            generationCancellation != nil,
            !hasHardMemoryPressure,
+           hasSoftRecoveryHeadroom,
            activeGenerationSoftMemoryWarningCount < Self.maxSoftMemoryWarningsPerGeneration {
             activeGenerationSoftMemoryWarningCount += 1
             return .softRecovered
@@ -1193,7 +1226,7 @@ private actor MLXRuntimeState {
     }
 
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
-        #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon)
+        #if canImport(MLX) && canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon)
         try ensureForegroundActive()
         let requiresVLM = request.messages.contains { message in
             message.attachments.contains { attachment in
@@ -1388,14 +1421,22 @@ private actor MLXRuntimeState {
                             LocalProviderMetadataKeys.runtimePressureReason: profile.quantization.runtimePressureReason.rawValue,
                             LocalProviderMetadataKeys.runtimePrefillStepSize: String(profile.prefillStepSize),
                             LocalProviderMetadataKeys.turboQuantProfileSource: profile.quantization.turboQuantProfileSource ?? "none",
+                            LocalProviderMetadataKeys.cacheTopology: install?.cacheTopology.rawValue ?? ModelCacheTopology.unsupported.rawValue,
+                            LocalProviderMetadataKeys.turboQuantFamilySupport: install?.turboQuantFamilySupport.rawValue ?? TurboQuantFamilySupport.none.rawValue,
                             LocalProviderMetadataKeys.generationPrepareElapsedSeconds: String(prepareElapsedSeconds),
                             LocalProviderMetadataKeys.generationPreflightAttempts: String(preflightAttempts),
                             "local.generation.requested_max_tokens": requestedCompletionTokens.map(String.init) ?? "none",
                             "local.generation.effective_max_tokens": effectiveMaxTokensOverride.map(String.init) ?? "none",
                             "local.generation.max_tokens_clamped": String(clampedCompletionTokens),
                         ]
+                        if install?.turboQuantFamilySupport == .hybridFull {
+                            contextMetadata[LocalProviderMetadataKeys.hybridStateExplanation] = "Attention KV caches use TurboQuant; architecture-specific native state caches remain exact."
+                        }
                         if let profileID = profile.quantization.turboQuantProfileID {
                             contextMetadata[LocalProviderMetadataKeys.turboQuantProfileID] = profileID
+                        }
+                        if !profile.quantization.turboQuantProfileDiagnostics.isEmpty {
+                            contextMetadata[LocalProviderMetadataKeys.turboQuantProfileDiagnostics] = profile.quantization.turboQuantProfileDiagnostics.joined(separator: " | ")
                         }
                         if let maxContextTokens = profile.quantization.maxKVSize {
                             contextMetadata[ChatContextMetadataKeys.contextWindowTokens] = String(maxContextTokens)
@@ -1427,40 +1468,50 @@ private actor MLXRuntimeState {
                             ]) { _, new in new })
                         )
                         #endif
-                        let stream: AsyncStream<Generation>
-                        let generationTask: Task<Void, Never>
+                        let generationArtifacts: (
+                            stream: AsyncStream<Generation>,
+                            task: Task<Void, Never>,
+                            errorBox: MLX.ErrorBox
+                        )
                         var stopFilter = TextStopSequenceFilter(stopSequences: stopStrings)
-                        if profile.mtpEnabled,
-                           let mtpModel = context.model as? any MTPLanguageModel {
-                            let iterator = try MTPTokenIterator(
-                                input: input,
-                                model: mtpModel,
-                                cache: cache,
-                                parameters: parameters,
-                                numMTPTokens: 1
-                            )
-                            (stream, generationTask) = MLXLMCommon.generateTask(
-                                promptTokenCount: input.text.tokens.size,
-                                modelConfiguration: context.configuration,
-                                tokenizer: context.tokenizer,
-                                iterator: iterator,
-                                tools: toolSpecs
-                            )
-                        } else {
-                            let iterator = try TokenIterator(
-                                input: input,
-                                model: context.model,
-                                cache: cache,
-                                parameters: parameters
-                            )
-                            (stream, generationTask) = MLXLMCommon.generateTask(
-                                promptTokenCount: input.text.tokens.size,
-                                modelConfiguration: context.configuration,
-                                tokenizer: context.tokenizer,
-                                iterator: iterator,
-                                tools: toolSpecs
-                            )
+                        generationArtifacts = try MLX.withError { errorBox in
+                            let stream: AsyncStream<Generation>
+                            let generationTask: Task<Void, Never>
+                            if profile.mtpEnabled,
+                               let mtpModel = context.model as? any MTPLanguageModel {
+                                let iterator = try MTPTokenIterator(
+                                    input: input,
+                                    model: mtpModel,
+                                    cache: cache,
+                                    parameters: parameters,
+                                    numMTPTokens: 1
+                                )
+                                (stream, generationTask) = MLXLMCommon.generateTask(
+                                    promptTokenCount: input.text.tokens.size,
+                                    modelConfiguration: context.configuration,
+                                    tokenizer: context.tokenizer,
+                                    iterator: iterator,
+                                    tools: toolSpecs
+                                )
+                            } else {
+                                let iterator = try TokenIterator(
+                                    input: input,
+                                    model: context.model,
+                                    cache: cache,
+                                    parameters: parameters
+                                )
+                                (stream, generationTask) = MLXLMCommon.generateTask(
+                                    promptTokenCount: input.text.tokens.size,
+                                    modelConfiguration: context.configuration,
+                                    tokenizer: context.tokenizer,
+                                    iterator: iterator,
+                                    tools: toolSpecs
+                                )
+                            }
+                            return (stream: stream, task: generationTask, errorBox: errorBox)
                         }
+                        let stream = generationArtifacts.stream
+                        let generationTask = generationArtifacts.task
                         generationCancellation.set(generationTask)
                         var completionInfo: GenerateCompletionInfo?
 
@@ -1528,6 +1579,7 @@ private actor MLXRuntimeState {
                         }
 
                         await generationTask.value
+                        try generationArtifacts.errorBox.check()
                         generationCancellation.clear()
                         let pendingText = stopFilter.flush()
                         if !pendingText.isEmpty {
@@ -1564,6 +1616,15 @@ private actor MLXRuntimeState {
                     continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
                     continuation.finish()
                 } catch {
+                    #if DEBUG
+                    await FreezeBreadcrumbJournal.shared.record(
+                        stage: "mlx.generation.failed",
+                        detail: error.localizedDescription,
+                        metadata: runtimeMemoryMetadata(merging: [
+                            "model_id": request.modelID.rawValue,
+                        ])
+                    )
+                    #endif
                     continuation.yield(
                         .failure(
                             InferenceStreamFailure(
@@ -1632,6 +1693,7 @@ private actor MLXRuntimeState {
 
         if install.localURL != nil {
             let resolvedURL = try resolvedModelDirectory(for: install)
+            try validateLocalChatAssets(for: install, directory: resolvedURL)
             let hints = ModelRuntimeConfigurationHints.infer(
                 repository: install.repository,
                 modelType: install.modelType,
@@ -1641,7 +1703,9 @@ private actor MLXRuntimeState {
             return ResolvedRuntimeModelConfiguration(
                 configuration: MLXLMCommon.ModelConfiguration(
                     directory: resolvedURL,
-                    tokenizerSource: registryConfiguration.tokenizerSource,
+                    // Installed models must use their downloaded tokenizer/template. A registry tokenizer
+                    // override can mismatch local weights and produce nonsense completions.
+                    tokenizerSource: nil,
                     defaultPrompt: registryConfiguration.defaultPrompt,
                     extraEOSTokens: registryConfiguration.extraEOSTokens.union(hints.extraEOSTokens),
                     eosTokenIds: registryConfiguration.eosTokenIds,
@@ -1668,6 +1732,67 @@ private actor MLXRuntimeState {
             stopStrings: configuration.extraEOSTokens.union(inferredHints.stopStrings)
         )
         return ResolvedRuntimeModelConfiguration(configuration: configuration, hints: hints)
+    }
+
+    private static func validateLocalChatAssets(for install: ModelInstall, directory: URL) throws {
+        guard install.modalities.contains(.text),
+              localModelRequiresChatTemplate(install)
+        else { return }
+
+        let hasTemplateFile = FileManager.default.fileExists(
+            atPath: directory.appending(path: "chat_template.jinja").path
+        )
+        guard hasTemplateFile || localTokenizerConfigHasChatTemplate(in: directory) else {
+            throw InferenceError.invalidRequest(
+                "Installed chat model \(install.repository) is missing a tokenizer chat template. Delete it and download a compatible MLX Instruct/Chat build; Pines will not use the MLX plain-text fallback because it can produce invalid output."
+            )
+        }
+    }
+
+    private static func localModelRequiresChatTemplate(_ install: ModelInstall) -> Bool {
+        let identifiers = [
+            install.repository,
+            install.modelID.rawValue,
+            install.displayName,
+            install.modelType,
+            install.textConfigModelType,
+            install.processorClass,
+        ]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+
+        if identifiers.contains("instruct")
+            || identifiers.contains("chat")
+            || identifiers.contains("-it")
+            || identifiers.contains("_it")
+            || identifiers.contains(" it ")
+            || identifiers.contains("qwen")
+            || identifiers.contains("gemma")
+            || identifiers.contains("llama-3")
+            || identifiers.contains("llama3") {
+            return true
+        }
+        return false
+    }
+
+    private static func localTokenizerConfigHasChatTemplate(in directory: URL) -> Bool {
+        let url = directory.appending(path: "tokenizer_config.json")
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+
+        if let template = object["chat_template"] as? String,
+           !template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if let templates = object["chat_template"] as? [[String: Any]] {
+            return templates.contains { entry in
+                guard let template = entry["template"] as? String else { return false }
+                return !template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
+        return false
     }
 
     private static func resolvedModelDirectory(for install: ModelInstall) throws -> URL {
@@ -1835,11 +1960,19 @@ private actor MLXRuntimeState {
         return cache.preset.defaultValueBits
     }
 
+    private static func cacheCounts(from cache: [KVCache]) -> (attention: Int, nativeState: Int) {
+        let nativeState = cache.filter { cacheEntry in
+            String(describing: Swift.type(of: cacheEntry)).localizedCaseInsensitiveContains("mamba")
+        }.count
+        return (attention: max(0, cache.count - nativeState), nativeState: nativeState)
+    }
+
     private static func localProviderMetadata(
         from cache: [KVCache],
         fallbackProfile profile: RuntimeProfile,
         partitionSummary: String? = nil
     ) -> [String: String] {
+        let cacheCounts = cacheCounts(from: cache)
         if let turboQuantCache = cache.compactMap({ $0 as? TurboQuantCompressedKVCacheProtocol }).first {
             let diagnostics = turboQuantCache.attentionDiagnostics
             var metadata: [String: String] = [
@@ -1857,6 +1990,8 @@ private actor MLXRuntimeState {
                 LocalProviderMetadataKeys.mtpEnabled: String(profile.mtpEnabled),
                 LocalProviderMetadataKeys.audioEnabled: String(profile.audioEnabled),
                 LocalProviderMetadataKeys.dflashEnabled: String(profile.dflashEnabled),
+                LocalProviderMetadataKeys.attentionCacheCount: String(cacheCounts.attention),
+                LocalProviderMetadataKeys.nativeStateCacheCount: String(cacheCounts.nativeState),
             ]
             if let maxKVSize = profile.quantization.maxKVSize {
                 metadata[LocalProviderMetadataKeys.runtimeMaxKVSize] = String(maxKVSize)
@@ -1866,6 +2001,9 @@ private actor MLXRuntimeState {
             }
             if let profileSource = profile.quantization.turboQuantProfileSource {
                 metadata[LocalProviderMetadataKeys.turboQuantProfileSource] = profileSource
+            }
+            if !profile.quantization.turboQuantProfileDiagnostics.isEmpty {
+                metadata[LocalProviderMetadataKeys.turboQuantProfileDiagnostics] = profile.quantization.turboQuantProfileDiagnostics.joined(separator: " | ")
             }
             appendRuntimeFeatureMetadata(to: &metadata, partitionSummary: partitionSummary)
             if let fallbackReason = diagnostics.fallbackReason {
@@ -1886,6 +2024,8 @@ private actor MLXRuntimeState {
             LocalProviderMetadataKeys.mtpEnabled: String(profile.mtpEnabled),
             LocalProviderMetadataKeys.audioEnabled: String(profile.audioEnabled),
             LocalProviderMetadataKeys.dflashEnabled: String(profile.dflashEnabled),
+            LocalProviderMetadataKeys.attentionCacheCount: String(cacheCounts.attention),
+            LocalProviderMetadataKeys.nativeStateCacheCount: String(cacheCounts.nativeState),
         ]
         if let maxKVSize = quantization.maxKVSize {
             metadata[LocalProviderMetadataKeys.runtimeMaxKVSize] = String(maxKVSize)
@@ -1895,6 +2035,9 @@ private actor MLXRuntimeState {
         }
         if let profileSource = quantization.turboQuantProfileSource {
             metadata[LocalProviderMetadataKeys.turboQuantProfileSource] = profileSource
+        }
+        if !quantization.turboQuantProfileDiagnostics.isEmpty {
+            metadata[LocalProviderMetadataKeys.turboQuantProfileDiagnostics] = quantization.turboQuantProfileDiagnostics.joined(separator: " | ")
         }
         appendRuntimeFeatureMetadata(to: &metadata, partitionSummary: partitionSummary)
         if let preset = quantization.preset {

@@ -14,9 +14,13 @@ import Darwin
 struct DeviceRuntimeMonitor: Sendable {
     func snapshot() -> RuntimeMemorySnapshot {
         let mlxCapabilities = metalCapabilities()
+        let processMemory = processMemorySnapshot()
         return RuntimeMemorySnapshot(
             physicalMemoryBytes: Int64(ProcessInfo.processInfo.physicalMemory),
             availableMemoryBytes: availableMemoryBytes(),
+            processResidentMemoryBytes: processMemory.resident,
+            processPhysicalFootprintBytes: processMemory.physicalFootprint,
+            processPeakResidentMemoryBytes: processMemory.peakResident,
             thermalState: ProcessInfo.processInfo.thermalState.pinesRuntimeValue,
             hardwareModelIdentifier: hardwareModelIdentifier(),
             lowPowerModeEnabled: isLowPowerModeEnabled(),
@@ -63,6 +67,9 @@ struct DeviceRuntimeMonitor: Sendable {
             vaultIndexBytes: vaultIndexBytes,
             physicalMemoryBytes: currentSnapshot.physicalMemoryBytes,
             availableMemoryBytes: currentSnapshot.availableMemoryBytes,
+            processResidentMemoryBytes: currentSnapshot.processResidentMemoryBytes,
+            processPhysicalFootprintBytes: currentSnapshot.processPhysicalFootprintBytes,
+            processPeakResidentMemoryBytes: currentSnapshot.processPeakResidentMemoryBytes,
             thermalState: currentSnapshot.thermalState,
             hardwareModelIdentifier: currentSnapshot.hardwareModelIdentifier,
             lowPowerModeEnabled: currentSnapshot.lowPowerModeEnabled,
@@ -116,6 +123,32 @@ struct DeviceRuntimeMonitor: Sendable {
         return Int64(available)
         #else
         return nil
+        #endif
+    }
+
+    private func processMemorySnapshot() -> (
+        resident: Int64?,
+        physicalFootprint: Int64?,
+        peakResident: Int64?
+    ) {
+        #if canImport(Darwin)
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else {
+            return (nil, nil, nil)
+        }
+        return (
+            Int64(info.resident_size),
+            Int64(info.phys_footprint),
+            Int64(info.resident_size_peak)
+        )
+        #else
+        return (nil, nil, nil)
         #endif
     }
 

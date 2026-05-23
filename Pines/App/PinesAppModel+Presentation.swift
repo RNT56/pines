@@ -127,7 +127,9 @@ extension PinesAppModel {
             keyHeadDimension: preflight.keyHeadDimension,
             valueHeadDimension: preflight.valueHeadDimension,
             routedExperts: preflight.routedExperts,
-            expertsPerToken: preflight.expertsPerToken
+            expertsPerToken: preflight.expertsPerToken,
+            cacheTopology: preflight.cacheTopology,
+            turboQuantFamilySupport: preflight.turboQuantFamilySupport
         )
     }
 

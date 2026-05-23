@@ -130,6 +130,8 @@ extension GRDBPinesStore {
             valueHeadDimension: row["value_head_dimension"] as Int?,
             routedExperts: row["routed_experts"] as Int?,
             expertsPerToken: row["experts_per_token"] as Int?,
+            cacheTopology: ModelCacheTopology(rawValue: row["cache_topology"] as String? ?? "") ?? .standardAttention,
+            turboQuantFamilySupport: TurboQuantFamilySupport(rawValue: row["turbo_quant_family_support"] as String? ?? "") ?? .attentionKVFull,
             createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
         )
     }

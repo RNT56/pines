@@ -25,6 +25,8 @@ struct PinesStressConfiguration: Sendable {
     var contextTargetTokens: Int?
     var contextHighWatermarkRatio: Double
     var contextReserveTokens: Int
+    var requestedModelID: String?
+    var allowPressureRecovery: Bool
 
     static func current(
         arguments: [String] = ProcessInfo.processInfo.arguments,
@@ -47,7 +49,9 @@ struct PinesStressConfiguration: Sendable {
             contextSweepMaxTokens: Self.optionalTokenCount(environment, key: "PINES_STRESS_CONTEXT_MAX_TOKENS"),
             contextTargetTokens: Self.optionalTokenCount(environment, key: "PINES_STRESS_CONTEXT_TARGET_TOKENS"),
             contextHighWatermarkRatio: Self.contextHighWatermarkRatio(environment: environment),
-            contextReserveTokens: max(128, Int(environment["PINES_STRESS_CONTEXT_RESERVE_TOKENS"] ?? "") ?? 1_024)
+            contextReserveTokens: max(128, Int(environment["PINES_STRESS_CONTEXT_RESERVE_TOKENS"] ?? "") ?? 1_024),
+            requestedModelID: Self.optionalModelID(environment),
+            allowPressureRecovery: environment["PINES_STRESS_ALLOW_PRESSURE_RECOVERY"] == "1"
         )
     }
 
@@ -107,6 +111,12 @@ struct PinesStressConfiguration: Sendable {
     private static func optionalTokenCount(_ environment: [String: String], key: String) -> Int? {
         guard let raw = Int(environment[key] ?? "") else { return nil }
         return max(512, raw)
+    }
+
+    private static func optionalModelID(_ environment: [String: String]) -> String? {
+        let raw = environment["PINES_STRESS_MODEL_ID"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw?.isEmpty == false ? raw : nil
     }
 
     private func contextCeiling(runtimeMaxContextTokens: Int?) -> Int {

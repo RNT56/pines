@@ -184,7 +184,7 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "gemma4", "any-to-any"]
             )
         )
-        try expectEqual(gemma4.verification, .installable)
+        try expectEqual(gemma4.verification, .verified)
         try expectEqual(gemma4.modalities, [.text, .vision])
 
         let qwen35 = ModelPreflightClassifier().classify(
@@ -256,7 +256,7 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "gemma4_assistant"]
             )
         )
-        try expectEqual(gemma4Assistant.verification, .installable)
+        try expectEqual(gemma4Assistant.verification, .verified)
         try expectEqual(gemma4Assistant.modalities, [.text])
 
         let deepseekV32 = ModelPreflightClassifier().classify(
@@ -547,7 +547,7 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS projects"), "missing project spaces table")
         try expect(sql.contains("ALTER TABLE conversations ADD COLUMN project_id"), "missing conversation project link")
         try expect(sql.contains("ALTER TABLE vault_documents ADD COLUMN project_id"), "missing vault project link")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 18)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 19)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")

@@ -21,6 +21,8 @@ extension PinesAppModel {
                 "context_target_tokens": configuration.contextTargetTokens.map(String.init) ?? "auto",
                 "context_high_ratio": String(configuration.contextHighWatermarkRatio),
                 "context_reserve_tokens": String(configuration.contextReserveTokens),
+                "requested_model_id": configuration.requestedModelID ?? "first-installed",
+                "allow_pressure_recovery": String(configuration.allowPressureRecovery),
             ],
             enabled: true
         )
@@ -58,10 +60,23 @@ extension PinesAppModel {
             await failStressRun(configuration, iteration: 0, message: "Unable to load local model state: \(error.localizedDescription)")
             return
         }
-        guard let install = installs
-            .first(where: { $0.state == .installed && $0.modalities.contains(.text) })
-        else {
-            await failStressRun(configuration, iteration: 0, message: "No installed local text model is available.")
+        let installedTextCandidates = installs.filter { $0.state == .installed && $0.modalities.contains(.text) }
+        await FreezeBreadcrumbJournal.shared.record(
+            stage: "stress.installed_models",
+            runID: configuration.runID,
+            metadata: [
+                "installed_text_model_count": String(installedTextCandidates.count),
+                "installed_text_model_ids": installedTextCandidates.map(\.modelID.rawValue).joined(separator: " | "),
+                "installed_text_repositories": installedTextCandidates.map(\.repository).joined(separator: " | "),
+                "requested_model_id": configuration.requestedModelID ?? "first-installed",
+            ],
+            enabled: true
+        )
+        guard let install = Self.selectedStressInstall(from: installs, configuration: configuration) else {
+            let message = configuration.requestedModelID.map {
+                "Requested stress model \($0) is not an installed local text model."
+            } ?? "No installed local text model is available."
+            await failStressRun(configuration, iteration: 0, message: message)
             return
         }
         guard let conversationID = await createChat(services: services) else {
@@ -114,6 +129,8 @@ extension PinesAppModel {
                 "value_head_dimension": install.valueHeadDimension.map(String.init) ?? "unknown",
                 "routed_experts": install.routedExperts.map(String.init) ?? "none",
                 "experts_per_token": install.expertsPerToken.map(String.init) ?? "none",
+                "cache_topology": install.cacheTopology.rawValue,
+                "turboquant_family_support": install.turboQuantFamilySupport.rawValue,
             ],
             enabled: true
         )
@@ -167,6 +184,16 @@ extension PinesAppModel {
             )
             if let completion {
                 if let pressureReason = Self.recoverableLocalStressPressureReason(from: completion) {
+                    guard configuration.allowPressureRecovery else {
+                        await failStressRun(
+                            configuration,
+                            iteration: iteration,
+                            threadID: conversationID,
+                            modelID: install.modelID,
+                            message: "Iteration \(iteration) hit \(pressureReason) before producing an accepted local response."
+                        )
+                        return
+                    }
                     await recoverStressRunFromLocalPressure(
                         configuration: configuration,
                         iteration: iteration,
@@ -220,6 +247,16 @@ extension PinesAppModel {
                 )
                 if status != .complete {
                     if let pressureReason = Self.recoverableLocalStressPressureReason(from: lastAssistant) {
+                        guard configuration.allowPressureRecovery else {
+                            await failStressRun(
+                                configuration,
+                                iteration: iteration,
+                                threadID: conversationID,
+                                modelID: install.modelID,
+                                message: "Iteration \(iteration) hit \(pressureReason) before producing an accepted local response."
+                            )
+                            return
+                        }
                         let thermal = pressureReason == "thermal_pressure"
                         let recoveryMessage = thermal
                             ? "Recovered from thermal-pressure cancellation at iteration \(iteration)."
@@ -264,6 +301,17 @@ extension PinesAppModel {
                     )
                     return
                 }
+                if let lastAssistant,
+                   let outputFailure = Self.localStressOutputQualityFailure(lastAssistant.content) {
+                    await failStressRun(
+                        configuration,
+                        iteration: iteration,
+                        threadID: conversationID,
+                        modelID: install.modelID,
+                        message: outputFailure
+                    )
+                    return
+                }
             } catch {
                 await failStressRun(
                     configuration,
@@ -302,6 +350,21 @@ extension PinesAppModel {
             ],
             enabled: true
         )
+    }
+
+    private static func selectedStressInstall(
+        from installs: [ModelInstall],
+        configuration: PinesStressConfiguration
+    ) -> ModelInstall? {
+        let candidates = installs.filter { $0.state == .installed && $0.modalities.contains(.text) }
+        guard let requestedModelID = configuration.requestedModelID?.lowercased() else {
+            return candidates.first
+        }
+        return candidates.first { install in
+            install.modelID.rawValue.lowercased() == requestedModelID
+                || install.repository.lowercased() == requestedModelID
+                || install.displayName.lowercased() == requestedModelID
+        }
     }
 
     private func waitForStressIterationCompletion(timeoutSeconds: TimeInterval) async -> String? {
@@ -377,6 +440,47 @@ extension PinesAppModel {
         guard approximateCharacters > 0 else { return "" }
         let repetitions = max(1, (approximateCharacters + sentence.count - 1) / sentence.count)
         return String(String(repeating: sentence, count: repetitions).prefix(approximateCharacters))
+    }
+
+    private static func localStressOutputQualityFailure(_ content: String) -> String? {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count < 16 {
+            return "Local generation produced too little output for the diagnostic prompt."
+        }
+
+        let scalars = Array(text.unicodeScalars)
+        let replacementCount = scalars.filter { $0.value == 0xfffd }.count
+        if replacementCount > 0 {
+            return "Local generation produced Unicode replacement characters, which indicates tokenizer/model output corruption."
+        }
+
+        let controlCount = scalars.filter { scalar in
+            CharacterSet.controlCharacters.contains(scalar)
+                && scalar != "\n"
+                && scalar != "\r"
+                && scalar != "\t"
+        }.count
+        if controlCount > 0 {
+            return "Local generation produced control characters, which indicates invalid decoded output."
+        }
+
+        let letterCount = scalars.filter { CharacterSet.letters.contains($0) }.count
+        if letterCount < max(8, scalars.count / 5) {
+            return "Local generation output failed the diagnostic text sanity check."
+        }
+
+        let words = text
+            .lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 3 }
+        if let mostRepeated = Dictionary(grouping: words, by: { $0 }).values.map(\.count).max(),
+           words.count >= 12,
+           mostRepeated > max(8, words.count / 2) {
+            return "Local generation repeated the same token pattern excessively."
+        }
+
+        return nil
     }
 
     private func settledLastAssistantMessage(

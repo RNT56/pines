@@ -262,6 +262,8 @@ struct SettingsDetailView: View {
             .init("Metal attention", diagnostics.metalAttentionAvailable ? "Available" : "Unavailable", systemImage: "scope")
         ]
         if let preset = diagnostics.preset { items.append(.init("Preset", preset.displayName)) }
+        if let profileID = diagnostics.turboQuantProfileID { items.append(.init("Profile ID", profileID, copyable: true)) }
+        if let profileSource = diagnostics.turboQuantProfileSource { items.append(.init("Profile source", profileSource)) }
         if let valueBits = diagnostics.turboQuantValueBits { items.append(.init("Value bits", "\(valueBits)")) }
         if let requestedBackend = diagnostics.requestedBackend { items.append(.init("Requested backend", requestedBackend.displayName)) }
         if let activeBackend = diagnostics.activeBackend { items.append(.init("Active backend", activeBackend.displayName)) }

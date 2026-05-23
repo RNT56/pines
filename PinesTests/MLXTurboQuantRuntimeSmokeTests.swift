@@ -112,6 +112,40 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         XCTAssertEqual(llama32ThreeB.id, "llama-3.2-3b")
     }
 
+    func testBundledTurboQuantProfileRegistryMatchesQwen35AndQwen36Families() throws {
+        let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
+        let cases: [(String, String, String, Double)] = [
+            ("mlx-community/Qwen3.5-0.8B-MLX-4bit", "qwen3_5", "qwen3.5-0.8b", 0.8),
+            ("mlx-community/Qwen3.5-4B-MLX-4bit", "qwen3_5_text", "qwen3.5-4b", 4),
+            ("mlx-community/Qwen3.6-27B-4bit", "qwen3_5", "qwen3.6-27b", 27),
+            ("mlx-community/Qwen3.5-35B-A3B-4bit", "qwen3_5_moe", "qwen3.5-35b-a3b", 35),
+            ("mlx-community/Qwen3.6-35B-A3B-4bit", "qwen3_5_moe_text", "qwen3.6-35b-a3b", 35),
+        ]
+
+        for (modelID, modelType, expectedProfileID, parameterCountB) in cases {
+            let profile = try XCTUnwrap(registry.profile(
+                for: modelID,
+                modelType: modelType,
+                parameterCountB: parameterCountB,
+                keyHeadDimension: 256,
+                valueHeadDimension: 256
+            ))
+            XCTAssertEqual(profile.id, expectedProfileID)
+        }
+
+        let rejected = registry.selection(
+            for: MLXLMCommon.TurboQuantModelDescriptor(
+                modelID: "mlx-community/Qwen3.5-4B-MLX-4bit",
+                modelType: "qwen3_5",
+                parameterCountB: 4
+            ),
+            keyHeadDimension: 128,
+            valueHeadDimension: 128
+        )
+        XCTAssertNil(rejected.profile)
+        XCTAssertFalse(rejected.rejectionReasons.isEmpty)
+    }
+
     func testBundledTurboQuantProfileRegistryMatchesExpandedGemmaFamilies() throws {
         let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
 
@@ -187,6 +221,13 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         ))
         XCTAssertNil(registry.profile(
             for: "mlx-community/Bunny-Llama-3-8B-V-4bit",
+            modality: .visionText,
+            keyHeadDimension: 128,
+            valueHeadDimension: 128
+        ))
+        XCTAssertNil(registry.profile(
+            for: "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
+            modelType: "mllama",
             modality: .visionText,
             keyHeadDimension: 128,
             valueHeadDimension: 128

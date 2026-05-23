@@ -2117,7 +2117,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 18)
+        #expect(PinesDatabaseSchema.currentVersion == 19)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
         let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
         let projectSpacesMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 16 })
@@ -2183,6 +2183,11 @@ struct CoreContractTests {
         #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN text_config_model_type"))
         #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN routed_experts"))
         #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN experts_per_token"))
+
+        let cacheTopologyMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 19 })
+        let cacheTopologySQL = cacheTopologyMigration.sql.joined(separator: "\n")
+        #expect(cacheTopologySQL.contains("ALTER TABLE model_installs ADD COLUMN cache_topology"))
+        #expect(cacheTopologySQL.contains("ALTER TABLE model_installs ADD COLUMN turbo_quant_family_support"))
     }
 
     @Test
@@ -2884,13 +2889,15 @@ struct CoreContractTests {
             let result = classifier.classify(spec.preflightInput)
 
             #expect(result.repository == spec.repository)
-            #expect(result.verification == .installable)
+            #expect(result.verification == .verified)
             #expect(result.modalities == spec.modalities)
             #expect(result.modelType == spec.modelType)
             #expect(result.processorClass == spec.processorClass)
             #expect(result.parameterCount == spec.parameterCount)
             #expect(result.keyHeadDimension == spec.headDimension)
             #expect(result.valueHeadDimension == spec.headDimension)
+            #expect(result.cacheTopology == .hybridAttentionAndNativeState)
+            #expect(result.turboQuantFamilySupport == .hybridFull)
             #expect(result.estimatedBytes == spec.expectedDownloadBytes)
             #expect(result.reasons.isEmpty)
 
@@ -2905,7 +2912,9 @@ struct CoreContractTests {
                 modelType: result.modelType,
                 processorClass: result.processorClass,
                 keyHeadDimension: result.keyHeadDimension,
-                valueHeadDimension: result.valueHeadDimension
+                valueHeadDimension: result.valueHeadDimension,
+                cacheTopology: result.cacheTopology,
+                turboQuantFamilySupport: result.turboQuantFamilySupport
             )
             let roundTrippedInstall = try JSONDecoder().decode(
                 ModelInstall.self,
@@ -2917,6 +2926,8 @@ struct CoreContractTests {
             #expect(roundTrippedInstall.parameterCount == spec.parameterCount)
             #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
+            #expect(roundTrippedInstall.cacheTopology == .hybridAttentionAndNativeState)
+            #expect(roundTrippedInstall.turboQuantFamilySupport == .hybridFull)
 
             let hints = ModelRuntimeConfigurationHints.infer(
                 repository: spec.repository,
@@ -2986,15 +2997,19 @@ struct CoreContractTests {
 
         for spec in gemmaTurboQuantProfileCases {
             let result = classifier.classify(spec.preflightInput)
+            let isPromotedFamily = ["gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant"]
+                .contains(spec.modelType)
 
             #expect(result.repository == spec.repository)
-            #expect(result.verification == .installable)
+            #expect(result.verification == (isPromotedFamily ? .verified : .installable))
             #expect(result.modalities == spec.modalities)
             #expect(result.modelType == spec.modelType)
             #expect(result.processorClass == spec.processorClass)
             #expect(result.parameterCount == spec.parameterCount)
             #expect(result.keyHeadDimension == spec.headDimension)
             #expect(result.valueHeadDimension == spec.headDimension)
+            #expect(result.cacheTopology == spec.expectedCacheTopology)
+            #expect(result.turboQuantFamilySupport == .attentionKVFull)
             #expect(result.estimatedBytes == spec.expectedDownloadBytes)
             #expect(result.reasons.isEmpty)
 
@@ -3009,7 +3024,9 @@ struct CoreContractTests {
                 modelType: result.modelType,
                 processorClass: result.processorClass,
                 keyHeadDimension: result.keyHeadDimension,
-                valueHeadDimension: result.valueHeadDimension
+                valueHeadDimension: result.valueHeadDimension,
+                cacheTopology: result.cacheTopology,
+                turboQuantFamilySupport: result.turboQuantFamilySupport
             )
             let roundTrippedInstall = try JSONDecoder().decode(
                 ModelInstall.self,
@@ -3021,6 +3038,8 @@ struct CoreContractTests {
             #expect(roundTrippedInstall.parameterCount == spec.parameterCount)
             #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
+            #expect(roundTrippedInstall.cacheTopology == spec.expectedCacheTopology)
+            #expect(roundTrippedInstall.turboQuantFamilySupport == .attentionKVFull)
 
             let hints = ModelRuntimeConfigurationHints.infer(
                 repository: spec.repository,
@@ -3149,12 +3168,28 @@ struct CoreContractTests {
                 tags: ["mlx", "llama4", "any-to-any", "4bit"]
             )
         )
+        let mllama = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
+                configJSON: #"{"model_type":"mllama","text_config":{"model_type":"llama","head_dim":128}}"#.data(using: .utf8),
+                processorConfigJSON: #"{"processor_class":"MllamaProcessor"}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 7_200_000_000),
+                ],
+                tags: ["mlx", "mllama", "image-text-to-text", "4bit"]
+            )
+        )
 
-        #expect(llama.verification == .installable)
+        #expect(llama.verification == .verified)
         #expect(llama.modelType == "llama")
         #expect(llama.keyHeadDimension == 128)
         #expect(llama.valueHeadDimension == 128)
         #expect(llama.textConfigModelType == nil)
+        #expect(llama.cacheTopology == .standardAttention)
+        #expect(llama.turboQuantFamilySupport == .attentionKVFull)
 
         #expect(mistralSmall4.verification == .installable)
         #expect(mistralSmall4.modelType == "mistral3")
@@ -3173,7 +3208,15 @@ struct CoreContractTests {
 
         #expect(llama4.verification == .unsupported)
         #expect(llama4.modalities.isEmpty)
+        #expect(llama4.cacheTopology == .unsupported)
+        #expect(llama4.turboQuantFamilySupport == .unsupportedTopology)
         #expect(llama4.reasons.contains("model_type llama4 is not registered in the linked MLX runtime."))
+
+        #expect(mllama.verification == .unsupported)
+        #expect(mllama.modalities.isEmpty)
+        #expect(mllama.cacheTopology == .unsupported)
+        #expect(mllama.turboQuantFamilySupport == .unsupportedTopology)
+        #expect(mllama.reasons.contains("model_type mllama requires an MLX Swift LM fork with Llama 3.2 Vision registry, processor, cache topology, and TurboQuant profile support."))
     }
 
     @Test
@@ -3312,7 +3355,7 @@ struct CoreContractTests {
                 )
             )
 
-            #expect(result.verification == .installable)
+            #expect(result.verification == .verified)
             #expect(result.keyHeadDimension == 256)
             #expect(result.valueHeadDimension == 256)
         }
@@ -4431,7 +4474,7 @@ private struct QwenTurboQuantProfileCase {
         }
 
         var configJSON: Data {
-            Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension)}"#.utf8)
+            Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension),"full_attention_interval":4,"linear_num_value_heads":8,"linear_conv_kernel_dim":4}"#.utf8)
         }
 
         var tokenizerConfigJSON: Data {
@@ -4636,13 +4679,28 @@ private struct GemmaTurboQuantProfileCase {
         var configJSONOverride: Data?
         var modalities: Set<ModelModality> = [.text]
         var processorClass: String?
+        var expectedCacheTopology: ModelCacheTopology {
+            if modalities.contains(.vision), modelType == "gemma3" || modelType == "gemma4" {
+                return .visionLanguageAttention
+            }
+            if modelType == "gemma3n" || modelType == "gemma4_text" || modelType == "gemma4_assistant" {
+                return .sharedKVAttention
+            }
+            return .standardAttention
+        }
 
         var expectedDownloadBytes: Int64 {
             modelBytes + Self.configBytes + Self.tokenizerBytes + (processorClass == nil ? 0 : Self.processorBytes)
         }
 
         var configJSON: Data {
-            configJSONOverride ?? Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension)}"#.utf8)
+            if let configJSONOverride {
+                return configJSONOverride
+            }
+            if modelType == "gemma3n" {
+                return Data(#"{"model_type":"gemma3n","head_dim":\#(headDimension),"layer_types":["sliding_attention","full_attention"],"sliding_window":2048,"num_kv_shared_layers":4}"#.utf8)
+            }
+            return Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension)}"#.utf8)
         }
 
         var tokenizerConfigJSON: Data {

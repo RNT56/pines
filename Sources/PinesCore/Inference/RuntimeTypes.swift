@@ -22,6 +22,52 @@ public enum ModelVerificationState: String, Codable, Sendable, CaseIterable {
     case unsupported
 }
 
+public enum ModelCacheTopology: String, Codable, Sendable, CaseIterable {
+    case standardAttention
+    case slidingAttention
+    case sharedKVAttention
+    case hybridAttentionAndNativeState
+    case visionLanguageAttention
+    case unsupported
+
+    public var displayName: String {
+        switch self {
+        case .standardAttention:
+            "Standard attention"
+        case .slidingAttention:
+            "Sliding attention"
+        case .sharedKVAttention:
+            "Shared KV attention"
+        case .hybridAttentionAndNativeState:
+            "Hybrid attention + native state"
+        case .visionLanguageAttention:
+            "Vision-language attention"
+        case .unsupported:
+            "Unsupported topology"
+        }
+    }
+}
+
+public enum TurboQuantFamilySupport: String, Codable, Sendable, CaseIterable {
+    case none
+    case attentionKVFull
+    case hybridFull
+    case unsupportedTopology
+
+    public var displayName: String {
+        switch self {
+        case .none:
+            "None"
+        case .attentionKVFull:
+            "TurboQuant full"
+        case .hybridFull:
+            "Hybrid full"
+        case .unsupportedTopology:
+            "Unsupported topology"
+        }
+    }
+}
+
 public enum QuantizationAlgorithm: String, Codable, Sendable, CaseIterable {
     case none
     case mlxAffine
@@ -251,6 +297,9 @@ public struct RuntimeMemoryCounters: Hashable, Codable, Sendable {
     public var vaultIndexBytes: Int64?
     public var physicalMemoryBytes: Int64?
     public var availableMemoryBytes: Int64?
+    public var processResidentMemoryBytes: Int64?
+    public var processPhysicalFootprintBytes: Int64?
+    public var processPeakResidentMemoryBytes: Int64?
     public var thermalState: String?
     public var hardwareModelIdentifier: String?
     public var lowPowerModeEnabled: Bool?
@@ -276,6 +325,9 @@ public struct RuntimeMemoryCounters: Hashable, Codable, Sendable {
         vaultIndexBytes: Int64? = nil,
         physicalMemoryBytes: Int64? = nil,
         availableMemoryBytes: Int64? = nil,
+        processResidentMemoryBytes: Int64? = nil,
+        processPhysicalFootprintBytes: Int64? = nil,
+        processPeakResidentMemoryBytes: Int64? = nil,
         thermalState: String? = nil,
         hardwareModelIdentifier: String? = nil,
         lowPowerModeEnabled: Bool? = nil,
@@ -300,6 +352,9 @@ public struct RuntimeMemoryCounters: Hashable, Codable, Sendable {
         self.vaultIndexBytes = vaultIndexBytes
         self.physicalMemoryBytes = physicalMemoryBytes
         self.availableMemoryBytes = availableMemoryBytes
+        self.processResidentMemoryBytes = processResidentMemoryBytes
+        self.processPhysicalFootprintBytes = processPhysicalFootprintBytes
+        self.processPeakResidentMemoryBytes = processPeakResidentMemoryBytes
         self.thermalState = thermalState
         self.hardwareModelIdentifier = hardwareModelIdentifier
         self.lowPowerModeEnabled = lowPowerModeEnabled
@@ -324,6 +379,9 @@ public struct RuntimeMemoryCounters: Hashable, Codable, Sendable {
 public struct RuntimeMemorySnapshot: Hashable, Codable, Sendable {
     public var physicalMemoryBytes: Int64
     public var availableMemoryBytes: Int64?
+    public var processResidentMemoryBytes: Int64?
+    public var processPhysicalFootprintBytes: Int64?
+    public var processPeakResidentMemoryBytes: Int64?
     public var thermalState: String
     public var hardwareModelIdentifier: String?
     public var lowPowerModeEnabled: Bool
@@ -335,6 +393,9 @@ public struct RuntimeMemorySnapshot: Hashable, Codable, Sendable {
     public init(
         physicalMemoryBytes: Int64,
         availableMemoryBytes: Int64? = nil,
+        processResidentMemoryBytes: Int64? = nil,
+        processPhysicalFootprintBytes: Int64? = nil,
+        processPeakResidentMemoryBytes: Int64? = nil,
         thermalState: String = "nominal",
         hardwareModelIdentifier: String? = nil,
         lowPowerModeEnabled: Bool = false,
@@ -345,6 +406,9 @@ public struct RuntimeMemorySnapshot: Hashable, Codable, Sendable {
     ) {
         self.physicalMemoryBytes = physicalMemoryBytes
         self.availableMemoryBytes = availableMemoryBytes
+        self.processResidentMemoryBytes = processResidentMemoryBytes
+        self.processPhysicalFootprintBytes = processPhysicalFootprintBytes
+        self.processPeakResidentMemoryBytes = processPeakResidentMemoryBytes
         self.thermalState = thermalState
         self.hardwareModelIdentifier = hardwareModelIdentifier
         self.lowPowerModeEnabled = lowPowerModeEnabled
@@ -474,6 +538,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var runtimePressureReason: RuntimePressureReason
     public var turboQuantProfileID: String?
     public var turboQuantProfileSource: String?
+    public var turboQuantProfileDiagnostics: [String]
     public var lastUnsupportedAttentionShape: String?
     public var activeFallbackReason: String?
     public var memoryCounters: RuntimeMemoryCounters
@@ -503,6 +568,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case runtimePressureReason
         case turboQuantProfileID
         case turboQuantProfileSource
+        case turboQuantProfileDiagnostics
         case lastUnsupportedAttentionShape
         case activeFallbackReason
         case memoryCounters
@@ -533,6 +599,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         runtimePressureReason: RuntimePressureReason = .none,
         turboQuantProfileID: String? = nil,
         turboQuantProfileSource: String? = nil,
+        turboQuantProfileDiagnostics: [String] = [],
         lastUnsupportedAttentionShape: String? = nil,
         activeFallbackReason: String? = nil,
         memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters()
@@ -561,6 +628,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.runtimePressureReason = runtimePressureReason
         self.turboQuantProfileID = turboQuantProfileID
         self.turboQuantProfileSource = turboQuantProfileSource
+        self.turboQuantProfileDiagnostics = turboQuantProfileDiagnostics
         self.lastUnsupportedAttentionShape = lastUnsupportedAttentionShape
         self.activeFallbackReason = activeFallbackReason
         self.memoryCounters = memoryCounters
@@ -592,6 +660,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         runtimePressureReason = try container.decodeIfPresent(RuntimePressureReason.self, forKey: .runtimePressureReason) ?? .none
         turboQuantProfileID = try container.decodeIfPresent(String.self, forKey: .turboQuantProfileID)
         turboQuantProfileSource = try container.decodeIfPresent(String.self, forKey: .turboQuantProfileSource)
+        turboQuantProfileDiagnostics = try container.decodeIfPresent([String].self, forKey: .turboQuantProfileDiagnostics) ?? []
         lastUnsupportedAttentionShape = try container.decodeIfPresent(String.self, forKey: .lastUnsupportedAttentionShape)
         activeFallbackReason = try container.decodeIfPresent(String.self, forKey: .activeFallbackReason)
         memoryCounters = try container.decodeIfPresent(RuntimeMemoryCounters.self, forKey: .memoryCounters) ?? RuntimeMemoryCounters()
@@ -718,7 +787,34 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
     public var valueHeadDimension: Int?
     public var routedExperts: Int?
     public var expertsPerToken: Int?
+    public var cacheTopology: ModelCacheTopology
+    public var turboQuantFamilySupport: TurboQuantFamilySupport
     public var createdAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case modelID
+        case displayName
+        case repository
+        case revision
+        case localURL
+        case modalities
+        case verification
+        case state
+        case parameterCount
+        case estimatedBytes
+        case license
+        case modelType
+        case textConfigModelType
+        case processorClass
+        case keyHeadDimension
+        case valueHeadDimension
+        case routedExperts
+        case expertsPerToken
+        case cacheTopology
+        case turboQuantFamilySupport
+        case createdAt
+    }
 
     public init(
         id: UUID = UUID(),
@@ -740,6 +836,8 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
         valueHeadDimension: Int? = nil,
         routedExperts: Int? = nil,
         expertsPerToken: Int? = nil,
+        cacheTopology: ModelCacheTopology = .standardAttention,
+        turboQuantFamilySupport: TurboQuantFamilySupport = .attentionKVFull,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -761,7 +859,35 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
         self.valueHeadDimension = valueHeadDimension
         self.routedExperts = routedExperts
         self.expertsPerToken = expertsPerToken
+        self.cacheTopology = cacheTopology
+        self.turboQuantFamilySupport = turboQuantFamilySupport
         self.createdAt = createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        modelID = try container.decode(ModelID.self, forKey: .modelID)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        repository = try container.decode(String.self, forKey: .repository)
+        revision = try container.decodeIfPresent(String.self, forKey: .revision)
+        localURL = try container.decodeIfPresent(URL.self, forKey: .localURL)
+        modalities = try container.decodeIfPresent(Set<ModelModality>.self, forKey: .modalities) ?? [.text]
+        verification = try container.decodeIfPresent(ModelVerificationState.self, forKey: .verification) ?? .installable
+        state = try container.decodeIfPresent(ModelInstallState.self, forKey: .state) ?? .remote
+        parameterCount = try container.decodeIfPresent(Int64.self, forKey: .parameterCount)
+        estimatedBytes = try container.decodeIfPresent(Int64.self, forKey: .estimatedBytes)
+        license = try container.decodeIfPresent(String.self, forKey: .license)
+        modelType = try container.decodeIfPresent(String.self, forKey: .modelType)
+        textConfigModelType = try container.decodeIfPresent(String.self, forKey: .textConfigModelType)
+        processorClass = try container.decodeIfPresent(String.self, forKey: .processorClass)
+        keyHeadDimension = try container.decodeIfPresent(Int.self, forKey: .keyHeadDimension)
+        valueHeadDimension = try container.decodeIfPresent(Int.self, forKey: .valueHeadDimension)
+        routedExperts = try container.decodeIfPresent(Int.self, forKey: .routedExperts)
+        expertsPerToken = try container.decodeIfPresent(Int.self, forKey: .expertsPerToken)
+        cacheTopology = try container.decodeIfPresent(ModelCacheTopology.self, forKey: .cacheTopology) ?? .standardAttention
+        turboQuantFamilySupport = try container.decodeIfPresent(TurboQuantFamilySupport.self, forKey: .turboQuantFamilySupport) ?? .attentionKVFull
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 }
 
@@ -937,7 +1063,7 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
         } else {
             pressureReason = .none
         }
-        let downshift = criticalThermal || thinThermal || lowMemory
+        let downshift = criticalThermal || thinThermal
 
         if criticalThermal {
             profile.recommendedContextTokens = min(profile.recommendedContextTokens, 4096)
@@ -1249,7 +1375,7 @@ public struct LocalRuntimeSafetyAssessment: Hashable, Codable, Sendable {
 }
 
 public enum LocalRuntimeSafetyPolicy {
-    public static let minimumAvailableMemoryBytes: Int64 = 600_000_000
+    public static let minimumAvailableMemoryBytes: Int64 = 900_000_000
     public static let constrainedAvailableMemoryBytes: Int64 = 2_000_000_000
 
     public static func assess(snapshot: RuntimeMemorySnapshot) -> LocalRuntimeSafetyAssessment {

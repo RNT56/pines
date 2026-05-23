@@ -462,7 +462,9 @@ struct ModelLifecycleService: Sendable {
             keyHeadDimension: result.keyHeadDimension,
             valueHeadDimension: result.valueHeadDimension,
             routedExperts: result.routedExperts,
-            expertsPerToken: result.expertsPerToken
+            expertsPerToken: result.expertsPerToken,
+            cacheTopology: result.cacheTopology,
+            turboQuantFamilySupport: result.turboQuantFamilySupport
         )
         try await installRepository.upsertInstall(install)
 
@@ -836,6 +838,14 @@ struct ModelLifecycleService: Sendable {
         set(\.routedExperts, result.routedExperts)
         set(\.expertsPerToken, result.expertsPerToken)
         set(\.license, result.license)
+        if install.cacheTopology != result.cacheTopology {
+            install.cacheTopology = result.cacheTopology
+            changed = true
+        }
+        if install.turboQuantFamilySupport != result.turboQuantFamilySupport {
+            install.turboQuantFamilySupport = result.turboQuantFamilySupport
+            changed = true
+        }
 
         return changed
     }

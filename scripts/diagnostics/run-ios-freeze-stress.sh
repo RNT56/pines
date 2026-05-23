@@ -147,6 +147,7 @@ read_status_field() {
   fi
   python3 - "$status_file" "$field" "$run_id" <<'PY'
 import json
+import os
 import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -211,6 +212,7 @@ else
 import os
 import selectors
 import signal
+import shlex
 import subprocess
 import sys
 import time
@@ -227,6 +229,9 @@ command = [
     "-allowProvisioningUpdates",
     "build",
 ]
+extra_build_settings = os.environ.get("PINES_STRESS_XCODEBUILD_SETTINGS", "").strip()
+if extra_build_settings:
+    command.extend(shlex.split(extra_build_settings))
 
 deadline = time.monotonic() + timeout_seconds
 timed_out = False
@@ -315,6 +320,7 @@ launch_environment="$(
     "$context_high_ratio" \
     "$context_reserve_tokens" <<'PY'
 import json
+import os
 import sys
 
 (
@@ -345,7 +351,10 @@ environment = {
     "PINES_STRESS_CONTEXT_STEP_TOKENS": context_step_tokens,
     "PINES_STRESS_CONTEXT_HIGH_RATIO": context_high_ratio,
     "PINES_STRESS_CONTEXT_RESERVE_TOKENS": context_reserve_tokens,
+    "PINES_STRESS_ALLOW_PRESSURE_RECOVERY": os.environ.get("PINES_STRESS_ALLOW_PRESSURE_RECOVERY", "0"),
 }
+if os.environ.get("PINES_STRESS_MODEL_ID"):
+    environment["PINES_STRESS_MODEL_ID"] = os.environ["PINES_STRESS_MODEL_ID"]
 if context_max_tokens:
     environment["PINES_STRESS_CONTEXT_MAX_TOKENS"] = context_max_tokens
 if context_target_tokens:
