@@ -152,6 +152,9 @@ public struct ModelPreflightClassifier: Sendable {
            let explicit = positiveInt(textConfig["head_dim"]) {
             return explicit
         }
+        if let runtimeDefault = runtimeDefaultHeadDimension(from: config, modelType: modelType) {
+            return runtimeDefault
+        }
         if let modelType, modelTypesWithNonInferredHeadDimension.contains(modelType) {
             return nil
         }
@@ -163,6 +166,23 @@ public struct ModelPreflightClassifier: Sendable {
         "gemma3", "gemma3_text", "gemma3n", "gemma3n_text",
         "gemma4", "gemma4_text", "gemma4_assistant",
     ]
+
+    private static func runtimeDefaultHeadDimension(from config: [String: Any], modelType: String?) -> Int? {
+        let textConfig = config["text_config"] as? [String: Any]
+        let modelTypes = [
+            modelType,
+            config["model_type"] as? String,
+            textConfig?["model_type"] as? String,
+        ].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+
+        if modelTypes.contains(where: { $0 == "gemma3" || $0 == "gemma3_text" }) {
+            return 256
+        }
+        if modelTypes.contains(where: { $0 == "gemma4" || $0 == "gemma4_text" || $0 == "gemma4_assistant" }) {
+            return 256
+        }
+        return nil
+    }
 
     private static func inferredHeadDimension(from config: [String: Any]) -> Int? {
         guard let hiddenSize = positiveInt(config["hidden_size"]),

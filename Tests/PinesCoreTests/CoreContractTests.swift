@@ -3044,23 +3044,41 @@ struct CoreContractTests {
     }
 
     @Test
-    func preflightDoesNotInferGemmaHeadDimensionFromHiddenSizeWhenConfigOmitsHeadDim() throws {
-        let input = ModelPreflightInput(
-            repository: "mlx-community/gemma-3-12b-it-4bit",
-            configJSON: #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":3840,"num_attention_heads":16}}"#.data(using: .utf8),
-            processorConfigJSON: #"{"processor_class":"Gemma3Processor"}"#.data(using: .utf8),
-            files: [
-                ModelFileInfo(path: "model.safetensors"),
-                ModelFileInfo(path: "tokenizer.json"),
-                ModelFileInfo(path: "processor_config.json"),
-            ]
-        )
+    func preflightUsesGemmaRuntimeDefaultHeadDimensionWhenConfigOmitsHeadDim() throws {
+        let classifier = ModelPreflightClassifier()
+        let examples: [(String, String)] = [
+            (
+                "mlx-community/gemma-3-4b-it-4bit",
+                #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":2560,"num_attention_heads":8}}"#
+            ),
+            (
+                "mlx-community/gemma-3-text-4b-it-4bit",
+                #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":2560,"num_attention_heads":8,"num_key_value_heads":4}}"#
+            ),
+            (
+                "mlx-community/gemma-3-12b-it-4bit",
+                #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":3840,"num_attention_heads":16,"num_key_value_heads":8}}"#
+            ),
+        ]
 
-        let result = ModelPreflightClassifier().classify(input)
+        for (repository, configJSON) in examples {
+            let result = classifier.classify(
+                ModelPreflightInput(
+                    repository: repository,
+                    configJSON: Data(configJSON.utf8),
+                    processorConfigJSON: #"{"processor_class":"Gemma3Processor"}"#.data(using: .utf8),
+                    files: [
+                        ModelFileInfo(path: "model.safetensors"),
+                        ModelFileInfo(path: "tokenizer.json"),
+                        ModelFileInfo(path: "processor_config.json"),
+                    ]
+                )
+            )
 
-        #expect(result.verification == .installable)
-        #expect(result.keyHeadDimension == nil)
-        #expect(result.valueHeadDimension == nil)
+            #expect(result.verification == .installable)
+            #expect(result.keyHeadDimension == 256)
+            #expect(result.valueHeadDimension == 256)
+        }
     }
 
     @Test
@@ -4033,6 +4051,22 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
 private var gemmaTurboQuantProfileCases: [GemmaTurboQuantProfileCase] {
         [
             GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-1.1-2b-it-4bit",
+                displayName: "Gemma 1.1 2B IT 4-bit",
+                modelType: "gemma",
+                parameterCount: 2_000_000_000,
+                headDimension: 256,
+                modelBytes: 1_700_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-1.1-7b-it-4bit",
+                displayName: "Gemma 1.1 7B IT 4-bit",
+                modelType: "gemma",
+                parameterCount: 7_000_000_000,
+                headDimension: 256,
+                modelBytes: 4_500_000_000
+            ),
+            GemmaTurboQuantProfileCase(
                 repository: "mlx-community/gemma-2-9b-it-4bit",
                 displayName: "Gemma 2 9B IT 4-bit",
                 modelType: "gemma2",
@@ -4075,12 +4109,34 @@ private var gemmaTurboQuantProfileCases: [GemmaTurboQuantProfileCase] {
                 processorClass: "Gemma3Processor"
             ),
             GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-4b-it-4bit",
+                displayName: "Gemma 3 4B IT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 4_000_000_000,
+                headDimension: 256,
+                modelBytes: 2_900_000_000,
+                configJSONOverride: Data(#"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":2560,"num_attention_heads":8,"num_key_value_heads":4}}"#.utf8),
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
                 repository: "mlx-community/gemma-3-12b-it-qat-4bit",
                 displayName: "Gemma 3 12B IT QAT 4-bit",
                 modelType: "gemma3",
                 parameterCount: 12_000_000_000,
                 headDimension: 256,
                 modelBytes: 7_800_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-12b-it-4bit",
+                displayName: "Gemma 3 12B IT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 12_000_000_000,
+                headDimension: 256,
+                modelBytes: 7_800_000_000,
+                configJSONOverride: Data(#"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":3840,"num_attention_heads":16,"num_key_value_heads":8}}"#.utf8),
                 modalities: [.text, .vision],
                 processorClass: "Gemma3Processor"
             ),
@@ -4164,6 +4220,7 @@ private struct GemmaTurboQuantProfileCase {
         var parameterCount: Int64
         var headDimension: Int
         var modelBytes: Int64
+        var configJSONOverride: Data?
         var modalities: Set<ModelModality> = [.text]
         var processorClass: String?
 
@@ -4172,7 +4229,7 @@ private struct GemmaTurboQuantProfileCase {
         }
 
         var configJSON: Data {
-            Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension)}"#.utf8)
+            configJSONOverride ?? Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension)}"#.utf8)
         }
 
         var tokenizerConfigJSON: Data {
