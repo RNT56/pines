@@ -11,7 +11,7 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
   - `RNT56/mlx-swift`: `8f0718404a323698c7b5730f2de3af2b5e21f854`
-  - `RNT56/mlx-swift-lm`: `aa36f6da37be95d9ce31e7d37943b87b2e9f82a9`
+  - `RNT56/mlx-swift-lm`: `c596b40cf3ac831f26006ee046dbabbb580b7c3b`
   - Nested `mlx` inside `RNT56/mlx-swift`: `8f13e02fa85252f2a569a43c6759f07490b816a5`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `fff19671eed2e556bdf4552328a1791a8f37b651`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, a tiled online fused decode path, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
