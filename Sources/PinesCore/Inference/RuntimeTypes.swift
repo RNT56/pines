@@ -713,6 +713,8 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
     public var license: String?
     public var modelType: String?
     public var processorClass: String?
+    public var keyHeadDimension: Int?
+    public var valueHeadDimension: Int?
     public var createdAt: Date
 
     public init(
@@ -730,6 +732,8 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
         license: String? = nil,
         modelType: String? = nil,
         processorClass: String? = nil,
+        keyHeadDimension: Int? = nil,
+        valueHeadDimension: Int? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -746,6 +750,8 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
         self.license = license
         self.modelType = modelType
         self.processorClass = processorClass
+        self.keyHeadDimension = keyHeadDimension
+        self.valueHeadDimension = valueHeadDimension
         self.createdAt = createdAt
     }
 }

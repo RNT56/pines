@@ -319,7 +319,17 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(stress.contains("settledLastAssistantMessage"))
         XCTAssertTrue(stress.contains("Recovered from memory-pressure cancellation"))
         XCTAssertTrue(diagnostics.contains("PINES_STRESS_RECOVERY_COOLDOWN_SECONDS"))
+        XCTAssertTrue(diagnostics.contains("PINES_STRESS_CONTEXT_MODE"))
+        XCTAssertTrue(diagnostics.contains("case suite"))
+        XCTAssertTrue(diagnostics.contains("requiresRuntimeContextWindow"))
+        XCTAssertTrue(stress.contains("context_plan_preview"))
+        XCTAssertTrue(stress.contains("runtimeMaxContextTokens"))
+        XCTAssertTrue(stress.contains("targetContextTokens"))
         XCTAssertTrue(script.contains("PINES_STRESS_RECOVERY_COOLDOWN_SECONDS"))
+        XCTAssertTrue(script.contains("PINES_STRESS_CONTEXT_MODE"))
+        XCTAssertTrue(script.contains("off|sweep|high|max|suite"))
+        XCTAssertTrue(script.contains("PINES_STRESS_CONTEXT_TARGET_TOKENS"))
+        XCTAssertTrue(script.contains("PINES_STRESS_CONTEXT_RESERVE_TOKENS"))
     }
 
     func testArtifactsWorkspaceDefinesFocusedModesAndConfirmations() throws {

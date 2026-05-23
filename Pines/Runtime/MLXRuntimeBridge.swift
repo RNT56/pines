@@ -356,6 +356,11 @@ struct MLXRuntimeBridge: Sendable {
         for identifier in identifiers {
             guard let profile = registry.profile(
                 for: identifier,
+                modelType: install.modelType,
+                modality: Self.turboQuantModality(for: install),
+                parameterCountB: Self.parameterCountBillionScale(for: install),
+                keyHeadDimension: install.keyHeadDimension,
+                valueHeadDimension: install.valueHeadDimension,
                 contextLength: contextLength
             ) else { continue }
             let profilePolicy = Self.coreTurboQuantOptimizationPolicy(from: profile.optimizationPolicy)
@@ -500,12 +505,25 @@ struct MLXRuntimeBridge: Sendable {
     #endif
 
     #if canImport(MLXLMCommon)
+    private static func turboQuantModality(
+        for install: ModelInstall
+    ) -> MLXLMCommon.TurboQuantModelModality {
+        if install.modalities.contains(.vision) {
+            return .visionText
+        }
+        return .text
+    }
+
     private static func coreTurboQuantOptimizationPolicy(
         from policy: MLXLMCommon.TurboQuantOptimizationPolicy
     ) -> PinesCore.TurboQuantOptimizationPolicy {
         PinesCore.TurboQuantOptimizationPolicy(rawValue: policy.rawValue) ?? .auto
     }
     #endif
+
+    private static func parameterCountBillionScale(for install: ModelInstall) -> Double? {
+        install.parameterCount.map { Double($0) / 1_000_000_000 }
+    }
 
     func load(_ install: ModelInstall, profile: RuntimeProfile? = nil) async throws {
         await supervisor.beginLoading(modelID: install.modelID)

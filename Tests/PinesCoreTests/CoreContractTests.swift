@@ -2117,10 +2117,11 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 16)
+        #expect(PinesDatabaseSchema.currentVersion == 17)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
         let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
         let projectSpacesMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 16 })
+        let runtimeMetadataMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 17 })
         let sql = openAIMigration.sql.joined(separator: "\n")
 
         for table in [
@@ -2171,6 +2172,11 @@ struct CoreContractTests {
         #expect(projectSQL.contains("CREATE TABLE IF NOT EXISTS projects"))
         #expect(projectSQL.contains("ALTER TABLE conversations ADD COLUMN project_id"))
         #expect(projectSQL.contains("ALTER TABLE vault_documents ADD COLUMN project_id"))
+
+        let runtimeMetadataSQL = runtimeMetadataMigration.sql.joined(separator: "\n")
+        #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN parameter_count"))
+        #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN key_head_dimension"))
+        #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN value_head_dimension"))
     }
 
     @Test
@@ -2881,6 +2887,46 @@ struct CoreContractTests {
 
         #expect(result.verification == .experimental)
         #expect(result.reasons.contains(ModelPreflightClassifier.runtimeCompatibilityGateReason))
+    }
+
+    @Test
+    func preflightPrefersExplicitHeadDimensionMetadata() throws {
+        let explicit = ModelPreflightInput(
+            repository: "mlx-community/Qwen3-0.6B-4bit",
+            configJSON: #"{"model_type":"qwen3","head_dim":128,"hidden_size":2048,"num_attention_heads":32}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ]
+        )
+        let nested = ModelPreflightInput(
+            repository: "mlx-community/Phi-4-mini-instruct-4bit",
+            configJSON: #"{"model_type":"phi3","text_config":{"head_dim":96,"hidden_size":3072,"num_attention_heads":32}}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ]
+        )
+        let inferred = ModelPreflightInput(
+            repository: "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+            configJSON: #"{"model_type":"qwen2","hidden_size":2048,"num_attention_heads":16}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ]
+        )
+
+        let classifier = ModelPreflightClassifier()
+        let explicitResult = classifier.classify(explicit)
+        let nestedResult = classifier.classify(nested)
+        let inferredResult = classifier.classify(inferred)
+
+        #expect(explicitResult.keyHeadDimension == 128)
+        #expect(explicitResult.valueHeadDimension == 128)
+        #expect(nestedResult.keyHeadDimension == 96)
+        #expect(nestedResult.valueHeadDimension == 96)
+        #expect(inferredResult.keyHeadDimension == 128)
+        #expect(inferredResult.valueHeadDimension == 128)
     }
 
     @Test

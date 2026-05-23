@@ -24,6 +24,20 @@ collect_diagnostics_on_failure="${PINES_STRESS_COLLECT_FAILURE_DIAGNOSTICS:-1}"
 sysdiagnose_timeout="${PINES_STRESS_SYSDIAGNOSE_TIMEOUT_SECONDS:-900}"
 skip_install="${PINES_STRESS_SKIP_INSTALL:-1}"
 prompt="${PINES_STRESS_PROMPT:-Continue this local stress chat. Answer with a concise diagnostic paragraph and avoid tool use.}"
+context_mode="${PINES_STRESS_CONTEXT_MODE:-${PINES_STRESS_CONTEXT_TEST:-}}"
+if [ -z "$context_mode" ]; then
+  if [ "${PINES_STRESS_CONTEXT_SWEEP:-0}" = "1" ]; then
+    context_mode="sweep"
+  else
+    context_mode="off"
+  fi
+fi
+context_start_tokens="${PINES_STRESS_CONTEXT_START_TOKENS:-1024}"
+context_step_tokens="${PINES_STRESS_CONTEXT_STEP_TOKENS:-2048}"
+context_max_tokens="${PINES_STRESS_CONTEXT_MAX_TOKENS:-}"
+context_target_tokens="${PINES_STRESS_CONTEXT_TARGET_TOKENS:-}"
+context_high_ratio="${PINES_STRESS_CONTEXT_HIGH_RATIO:-0.75}"
+context_reserve_tokens="${PINES_STRESS_CONTEXT_RESERVE_TOKENS:-1024}"
 
 mkdir -p "$artifacts/logs" "$artifacts/polls" "$artifacts/app-diagnostics"
 
@@ -39,6 +53,11 @@ die() {
 if [ "$configuration" != "Debug" ]; then
   die "PINES_CONFIGURATION must be Debug. The in-app stress harness is compiled out of non-Debug builds."
 fi
+
+case "$context_mode" in
+  off|sweep|high|max|suite) ;;
+  *) die "PINES_STRESS_CONTEXT_MODE must be one of: off, sweep, high, max, suite." ;;
+esac
 
 select_device() {
   local devices_json="$artifacts/devices.json"
@@ -269,12 +288,37 @@ else
 fi
 
 launch_environment="$(
-  python3 - "$run_id" "$iterations" "$iteration_timeout" "$recovery_cooldown" "$prompt" <<'PY'
+  python3 - \
+    "$run_id" \
+    "$iterations" \
+    "$iteration_timeout" \
+    "$recovery_cooldown" \
+    "$prompt" \
+    "$context_mode" \
+    "$context_start_tokens" \
+    "$context_step_tokens" \
+    "$context_max_tokens" \
+    "$context_target_tokens" \
+    "$context_high_ratio" \
+    "$context_reserve_tokens" <<'PY'
 import json
 import sys
 
-run_id, iterations, iteration_timeout, recovery_cooldown, prompt = sys.argv[1:]
-print(json.dumps({
+(
+    run_id,
+    iterations,
+    iteration_timeout,
+    recovery_cooldown,
+    prompt,
+    context_mode,
+    context_start_tokens,
+    context_step_tokens,
+    context_max_tokens,
+    context_target_tokens,
+    context_high_ratio,
+    context_reserve_tokens,
+) = sys.argv[1:]
+environment = {
     "PINES_FREEZE_BREADCRUMBS": "1",
     "PINES_STRESS_MODE": "local-generation",
     "PINES_STRESS_RUN_ID": run_id,
@@ -283,12 +327,22 @@ print(json.dumps({
     "PINES_STRESS_RECOVERY_COOLDOWN_SECONDS": recovery_cooldown,
     "PINES_STRESS_PROMPT": prompt,
     "PINES_STRESS_RESET_BREADCRUMBS": "1",
-}))
+    "PINES_STRESS_CONTEXT_MODE": context_mode,
+    "PINES_STRESS_CONTEXT_START_TOKENS": context_start_tokens,
+    "PINES_STRESS_CONTEXT_STEP_TOKENS": context_step_tokens,
+    "PINES_STRESS_CONTEXT_HIGH_RATIO": context_high_ratio,
+    "PINES_STRESS_CONTEXT_RESERVE_TOKENS": context_reserve_tokens,
+}
+if context_max_tokens:
+    environment["PINES_STRESS_CONTEXT_MAX_TOKENS"] = context_max_tokens
+if context_target_tokens:
+    environment["PINES_STRESS_CONTEXT_TARGET_TOKENS"] = context_target_tokens
+print(json.dumps(environment))
 PY
 )"
 
 launch_json="$artifacts/launch.json"
-log "Launching hidden local-generation stress mode, run $run_id."
+log "Launching hidden local-generation stress mode, run $run_id, context mode $context_mode."
 xcrun devicectl device process launch \
   --device "$device_id" \
   --terminate-existing \

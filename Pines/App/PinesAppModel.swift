@@ -4097,7 +4097,9 @@ final class PinesAppModel: ObservableObject {
                 estimatedBytes: result.estimatedBytes,
                 license: result.license,
                 modelType: result.modelType,
-                processorClass: result.processorClass
+                processorClass: result.processorClass,
+                keyHeadDimension: result.keyHeadDimension,
+                valueHeadDimension: result.valueHeadDimension
             )
             let download = Self.latestDownloadByRepository(modelDownloads)[repository.lowercased()]
             let preview = Self.modelPreview(from: install, runtime: services.mlxRuntime, download: download)

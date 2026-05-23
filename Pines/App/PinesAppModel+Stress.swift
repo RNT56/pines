@@ -14,10 +14,13 @@ extension PinesAppModel {
             metadata: [
                 "mode": configuration.mode,
                 "iterations": String(configuration.iterations),
-                "context_sweep_enabled": String(configuration.contextSweepEnabled),
+                "context_mode": configuration.contextMode.rawValue,
                 "context_sweep_start_tokens": String(configuration.contextSweepStartTokens),
                 "context_sweep_step_tokens": String(configuration.contextSweepStepTokens),
                 "context_sweep_max_tokens": configuration.contextSweepMaxTokens.map(String.init) ?? "runtime",
+                "context_target_tokens": configuration.contextTargetTokens.map(String.init) ?? "auto",
+                "context_high_ratio": String(configuration.contextHighWatermarkRatio),
+                "context_reserve_tokens": String(configuration.contextReserveTokens),
             ],
             enabled: true
         )
@@ -78,12 +81,27 @@ extension PinesAppModel {
         await selectModel(option, for: conversationID, services: services)
         let stressRuntimeProfile = localRuntimeProfile(for: install, settings: nil, services: services)
         let stressRuntimeMaxContextTokens = stressRuntimeProfile.quantization.maxKVSize
+        if configuration.requiresRuntimeContextWindow(), stressRuntimeMaxContextTokens == nil {
+            await failStressRun(
+                configuration,
+                iteration: 0,
+                threadID: conversationID,
+                modelID: install.modelID,
+                message: "Context \(configuration.contextMode.rawValue) stress requires a known runtime context window."
+            )
+            return
+        }
         await FreezeBreadcrumbJournal.shared.record(
             stage: "stress.conversation.ready",
             runID: configuration.runID,
             metadata: [
                 "thread_id": conversationID.uuidString,
                 "model_id": install.modelID.rawValue,
+                "context_mode": configuration.contextMode.rawValue,
+                "context_plan_preview": configuration.contextPlanPreview(
+                    iterations: configuration.iterations,
+                    runtimeMaxContextTokens: stressRuntimeMaxContextTokens
+                ),
                 "runtime_max_context_tokens": stressRuntimeMaxContextTokens.map(String.init) ?? "unknown",
                 "runtime_prefill_step_size": String(stressRuntimeProfile.prefillStepSize),
                 "runtime_pressure_reason": stressRuntimeProfile.quantization.runtimePressureReason.rawValue,
@@ -110,6 +128,8 @@ extension PinesAppModel {
                 iteration: iteration,
                 threadID: conversationID,
                 modelID: install.modelID,
+                runtimeMaxContextTokens: stressRuntimeMaxContextTokens,
+                targetContextTokens: targetContextTokens,
                 message: "Starting local generation iteration \(iteration)."
             )
             await FreezeBreadcrumbJournal.shared.record(
@@ -119,6 +139,8 @@ extension PinesAppModel {
                     "iteration": String(iteration),
                     "thread_id": conversationID.uuidString,
                     "model_id": install.modelID.rawValue,
+                    "context_mode": configuration.contextMode.rawValue,
+                    "runtime_max_context_tokens": stressRuntimeMaxContextTokens.map(String.init) ?? "unknown",
                     "target_context_tokens": targetContextTokens.map(String.init) ?? "short",
                     "prompt_characters": String(prompt.count),
                 ],
@@ -173,6 +195,8 @@ extension PinesAppModel {
                     iteration: iteration,
                     threadID: conversationID,
                     modelID: install.modelID,
+                    runtimeMaxContextTokens: stressRuntimeMaxContextTokens,
+                    targetContextTokens: targetContextTokens,
                     message: "Completed iteration \(iteration) with status \(status?.rawValue ?? "unknown")."
                 )
                 await FreezeBreadcrumbJournal.shared.record(
@@ -180,6 +204,8 @@ extension PinesAppModel {
                     runID: configuration.runID,
                     metadata: [
                         "iteration": String(iteration),
+                        "context_mode": configuration.contextMode.rawValue,
+                        "target_context_tokens": targetContextTokens.map(String.init) ?? "short",
                         "assistant_message_id": lastAssistant?.id.uuidString ?? "none",
                         "assistant_status": status?.rawValue ?? "unknown",
                     ],
@@ -199,6 +225,8 @@ extension PinesAppModel {
                             iteration: iteration,
                             threadID: conversationID,
                             modelID: install.modelID,
+                            runtimeMaxContextTokens: stressRuntimeMaxContextTokens,
+                            targetContextTokens: targetContextTokens,
                             message: recoveryMessage
                         )
                         await FreezeBreadcrumbJournal.shared.record(
@@ -243,12 +271,18 @@ extension PinesAppModel {
             }
         }
 
+        let finalTargetContextTokens = configuration.targetContextTokens(
+            iteration: configuration.iterations,
+            runtimeMaxContextTokens: stressRuntimeMaxContextTokens
+        )
         await writeStressStatus(
             configuration: configuration,
             state: "completed",
             iteration: configuration.iterations,
             threadID: conversationID,
             modelID: install.modelID,
+            runtimeMaxContextTokens: stressRuntimeMaxContextTokens,
+            targetContextTokens: finalTargetContextTokens,
             message: "Completed \(configuration.iterations) local generation stress iterations."
         )
         await FreezeBreadcrumbJournal.shared.record(
@@ -258,6 +292,8 @@ extension PinesAppModel {
                 "iterations": String(configuration.iterations),
                 "thread_id": conversationID.uuidString,
                 "model_id": install.modelID.rawValue,
+                "context_mode": configuration.contextMode.rawValue,
+                "runtime_max_context_tokens": stressRuntimeMaxContextTokens.map(String.init) ?? "unknown",
             ],
             enabled: true
         )
@@ -462,6 +498,8 @@ extension PinesAppModel {
         iteration: Int,
         threadID: UUID? = nil,
         modelID: ModelID? = nil,
+        runtimeMaxContextTokens: Int? = nil,
+        targetContextTokens: Int? = nil,
         message: String?
     ) async {
         await PinesStressStatusWriter.shared.write(
@@ -473,6 +511,9 @@ extension PinesAppModel {
                 iterations: configuration.iterations,
                 threadID: threadID?.uuidString,
                 modelID: modelID?.rawValue,
+                contextMode: configuration.contextMode,
+                runtimeMaxContextTokens: runtimeMaxContextTokens,
+                targetContextTokens: targetContextTokens,
                 message: message,
                 updatedAt: Date()
             )

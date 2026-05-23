@@ -120,10 +120,13 @@ extension GRDBPinesStore {
             modalities: decodeModalities(row["modalities"]),
             verification: ModelVerificationState(rawValue: row["verification"]) ?? .installable,
             state: ModelInstallState(rawValue: row["state"]) ?? .remote,
+            parameterCount: row["parameter_count"] as Int64?,
             estimatedBytes: row["estimated_bytes"] as Int64?,
             license: row["license"] as String?,
             modelType: row["model_type"] as String?,
             processorClass: row["processor_class"] as String?,
+            keyHeadDimension: row["key_head_dimension"] as Int?,
+            valueHeadDimension: row["value_head_dimension"] as Int?,
             createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
         )
     }

@@ -44,15 +44,31 @@ PINES_STRESS_MEMORY_WARNING_EVERY=6 \
 bash scripts/diagnostics/run-ios-freeze-stress.sh
 ```
 
+For physical high/max context boundary testing:
+
+```bash
+PINES_STRESS_CONTEXT_MODE=suite \
+PINES_STRESS_ITERATIONS=4 \
+PINES_STRESS_ITERATION_TIMEOUT_SECONDS=600 \
+PINES_STRESS_TIMEOUT_SECONDS=7200 \
+bash scripts/diagnostics/run-ios-freeze-stress.sh
+```
+
+`suite` runs one short warmup, one high-context iteration, then max-context iterations against the runtime-selected local context window. Use `high` to only test the high-watermark target, `max` to go directly to the max target, or `sweep` to grow linearly over many iterations.
+
 - `PINES_DEVICE_ID`: device identifier, UDID, serial number, or name accepted by `devicectl`.
 - `PINES_STRESS_ITERATIONS`: local chat continuations to run. Default: `50`.
 - `PINES_STRESS_BUILD_TIMEOUT_SECONDS`: maximum time allowed for the device Debug build before the harness fails. Default: `1800`.
 - `PINES_STRESS_ITERATION_TIMEOUT_SECONDS`: per-generation timeout. Default: `180`.
 - `PINES_STRESS_RECOVERY_COOLDOWN_SECONDS`: cooldown after recoverable local memory pressure before continuing stress. Default: `15`.
-- `PINES_STRESS_CONTEXT_SWEEP`: set to `1` to grow each prompt toward the selected runtime context window and find the practical on-device boundary.
+- `PINES_STRESS_CONTEXT_MODE`: one of `off`, `sweep`, `high`, `max`, or `suite`. Default: `off`, unless legacy `PINES_STRESS_CONTEXT_SWEEP=1` is set.
+- `PINES_STRESS_CONTEXT_SWEEP`: legacy alias that enables `sweep` mode when `PINES_STRESS_CONTEXT_MODE` is not set.
 - `PINES_STRESS_CONTEXT_START_TOKENS`: approximate first prompt size when context sweep is enabled. Default: `1024`.
 - `PINES_STRESS_CONTEXT_STEP_TOKENS`: approximate token increase per iteration when context sweep is enabled. Default: `2048`.
 - `PINES_STRESS_CONTEXT_MAX_TOKENS`: optional sweep ceiling. Default: the runtime-selected local context window minus a small completion reserve.
+- `PINES_STRESS_CONTEXT_TARGET_TOKENS`: explicit target for `high`, `max`, or `suite` when you want to override the runtime-selected window.
+- `PINES_STRESS_CONTEXT_HIGH_RATIO`: high-context target as a fraction of the max target. Default: `0.75`.
+- `PINES_STRESS_CONTEXT_RESERVE_TOKENS`: tokens reserved below the runtime max context window for completion/template overhead in `high`, `max`, and `suite`. Default: `1024`.
 - `PINES_STRESS_TIMEOUT_SECONDS`: total host-side timeout. Default: `7200`.
 - `PINES_STRESS_POLL_SECONDS`: poll interval. Default: `10`.
 - `PINES_STRESS_MEMORY_WARNING_EVERY`: send a memory warning every N polls. Default: `0`.
@@ -67,8 +83,8 @@ bash scripts/diagnostics/run-ios-freeze-stress.sh
 Primary files:
 
 - `summary.json`: final host-side result and last app stress status.
-- `app-diagnostics/pines-stress-status.json`: in-app state, iteration, model ID, and message.
-- `app-diagnostics/pines-freeze-breadcrumbs.jsonl`: bounded event log from app launch, model loading, exact token preflight, selected context window, runtime pressure reason, Low Power state, TurboQuant profile source, token streaming, completion, cancellation, and unload.
+- `app-diagnostics/pines-stress-status.json`: in-app state, iteration, model ID, context mode, runtime max context, target context, and message.
+- `app-diagnostics/pines-freeze-breadcrumbs.jsonl`: bounded event log from app launch, model loading, context test plan, exact token preflight, selected context window, runtime pressure reason, Low Power state, TurboQuant profile source, token streaming, completion, cancellation, and unload.
 - `devicectl-diagnose.zip`: host and CoreDevice diagnostics after failure.
 - `sysdiagnose/`: device sysdiagnose when collection succeeds.
 

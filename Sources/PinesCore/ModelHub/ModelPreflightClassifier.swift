@@ -20,6 +20,7 @@ public struct ModelPreflightClassifier: Sendable {
         let processor = input.processorConfigJSON.flatMap(Self.decodeJSONObject)
         let modelType = config?["model_type"] as? String ?? inferredModelType(from: input.tags)
         let processorClass = processor?["processor_class"] as? String
+        let headDimension = Self.headDimension(from: config)
         let parameterCount = ModelDiscoveryResourcePolicy.inferredParameterCount(
             repository: input.repository,
             tags: input.tags
@@ -126,6 +127,8 @@ public struct ModelPreflightClassifier: Sendable {
             modelType: modelType,
             processorClass: processorClass,
             parameterCount: parameterCount,
+            keyHeadDimension: headDimension,
+            valueHeadDimension: headDimension,
             estimatedBytes: size,
             reasons: reasons,
             license: input.license
@@ -138,6 +141,46 @@ public struct ModelPreflightClassifier: Sendable {
 
     private static func filename(_ path: String) -> String {
         path.split(separator: "/").last.map { String($0).lowercased() } ?? path.lowercased()
+    }
+
+    private static func headDimension(from config: [String: Any]?) -> Int? {
+        guard let config else { return nil }
+        if let explicit = positiveInt(config["head_dim"]) {
+            return explicit
+        }
+        if let textConfig = config["text_config"] as? [String: Any],
+           let explicit = positiveInt(textConfig["head_dim"]) {
+            return explicit
+        }
+        return inferredHeadDimension(from: config)
+            ?? (config["text_config"] as? [String: Any]).flatMap(inferredHeadDimension(from:))
+    }
+
+    private static func inferredHeadDimension(from config: [String: Any]) -> Int? {
+        guard let hiddenSize = positiveInt(config["hidden_size"]),
+              let attentionHeads = positiveInt(config["num_attention_heads"]),
+              hiddenSize.isMultiple(of: attentionHeads)
+        else {
+            return nil
+        }
+        return hiddenSize / attentionHeads
+    }
+
+    private static func positiveInt(_ value: Any?) -> Int? {
+        switch value {
+        case let int as Int where int > 0:
+            return int
+        case let int64 as Int64 where int64 > 0 && int64 <= Int64(Int.max):
+            return Int(int64)
+        case let double as Double where double > 0 && double.rounded(.towardZero) == double && double <= Double(Int.max):
+            return Int(double)
+        case let string as String:
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let int = Int(trimmed), int > 0 else { return nil }
+            return int
+        default:
+            return nil
+        }
     }
 
     private func inferredModelType(from tags: [String]) -> String? {

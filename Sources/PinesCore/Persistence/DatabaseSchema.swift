@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 16
+    public static let currentVersion = 17
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -1067,6 +1067,11 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(deleted_at, updated_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id, updated_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_vault_documents_project ON vault_documents(project_id, updated_at DESC);",
+        ]),
+        DatabaseMigration(version: 17, name: "model-install-runtime-metadata", sql: [
+            "ALTER TABLE model_installs ADD COLUMN parameter_count INTEGER;",
+            "ALTER TABLE model_installs ADD COLUMN key_head_dimension INTEGER;",
+            "ALTER TABLE model_installs ADD COLUMN value_head_dimension INTEGER;",
         ]),
     ]
 }

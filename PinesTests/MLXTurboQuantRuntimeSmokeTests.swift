@@ -38,6 +38,8 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         let profile = try XCTUnwrap(
             MLXLMCommon.TurboQuantProfileRegistry.bundled.profile(
                 for: "mlx-community/Qwen3-4B-4bit",
+                modelType: "qwen3",
+                parameterCountB: 4,
                 keyHeadDimension: 128,
                 valueHeadDimension: 128,
                 contextLength: 4096
@@ -50,6 +52,8 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
 
         let parameters = MLXLMCommon.GenerateParameters(
             turboQuantModelID: "mlx-community/Qwen3-4B-4bit",
+            modelType: "qwen3",
+            parameterCountB: 4,
             keyHeadDimension: 128,
             valueHeadDimension: 128,
             contextLength: 4096
@@ -57,6 +61,62 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         XCTAssertEqual(parameters.kvCacheStrategy, .turboQuant)
         XCTAssertEqual(parameters.turboQuantPreset, .turbo4v2)
         XCTAssertEqual(parameters.turboQuantValueBits, 4)
+    }
+
+    func testBundledTurboQuantProfileRegistryMatchesExpandedSmallModels() throws {
+        let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
+
+        let qwen06 = try XCTUnwrap(registry.profile(
+            for: "mlx-community/Qwen3-0.6B-4bit",
+            modelType: "qwen3",
+            parameterCountB: 0.6,
+            keyHeadDimension: 128,
+            valueHeadDimension: 128
+        ))
+        XCTAssertEqual(qwen06.id, "qwen3-0.6b")
+
+        let phi4Mini = try XCTUnwrap(registry.profile(
+            for: "mlx-community/Phi-4-mini-instruct-4bit",
+            modelType: "phi3",
+            keyHeadDimension: 128,
+            valueHeadDimension: 128
+        ))
+        XCTAssertEqual(phi4Mini.id, "phi-4-mini")
+
+        let qwen25Coder = try XCTUnwrap(registry.profile(
+            for: "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+            modelType: "qwen2",
+            parameterCountB: 3,
+            keyHeadDimension: 128,
+            valueHeadDimension: 128
+        ))
+        XCTAssertEqual(qwen25Coder.id, "qwen2.5-small")
+
+        let smolLM = try XCTUnwrap(registry.profile(
+            for: "mlx-community/SmolLM2-135M-Instruct",
+            modelType: "llama",
+            parameterCountB: 0.135,
+            keyHeadDimension: 64,
+            valueHeadDimension: 64
+        ))
+        XCTAssertEqual(smolLM.id, "smollm-small")
+    }
+
+    func testBundledTurboQuantProfileRegistryDoesNotMatchKnownVLMTextProfiles() throws {
+        let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
+
+        XCTAssertNil(registry.profile(
+            for: "mlx-community/llava-llama-3-8b-v1_1-4bit",
+            modality: .visionText,
+            keyHeadDimension: 128,
+            valueHeadDimension: 128
+        ))
+        XCTAssertNil(registry.profile(
+            for: "mlx-community/Bunny-Llama-3-8B-V-4bit",
+            modality: .visionText,
+            keyHeadDimension: 128,
+            valueHeadDimension: 128
+        ))
     }
 
     func testTurboQuantCacheUsesFixedHighBitSeedOnDevice() throws {

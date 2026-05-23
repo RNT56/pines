@@ -191,6 +191,8 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
     public var modelType: String?
     public var processorClass: String?
     public var parameterCount: Int64?
+    public var keyHeadDimension: Int?
+    public var valueHeadDimension: Int?
     public var estimatedBytes: Int64
     public var reasons: [String]
     public var license: String?
@@ -202,6 +204,8 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
         modelType: String? = nil,
         processorClass: String? = nil,
         parameterCount: Int64? = nil,
+        keyHeadDimension: Int? = nil,
+        valueHeadDimension: Int? = nil,
         estimatedBytes: Int64 = 0,
         reasons: [String] = [],
         license: String? = nil
@@ -212,6 +216,8 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
         self.modelType = modelType
         self.processorClass = processorClass
         self.parameterCount = parameterCount
+        self.keyHeadDimension = keyHeadDimension
+        self.valueHeadDimension = valueHeadDimension
         self.estimatedBytes = estimatedBytes
         self.reasons = reasons
         self.license = license
