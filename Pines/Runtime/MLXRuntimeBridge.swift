@@ -1683,6 +1683,11 @@ private actor MLXRuntimeState {
         if let install,
            let registryProfile = MLXLMCommon.TurboQuantProfileRegistry.bundled.profile(
                for: install.repository,
+               modelType: install.modelType,
+               modality: install.modalities.contains(.vision) ? .visionText : .text,
+               parameterCountB: install.parameterCount.map { Double($0) / 1_000_000_000 },
+               keyHeadDimension: install.keyHeadDimension,
+               valueHeadDimension: install.valueHeadDimension,
                contextLength: profile.quantization.maxKVSize
            ) {
             return registryProfile.valueBits

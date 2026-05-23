@@ -258,6 +258,69 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(runtime.contains("ModelLifecycleService.installedModelDirectory(for: install)"))
     }
 
+    func testTurboQuantProfileLookupCarriesModelMetadataAndUsesConservativeFallback() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let runtime = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Runtime/MLXRuntimeBridge.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(runtime.contains("modelType: install.modelType"))
+        XCTAssertTrue(runtime.contains("modality: Self.turboQuantModality(for: install)"))
+        XCTAssertTrue(runtime.contains("parameterCountB: Self.parameterCountBillionScale(for: install)"))
+        XCTAssertTrue(runtime.contains("keyHeadDimension: install.keyHeadDimension"))
+        XCTAssertTrue(runtime.contains("valueHeadDimension: install.valueHeadDimension"))
+        XCTAssertTrue(runtime.contains("preset: .conservativeFallback"))
+        XCTAssertTrue(runtime.contains("profileSource: \"generic_conservative_fallback\""))
+
+        guard let valueBitsLookup = runtime.range(of: "private static func resolvedTurboQuantValueBits") else {
+            XCTFail("Missing TurboQuant value-bit resolver.")
+            return
+        }
+        let resolverBody = runtime[valueBitsLookup.lowerBound...].prefix(1200)
+        XCTAssertTrue(resolverBody.contains("modelType: install.modelType"))
+        XCTAssertTrue(resolverBody.contains("modality: install.modalities.contains(.vision) ? .visionText : .text"))
+        XCTAssertTrue(resolverBody.contains("parameterCountB: install.parameterCount.map { Double($0) / 1_000_000_000 }"))
+        XCTAssertTrue(resolverBody.contains("keyHeadDimension: install.keyHeadDimension"))
+        XCTAssertTrue(resolverBody.contains("valueHeadDimension: install.valueHeadDimension"))
+    }
+
+    func testModelInstallPersistenceCarriesHeadDimensionMetadata() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let schema = try String(
+            contentsOf: repoRoot.appendingPathComponent("Sources/PinesCore/Persistence/DatabaseSchema.swift"),
+            encoding: .utf8
+        )
+        let store = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Persistence/GRDBPinesStore.swift"),
+            encoding: .utf8
+        )
+        let mapping = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Persistence/GRDBPinesStore+Mapping.swift"),
+            encoding: .utf8
+        )
+        let lifecycle = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Runtime/ModelLifecycleService.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(schema.contains("ALTER TABLE model_installs ADD COLUMN key_head_dimension INTEGER;"))
+        XCTAssertTrue(schema.contains("ALTER TABLE model_installs ADD COLUMN value_head_dimension INTEGER;"))
+        XCTAssertTrue(store.contains("key_head_dimension, value_head_dimension"))
+        XCTAssertTrue(store.contains("key_head_dimension = excluded.key_head_dimension"))
+        XCTAssertTrue(store.contains("value_head_dimension = excluded.value_head_dimension"))
+        XCTAssertTrue(store.contains("install.keyHeadDimension"))
+        XCTAssertTrue(store.contains("install.valueHeadDimension"))
+        XCTAssertTrue(mapping.contains("keyHeadDimension: row[\"key_head_dimension\"] as Int?"))
+        XCTAssertTrue(mapping.contains("valueHeadDimension: row[\"value_head_dimension\"] as Int?"))
+        XCTAssertTrue(lifecycle.contains("keyHeadDimension: result.keyHeadDimension"))
+        XCTAssertTrue(lifecycle.contains("valueHeadDimension: result.valueHeadDimension"))
+    }
+
     func testMemoryPressureCancellationIsTypedAndRecoverableInStressHarness() throws {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
