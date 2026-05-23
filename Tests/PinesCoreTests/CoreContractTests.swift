@@ -3221,11 +3221,20 @@ struct CoreContractTests {
                 ModelFileInfo(path: "tokenizer.json"),
             ]
         )
+        let legacyLlama = ModelPreflightInput(
+            repository: "mlx-community/Llama-2-7b-chat-mlx",
+            configJSON: #"{"model_type":"llama","dim":4096,"n_heads":32}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ]
+        )
 
         let classifier = ModelPreflightClassifier()
         let explicitResult = classifier.classify(explicit)
         let nestedResult = classifier.classify(nested)
         let inferredResult = classifier.classify(inferred)
+        let legacyLlamaResult = classifier.classify(legacyLlama)
 
         #expect(explicitResult.keyHeadDimension == 128)
         #expect(explicitResult.valueHeadDimension == 128)
@@ -3233,6 +3242,42 @@ struct CoreContractTests {
         #expect(nestedResult.valueHeadDimension == 96)
         #expect(inferredResult.keyHeadDimension == 128)
         #expect(inferredResult.valueHeadDimension == 128)
+        #expect(legacyLlamaResult.keyHeadDimension == 128)
+        #expect(legacyLlamaResult.valueHeadDimension == 128)
+    }
+
+    @Test
+    func preflightInfersDenseTransformerParameterCountFromConfigWhenNameOmitsSize() throws {
+        let config = """
+        {
+          "model_type": "mistral",
+          "hidden_size": 4096,
+          "intermediate_size": 14336,
+          "num_attention_heads": 32,
+          "num_key_value_heads": 8,
+          "num_hidden_layers": 32,
+          "vocab_size": 32000,
+          "tie_word_embeddings": false
+        }
+        """.data(using: .utf8)
+        let input = ModelPreflightInput(
+            repository: "mlx-community/mistral-ft-optimized-1227-4bit-mlx",
+            configJSON: config,
+            files: [
+                ModelFileInfo(path: "model.safetensors", size: 3_900_000_000),
+                ModelFileInfo(path: "tokenizer.json", size: 2_000_000),
+            ],
+            tags: ["mlx", "mistral"]
+        )
+
+        let result = ModelPreflightClassifier().classify(input)
+        let resourceDecision = ModelDiscoveryResourcePolicy(maxDownloadBytes: 12_000_000_000)
+            .evaluate(input, modalities: result.modalities)
+
+        #expect(result.parameterCount == 7_241_465_856)
+        #expect(result.keyHeadDimension == 128)
+        #expect(result.valueHeadDimension == 128)
+        #expect(resourceDecision.inferredParameterCount == 7_241_465_856)
     }
 
     @Test
@@ -3347,6 +3392,21 @@ struct CoreContractTests {
             ) == 1_700_000_000
         )
         #expect(
+            ModelDiscoveryResourcePolicy.inferredParameterCount(
+                repository: "mlx-community/AMD-Llama-135m-4bit",
+                tags: [
+                    "dataset:cerebras/SlimPajama-627B",
+                    "base_model:amd/AMD-Llama-135m",
+                ]
+            ) == 135_000_000
+        )
+        #expect(
+            ModelDiscoveryResourcePolicy.inferredParameterCount(
+                repository: "mlx-community/Llama-3.1-SuperNova-Lite-4bit",
+                tags: ["base_model:meta-llama/Llama-3.1-8B-Instruct"]
+            ) == 8_000_000_000
+        )
+        #expect(
             ModelDiscoveryResourcePolicy.inferredWeightBits(
                 repository: "mlx-community/Qwen3-4B-Instruct-2507-mxfp8",
                 tags: []
@@ -3405,17 +3465,29 @@ struct CoreContractTests {
             snapshot: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 8_000_000_000,
                 availableMemoryBytes: 2_500_000_000,
-                thermalState: "serious"
+                thermalState: "critical"
             )
         )
         #expect(!thermal.allowed)
         #expect(thermal.constrainedModeActive)
         #expect(thermal.requiresImmediateUnload)
 
+        let seriousThermal = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "serious"
+            )
+        )
+        #expect(seriousThermal.allowed)
+        #expect(seriousThermal.pressureReason == .thermalSerious)
+        #expect(seriousThermal.constrainedModeActive)
+        #expect(!seriousThermal.requiresImmediateUnload)
+
         let memory = LocalRuntimeSafetyPolicy.assess(
             snapshot: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 8_000_000_000,
-                availableMemoryBytes: 700_000_000,
+                availableMemoryBytes: 500_000_000,
                 thermalState: "nominal"
             )
         )

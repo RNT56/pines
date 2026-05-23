@@ -27,7 +27,8 @@ public struct ModelPreflightClassifier: Sendable {
         let expertsPerToken = Self.expertsPerToken(from: config)
         let parameterCount = ModelDiscoveryResourcePolicy.inferredParameterCount(
             repository: input.repository,
-            tags: input.tags
+            tags: input.tags,
+            configJSON: input.configJSON
         )
         let size = input.files.compactMap(\.size).reduce(Int64(0), +)
         let hasSafetensors = input.files.contains { $0.path.hasSuffix(".safetensors") }
@@ -203,13 +204,12 @@ public struct ModelPreflightClassifier: Sendable {
     }
 
     private static func inferredHeadDimension(from config: [String: Any]) -> Int? {
-        guard let hiddenSize = positiveInt(config["hidden_size"]),
-              let attentionHeads = positiveInt(config["num_attention_heads"]),
-              hiddenSize.isMultiple(of: attentionHeads)
-        else {
-            return nil
+        let hiddenSize = positiveInt(config["hidden_size"]) ?? positiveInt(config["dim"])
+        let attentionHeads = positiveInt(config["num_attention_heads"]) ?? positiveInt(config["n_heads"])
+        if let hiddenSize, let attentionHeads, hiddenSize.isMultiple(of: attentionHeads) {
+            return hiddenSize / attentionHeads
         }
-        return hiddenSize / attentionHeads
+        return nil
     }
 
     private static func mistral4HeadDimensions(from config: [String: Any]) -> HeadDimensions? {
