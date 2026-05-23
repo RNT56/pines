@@ -886,6 +886,7 @@ struct PinesCoreTestRunner {
         try expectEqual(a17Pro.memoryTier, .balanced)
         try expectEqual(a17Pro.performanceClass, .a17Pro)
         try expectEqual(a17Pro.recommendedMaxModelBytes, 3_800_000_000)
+        try expectEqual(a17Pro.runtimePressureReason, .none)
         let a17ProPolicy = ModelDiscoveryResourcePolicy.deviceDefault(for: a17Pro)
         let gemma4E2BDecision = a17ProPolicy.evaluate(
             ModelPreflightInput(
@@ -963,8 +964,56 @@ struct PinesCoreTestRunner {
         try expectEqual(pressured.recommendedContextTokens, 4096)
         try expectEqual(pressured.recommendedEmbeddingBatchSize, 4)
         try expectEqual(pressured.turboQuantOptimizationPolicy, .conservative)
+        try expectEqual(pressured.runtimePressureReason, .thermalSerious)
         try expect(pressured.thermalDownshiftActive, "thermal pressure should mark a downshift")
         try expect(!pressured.allowsVisionModels, "thermal pressure should disable vision defaults")
+        let lowPowerA17 = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPhone16,2",
+                lowPowerModeEnabled: true
+            )
+        )
+        try expectEqual(lowPowerA17.runtimePressureReason, .lowPower)
+        try expect(!lowPowerA17.thermalDownshiftActive, "low power mode should not masquerade as thermal downshift")
+        try expectEqual(lowPowerA17.recommendedContextTokens, 16_384)
+        try expectEqual(lowPowerA17.recommendedSmallModelContextTokens, 24_576)
+        try expectEqual(lowPowerA17.recommendedPrefillStepSize, 256)
+        let unsafeThermal = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_000_000_000,
+                thermalState: "serious"
+            )
+        )
+        try expect(!unsafeThermal.allowed, "serious thermal state should pause local generation")
+        try expectEqual(unsafeThermal.pressureReason, .thermalSerious)
+        try expect(unsafeThermal.constrainedModeActive, "serious thermal state should constrain local runtime")
+        try expect(unsafeThermal.requiresImmediateUnload, "serious thermal state should unload local runtime")
+
+        let constrainedSafety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_250_000_000,
+                thermalState: "fair"
+            )
+        )
+        let constrainedProfile = constrainedSafety.constrainedRuntimeProfile(
+            RuntimeProfile(
+                quantization: QuantizationProfile(maxKVSize: 16_384),
+                streamExperts: true,
+                expertStreamingMode: .directNVMe,
+                mtpEnabled: true,
+                speculativeDecodingEnabled: true
+            )
+        )
+        try expect(constrainedSafety.allowed, "fair thermal pressure should constrain before denying")
+        try expect(constrainedSafety.constrainedModeActive, "fair thermal pressure should enter constrained mode")
+        try expect(!constrainedSafety.requiresImmediateUnload, "fair thermal pressure should not force immediate unload")
+        try expectEqual(constrainedProfile.quantization.maxKVSize, 4096)
+        try expect(!constrainedProfile.streamExperts, "constrained local profile should disable stream experts")
 
         let future = DeviceProfile.recommended(
             for: RuntimeMemorySnapshot(

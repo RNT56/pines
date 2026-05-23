@@ -85,6 +85,7 @@ struct SettingsDetailView: View {
             .pinesExpressiveScrollHaptics()
         }
         .navigationTitle(section.title)
+        .accessibilityIdentifier("pines.settings.detail.\(section.title.uiTestIdentifierComponent)")
         .confirmationDialog(
             "Delete all Pines data?",
             isPresented: $showsEraseAllDataConfirmation,
@@ -270,7 +271,10 @@ struct SettingsDetailView: View {
         if let selfTest = diagnostics.metalSelfTestStatus { items.append(.init("MLX self-test", selfTest.displayName)) }
         if let policy = diagnostics.turboQuantOptimizationPolicy { items.append(.init("Optimization", policy.displayName)) }
         if let rawFallbackAllocated = diagnostics.rawFallbackAllocated { items.append(.init("Raw KV fallback", rawFallbackAllocated ? "Allocated" : "Not allocated")) }
-        if diagnostics.thermalDownshiftActive == true { items.append(.init("Thermal downshift", "Active")) }
+        if let pressureReason = diagnostics.runtimePressureReason, pressureReason != .none {
+            items.append(.init("Pressure reason", pressureReason.displayName))
+        }
+        if diagnostics.thermalDownshiftActive == true { items.append(.init("Pressure downshift", "Active")) }
         if let unsupportedShape = diagnostics.lastUnsupportedAttentionShape { items.append(.init("Unsupported shape", unsupportedShape, copyable: true)) }
         if let hardware = memory.hardwareModelIdentifier { items.append(.init("Device identifier", hardware, copyable: true)) }
         if let metalArchitecture = memory.metalArchitectureName { items.append(.init("Metal architecture", metalArchitecture)) }
@@ -279,7 +283,10 @@ struct SettingsDetailView: View {
         if let contextTokens = memory.recommendedContextTokens { items.append(.init("Context window", "\(contextTokens.formatted()) tokens")) }
         if let physicalMemory = memory.physicalMemoryBytes { items.append(.init("Device memory", ByteCountFormatter.string(fromByteCount: physicalMemory, countStyle: .memory))) }
         if let availableMemory = memory.availableMemoryBytes { items.append(.init("Available memory", ByteCountFormatter.string(fromByteCount: availableMemory, countStyle: .memory))) }
-        if let thermalState = memory.thermalState { items.append(.init("Thermal state", thermalState.capitalized)) }
+        if let memoryPressureReason = memory.runtimePressureReason, memoryPressureReason != .none {
+            items.append(.init("Live pressure reason", memoryPressureReason.displayName))
+        }
+        if let thermalState = memory.thermalState { items.append(.init("System thermal state", thermalState.capitalized)) }
         if let fallback = diagnostics.activeFallbackReason { items.append(.init("Fallback", fallback, copyable: true)) }
 
         return PinesCardSection("Runtime Diagnostics", subtitle: "Live MLX and device routing state.", systemImage: "gauge.with.dots.needle.67percent") {
@@ -293,6 +300,7 @@ struct SettingsDetailView: View {
             PinesKeyValueGrid(items: [.init("Hub token", settingsState.huggingFaceCredentialStatus, systemImage: "checkmark.seal")])
             SecureField("Access token", text: $huggingFaceToken)
                 .textContentType(.password)
+                .accessibilityIdentifier("pines.settings.huggingface.token")
                 .pinesFieldChrome()
 
             VStack(spacing: theme.spacing.small) {
@@ -677,6 +685,7 @@ struct SettingsDetailView: View {
             PinesKeyValueGrid(items: [.init("Brave Search", settingsState.braveSearchCredentialStatus, systemImage: "magnifyingglass")])
             SecureField("Brave Search API key", text: $braveSearchKey)
                 .textContentType(.password)
+                .accessibilityIdentifier("pines.settings.brave.key")
                 .pinesFieldChrome()
 
             HStack(spacing: theme.spacing.small) {
@@ -718,10 +727,12 @@ struct SettingsDetailView: View {
             }
 
             TextField("Display name", text: $mcpName)
+                .accessibilityIdentifier("pines.settings.mcp.name")
                 .pinesFieldChrome()
             TextField("Streamable HTTP endpoint", text: $mcpEndpointURL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .accessibilityIdentifier("pines.settings.mcp.endpoint")
                 .pinesFieldChrome()
             Picker("Authentication", selection: $mcpAuthMode) {
                 ForEach(MCPAuthMode.allCases, id: \.self) { mode in

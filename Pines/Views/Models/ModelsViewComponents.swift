@@ -762,7 +762,12 @@ struct ModelDetailView: View {
         if let kernelProfile = quantization.metalKernelProfile { items.append(.init("Kernel", kernelProfile.displayName)) }
         if let selfTest = quantization.metalSelfTestStatus { items.append(.init("MLX self-test", selfTest.displayName)) }
         if let rawFallbackAllocated = quantization.rawFallbackAllocated { items.append(.init("Raw KV fallback", rawFallbackAllocated ? "Allocated" : "Not allocated")) }
-        if quantization.thermalDownshiftActive { items.append(.init("Thermal downshift", "Active")) }
+        if quantization.runtimePressureReason != .none {
+            items.append(.init("Pressure reason", quantization.runtimePressureReason.displayName))
+        }
+        if quantization.thermalDownshiftActive {
+            items.append(.init("Pressure downshift", "Active"))
+        }
         if let unsupportedShape = quantization.lastUnsupportedAttentionShape { items.append(.init("Unsupported shape", unsupportedShape, copyable: true)) }
         if let fallback = quantization.activeFallbackReason { items.append(.init("Fallback", fallback, copyable: true)) }
         return items
@@ -780,7 +785,10 @@ struct ModelDetailView: View {
         var items: [PinesKeyValueGrid.Item] = []
         if let performanceClass = quantization.devicePerformanceClass { items.append(.init("Performance", performanceClass.displayName, systemImage: "speedometer")) }
         if let contextTokens = memory.recommendedContextTokens { items.append(.init("Context", "\(contextTokens.formatted()) tokens", systemImage: "text.word.spacing")) }
-        if let thermalState = memory.thermalState { items.append(.init("Thermal state", thermalState.capitalized, systemImage: "thermometer.medium")) }
+        if let pressureReason = memory.runtimePressureReason, pressureReason != .none {
+            items.append(.init("Pressure reason", pressureReason.displayName, systemImage: "gauge.with.dots.needle.67percent"))
+        }
+        if let thermalState = memory.thermalState { items.append(.init("System thermal state", thermalState.capitalized, systemImage: "thermometer.medium")) }
         if let physicalMemory = memory.physicalMemoryBytes { items.append(.init("Device memory", ByteCountFormatter.string(fromByteCount: physicalMemory, countStyle: .memory), systemImage: "memorychip")) }
         if let availableMemory = memory.availableMemoryBytes { items.append(.init("Available memory", ByteCountFormatter.string(fromByteCount: availableMemory, countStyle: .memory))) }
         if let workingSet = memory.metalRecommendedWorkingSetBytes { items.append(.init("MLX working set", ByteCountFormatter.string(fromByteCount: workingSet, countStyle: .memory))) }

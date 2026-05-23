@@ -33,6 +33,7 @@ struct SettingsView: View {
                         NavigationLink(value: section.id) {
                             SettingsSectionRow(section: section, isSelected: selectedSectionID == section.id)
                         }
+                        .accessibilityIdentifier("pines.settings.section.\(section.title.uiTestIdentifierComponent)")
                         .pinesSidebarListRow()
                     }
                 }
@@ -70,6 +71,7 @@ struct SettingsView: View {
                 )
             }
         }
+        .accessibilityIdentifier("pines.screen.settings")
     }
 
     private func selectDefaultSectionIfNeeded() {

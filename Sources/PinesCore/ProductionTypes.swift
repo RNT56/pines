@@ -1468,7 +1468,7 @@ public struct BrowserAction: Identifiable, Hashable, Codable, Sendable {
 public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let defaultCloudMaxCompletionTokens = 16_384
     public static let defaultLocalMaxCompletionTokens = 1_024
-    public static let defaultLocalMaxContextTokens = 16_384
+    public static let defaultLocalMaxContextTokens = 65_536
     public static let minCompletionTokens = 128
     public static let maxCompletionTokens = 128_000
     public static let minLocalContextTokens = 1_024

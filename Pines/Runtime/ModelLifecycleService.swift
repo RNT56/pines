@@ -125,6 +125,44 @@ struct ModelLifecycleService: Sendable {
         )
     }
 
+    @discardableResult
+    func validateInstalledModels() async throws -> Int {
+        let installs = try await installRepository.listInstalledAndCuratedModels()
+        var repairedCount = 0
+        for install in installs where install.state == .installed {
+            guard let resolvedURL = try Self.installedModelDirectory(for: install) else {
+                var failed = install
+                failed.state = .failed
+                failed.localURL = nil
+                try await installRepository.upsertInstall(failed)
+                repairedCount += 1
+                try await auditRepository?.append(
+                    AuditEvent(
+                        category: .modelDownload,
+                        summary: "Marked incomplete install failed: \(install.repository)",
+                        modelID: install.modelID
+                    )
+                )
+                continue
+            }
+
+            if resolvedURL != install.localURL {
+                var repaired = install
+                repaired.localURL = resolvedURL
+                try await installRepository.upsertInstall(repaired)
+                repairedCount += 1
+                try await auditRepository?.append(
+                    AuditEvent(
+                        category: .modelDownload,
+                        summary: "Repaired installed model path: \(install.repository)",
+                        modelID: install.modelID
+                    )
+                )
+            }
+        }
+        return repairedCount
+    }
+
     func reconcileInterruptedDownloads() async throws {
         await BackgroundModelFileDownloadCenter.shared.recoverBackgroundTasks()
         let downloads = try await downloadRepository.listDownloads()
@@ -147,8 +185,7 @@ struct ModelLifecycleService: Sendable {
         for (key, download) in activeDownloadByRepository {
             if let install = installByRepository[key],
                install.state == .installed,
-               let localURL = install.localURL,
-               let resolvedURL = Self.resolvedModelDirectory(from: localURL, modalities: install.modalities) {
+               let resolvedURL = try Self.installedModelDirectory(for: install) {
                 var completed = download
                 completed.status = .installed
                 completed.bytesReceived = completed.totalBytes ?? completed.bytesReceived
@@ -200,9 +237,7 @@ struct ModelLifecycleService: Sendable {
         }
 
         for install in installs where install.state == .installed {
-            guard let localURL = install.localURL,
-                  let resolvedURL = Self.resolvedModelDirectory(from: localURL, modalities: install.modalities)
-            else {
+            guard let resolvedURL = try Self.installedModelDirectory(for: install) else {
                 var failed = install
                 failed.state = .failed
                 failed.localURL = nil
@@ -217,7 +252,7 @@ struct ModelLifecycleService: Sendable {
                 continue
             }
 
-            if resolvedURL != localURL {
+            if resolvedURL != install.localURL {
                 var repaired = install
                 repaired.localURL = resolvedURL
                 try await installRepository.upsertInstall(repaired)
@@ -296,12 +331,11 @@ struct ModelLifecycleService: Sendable {
             .first(where: { $0.repository.caseInsensitiveCompare(repository) == .orderedSame }) {
             switch existing.state {
             case .installed:
-                if let localURL = existing.localURL,
-                   let resolvedURL = Self.resolvedModelDirectory(from: localURL, modalities: existing.modalities) {
+                if let resolvedURL = try Self.installedModelDirectory(for: existing) {
                     if mode == .full, !existing.modalities.contains(.vision) {
                         try Self.removeInstalledDirectory(for: repository, localURL: existing.localURL)
                     } else {
-                        if resolvedURL != localURL {
+                        if resolvedURL != existing.localURL {
                             var repaired = existing
                             repaired.localURL = resolvedURL
                             try await installRepository.upsertInstall(repaired)
@@ -1116,20 +1150,37 @@ struct ModelLifecycleService: Sendable {
         return nil
     }
 
+    static func installedModelDirectory(for install: ModelInstall) throws -> URL? {
+        let modelsDirectory = try modelsDirectory()
+        let currentDirectory = modelsDirectory.appending(path: safeDirectoryName(install.repository), directoryHint: .isDirectory)
+        let legacyDirectory = modelsDirectory.appending(path: legacySafeDirectoryName(install.repository), directoryHint: .isDirectory)
+        let candidates = [install.localURL, currentDirectory, legacyDirectory]
+            .compactMap(\.self)
+            .uniquedByPath()
+
+        for candidate in candidates {
+            guard FileManager.default.fileExists(atPath: candidate.path) else { continue }
+            if let resolved = resolvedModelDirectory(from: candidate, modalities: install.modalities) {
+                return resolved
+            }
+        }
+        return nil
+    }
+
     private static func hasRequiredModelFiles(in directory: URL, modalities: Set<ModelModality>) -> Bool {
         let fileManager = FileManager.default
         let configURL = directory.appending(path: "config.json")
-        guard fileManager.fileExists(atPath: configURL.path) else {
+        guard isNonEmptyRegularFile(configURL) else {
             return false
         }
 
-        guard fileManager.fileExists(atPath: directory.appending(path: "tokenizer.json").path) else {
+        guard isNonEmptyRegularFile(directory.appending(path: "tokenizer.json")) else {
             return false
         }
 
         if modalities.contains(.vision) {
             let processorFiles = ["preprocessor_config.json", "processor_config.json"]
-            guard processorFiles.contains(where: { fileManager.fileExists(atPath: directory.appending(path: $0).path) }) else {
+            guard processorFiles.contains(where: { isNonEmptyRegularFile(directory.appending(path: $0)) }) else {
                 return false
             }
         }
@@ -1142,10 +1193,21 @@ struct ModelLifecycleService: Sendable {
             return false
         }
 
-        for case let fileURL as URL in enumerator where fileURL.pathExtension.lowercased() == "safetensors" {
+        for case let fileURL as URL in enumerator
+            where fileURL.pathExtension.lowercased() == "safetensors" && isNonEmptyRegularFile(fileURL) {
             return true
         }
         return false
+    }
+
+    private static func isNonEmptyRegularFile(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true,
+              (values.fileSize ?? 0) > 0
+        else {
+            return false
+        }
+        return true
     }
 
     private static func downloadableModelRoot(

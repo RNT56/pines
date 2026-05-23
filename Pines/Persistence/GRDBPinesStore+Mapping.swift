@@ -80,7 +80,12 @@ extension GRDBPinesStore {
     }
 
     static func message(from row: Row) -> ChatMessage {
-        ChatMessage(
+        var providerMetadata = decodeProviderMetadata(row["provider_metadata_json"] as String?)
+        if let rawStatus = row["status"] as String?,
+           MessageStatus(rawValue: rawStatus) != nil {
+            providerMetadata[ChatTranscriptMetadataKeys.persistedMessageStatus] = rawStatus
+        }
+        return ChatMessage(
             id: UUID(uuidString: row["id"]) ?? UUID(),
             role: ChatRole(rawValue: row["role"]) ?? .assistant,
             content: row["content"],
@@ -88,7 +93,7 @@ extension GRDBPinesStore {
             toolCallID: row["tool_call_id"] as String?,
             toolName: row["tool_name"] as String?,
             toolCalls: decodeToolCalls(row["tool_calls_json"] as String?),
-            providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?)
+            providerMetadata: providerMetadata
         )
     }
 

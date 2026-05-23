@@ -39,7 +39,7 @@ actor GRDBPinesStore:
         let url = try Self.databaseURL(fileName: configuration.databaseFileName)
         runtimeMetrics.recordStartupPhase("store_url", elapsedSeconds: Date().timeIntervalSince(urlStartedAt))
 
-        let databaseKey = try Self.prepareEncryptedDatabase(at: url, dataProtection: configuration.dataProtection)
+        let databaseKey = try Self.prepareDatabaseKey(at: url, dataProtection: configuration.dataProtection)
 
         let openStartedAt = Date()
         database = try DatabasePool(path: url.path, configuration: Self.databaseConfiguration(databaseKey: databaseKey))
@@ -66,7 +66,13 @@ actor GRDBPinesStore:
         return directory.appending(path: fileName)
     }
 
-    private static func prepareEncryptedDatabase(at url: URL, dataProtection: DataProtectionClass) throws -> Data {
+    private static func prepareDatabaseKey(at url: URL, dataProtection: DataProtectionClass) throws -> Data? {
+        #if DEBUG
+        if PinesUITestLaunchConfiguration.usesPlaintextDatabase {
+            try applyProtection(dataProtection, to: url.deletingLastPathComponent())
+            return nil
+        }
+        #endif
         #if canImport(SQLCipher)
         let key = try SecureKeyStore.loadOrCreateDataKey(purpose: .encryptedDatabase, keyID: SecureKeyStore.databaseKeyID)
         if isPlaintextSQLiteDatabase(at: url) {
@@ -80,8 +86,14 @@ actor GRDBPinesStore:
         #endif
     }
 
-    private static func databaseConfiguration(databaseKey: Data) throws -> Configuration {
+    private static func databaseConfiguration(databaseKey: Data?) throws -> Configuration {
         var configuration = Configuration()
+        guard let databaseKey else {
+            configuration.prepareDatabase { db in
+                try db.execute(sql: "PRAGMA foreign_keys = ON")
+            }
+            return configuration
+        }
         #if canImport(SQLCipher)
         let rawKey = databaseKey.map { String(format: "%02x", $0) }.joined()
         configuration.prepareDatabase { db in
@@ -2568,7 +2580,7 @@ actor GRDBPinesStore:
         var messages = try Row.fetchAll(
             db,
             sql: """
-            SELECT id, role, content, created_at, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
+            SELECT id, role, content, created_at, status, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
             FROM messages
             WHERE conversation_id = ? AND deleted_at IS NULL
             ORDER BY created_at ASC, rowid ASC
@@ -2633,6 +2645,7 @@ actor GRDBPinesStore:
                     role,
                     content,
                     created_at,
+                    status,
                     tool_call_id,
                     tool_name,
                     tool_calls_json,
@@ -2641,7 +2654,7 @@ actor GRDBPinesStore:
                 FROM messages
                 WHERE conversation_id = ? AND deleted_at IS NULL
             )
-            SELECT id, role, content, created_at, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
+            SELECT id, role, content, created_at, status, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
             FROM ranked_messages
             WHERE recent_rank <= ?\(requiredClause)
             ORDER BY created_at ASC, message_rowid ASC

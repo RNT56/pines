@@ -31,6 +31,24 @@ struct DeviceRuntimeMonitor: Sendable {
         DeviceProfile.recommended(for: snapshot())
     }
 
+    func localGenerationSafety() -> LocalRuntimeSafetyAssessment {
+        let currentSnapshot = snapshot()
+        return LocalRuntimeSafetyPolicy.assess(
+            snapshot: currentSnapshot,
+            profile: DeviceProfile.recommended(for: currentSnapshot)
+        )
+    }
+
+    func requireLocalGenerationSafety() throws -> LocalRuntimeSafetyAssessment {
+        let safety = localGenerationSafety()
+        guard safety.allowed else {
+            throw InferenceError.unsupportedCapability(
+                safety.reason ?? "Local MLX generation is paused by runtime safety policy."
+            )
+        }
+        return safety
+    }
+
     func memoryCounters(
         kvCacheBytes: Int64? = nil,
         quantizedKVCacheBytes: Int64? = nil,
@@ -38,6 +56,7 @@ struct DeviceRuntimeMonitor: Sendable {
     ) -> RuntimeMemoryCounters {
         let currentSnapshot = snapshot()
         let profile = DeviceProfile.recommended(for: currentSnapshot)
+        let mlxMemory = mlxMemorySnapshot()
         return RuntimeMemoryCounters(
             kvCacheBytes: kvCacheBytes,
             quantizedKVCacheBytes: quantizedKVCacheBytes,
@@ -49,12 +68,45 @@ struct DeviceRuntimeMonitor: Sendable {
             lowPowerModeEnabled: currentSnapshot.lowPowerModeEnabled,
             metalArchitectureName: currentSnapshot.metalArchitectureName,
             metalRecommendedWorkingSetBytes: currentSnapshot.metalRecommendedWorkingSetBytes,
+            mlxActiveMemoryBytes: mlxMemory.active,
+            mlxCacheMemoryBytes: mlxMemory.cache,
+            mlxPeakMemoryBytes: mlxMemory.peak,
+            mlxMemoryLimitBytes: mlxMemory.memoryLimit,
+            mlxCacheLimitBytes: mlxMemory.cacheLimit,
             devicePerformanceClass: profile.performanceClass,
             thermalDownshiftActive: profile.thermalDownshiftActive,
+            runtimePressureReason: profile.runtimePressureReason,
             recommendedContextTokens: profile.recommendedContextTokens,
+            recommendedSmallModelContextTokens: profile.recommendedSmallModelContextTokens,
+            recommendedPrefillStepSize: profile.recommendedPrefillStepSize,
             recommendedEmbeddingBatchSize: profile.recommendedEmbeddingBatchSize,
             recommendedVectorScanLimit: profile.recommendedVectorScanLimit
         )
+    }
+
+    private func mlxMemorySnapshot() -> (
+        active: Int64?,
+        cache: Int64?,
+        peak: Int64?,
+        memoryLimit: Int64?,
+        cacheLimit: Int64?
+    ) {
+        #if targetEnvironment(simulator)
+        return (nil, nil, nil, nil, nil)
+        #else
+        #if canImport(MLX)
+        let snapshot = MLX.Memory.snapshot()
+        return (
+            Int64(snapshot.activeMemory),
+            Int64(snapshot.cacheMemory),
+            Int64(snapshot.peakMemory),
+            Int64(MLX.Memory.memoryLimit),
+            Int64(MLX.Memory.cacheLimit)
+        )
+        #else
+        return (nil, nil, nil, nil, nil)
+        #endif
+        #endif
     }
 
     private func availableMemoryBytes() -> Int64? {
@@ -97,6 +149,14 @@ struct DeviceRuntimeMonitor: Sendable {
         selfTestStatus: PinesCore.TurboQuantSelfTestStatus?
     ) {
         let device = metalDeviceSnapshot()
+        #if targetEnvironment(simulator)
+        return (
+            device.architectureName,
+            device.recommendedWorkingSetBytes,
+            nil,
+            nil
+        )
+        #else
         #if canImport(MLX)
         let availability = MLX.TurboQuantKernelAvailability.current
         return (
@@ -112,6 +172,7 @@ struct DeviceRuntimeMonitor: Sendable {
             nil,
             nil
         )
+        #endif
         #endif
     }
 

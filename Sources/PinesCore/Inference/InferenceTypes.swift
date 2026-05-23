@@ -23,6 +23,12 @@ public enum LocalProviderMetadataKeys {
     public static let turboQuantFallbackReason = "local.turboquant.fallback_reason"
     public static let turboQuantLastUnsupportedShape = "local.turboquant.last_unsupported_shape"
     public static let turboQuantRawFallbackAllocated = "local.turboquant.raw_fallback_allocated"
+    public static let turboQuantProfileID = "local.turboquant.profile_id"
+    public static let turboQuantProfileSource = "local.turboquant.profile_source"
+    public static let runtimePressureReason = "local.runtime.pressure_reason"
+    public static let runtimeLowPowerMode = "local.runtime.low_power_mode"
+    public static let runtimeMaxKVSize = "local.runtime.max_kv_size"
+    public static let runtimePrefillStepSize = "local.runtime.prefill_step_size"
     public static let ssdThroughputMBperS = "local.ssd.throughput_mb_per_s"
     public static let ssdTotalBytesRead = "local.ssd.total_bytes_read"
     public static let ssdTotalChunks = "local.ssd.total_chunks"
@@ -35,6 +41,15 @@ public enum LocalProviderMetadataKeys {
     public static let generationCompletionTokens = "local.generation.completion_tokens"
     public static let generationElapsedSeconds = "local.generation.elapsed_seconds"
     public static let generationTokensPerSecond = "local.generation.tokens_per_second"
+    public static let generationFirstTokenLatencySeconds = "local.generation.first_token_latency_seconds"
+    public static let generationPrepareElapsedSeconds = "local.generation.prepare_elapsed_seconds"
+    public static let generationCacheCreateElapsedSeconds = "local.generation.cache_create_elapsed_seconds"
+    public static let generationPreflightAttempts = "local.generation.preflight_attempts"
+    public static let generationLastTokenAt = "local.generation.last_token_at"
+    public static let generationCancellationReason = "local.generation.cancellation_reason"
+    public static let generationWatchdogCode = "local.generation.watchdog.code"
+    public static let generationWatchdogStage = "local.generation.watchdog.stage"
+    public static let generationWatchdogElapsedSeconds = "local.generation.watchdog.elapsed_seconds"
 }
 
 public struct ModelID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {

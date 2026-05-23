@@ -80,6 +80,7 @@ struct ArtifactsWorkspaceView: View {
                 message: { confirmation in Text(confirmation.message) }
             )
         }
+        .accessibilityIdentifier("pines.screen.artifacts")
     }
 
     private var workspaceHeader: some View {
@@ -411,6 +412,7 @@ private struct ArtifactsLibraryControls: View {
             TextField("Search artifacts, IDs, files, providers, or response links", text: $filter.query)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .accessibilityIdentifier("pines.artifacts.library.search")
                 .pinesFieldChrome()
 
             Menu {
@@ -509,6 +511,7 @@ private struct ArtifactsMediaWorkspace: View {
 
                     TextField("Prompt", text: $prompt, axis: .vertical)
                         .lineLimit(3...7)
+                        .accessibilityIdentifier("pines.artifacts.media.prompt")
                         .pinesFieldChrome()
 
                     Button {
@@ -517,6 +520,7 @@ private struct ArtifactsMediaWorkspace: View {
                         Label(isCreating ? "Creating" : "Create artifact", systemImage: isCreating ? "hourglass" : "sparkles")
                     }
                     .disabled(isCreating || provider == nil || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("pines.artifacts.media.create")
                     .pinesButtonStyle(.primary)
                 }
             }
@@ -1391,10 +1395,12 @@ private struct ArtifactsResearchWorkspace: View {
             if run == nil {
                 TextField("Ask a research question", text: $prompt, axis: .vertical)
                     .lineLimit(1...5)
+                    .accessibilityIdentifier("pines.artifacts.research.prompt")
                     .pinesFieldChrome()
             } else {
                 TextField("Ask follow-up or clarify", text: $followUpPrompt, axis: .vertical)
                     .lineLimit(1...5)
+                    .accessibilityIdentifier("pines.artifacts.research.follow-up")
                     .pinesFieldChrome()
             }
 
@@ -1409,6 +1415,7 @@ private struct ArtifactsResearchWorkspace: View {
                     .frame(width: 18, height: 18)
             }
             .disabled(sendDisabled(for: run))
+            .accessibilityIdentifier(run == nil ? "pines.artifacts.research.start" : "pines.artifacts.research.follow-up.send")
             .pinesButtonStyle(.primary)
             .accessibilityLabel(run == nil ? "Start research" : "Send follow-up")
         }
@@ -1739,6 +1746,7 @@ private struct ArtifactsWorkspaceModePicker: View {
         }
         .accessibilityLabel("Artifacts workspace")
         .accessibilityValue(selection.title)
+        .accessibilityIdentifier("pines.artifacts.workspace.mode")
         .transaction { transaction in
             transaction.animation = nil
         }

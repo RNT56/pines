@@ -56,6 +56,254 @@ struct CoreContractTests {
         #expect(result.summary.estimatedInputTokens <= result.summary.inputBudgetTokens)
     }
 
+    @Test
+    func chatContextPackerAddsRollingHandoffForDroppedOlderTurns() {
+        let anchorID = UUID()
+        var messages = [ChatMessage(role: .system, content: "System instruction")]
+        for index in 0..<18 {
+            messages.append(ChatMessage(role: .user, content: "Earlier user decision \(index): " + String(repeating: "context ", count: 40)))
+            messages.append(ChatMessage(role: .assistant, content: "Earlier assistant result \(index): " + String(repeating: "detail ", count: 40)))
+        }
+        messages.append(ChatMessage(id: anchorID, role: .user, content: "Current question"))
+
+        let result = ChatContextPacker.pack(
+            messages,
+            policy: ChatContextPackingPolicy(
+                maxContextTokens: 1_024,
+                reservedCompletionTokens: 128,
+                safetyMarginTokens: 64,
+                maximumMessages: 12,
+                anchorMessageID: anchorID,
+                rollingSummaryBudgetTokens: 256
+            )
+        )
+
+        #expect(result.messages.contains { $0.id == anchorID })
+        #expect(result.messages.contains { $0.role == .system && $0.content.contains("Earlier conversation handoff summary") })
+        #expect(result.summary.rollingSummaryApplied)
+        #expect(result.summary.rollingSummaryMessageCount > 0)
+        #expect(result.summary.providerMetadata[ChatContextMetadataKeys.rollingSummaryApplied] == "true")
+        #expect(result.summary.estimatedInputTokens <= result.summary.inputBudgetTokens)
+    }
+
+    @Test
+    func chatTranscriptSanitizerDropsIncompleteAssistantRowsFromContinuedChats() {
+        let latestUserID = UUID()
+        let messages = [
+            ChatMessage(role: .user, content: "Earlier question").withPersistedMessageStatus(.complete),
+            ChatMessage(role: .assistant, content: "Earlier answer").withPersistedMessageStatus(.complete),
+            ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(.streaming),
+            ChatMessage(role: .assistant, content: "The previous run failed.").withPersistedMessageStatus(.failed),
+            ChatMessage(id: latestUserID, role: .user, content: "Continue from here").withPersistedMessageStatus(.complete),
+        ]
+
+        let result = ChatTranscriptSanitizer.messagesForProviderRequest(
+            messages,
+            requiredUserMessageIDs: [latestUserID]
+        )
+
+        #expect(result.messages.map(\.role) == [.user, .assistant, .user])
+        #expect(result.messages.map(\.content) == ["Earlier question", "Earlier answer", "Continue from here"])
+        #expect(result.summary.droppedIncompleteAssistantCount == 2)
+        #expect(result.summary.droppedMessageCount == 2)
+        #expect(result.summary.providerMetadata[ChatTranscriptMetadataKeys.droppedMessageCount] == "2")
+    }
+
+    @Test
+    func chatTranscriptSanitizerStripsInternalStatusMetadataBeforeProviderRequest() {
+        var assistant = ChatMessage(role: .assistant, content: "Ready.").withPersistedMessageStatus(.complete)
+        assistant.providerMetadata[CloudProviderMetadataKeys.openAIResponseID] = "resp_123"
+
+        let result = ChatTranscriptSanitizer.messagesForProviderRequest([assistant])
+
+        #expect(result.messages.count == 1)
+        #expect(result.messages[0].providerMetadata[ChatTranscriptMetadataKeys.persistedMessageStatus] == nil)
+        #expect(result.messages[0].providerMetadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_123")
+    }
+
+    @Test
+    func chatTranscriptSanitizerDropsEmptyAssistantButKeepsCurrentAttachmentOnlyUserTurn() {
+        let latestUserID = UUID()
+        let attachment = ChatAttachment(
+            kind: .document,
+            fileName: "notes.txt",
+            contentType: "text/plain",
+            byteCount: 42
+        )
+        let messages = [
+            ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(.complete),
+            ChatMessage(id: latestUserID, role: .user, content: "", attachments: [attachment]).withPersistedMessageStatus(.complete),
+        ]
+
+        let result = ChatTranscriptSanitizer.messagesForProviderRequest(
+            messages,
+            requiredUserMessageIDs: [latestUserID]
+        )
+
+        #expect(result.messages.count == 1)
+        #expect(result.messages[0].id == latestUserID)
+        #expect(result.messages[0].attachments == [attachment])
+        #expect(result.summary.droppedEmptyAssistantCount == 1)
+    }
+
+    @Test
+    func freezeBreadcrumbJournalIsExplicitlyEnabledForStressRuns() {
+        #expect(FreezeBreadcrumbJournal.isEnabled(environment: ["PINES_FREEZE_BREADCRUMBS": "1"]))
+        #expect(FreezeBreadcrumbJournal.isEnabled(environment: ["PINES_STRESS_MODE": "local-generation"]))
+        #expect(FreezeBreadcrumbJournal.isEnabled(arguments: ["pines", "--pines-stress-local-generation"], environment: [:]))
+        #expect(!FreezeBreadcrumbJournal.isEnabled(arguments: ["pines"], environment: [:]))
+    }
+
+    @Test
+    func freezeBreadcrumbJournalKeepsBoundedJsonlHistory() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pines-freeze-breadcrumb-\(UUID().uuidString)")
+            .appendingPathExtension("jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        let journal = FreezeBreadcrumbJournal(fileURL: fileURL, maximumEvents: 2)
+
+        await journal.record(stage: "one", enabled: true)
+        await journal.record(stage: "two", enabled: true)
+        await journal.record(stage: "three", enabled: true)
+
+        let events = await journal.events()
+        #expect(events.map(\.stage) == ["two", "three"])
+
+        let contents = try String(contentsOf: fileURL, encoding: .utf8)
+        #expect(contents.split(separator: "\n").count == 2)
+        #expect(contents.contains("\"stage\":\"three\""))
+    }
+
+    @Test
+    func interruptedChatRunRepairMarksStaleStreamingAssistantMessagesFailed() {
+        let streaming = ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(.streaming)
+        let pendingTool = ChatMessage(
+            role: .tool,
+            content: "partial",
+            toolCallID: "tool_1",
+            toolName: "search"
+        ).withPersistedMessageStatus(.pending)
+        let complete = ChatMessage(role: .assistant, content: "done").withPersistedMessageStatus(.complete)
+
+        let repairs = InterruptedChatRunRepair.repairs(
+            for: [streaming, pendingTool, complete],
+            reason: "app_launch"
+        )
+
+        #expect(repairs.count == 2)
+        #expect(repairs[0].messageID == streaming.id)
+        #expect(repairs[0].status == .failed)
+        #expect(repairs[0].content == InterruptedChatRunRepair.defaultInterruptedAssistantMessage)
+        #expect(repairs[0].providerMetadata[ChatTranscriptMetadataKeys.persistedMessageStatus] == nil)
+        #expect(repairs[0].providerMetadata[ChatTranscriptMetadataKeys.interruptedRunOriginalStatus] == MessageStatus.streaming.rawValue)
+        #expect(repairs[1].toolName == "search")
+        #expect(repairs[1].content == "partial")
+        #expect(repairs[1].providerMetadata[ChatTranscriptMetadataKeys.interruptedRunOriginalStatus] == MessageStatus.pending.rawValue)
+    }
+
+    @Test
+    func inferenceStreamWatchdogFailsWhenFirstEventStalls() async throws {
+        let source = AsyncThrowingStream<InferenceStreamEvent, Error> { continuation in
+            let task = Task {
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    continuation.yield(.token(TokenDelta(text: "late", tokenCount: 1)))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: InferenceError.cancelled)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+
+        let guarded = InferenceStreamWatchdog.guarded(
+            source,
+            configuration: InferenceStreamWatchdogConfiguration(
+                firstEventTimeoutSeconds: 0.1,
+                progressTimeoutSeconds: 1,
+                pollIntervalSeconds: 0.05
+            )
+        )
+        var events = [InferenceStreamEvent]()
+        for try await event in guarded {
+            events.append(event)
+        }
+
+        guard case let .finish(finish)? = events.last else {
+            Issue.record("Expected watchdog finish event.")
+            return
+        }
+        #expect(finish.reason == .error)
+        #expect(finish.providerMetadata[LocalProviderMetadataKeys.generationWatchdogStage] == InferenceStreamWatchdogTimeoutStage.firstEvent.rawValue)
+    }
+
+    @Test
+    func inferenceStreamWatchdogFailsWhenProgressStalls() async throws {
+        let source = AsyncThrowingStream<InferenceStreamEvent, Error> { continuation in
+            let task = Task {
+                do {
+                    continuation.yield(.token(TokenDelta(text: "hello", tokenCount: 1)))
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: InferenceError.cancelled)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+
+        let guarded = InferenceStreamWatchdog.guarded(
+            source,
+            configuration: InferenceStreamWatchdogConfiguration(
+                firstEventTimeoutSeconds: 1,
+                progressTimeoutSeconds: 0.1,
+                pollIntervalSeconds: 0.05
+            )
+        )
+        var events = [InferenceStreamEvent]()
+        for try await event in guarded {
+            events.append(event)
+        }
+
+        #expect(events.contains(.token(TokenDelta(text: "hello", tokenCount: 1))))
+        guard case let .finish(finish)? = events.last else {
+            Issue.record("Expected watchdog finish event.")
+            return
+        }
+        #expect(finish.reason == .error)
+        #expect(finish.providerMetadata[LocalProviderMetadataKeys.generationWatchdogStage] == InferenceStreamWatchdogTimeoutStage.progress.rawValue)
+    }
+
+    @Test
+    func inferenceStreamWatchdogAllowsHealthyStream() async throws {
+        let source = AsyncThrowingStream<InferenceStreamEvent, Error> { continuation in
+            continuation.yield(.token(TokenDelta(text: "ok", tokenCount: 1)))
+            continuation.yield(.finish(InferenceFinish(reason: .stop)))
+            continuation.finish()
+        }
+
+        let guarded = InferenceStreamWatchdog.guarded(
+            source,
+            configuration: InferenceStreamWatchdogConfiguration(
+                firstEventTimeoutSeconds: 1,
+                progressTimeoutSeconds: 1,
+                pollIntervalSeconds: 0.05
+            )
+        )
+        var events = [InferenceStreamEvent]()
+        for try await event in guarded {
+            events.append(event)
+        }
+
+        #expect(events == [
+            .token(TokenDelta(text: "ok", tokenCount: 1)),
+            .finish(InferenceFinish(reason: .stop)),
+        ])
+    }
+
     private static func vaultChunk(id: String, documentID: UUID, text: String) -> VaultChunk {
         VaultChunk(
             id: id,
@@ -2759,6 +3007,95 @@ struct CoreContractTests {
         )
         #expect(highStoragePro.performanceClass == .mSeriesTabletMax)
         #expect(highStoragePro.recommendedMaxModelBytes == 8_000_000_000)
+    }
+
+    @Test
+    func localRuntimeSafetyPausesGenerationUnderCriticalDevicePressure() {
+        let thermal = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "serious"
+            )
+        )
+        #expect(!thermal.allowed)
+        #expect(thermal.constrainedModeActive)
+        #expect(thermal.requiresImmediateUnload)
+
+        let memory = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 700_000_000,
+                thermalState: "nominal"
+            )
+        )
+        #expect(!memory.allowed)
+        #expect(memory.constrainedModeActive)
+        #expect(memory.requiresImmediateUnload)
+        #expect(memory.recommendedMaxContextTokens <= 2_048)
+    }
+
+    @Test
+    func localRuntimeSafetyConstrainsProfileUnderModeratePressure() {
+        let profile = RuntimeProfile(
+            quantization: QuantizationProfile(maxKVSize: 16_384),
+            streamExperts: true,
+            expertStreamingMode: .directNVMe,
+            mtpEnabled: true,
+            prefillStepSize: 1_024,
+            speculativeDecodingEnabled: true
+        )
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_250_000_000,
+                thermalState: "fair"
+            )
+        )
+        let constrained = safety.constrainedRuntimeProfile(profile)
+
+        #expect(safety.allowed)
+        #expect(safety.constrainedModeActive)
+        #expect(!safety.requiresImmediateUnload)
+        #expect(constrained.quantization.maxKVSize == 4_096)
+        #expect(constrained.prefillStepSize == 256)
+        #expect(!constrained.streamExperts)
+        #expect(!constrained.mtpEnabled)
+        #expect(!constrained.speculativeDecodingEnabled)
+    }
+
+    @Test
+    func lowPowerModeKeepsContextWindowButConservesPrefill() {
+        let profile = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPhone16,2",
+                lowPowerModeEnabled: true
+            )
+        )
+
+        #expect(profile.performanceClass == .a17Pro)
+        #expect(profile.runtimePressureReason == .lowPower)
+        #expect(!profile.thermalDownshiftActive)
+        #expect(profile.recommendedContextTokens == 16_384)
+        #expect(profile.recommendedSmallModelContextTokens == 24_576)
+        #expect(profile.recommendedPrefillStepSize == 256)
+
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPhone16,2",
+                lowPowerModeEnabled: true
+            )
+        )
+        #expect(safety.allowed)
+        #expect(safety.pressureReason == .lowPower)
+        #expect(safety.recommendedMaxContextTokens == 16_384)
+        #expect(safety.recommendedPrefillStepSize == 256)
     }
 
     @Test

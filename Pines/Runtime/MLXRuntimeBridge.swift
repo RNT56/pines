@@ -47,9 +47,128 @@ private final class MLXGenerationCancellationBox: @unchecked Sendable {
     }
 }
 
+private enum LocalRuntimeSupervisorState: String, Sendable {
+    case idle
+    case loading
+    case ready
+    case generating
+    case cancelling
+    case unloading
+    case blocked
+}
+
+private struct LocalRuntimeSupervisorSnapshot: Sendable {
+    var state: LocalRuntimeSupervisorState
+    var modelID: ModelID?
+    var reason: String?
+    var updatedAt: Date
+}
+
+private actor LocalRuntimeSupervisor {
+    private var snapshot = LocalRuntimeSupervisorSnapshot(
+        state: .idle,
+        modelID: nil,
+        reason: nil,
+        updatedAt: Date()
+    )
+
+    func currentSnapshot() -> LocalRuntimeSupervisorSnapshot {
+        snapshot
+    }
+
+    func beginLoading(modelID: ModelID) {
+        update(state: .loading, modelID: modelID, reason: nil)
+    }
+
+    func markReady(modelID: ModelID) {
+        update(state: .ready, modelID: modelID, reason: nil)
+    }
+
+    func beginGenerating(modelID: ModelID) {
+        update(state: .generating, modelID: modelID, reason: nil)
+    }
+
+    func finishGeneration(modelID: ModelID?) {
+        update(state: modelID == nil ? .idle : .ready, modelID: modelID, reason: nil)
+    }
+
+    func beginCancelling(reason: String) {
+        update(state: .cancelling, modelID: snapshot.modelID, reason: reason)
+    }
+
+    func beginUnloading(reason: String) {
+        update(state: .unloading, modelID: snapshot.modelID, reason: reason)
+    }
+
+    func markUnloaded(reason: String? = nil) {
+        update(state: .idle, modelID: nil, reason: reason)
+    }
+
+    func block(reason: String, modelID: ModelID? = nil) {
+        update(state: .blocked, modelID: modelID ?? snapshot.modelID, reason: reason)
+    }
+
+    private func update(state: LocalRuntimeSupervisorState, modelID: ModelID?, reason: String?) {
+        snapshot = LocalRuntimeSupervisorSnapshot(
+            state: state,
+            modelID: modelID,
+            reason: reason,
+            updatedAt: Date()
+        )
+    }
+}
+
 struct MLXRuntimeBridge: Sendable {
     private let state = MLXRuntimeState()
     private let deviceMonitor = DeviceRuntimeMonitor()
+    private let supervisor = LocalRuntimeSupervisor()
+
+    private func runtimeMemoryMetadata(
+        merging base: [String: String] = [:]
+    ) -> [String: String] {
+        var metadata = base
+        let counters = deviceMonitor.memoryCounters()
+        Self.add(counters.physicalMemoryBytes, forKey: "physical_memory_bytes", to: &metadata)
+        Self.add(counters.availableMemoryBytes, forKey: "available_memory_bytes", to: &metadata)
+        if let thermalState = counters.thermalState {
+            metadata["thermal_state"] = thermalState
+        }
+        if let lowPowerModeEnabled = counters.lowPowerModeEnabled {
+            metadata["low_power_mode_enabled"] = String(lowPowerModeEnabled)
+        }
+        if let hardwareModelIdentifier = counters.hardwareModelIdentifier {
+            metadata["hardware_model_identifier"] = hardwareModelIdentifier
+        }
+        if let performanceClass = counters.devicePerformanceClass {
+            metadata["device_performance_class"] = performanceClass.rawValue
+        }
+        if let runtimePressureReason = counters.runtimePressureReason {
+            metadata["runtime_pressure_reason"] = runtimePressureReason.rawValue
+        }
+        if let thermalDownshiftActive = counters.thermalDownshiftActive {
+            metadata["thermal_downshift_active"] = String(thermalDownshiftActive)
+        }
+        Self.add(counters.recommendedContextTokens, forKey: "recommended_context_tokens", to: &metadata)
+        Self.add(counters.recommendedSmallModelContextTokens, forKey: "recommended_small_model_context_tokens", to: &metadata)
+        Self.add(counters.recommendedPrefillStepSize, forKey: "recommended_prefill_step_size", to: &metadata)
+        Self.add(counters.metalRecommendedWorkingSetBytes, forKey: "metal_recommended_working_set_bytes", to: &metadata)
+        Self.add(counters.mlxActiveMemoryBytes, forKey: "mlx_active_memory_bytes", to: &metadata)
+        Self.add(counters.mlxCacheMemoryBytes, forKey: "mlx_cache_memory_bytes", to: &metadata)
+        Self.add(counters.mlxPeakMemoryBytes, forKey: "mlx_peak_memory_bytes", to: &metadata)
+        Self.add(counters.mlxMemoryLimitBytes, forKey: "mlx_memory_limit_bytes", to: &metadata)
+        Self.add(counters.mlxCacheLimitBytes, forKey: "mlx_cache_limit_bytes", to: &metadata)
+        return metadata
+    }
+
+    private static func add(_ value: Int64?, forKey key: String, to metadata: inout [String: String]) {
+        guard let value else { return }
+        metadata[key] = String(value)
+    }
+
+    private static func add(_ value: Int?, forKey key: String, to metadata: inout [String: String]) {
+        guard let value else { return }
+        metadata[key] = String(value)
+    }
 
     var isLinked: Bool {
         #if canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXEmbedders)
@@ -73,16 +192,17 @@ struct MLXRuntimeBridge: Sendable {
 
     var capabilities: ProviderCapabilities {
         let profile = deviceMonitor.currentProfile()
+        let safety = deviceMonitor.localGenerationSafety()
         return ProviderCapabilities(
             local: true,
             streaming: true,
-            textGeneration: true,
-            vision: profile.allowsVisionModels,
-            imageInputs: profile.allowsVisionModels,
+            textGeneration: safety.allowed,
+            vision: safety.allowed && profile.allowsVisionModels,
+            imageInputs: safety.allowed && profile.allowsVisionModels,
             embeddings: true,
             toolCalling: true,
             jsonMode: true,
-            maxContextTokens: profile.recommendedContextTokens
+            maxContextTokens: safety.recommendedMaxContextTokens
         )
     }
 
@@ -121,6 +241,7 @@ struct MLXRuntimeBridge: Sendable {
                 : deviceMonitor.currentProfile().turboQuantOptimizationPolicy,
             turboQuantValueBits: PinesCore.TurboQuantPreset.defaultGeneration.defaultValueBits,
             thermalDownshiftActive: memoryCounters.thermalDownshiftActive,
+            runtimePressureReason: memoryCounters.runtimePressureReason,
             lastUnsupportedAttentionShape: backend.lastUnsupportedAttentionShape,
             activeFallbackReason: linked
                 ? backend.fallbackReason
@@ -150,7 +271,7 @@ struct MLXRuntimeBridge: Sendable {
             : min(recommendedMaxKVSize, 8192)
         let fallbackReason = usesTurboQuant
             ? backend.fallbackReason
-            : "Using plain MLX KV cache until this community model is device-verified."
+            : "Using plain MLX KV cache because TurboQuant is not applicable to this install."
         let turboQuantDefaults = usesTurboQuant
             ? Self.turboQuantRuntimeDefaults(
                 for: install,
@@ -158,7 +279,7 @@ struct MLXRuntimeBridge: Sendable {
                 deviceOptimizationPolicy: deviceProfile.turboQuantOptimizationPolicy
             )
             : nil
-        return RuntimeProfile(
+        let profile = RuntimeProfile(
             name: hasVision ? "Vision balanced" : "Local balanced",
             quantization: QuantizationProfile(
                 weightBits: install.repository.localizedCaseInsensitiveContains("4bit") ? 4 : nil,
@@ -183,6 +304,9 @@ struct MLXRuntimeBridge: Sendable {
                     ?? deviceProfile.turboQuantOptimizationPolicy,
                 turboQuantValueBits: turboQuantDefaults?.valueBits,
                 thermalDownshiftActive: deviceProfile.thermalDownshiftActive,
+                runtimePressureReason: deviceProfile.runtimePressureReason,
+                turboQuantProfileID: turboQuantDefaults?.profileID,
+                turboQuantProfileSource: turboQuantDefaults?.profileSource,
                 lastUnsupportedAttentionShape: usesTurboQuant ? backend.lastUnsupportedAttentionShape : nil,
                 activeFallbackReason: linked ? fallbackReason : "MLX runtime packages are not linked in this build.",
                 memoryCounters: deviceMonitor.memoryCounters()
@@ -204,10 +328,11 @@ struct MLXRuntimeBridge: Sendable {
             repetitionContextSize: isCompact ? 16 : 20,
             maxConcurrentSessions: 1
         )
+        return deviceMonitor.localGenerationSafety().constrainedRuntimeProfile(profile)
     }
 
     private static func usesTurboQuantByDefault(for install: ModelInstall) -> Bool {
-        install.verification == .verified
+        install.modalities.contains(.text)
     }
 
     private struct TurboQuantRuntimeDefaults {
@@ -216,6 +341,8 @@ struct MLXRuntimeBridge: Sendable {
         var groupSize: Int
         var valueBits: Int?
         var optimizationPolicy: PinesCore.TurboQuantOptimizationPolicy
+        var profileID: String?
+        var profileSource: String
     }
 
     private static func turboQuantRuntimeDefaults(
@@ -237,7 +364,9 @@ struct MLXRuntimeBridge: Sendable {
                 requestedBackend: Self.coreTurboQuantBackend(from: profile.backend),
                 groupSize: profile.groupSize,
                 valueBits: profile.valueBits,
-                optimizationPolicy: profilePolicy == .auto ? deviceOptimizationPolicy : profilePolicy
+                optimizationPolicy: profilePolicy == .auto ? deviceOptimizationPolicy : profilePolicy,
+                profileID: profile.id,
+                profileSource: "bundled"
             )
         }
         #endif
@@ -247,7 +376,9 @@ struct MLXRuntimeBridge: Sendable {
             requestedBackend: .metalPolarQJL,
             groupSize: 64,
             valueBits: PinesCore.TurboQuantPreset.conservativeFallback.defaultValueBits,
-            optimizationPolicy: deviceOptimizationPolicy
+            optimizationPolicy: deviceOptimizationPolicy,
+            profileID: nil,
+            profileSource: "generic_conservative_fallback"
         )
     }
 
@@ -264,6 +395,21 @@ struct MLXRuntimeBridge: Sendable {
         lastUnsupportedAttentionShape: String?,
         fallbackReason: String?
     ) {
+        #if targetEnvironment(simulator)
+        return (
+            .metalPolarQJL,
+            nil,
+            false,
+            false,
+            .baseline,
+            .mlxPackedFallback,
+            nil,
+            nil,
+            nil,
+            nil,
+            "MLX TurboQuant Metal probing is disabled on iOS Simulator."
+        )
+        #else
         #if canImport(MLX)
         let requested = MLX.TurboQuantBackend.metalPolarQJL
         let availability = MLX.TurboQuantKernelAvailability.current
@@ -299,6 +445,7 @@ struct MLXRuntimeBridge: Sendable {
             nil,
             "MLX runtime packages are not linked in this build."
         )
+        #endif
         #endif
     }
 
@@ -361,33 +508,293 @@ struct MLXRuntimeBridge: Sendable {
     #endif
 
     func load(_ install: ModelInstall, profile: RuntimeProfile? = nil) async throws {
-        try await state.load(install, profile: profile ?? defaultRuntimeProfile(for: install))
+        await supervisor.beginLoading(modelID: install.modelID)
+        #if DEBUG
+        await FreezeBreadcrumbJournal.shared.record(
+            stage: "mlx.load.start",
+            metadata: runtimeMemoryMetadata(merging: [
+                "model_id": install.modelID.rawValue,
+                "repository": install.repository,
+            ])
+        )
+        #endif
+        do {
+            let safety = try deviceMonitor.requireLocalGenerationSafety()
+            try await state.load(
+                install,
+                profile: safety.constrainedRuntimeProfile(profile ?? defaultRuntimeProfile(for: install))
+            )
+            await supervisor.markReady(modelID: install.modelID)
+            #if DEBUG
+            await FreezeBreadcrumbJournal.shared.record(
+                stage: "mlx.load.complete",
+                metadata: runtimeMemoryMetadata(merging: ["model_id": install.modelID.rawValue])
+            )
+            #endif
+        } catch {
+            await supervisor.block(reason: error.localizedDescription, modelID: install.modelID)
+            #if DEBUG
+            await FreezeBreadcrumbJournal.shared.record(
+                stage: "mlx.load.failed",
+                detail: error.localizedDescription,
+                metadata: runtimeMemoryMetadata(merging: ["model_id": install.modelID.rawValue])
+            )
+            #endif
+            throw error
+        }
     }
 
     func unload() async {
+        await supervisor.beginUnloading(reason: "explicit_unload")
+        #if DEBUG
+        await FreezeBreadcrumbJournal.shared.record(
+            stage: "mlx.unload.start",
+            metadata: runtimeMemoryMetadata()
+        )
+        #endif
         await state.unload()
+        await supervisor.markUnloaded()
+        #if DEBUG
+        await FreezeBreadcrumbJournal.shared.record(
+            stage: "mlx.unload.complete",
+            metadata: runtimeMemoryMetadata()
+        )
+        #endif
     }
 
     func setForegroundActive(_ active: Bool) async {
+        if !active {
+            await supervisor.beginCancelling(reason: "background")
+        }
         await state.setForegroundActive(active)
+        if !active {
+            await supervisor.markUnloaded(reason: "background")
+        }
     }
 
     func handleMemoryPressure() async {
-        await state.handleMemoryPressure()
+        let handling = await state.handleMemoryPressure {
+            await supervisor.beginCancelling(reason: "memory_pressure")
+        }
+        switch handling {
+        case .unloaded:
+            #if DEBUG
+            await FreezeBreadcrumbJournal.shared.record(
+                stage: "mlx.memory_pressure.cancel_unload",
+                metadata: runtimeMemoryMetadata()
+            )
+            #endif
+            await supervisor.markUnloaded(reason: "memory_pressure")
+        case .ignoredDuringLoad:
+            #if DEBUG
+            await FreezeBreadcrumbJournal.shared.record(
+                stage: "mlx.memory_pressure.ignored_during_load",
+                metadata: runtimeMemoryMetadata()
+            )
+            #endif
+        }
     }
+
+    func handleThermalPressure() async {
+        let handling = await state.handlePressureUnload {
+            await supervisor.beginCancelling(reason: "thermal_pressure")
+        }
+        switch handling {
+        case .unloaded:
+            #if DEBUG
+            await FreezeBreadcrumbJournal.shared.record(
+                stage: "mlx.thermal_pressure.cancel_unload",
+                metadata: runtimeMemoryMetadata()
+            )
+            #endif
+            await supervisor.markUnloaded(reason: "thermal_pressure")
+        case .ignoredDuringLoad:
+            #if DEBUG
+            await FreezeBreadcrumbJournal.shared.record(
+                stage: "mlx.thermal_pressure.ignored_during_load",
+                metadata: runtimeMemoryMetadata()
+            )
+            #endif
+        }
+    }
+
+}
+
+private enum MLXMemoryPressureHandling: Sendable {
+    case unloaded
+    case ignoredDuringLoad
 }
 
 extension MLXRuntimeBridge: InferenceProvider {
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
-        try await state.streamEvents(request)
+        do {
+            _ = try deviceMonitor.requireLocalGenerationSafety()
+            await supervisor.beginGenerating(modelID: request.modelID)
+            #if DEBUG
+            await FreezeBreadcrumbJournal.shared.record(
+                stage: "mlx.stream.start",
+                metadata: runtimeMemoryMetadata(merging: ["model_id": request.modelID.rawValue])
+            )
+            #endif
+            let stream = try await state.streamEvents(request)
+            return supervised(stream, modelID: request.modelID)
+        } catch {
+            await supervisor.block(reason: error.localizedDescription, modelID: request.modelID)
+            throw error
+        }
     }
 
     func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
         try await state.embed(request)
     }
+
+    private func supervised(
+        _ source: AsyncThrowingStream<InferenceStreamEvent, Error>,
+        modelID: ModelID
+    ) -> AsyncThrowingStream<InferenceStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var terminalFailureReason: String?
+                var emittedTokenCount = 0
+                var didRecordFirstToken = false
+                do {
+                    for try await event in source {
+                        var eventToYield = event
+                        switch event {
+                        case let .token(delta):
+                            emittedTokenCount += max(1, delta.tokenCount)
+                            #if DEBUG
+                            if !didRecordFirstToken {
+                                didRecordFirstToken = true
+                                await FreezeBreadcrumbJournal.shared.record(
+                                    stage: "mlx.stream.first_token",
+                                    metadata: [
+                                        "model_id": modelID.rawValue,
+                                        "token_count": String(emittedTokenCount),
+                                    ]
+                                )
+                            } else if emittedTokenCount.isMultiple(of: 32) {
+                                await FreezeBreadcrumbJournal.shared.record(
+                                    stage: "mlx.stream.token_milestone",
+                                    metadata: [
+                                        "model_id": modelID.rawValue,
+                                        "token_count": String(emittedTokenCount),
+                                    ]
+                                )
+                            }
+                            #endif
+                        case let .finish(finish) where finish.reason == .error:
+                            terminalFailureReason = finish.message ?? "local_generation_error"
+                            #if DEBUG
+                            await FreezeBreadcrumbJournal.shared.record(
+                                stage: "mlx.stream.finish_error",
+                                detail: terminalFailureReason,
+                                metadata: runtimeMemoryMetadata(merging: [
+                                    "model_id": modelID.rawValue,
+                                    "token_count": String(emittedTokenCount),
+                                ])
+                            )
+                            #endif
+                        case let .finish(finish):
+                            var finish = finish
+                            if finish.reason == .cancelled {
+                                let snapshot = await supervisor.currentSnapshot()
+                                if let reason = snapshot.reason {
+                                    finish.providerMetadata[LocalProviderMetadataKeys.generationCancellationReason] = reason
+                                    if reason == "memory_pressure", finish.message == nil {
+                                        finish.message = "Local generation was cancelled because iOS reported memory pressure."
+                                    } else if reason == "thermal_pressure", finish.message == nil {
+                                        finish.message = "Local generation was cancelled because the device became too hot for on-device MLX inference."
+                                    }
+                                }
+                                eventToYield = .finish(finish)
+                            }
+                            #if DEBUG
+                            await FreezeBreadcrumbJournal.shared.record(
+                                stage: "mlx.stream.finish",
+                                detail: finish.message,
+                                metadata: runtimeMemoryMetadata(merging: [
+                                    "model_id": modelID.rawValue,
+                                    "reason": finish.reason.rawValue,
+                                    "token_count": String(emittedTokenCount),
+                                ])
+                            )
+                            #endif
+                        case let .failure(failure):
+                            terminalFailureReason = failure.message
+                            #if DEBUG
+                            await FreezeBreadcrumbJournal.shared.record(
+                                stage: "mlx.stream.failure",
+                                detail: failure.message,
+                                metadata: runtimeMemoryMetadata(merging: [
+                                    "model_id": modelID.rawValue,
+                                    "code": failure.code,
+                                    "recoverable": String(failure.recoverable),
+                                    "token_count": String(emittedTokenCount),
+                                ])
+                            )
+                            #endif
+                        case .toolCall, .metrics:
+                            break
+                        }
+                        continuation.yield(eventToYield)
+                    }
+                    if let terminalFailureReason {
+                        await supervisor.block(reason: terminalFailureReason, modelID: modelID)
+                    } else {
+                        await supervisor.finishGeneration(modelID: modelID)
+                    }
+                    #if DEBUG
+                    await FreezeBreadcrumbJournal.shared.record(
+                        stage: "mlx.stream.closed",
+                        detail: terminalFailureReason,
+                        metadata: runtimeMemoryMetadata(merging: [
+                            "model_id": modelID.rawValue,
+                            "token_count": String(emittedTokenCount),
+                        ])
+                    )
+                    #endif
+                    continuation.finish()
+                } catch is CancellationError {
+                    let snapshot = await supervisor.currentSnapshot()
+                    if snapshot.reason == nil {
+                        await supervisor.beginCancelling(reason: "stream_cancelled")
+                    }
+                    #if DEBUG
+                    await FreezeBreadcrumbJournal.shared.record(
+                        stage: "mlx.stream.cancelled",
+                        metadata: runtimeMemoryMetadata(merging: [
+                            "model_id": modelID.rawValue,
+                            "token_count": String(emittedTokenCount),
+                        ])
+                    )
+                    #endif
+                    continuation.finish(throwing: InferenceError.cancelled)
+                } catch {
+                    await supervisor.block(reason: error.localizedDescription, modelID: modelID)
+                    #if DEBUG
+                    await FreezeBreadcrumbJournal.shared.record(
+                        stage: "mlx.stream.thrown",
+                        detail: error.localizedDescription,
+                        metadata: runtimeMemoryMetadata(merging: [
+                            "model_id": modelID.rawValue,
+                            "token_count": String(emittedTokenCount),
+                        ])
+                    )
+                    #endif
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
 }
 
 private actor MLXRuntimeState {
+    private let deviceMonitor = DeviceRuntimeMonitor()
     private var activeInstall: ModelInstall?
     private var activeProfile = RuntimeProfile()
     private var activePartitionSummary: String?
@@ -395,6 +802,54 @@ private actor MLXRuntimeState {
     private var didRegisterModelAliases = false
     private var foregroundActive = true
     private var activeGenerationCancellation: MLXGenerationCancellationBox?
+    private var isLoading = false
+
+    private func runtimeMemoryMetadata(
+        merging base: [String: String] = [:]
+    ) -> [String: String] {
+        var metadata = base
+        let counters = deviceMonitor.memoryCounters()
+        Self.add(counters.physicalMemoryBytes, forKey: "physical_memory_bytes", to: &metadata)
+        Self.add(counters.availableMemoryBytes, forKey: "available_memory_bytes", to: &metadata)
+        if let thermalState = counters.thermalState {
+            metadata["thermal_state"] = thermalState
+        }
+        if let lowPowerModeEnabled = counters.lowPowerModeEnabled {
+            metadata["low_power_mode_enabled"] = String(lowPowerModeEnabled)
+        }
+        if let hardwareModelIdentifier = counters.hardwareModelIdentifier {
+            metadata["hardware_model_identifier"] = hardwareModelIdentifier
+        }
+        if let performanceClass = counters.devicePerformanceClass {
+            metadata["device_performance_class"] = performanceClass.rawValue
+        }
+        if let runtimePressureReason = counters.runtimePressureReason {
+            metadata["runtime_pressure_reason"] = runtimePressureReason.rawValue
+        }
+        if let thermalDownshiftActive = counters.thermalDownshiftActive {
+            metadata["thermal_downshift_active"] = String(thermalDownshiftActive)
+        }
+        Self.add(counters.recommendedContextTokens, forKey: "recommended_context_tokens", to: &metadata)
+        Self.add(counters.recommendedSmallModelContextTokens, forKey: "recommended_small_model_context_tokens", to: &metadata)
+        Self.add(counters.recommendedPrefillStepSize, forKey: "recommended_prefill_step_size", to: &metadata)
+        Self.add(counters.metalRecommendedWorkingSetBytes, forKey: "metal_recommended_working_set_bytes", to: &metadata)
+        Self.add(counters.mlxActiveMemoryBytes, forKey: "mlx_active_memory_bytes", to: &metadata)
+        Self.add(counters.mlxCacheMemoryBytes, forKey: "mlx_cache_memory_bytes", to: &metadata)
+        Self.add(counters.mlxPeakMemoryBytes, forKey: "mlx_peak_memory_bytes", to: &metadata)
+        Self.add(counters.mlxMemoryLimitBytes, forKey: "mlx_memory_limit_bytes", to: &metadata)
+        Self.add(counters.mlxCacheLimitBytes, forKey: "mlx_cache_limit_bytes", to: &metadata)
+        return metadata
+    }
+
+    private static func add(_ value: Int64?, forKey key: String, to metadata: inout [String: String]) {
+        guard let value else { return }
+        metadata[key] = String(value)
+    }
+
+    private static func add(_ value: Int?, forKey key: String, to metadata: inout [String: String]) {
+        guard let value else { return }
+        metadata[key] = String(value)
+    }
 
     #if canImport(MLXLMCommon)
     private var textContainer: MLXLMCommon.ModelContainer?
@@ -408,6 +863,39 @@ private actor MLXRuntimeState {
     func load(_ install: ModelInstall, profile: RuntimeProfile) async throws {
         try ensureForegroundActive()
         try Self.validateRuntimeCompatibility(install)
+        #if canImport(MLX)
+        Self.configureMLXMemoryPolicy(profile: profile)
+        #endif
+        #if canImport(MLXLMCommon)
+        let matchingInstall = activeInstall?.modelID == install.modelID
+            && activeInstall?.repository == install.repository
+        if matchingInstall {
+            let hasCompatibleContainer: Bool
+            if install.modalities.contains(.vision) || install.modalities.contains(.audio) {
+                hasCompatibleContainer = visionContainer != nil
+            } else if install.modalities.contains(.text) {
+                hasCompatibleContainer = textContainer != nil
+            } else {
+                hasCompatibleContainer = false
+            }
+            if hasCompatibleContainer {
+                let profileMatches = activeProfile == profile
+                #if DEBUG
+                await FreezeBreadcrumbJournal.shared.record(
+                    stage: "mlx.load.reuse",
+                    metadata: [
+                        "model_id": install.modelID.rawValue,
+                        "profile_matches": String(profileMatches),
+                    ]
+                )
+                #endif
+                activeProfile = profile
+                return
+            }
+        }
+        #endif
+        isLoading = true
+        defer { isLoading = false }
         activeInstall = install
         activeProfile = profile
 
@@ -443,6 +931,55 @@ private actor MLXRuntimeState {
         throw InferenceError.providerUnavailable("mlx-local")
         #endif
     }
+
+    #if canImport(MLX)
+    private static func configureMLXMemoryPolicy(profile: RuntimeProfile) {
+        #if targetEnvironment(simulator)
+        return
+        #else
+        Memory.cacheLimit = mlxCacheLimit(for: profile)
+        #endif
+    }
+
+    private static func mlxCacheLimit(for profile: RuntimeProfile) -> Int {
+        #if os(iOS)
+        let megabyte = 1_024 * 1_024
+        let contextTokens = profile.quantization.maxKVSize ?? 4_096
+        if profile.quantization.thermalDownshiftActive {
+            return 64 * megabyte
+        }
+        if contextTokens <= 4_096 {
+            return 64 * megabyte
+        }
+        if contextTokens <= 8_192 {
+            return 96 * megabyte
+        }
+        if contextTokens <= 16_384 {
+            return 128 * megabyte
+        }
+        return 192 * megabyte
+        #else
+        return Memory.cacheLimit
+        #endif
+    }
+
+    private static func clearCachedMLXBuffers() {
+        #if targetEnvironment(simulator)
+        return
+        #else
+        Stream.gpu.synchronize()
+        Memory.clearCache()
+        #endif
+    }
+
+    private static func resetMLXPeakMemory() {
+        #if targetEnvironment(simulator)
+        return
+        #else
+        Memory.peakMemory = 0
+        #endif
+    }
+    #endif
 
     #if canImport(MLXLLM) && canImport(MLXLMCommon)
     private func registerModelAliasesIfNeeded() async {
@@ -498,6 +1035,9 @@ private actor MLXRuntimeState {
     }
 
     private static func validateTurboQuantRuntimeGate() throws {
+        #if targetEnvironment(simulator)
+        throw InferenceError.unsupportedCapability("MLX TurboQuant Metal probing is disabled on iOS Simulator.")
+        #else
         #if canImport(MLX)
         let availability = MLX.TurboQuantKernelAvailability.current
         guard availability.selfTestStatus == .passed,
@@ -510,13 +1050,15 @@ private actor MLXRuntimeState {
         #else
         throw InferenceError.unsupportedCapability("MLX runtime packages are not linked in this build.")
         #endif
+        #endif
     }
     #endif
 
-    func setForegroundActive(_ active: Bool) {
+    func setForegroundActive(_ active: Bool) async {
         foregroundActive = active
         if !active {
             activeGenerationCancellation?.cancel()
+            await unload()
         }
     }
 
@@ -545,11 +1087,28 @@ private actor MLXRuntimeState {
         #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await embeddingRuntime.unload()
         #endif
+        #if canImport(MLX)
+        Self.clearCachedMLXBuffers()
+        Self.resetMLXPeakMemory()
+        #endif
     }
 
-    func handleMemoryPressure() async {
-        guard activeProfile.unloadOnMemoryPressure else { return }
+    func handleMemoryPressure(
+        willCancel: @Sendable () async -> Void
+    ) async -> MLXMemoryPressureHandling {
+        await handlePressureUnload(willCancel: willCancel)
+    }
+
+    func handlePressureUnload(
+        willCancel: @Sendable () async -> Void
+    ) async -> MLXMemoryPressureHandling {
+        if isLoading {
+            return .ignoredDuringLoad
+        }
+        await willCancel()
+        activeGenerationCancellation?.cancel()
         await unload()
+        return .unloaded
     }
 
     func streamEvents(_ request: ChatRequest) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
@@ -628,6 +1187,9 @@ private actor MLXRuntimeState {
             let task = Task {
                 defer {
                     generationCancellation.cancel()
+                    #if canImport(MLX)
+                    Self.clearCachedMLXBuffers()
+                    #endif
                     Task {
                         self.clearActiveGenerationCancellation(generationCancellation)
                     }
@@ -639,6 +1201,7 @@ private actor MLXRuntimeState {
                         let audio = audioURLs.map(UserInput.Audio.url)
                         var tokenCount = 0
                         var finish: InferenceFinish?
+                        _ = try deviceMonitor.requireLocalGenerationSafety()
                         let initialHistoryCharacterBudget = Self.localHistoryCharacterBudget(
                             maxContextTokens: profile.quantization.maxKVSize
                         )
@@ -676,6 +1239,8 @@ private actor MLXRuntimeState {
                             return messages
                         }
 
+                        let prepareStartedAt = Date()
+                        var preflightAttempts = 1
                         var userInput = UserInput(
                             chat: makeMessages(historyCharacterBudget: historyCharacterBudget),
                             processing: .init(resize: CGSize(width: 512, height: 512)),
@@ -686,6 +1251,7 @@ private actor MLXRuntimeState {
                               input.text.tokens.size + reservedCompletionTokens > maxContextTokens,
                               historyCharacterBudget > 0 {
                             reducedHistoryForContext = true
+                            preflightAttempts += 1
                             historyCharacterBudget = historyCharacterBudget <= 512 ? 0 : historyCharacterBudget / 2
                             userInput = UserInput(
                                 chat: makeMessages(historyCharacterBudget: historyCharacterBudget),
@@ -694,6 +1260,7 @@ private actor MLXRuntimeState {
                             )
                             input = try await context.processor.prepare(input: userInput)
                         }
+                        let prepareElapsedSeconds = Date().timeIntervalSince(prepareStartedAt)
                         if let maxContextTokens = profile.quantization.maxKVSize,
                            input.text.tokens.size + reservedCompletionTokens > maxContextTokens {
                             throw InferenceError.invalidRequest(
@@ -703,17 +1270,45 @@ private actor MLXRuntimeState {
                         var contextMetadata: [String: String] = [
                             ChatContextMetadataKeys.exactInputTokens: String(input.text.tokens.size),
                             ChatContextMetadataKeys.reservedCompletionTokens: String(reservedCompletionTokens),
+                            LocalProviderMetadataKeys.runtimePressureReason: profile.quantization.runtimePressureReason.rawValue,
+                            LocalProviderMetadataKeys.runtimePrefillStepSize: String(profile.prefillStepSize),
+                            LocalProviderMetadataKeys.turboQuantProfileSource: profile.quantization.turboQuantProfileSource ?? "none",
+                            LocalProviderMetadataKeys.generationPrepareElapsedSeconds: String(prepareElapsedSeconds),
+                            LocalProviderMetadataKeys.generationPreflightAttempts: String(preflightAttempts),
                         ]
+                        if let profileID = profile.quantization.turboQuantProfileID {
+                            contextMetadata[LocalProviderMetadataKeys.turboQuantProfileID] = profileID
+                        }
                         if let maxContextTokens = profile.quantization.maxKVSize {
                             contextMetadata[ChatContextMetadataKeys.contextWindowTokens] = String(maxContextTokens)
                             contextMetadata[ChatContextMetadataKeys.inputBudgetTokens] = String(max(0, maxContextTokens - reservedCompletionTokens))
+                            contextMetadata[LocalProviderMetadataKeys.runtimeMaxKVSize] = String(maxContextTokens)
                         }
                         if reducedHistoryForContext {
                             contextMetadata[ChatContextMetadataKeys.truncationApplied] = "true"
                             contextMetadata[ChatContextMetadataKeys.strategy] = "mlx-exact-token-preflight-v1"
                             contextMetadata[ChatContextMetadataKeys.clippedMessageCount] = "1"
                         }
+                        let cacheStartedAt = Date()
                         let cache = context.model.newCache(parameters: parameters)
+                        contextMetadata[LocalProviderMetadataKeys.generationCacheCreateElapsedSeconds] = String(
+                            Date().timeIntervalSince(cacheStartedAt)
+                        )
+                        #if DEBUG
+                        await FreezeBreadcrumbJournal.shared.record(
+                            stage: "mlx.generation.preflight",
+                            metadata: runtimeMemoryMetadata(merging: contextMetadata.merging([
+                                "model_id": request.modelID.rawValue,
+                                "prompt_tokens": String(input.text.tokens.size),
+                                "reserved_completion_tokens": String(reservedCompletionTokens),
+                                "history_character_budget": String(historyCharacterBudget),
+                                "reduced_history_for_context": String(reducedHistoryForContext),
+                                "kv_cache_strategy": profile.quantization.kvCacheStrategy.rawValue,
+                                "turboquant_preset": profile.quantization.preset?.rawValue ?? "none",
+                                "turboquant_requested_backend": profile.quantization.requestedBackend?.rawValue ?? "none",
+                            ]) { _, new in new })
+                        )
+                        #endif
                         let stream: AsyncStream<Generation>
                         let generationTask: Task<Void, Never>
                         var stopFilter = TextStopSequenceFilter(stopSequences: stopStrings)
@@ -756,6 +1351,9 @@ private actor MLXRuntimeState {
                             switch item {
                             case let .chunk(text):
                                 tokenCount += 1
+                                if tokenCount == 1 || tokenCount.isMultiple(of: 16) {
+                                    _ = try deviceMonitor.requireLocalGenerationSafety()
+                                }
                                 let filtered = stopFilter.append(text)
                                 if !filtered.text.isEmpty {
                                     continuation.yield(.token(TokenDelta(kind: .token, text: filtered.text, tokenCount: 1)))
@@ -955,11 +1553,7 @@ private actor MLXRuntimeState {
     }
 
     private static func resolvedModelDirectory(for install: ModelInstall) throws -> URL {
-        guard let localURL = install.localURL,
-              let resolvedURL = ModelLifecycleService.resolvedModelDirectory(
-                  from: localURL,
-                  modalities: install.modalities
-              ) else {
+        guard let resolvedURL = try ModelLifecycleService.installedModelDirectory(for: install) else {
             throw InferenceError.invalidRequest(
                 "The installed model \(install.repository) is incomplete. Delete it and download it again."
             )
@@ -1113,10 +1707,22 @@ private actor MLXRuntimeState {
                 LocalProviderMetadataKeys.turboQuantKernelProfile: diagnostics.selectedKernelProfile.rawValue,
                 LocalProviderMetadataKeys.turboQuantSelfTestStatus: diagnostics.selfTestStatus.rawValue,
                 LocalProviderMetadataKeys.turboQuantRawFallbackAllocated: String(diagnostics.rawFallbackAllocated),
+                LocalProviderMetadataKeys.runtimePressureReason: profile.quantization.runtimePressureReason.rawValue,
+                LocalProviderMetadataKeys.runtimeLowPowerMode: String(profile.quantization.memoryCounters.lowPowerModeEnabled ?? false),
+                LocalProviderMetadataKeys.runtimePrefillStepSize: String(profile.prefillStepSize),
                 LocalProviderMetadataKeys.mtpEnabled: String(profile.mtpEnabled),
                 LocalProviderMetadataKeys.audioEnabled: String(profile.audioEnabled),
                 LocalProviderMetadataKeys.dflashEnabled: String(profile.dflashEnabled),
             ]
+            if let maxKVSize = profile.quantization.maxKVSize {
+                metadata[LocalProviderMetadataKeys.runtimeMaxKVSize] = String(maxKVSize)
+            }
+            if let profileID = profile.quantization.turboQuantProfileID {
+                metadata[LocalProviderMetadataKeys.turboQuantProfileID] = profileID
+            }
+            if let profileSource = profile.quantization.turboQuantProfileSource {
+                metadata[LocalProviderMetadataKeys.turboQuantProfileSource] = profileSource
+            }
             appendRuntimeFeatureMetadata(to: &metadata, partitionSummary: partitionSummary)
             if let fallbackReason = diagnostics.fallbackReason {
                 metadata[LocalProviderMetadataKeys.turboQuantFallbackReason] = fallbackReason
@@ -1130,10 +1736,22 @@ private actor MLXRuntimeState {
         let quantization = profile.quantization
         var metadata: [String: String] = [
             LocalProviderMetadataKeys.turboQuantRawFallbackAllocated: String(quantization.rawFallbackAllocated ?? false),
+            LocalProviderMetadataKeys.runtimePressureReason: quantization.runtimePressureReason.rawValue,
+            LocalProviderMetadataKeys.runtimeLowPowerMode: String(quantization.memoryCounters.lowPowerModeEnabled ?? false),
+            LocalProviderMetadataKeys.runtimePrefillStepSize: String(profile.prefillStepSize),
             LocalProviderMetadataKeys.mtpEnabled: String(profile.mtpEnabled),
             LocalProviderMetadataKeys.audioEnabled: String(profile.audioEnabled),
             LocalProviderMetadataKeys.dflashEnabled: String(profile.dflashEnabled),
         ]
+        if let maxKVSize = quantization.maxKVSize {
+            metadata[LocalProviderMetadataKeys.runtimeMaxKVSize] = String(maxKVSize)
+        }
+        if let profileID = quantization.turboQuantProfileID {
+            metadata[LocalProviderMetadataKeys.turboQuantProfileID] = profileID
+        }
+        if let profileSource = quantization.turboQuantProfileSource {
+            metadata[LocalProviderMetadataKeys.turboQuantProfileSource] = profileSource
+        }
         appendRuntimeFeatureMetadata(to: &metadata, partitionSummary: partitionSummary)
         if let preset = quantization.preset {
             metadata[LocalProviderMetadataKeys.turboQuantPreset] = preset.rawValue

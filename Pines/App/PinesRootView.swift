@@ -31,6 +31,7 @@ struct PinesRootView: View {
     @State private var isPrivacyCoverVisible = false
     @State private var isPrivacyLocked = false
     @State private var appUnlockError: String?
+    @State private var isUITestBootstrapReady = false
 
     init() {
         let chatState = PinesChatState()
@@ -97,6 +98,18 @@ struct PinesRootView: View {
                 privacyCover
                     .zIndex(2)
             }
+
+            #if DEBUG
+            if isUITestBootstrapReady {
+                Text(".")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.clear)
+                    .frame(width: 10, height: 10)
+                    .accessibilityElement()
+                    .accessibilityLabel("Pines UI test ready")
+                    .accessibilityIdentifier("pines.ui-test.ready")
+            }
+            #endif
         }
         .pinesHighRefreshRate()
         .preferredColorScheme(settingsState.interfaceMode.colorScheme)
@@ -112,8 +125,16 @@ struct PinesRootView: View {
             PinesRuntimeMetrics.shared.recordStartupPhase("boot_first_frame_yield", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
 
             let servicesStartedAt = Date()
-            let services = PinesAppServices(loadsDefaultStore: false)
+            let services = PinesAppServices(loadsDefaultStore: PinesUITestLaunchConfiguration.isEnabled)
             self.services = services
+            #if DEBUG
+            if PinesUITestLaunchConfiguration.isEnabled {
+                isUITestBootstrapReady = services.liveStore != nil
+                if services.liveStore == nil {
+                    appModel.serviceError = services.defaultStoreStartupError ?? "UI test local store is unavailable."
+                }
+            }
+            #endif
             services.runtimeMetrics.recordStartupPhase("services_init", elapsedSeconds: Date().timeIntervalSince(servicesStartedAt))
 
             await services.prepareForFirstFrame()
@@ -147,7 +168,11 @@ struct PinesRootView: View {
                 if !storeReady, let error = services.defaultStoreStartupError {
                     appModel.serviceError = error
                 }
+                isUITestBootstrapReady = storeReady
                 await appModel.bootstrap(services: services)
+                #if DEBUG
+                await appModel.runLaunchStressModeIfNeeded(services: services)
+                #endif
                 haptics.prepare()
                 services.runtimeMetrics.recordStartupPhase("root_bootstrap_complete", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
             }
@@ -171,10 +196,19 @@ struct PinesRootView: View {
             Task { await authenticateAppUnlock() }
         }
         .onPinesMemoryWarning {
-            appModel.stopCurrentRun()
             if let services {
                 Task {
                     await services.handleMemoryPressure()
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
+            guard ProcessInfo.processInfo.thermalState == .serious
+                || ProcessInfo.processInfo.thermalState == .critical
+            else { return }
+            if let services {
+                Task {
+                    await services.handleThermalPressure()
                 }
             }
         }
@@ -360,23 +394,29 @@ struct PinesRootView: View {
             ChatsView()
                 .tabItem { Label(PinesTab.chats.title, systemImage: PinesTab.chats.systemImage) }
                 .tag(PinesTab.chats)
+                .accessibilityIdentifier("pines.tab.chats")
 
             ModelsView()
                 .tabItem { Label(PinesTab.models.title, systemImage: PinesTab.models.systemImage) }
                 .tag(PinesTab.models)
+                .accessibilityIdentifier("pines.tab.models")
 
             VaultView()
                 .tabItem { Label(PinesTab.vault.title, systemImage: PinesTab.vault.systemImage) }
                 .tag(PinesTab.vault)
+                .accessibilityIdentifier("pines.tab.vault")
 
             ArtifactsWorkspaceView()
                 .tabItem { Label(PinesTab.artifacts.title, systemImage: PinesTab.artifacts.systemImage) }
                 .tag(PinesTab.artifacts)
+                .accessibilityIdentifier("pines.tab.artifacts")
 
             SettingsView()
                 .tabItem { Label(PinesTab.settings.title, systemImage: PinesTab.settings.systemImage) }
                 .tag(PinesTab.settings)
+                .accessibilityIdentifier("pines.tab.settings")
         }
+        .accessibilityIdentifier("pines.root.tabs")
         .pinesAdaptiveTabViewStyle()
         .tint(theme.colors.accent)
         .background {
