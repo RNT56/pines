@@ -265,7 +265,7 @@ public struct ModelPreflightClassifier: Sendable {
     public static let defaultSupportedLLMTypes: Set<String> = [
         "llama", "llama4", "llama4_text", "mistral", "qwen2", "qwen3", "qwen3_moe", "gemma", "gemma2",
         "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant",
-        "qwen3_next", "qwen3_5", "qwen3_5_moe", "qwen3_5_text",
+        "qwen3_next", "qwen3_5", "qwen3_5_moe", "qwen3_5_text", "qwen3_5_moe_text",
         "phi", "phi3", "phimoe", "deepseek_v3", "deepseek_v32", "deepseek_v4", "glm4", "glm4_moe",
         "glm4_moe_lite", "starcoder2", "cohere", "openelm", "internlm2",
         "granite", "granitemoehybrid", "mimo", "mimo_v2_flash", "minimax",
@@ -276,7 +276,8 @@ public struct ModelPreflightClassifier: Sendable {
     ]
 
     public static let defaultSupportedVLMTypes: Set<String> = [
-        "qwen2_vl", "qwen2_5_vl", "qwen3_vl", "qwen3_5", "qwen3_5_moe",
+        "qwen2_vl", "qwen2_5_vl", "qwen3_vl", "qwen3_5", "qwen3_5_text",
+        "qwen3_5_moe", "qwen3_5_moe_text",
         "gemma3", "gemma4", "paligemma", "idefics3", "smolvlm", "fastvlm",
         "llava_qwen2", "pixtral", "mistral3", "lfm2_vl", "lfm2-vl", "glm_ocr",
     ]

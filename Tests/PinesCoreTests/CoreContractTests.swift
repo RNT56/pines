@@ -2871,6 +2871,110 @@ struct CoreContractTests {
     }
 
     @Test
+    func qwenTurboQuantPreflightCarriesProfileMetadataForExpandedFamilies() throws {
+        let classifier = ModelPreflightClassifier()
+
+        for spec in qwenTurboQuantProfileCases {
+            let result = classifier.classify(spec.preflightInput)
+
+            #expect(result.repository == spec.repository)
+            #expect(result.verification == .installable)
+            #expect(result.modalities == spec.modalities)
+            #expect(result.modelType == spec.modelType)
+            #expect(result.processorClass == spec.processorClass)
+            #expect(result.parameterCount == spec.parameterCount)
+            #expect(result.keyHeadDimension == spec.headDimension)
+            #expect(result.valueHeadDimension == spec.headDimension)
+            #expect(result.estimatedBytes == spec.expectedDownloadBytes)
+            #expect(result.reasons.isEmpty)
+
+            let install = ModelInstall(
+                modelID: ModelID(rawValue: spec.repository),
+                displayName: spec.displayName,
+                repository: spec.repository,
+                modalities: result.modalities,
+                verification: result.verification,
+                parameterCount: result.parameterCount,
+                estimatedBytes: result.estimatedBytes,
+                modelType: result.modelType,
+                processorClass: result.processorClass,
+                keyHeadDimension: result.keyHeadDimension,
+                valueHeadDimension: result.valueHeadDimension
+            )
+            let roundTrippedInstall = try JSONDecoder().decode(
+                ModelInstall.self,
+                from: JSONEncoder().encode(install)
+            )
+
+            #expect(roundTrippedInstall.repository == spec.repository)
+            #expect(roundTrippedInstall.modelType == spec.modelType)
+            #expect(roundTrippedInstall.parameterCount == spec.parameterCount)
+            #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
+            #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
+
+            let hints = ModelRuntimeConfigurationHints.infer(
+                repository: spec.repository,
+                modelType: result.modelType,
+                processorClass: result.processorClass,
+                metadataFiles: [
+                    "config.json": spec.configJSON,
+                    "tokenizer_config.json": spec.tokenizerConfigJSON,
+                ]
+            )
+
+            #expect(hints.extraEOSTokens.contains("<|im_end|>"))
+        }
+    }
+
+    @Test
+    func qwenTurboQuantResourcePolicyKeepsLargeModelsBehindDownloadGates() throws {
+        let compactPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 3_800_000_000)
+        let proPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 5_500_000_000)
+        let specsByRepository = Dictionary(uniqueKeysWithValues: qwenTurboQuantProfileCases.map { ($0.repository, $0) })
+
+        for repository in [
+            "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+            "mlx-community/Qwen3.5-2B-MLX-4bit",
+        ] {
+            let spec = try #require(specsByRepository[repository])
+            let decision = compactPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
+            #expect(!decision.isRejected)
+            #expect(decision.knownDownloadBytes == spec.expectedDownloadBytes)
+            #expect(decision.inferredParameterCount == spec.parameterCount)
+            #expect(decision.inferredWeightBits == 4)
+            #expect(decision.inferredWeightBitsAreExplicit)
+        }
+
+        let qwen4B = try #require(specsByRepository["mlx-community/Qwen3.5-4B-MLX-4bit"])
+        let qwen4BDecision = compactPolicy.evaluate(qwen4B.preflightInput, modalities: qwen4B.modalities)
+        #expect(qwen4BDecision.isRejected)
+        #expect(qwen4BDecision.knownDownloadBytes == qwen4B.expectedDownloadBytes)
+
+        let qwen9B = try #require(specsByRepository["mlx-community/Qwen3.5-9B-MLX-4bit"])
+        let qwen9BDecision = proPolicy.evaluate(qwen9B.preflightInput, modalities: qwen9B.modalities)
+        #expect(qwen9BDecision.isRejected)
+        #expect(qwen9BDecision.knownDownloadBytes == qwen9B.expectedDownloadBytes)
+
+        for repository in [
+            "mlx-community/Qwen3.5-27B-4bit",
+            "mlx-community/Qwen3.6-27B-4bit",
+            "mlx-community/Qwen3.5-40B-4bit",
+            "mlx-community/Qwen3.6-40B-4bit",
+            "mlx-community/Qwen3.5-35B-A3B-4bit",
+            "mlx-community/Qwen3.6-35B-A3B-4bit",
+            "mlx-community/Qwen3.5-REAP-97B-A10B-4bit",
+            "mlx-community/Qwen3.5-122B-A10B-4bit",
+            "mlx-community/Qwen3.5-397B-A17B-4bit",
+        ] {
+            let spec = try #require(specsByRepository[repository])
+            let decision = proPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
+            #expect(decision.isRejected)
+            #expect(decision.knownDownloadBytes == spec.expectedDownloadBytes)
+            #expect(decision.inferredParameterCount == spec.parameterCount)
+        }
+    }
+
+    @Test
     func gemmaTurboQuantPreflightCarriesProfileMetadataForExpandedFamilies() throws {
         let classifier = ModelPreflightClassifier()
 
@@ -4047,6 +4151,155 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
         jsonArray(fromJSONString: metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]).count
     }
 }
+
+private var qwenTurboQuantProfileCases: [QwenTurboQuantProfileCase] {
+        [
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+                displayName: "Qwen3.5 0.8B MLX 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 800_000_000,
+                modelBytes: 700_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-2B-MLX-4bit",
+                displayName: "Qwen3.5 2B MLX 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 2_000_000_000,
+                modelBytes: 1_550_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-4B-MLX-4bit",
+                displayName: "Qwen3.5 4B MLX 4-bit",
+                modelType: "qwen3_5_text",
+                parameterCount: 4_000_000_000,
+                modelBytes: 3_290_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-9B-MLX-4bit",
+                displayName: "Qwen3.5 9B MLX 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 9_000_000_000,
+                modelBytes: 5_600_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-27B-4bit",
+                displayName: "Qwen3.5 27B 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 27_000_000_000,
+                modelBytes: 16_200_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.6-27B-4bit",
+                displayName: "Qwen3.6 27B 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 27_000_000_000,
+                modelBytes: 16_200_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-40B-4bit",
+                displayName: "Qwen3.5 40B 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 40_000_000_000,
+                modelBytes: 24_000_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.6-40B-4bit",
+                displayName: "Qwen3.6 40B 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 40_000_000_000,
+                modelBytes: 24_000_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-35B-A3B-4bit",
+                displayName: "Qwen3.5 35B-A3B 4-bit",
+                modelType: "qwen3_5_moe",
+                parameterCount: 35_000_000_000,
+                modelBytes: 21_000_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.6-35B-A3B-4bit",
+                displayName: "Qwen3.6 35B-A3B 4-bit",
+                modelType: "qwen3_5_moe_text",
+                parameterCount: 35_000_000_000,
+                modelBytes: 21_000_000_000,
+                processorClass: "Qwen2VLProcessor"
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-REAP-97B-A10B-4bit",
+                displayName: "Qwen3.5 REAP 97B-A10B 4-bit",
+                modelType: "qwen3_5_moe",
+                parameterCount: 97_000_000_000,
+                modelBytes: 58_200_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-122B-A10B-4bit",
+                displayName: "Qwen3.5 122B-A10B 4-bit",
+                modelType: "qwen3_5_moe",
+                parameterCount: 122_000_000_000,
+                modelBytes: 73_200_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-397B-A17B-4bit",
+                displayName: "Qwen3.5 397B-A17B 4-bit",
+                modelType: "qwen3_5_moe",
+                parameterCount: 397_000_000_000,
+                modelBytes: 238_200_000_000
+            ),
+        ]
+    }
+
+private struct QwenTurboQuantProfileCase {
+        static let configBytes: Int64 = 10_000
+        static let tokenizerBytes: Int64 = 8_000_000
+        static let processorBytes: Int64 = 12_000
+
+        var repository: String
+        var displayName: String
+        var modelType: String
+        var parameterCount: Int64
+        var headDimension: Int = 256
+        var modelBytes: Int64
+        var processorClass: String?
+
+        var modalities: Set<ModelModality> {
+            processorClass == nil ? [.text] : [.text, .vision]
+        }
+
+        var expectedDownloadBytes: Int64 {
+            modelBytes + Self.configBytes + Self.tokenizerBytes + (processorClass == nil ? 0 : Self.processorBytes)
+        }
+
+        var configJSON: Data {
+            Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension)}"#.utf8)
+        }
+
+        var tokenizerConfigJSON: Data {
+            Data(#"{"chat_template":"<|im_start|>user\n{{ content }}<|im_end|>\n<|im_start|>assistant\n","additional_special_tokens":["<|im_start|>","<|im_end|>"]}"#.utf8)
+        }
+
+        var processorConfigJSON: Data? {
+            processorClass.map { Data(#"{"processor_class":"\#($0)"}"#.utf8) }
+        }
+
+        var preflightInput: ModelPreflightInput {
+            var files = [
+                ModelFileInfo(path: "config.json", size: Self.configBytes),
+                ModelFileInfo(path: "tokenizer.json", size: Self.tokenizerBytes),
+                ModelFileInfo(path: "model.safetensors", size: modelBytes),
+            ]
+            if processorClass != nil {
+                files.append(ModelFileInfo(path: "processor_config.json", size: Self.processorBytes))
+            }
+            return ModelPreflightInput(
+                repository: repository,
+                configJSON: configJSON,
+                processorConfigJSON: processorConfigJSON,
+                files: files,
+                tags: ["mlx", modelType, "4bit"]
+            )
+        }
+    }
 
 private var gemmaTurboQuantProfileCases: [GemmaTurboQuantProfileCase] {
         [
