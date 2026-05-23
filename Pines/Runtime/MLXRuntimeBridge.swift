@@ -354,13 +354,16 @@ struct MLXRuntimeBridge: Sendable {
         let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
         let identifiers = [install.repository, install.modelID.rawValue, install.displayName]
         for identifier in identifiers {
-            guard let profile = registry.profile(
-                for: identifier,
-                modelType: install.modelType,
-                modality: Self.turboQuantModality(for: install),
-                parameterCountB: Self.parameterCountBillionScale(for: install),
-                keyHeadDimension: install.keyHeadDimension,
-                valueHeadDimension: install.valueHeadDimension,
+	            guard let profile = registry.profile(
+	                for: identifier,
+	                modelType: install.modelType,
+	                textConfigModelType: install.textConfigModelType,
+	                modality: Self.turboQuantModality(for: install),
+	                parameterCountB: Self.parameterCountBillionScale(for: install),
+	                routedExperts: install.routedExperts,
+	                expertsPerToken: install.expertsPerToken,
+	                keyHeadDimension: install.keyHeadDimension,
+	                valueHeadDimension: install.valueHeadDimension,
                 contextLength: contextLength
             ) else { continue }
             let profilePolicy = Self.coreTurboQuantOptimizationPolicy(from: profile.optimizationPolicy)
@@ -1681,12 +1684,15 @@ private actor MLXRuntimeState {
         }
         #if canImport(MLXLMCommon)
         if let install,
-           let registryProfile = MLXLMCommon.TurboQuantProfileRegistry.bundled.profile(
-               for: install.repository,
-               modelType: install.modelType,
-               modality: install.modalities.contains(.vision) ? .visionText : .text,
-               parameterCountB: install.parameterCount.map { Double($0) / 1_000_000_000 },
-               keyHeadDimension: install.keyHeadDimension,
+	           let registryProfile = MLXLMCommon.TurboQuantProfileRegistry.bundled.profile(
+	               for: install.repository,
+	               modelType: install.modelType,
+	               textConfigModelType: install.textConfigModelType,
+	               modality: install.modalities.contains(.vision) ? .visionText : .text,
+	               parameterCountB: install.parameterCount.map { Double($0) / 1_000_000_000 },
+	               routedExperts: install.routedExperts,
+	               expertsPerToken: install.expertsPerToken,
+	               keyHeadDimension: install.keyHeadDimension,
                valueHeadDimension: install.valueHeadDimension,
                contextLength: profile.quantization.maxKVSize
            ) {

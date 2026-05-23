@@ -433,9 +433,12 @@ struct ModelLifecycleService: Sendable {
             estimatedBytes: result.estimatedBytes,
             license: result.license,
             modelType: result.modelType,
+            textConfigModelType: result.textConfigModelType,
             processorClass: result.processorClass,
             keyHeadDimension: result.keyHeadDimension,
-            valueHeadDimension: result.valueHeadDimension
+            valueHeadDimension: result.valueHeadDimension,
+            routedExperts: result.routedExperts,
+            expertsPerToken: result.expertsPerToken
         )
         try await installRepository.upsertInstall(install)
 

@@ -712,9 +712,12 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
     public var estimatedBytes: Int64?
     public var license: String?
     public var modelType: String?
+    public var textConfigModelType: String?
     public var processorClass: String?
     public var keyHeadDimension: Int?
     public var valueHeadDimension: Int?
+    public var routedExperts: Int?
+    public var expertsPerToken: Int?
     public var createdAt: Date
 
     public init(
@@ -731,9 +734,12 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
         estimatedBytes: Int64? = nil,
         license: String? = nil,
         modelType: String? = nil,
+        textConfigModelType: String? = nil,
         processorClass: String? = nil,
         keyHeadDimension: Int? = nil,
         valueHeadDimension: Int? = nil,
+        routedExperts: Int? = nil,
+        expertsPerToken: Int? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -749,9 +755,12 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
         self.estimatedBytes = estimatedBytes
         self.license = license
         self.modelType = modelType
+        self.textConfigModelType = textConfigModelType
         self.processorClass = processorClass
         self.keyHeadDimension = keyHeadDimension
         self.valueHeadDimension = valueHeadDimension
+        self.routedExperts = routedExperts
+        self.expertsPerToken = expertsPerToken
         self.createdAt = createdAt
     }
 }

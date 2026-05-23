@@ -122,9 +122,12 @@ extension PinesAppModel {
             estimatedBytes: preflight.estimatedBytes > 0 ? preflight.estimatedBytes : nil,
             license: preflight.license,
             modelType: preflight.modelType,
+            textConfigModelType: preflight.textConfigModelType,
             processorClass: preflight.processorClass,
             keyHeadDimension: preflight.keyHeadDimension,
-            valueHeadDimension: preflight.valueHeadDimension
+            valueHeadDimension: preflight.valueHeadDimension,
+            routedExperts: preflight.routedExperts,
+            expertsPerToken: preflight.expertsPerToken
         )
     }
 

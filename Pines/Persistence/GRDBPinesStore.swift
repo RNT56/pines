@@ -777,8 +777,8 @@ actor GRDBPinesStore:
             try db.execute(
                 sql: """
                 INSERT INTO model_installs
-                    (id, repository, display_name, revision, local_path, modalities, verification, state, parameter_count, model_type, processor_class, key_head_dimension, value_head_dimension, estimated_bytes, license, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, repository, display_name, revision, local_path, modalities, verification, state, parameter_count, model_type, text_config_model_type, processor_class, key_head_dimension, value_head_dimension, routed_experts, experts_per_token, estimated_bytes, license, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(repository) DO UPDATE SET
                     display_name = excluded.display_name,
                     revision = excluded.revision,
@@ -788,9 +788,12 @@ actor GRDBPinesStore:
                     state = excluded.state,
                     parameter_count = excluded.parameter_count,
                     model_type = excluded.model_type,
+                    text_config_model_type = excluded.text_config_model_type,
                     processor_class = excluded.processor_class,
                     key_head_dimension = excluded.key_head_dimension,
                     value_head_dimension = excluded.value_head_dimension,
+                    routed_experts = excluded.routed_experts,
+                    experts_per_token = excluded.experts_per_token,
                     estimated_bytes = excluded.estimated_bytes,
                     license = excluded.license,
                     updated_at = excluded.updated_at
@@ -806,9 +809,12 @@ actor GRDBPinesStore:
                     install.state.rawValue,
                     install.parameterCount,
                     install.modelType,
+                    install.textConfigModelType,
                     install.processorClass,
                     install.keyHeadDimension,
                     install.valueHeadDimension,
+                    install.routedExperts,
+                    install.expertsPerToken,
                     install.estimatedBytes,
                     install.license,
                     install.createdAt.timeIntervalSinceReferenceDate,

@@ -154,8 +154,8 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
             for: "mlx-community/gemma-3-12b-it-4bit",
             modelType: "gemma3",
             parameterCountB: 12,
-            keyHeadDimension: 240,
-            valueHeadDimension: 240
+            keyHeadDimension: 128,
+            valueHeadDimension: 128
         ))
         XCTAssertNil(registry.profile(
             for: "mlx-community/embeddinggemma-300m-4bit",

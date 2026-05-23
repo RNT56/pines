@@ -124,9 +124,12 @@ extension GRDBPinesStore {
             estimatedBytes: row["estimated_bytes"] as Int64?,
             license: row["license"] as String?,
             modelType: row["model_type"] as String?,
+            textConfigModelType: row["text_config_model_type"] as String?,
             processorClass: row["processor_class"] as String?,
             keyHeadDimension: row["key_head_dimension"] as Int?,
             valueHeadDimension: row["value_head_dimension"] as Int?,
+            routedExperts: row["routed_experts"] as Int?,
+            expertsPerToken: row["experts_per_token"] as Int?,
             createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
         )
     }

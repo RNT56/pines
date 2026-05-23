@@ -18,7 +18,12 @@ extension ModelInstall {
         copy.parameterCount = preflight.parameterCount ?? copy.parameterCount
         copy.license = preflight.license ?? copy.license
         copy.modelType = preflight.modelType ?? copy.modelType
+        copy.textConfigModelType = preflight.textConfigModelType ?? copy.textConfigModelType
         copy.processorClass = preflight.processorClass ?? copy.processorClass
+        copy.keyHeadDimension = preflight.keyHeadDimension ?? copy.keyHeadDimension
+        copy.valueHeadDimension = preflight.valueHeadDimension ?? copy.valueHeadDimension
+        copy.routedExperts = preflight.routedExperts ?? copy.routedExperts
+        copy.expertsPerToken = preflight.expertsPerToken ?? copy.expertsPerToken
         return copy
     }
 }

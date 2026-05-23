@@ -2117,7 +2117,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 17)
+        #expect(PinesDatabaseSchema.currentVersion == 18)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
         let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
         let projectSpacesMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 16 })
@@ -2177,6 +2177,12 @@ struct CoreContractTests {
         #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN parameter_count"))
         #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN key_head_dimension"))
         #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN value_head_dimension"))
+
+        let nestedRuntimeMetadataMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 18 })
+        let nestedRuntimeMetadataSQL = nestedRuntimeMetadataMigration.sql.joined(separator: "\n")
+        #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN text_config_model_type"))
+        #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN routed_experts"))
+        #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN experts_per_token"))
     }
 
     @Test
@@ -3086,6 +3092,88 @@ struct CoreContractTests {
                 #expect(decision.reason?.contains("device profile limit") == true)
             }
         }
+    }
+
+    @Test
+    func llamaAndMistralTurboQuantPreflightCarriesNestedProfileMetadata() throws {
+        let classifier = ModelPreflightClassifier()
+        let llama = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
+                configJSON: #"{"model_type":"llama","hidden_size":4096,"num_attention_heads":32}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "model.safetensors", size: 4_800_000_000),
+                ],
+                tags: ["mlx", "llama", "4bit"]
+            )
+        )
+        let mistralSmall4 = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Mistral-Small-4-119B-A6B-Instruct-4bit",
+                configJSON: #"{"model_type":"mistral3","text_config":{"model_type":"mistral4","qk_nope_head_dim":64,"qk_rope_head_dim":64,"v_head_dim":128,"n_routed_experts":128,"num_experts_per_tok":4}}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "model.safetensors", size: 72_000_000_000),
+                ],
+                tags: ["mlx", "mistral3", "4bit"]
+            )
+        )
+        let pixtral = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Pixtral-12B-2409-4bit",
+                configJSON: #"{"model_type":"pixtral","text_config":{"model_type":"mistral","head_dim":128}}"#.data(using: .utf8),
+                processorConfigJSON: #"{"processor_class":"PixtralProcessor"}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 7_200_000_000),
+                ],
+                tags: ["mlx", "pixtral", "image-text-to-text", "4bit"]
+            )
+        )
+        let llama4 = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit",
+                configJSON: #"{"model_type":"llama4","text_config":{"model_type":"llama4_text","head_dim":128}}"#.data(using: .utf8),
+                processorConfigJSON: #"{"processor_class":"Llama4Processor"}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 40_000_000_000),
+                ],
+                tags: ["mlx", "llama4", "any-to-any", "4bit"]
+            )
+        )
+
+        #expect(llama.verification == .installable)
+        #expect(llama.modelType == "llama")
+        #expect(llama.keyHeadDimension == 128)
+        #expect(llama.valueHeadDimension == 128)
+        #expect(llama.textConfigModelType == nil)
+
+        #expect(mistralSmall4.verification == .installable)
+        #expect(mistralSmall4.modelType == "mistral3")
+        #expect(mistralSmall4.textConfigModelType == "mistral4")
+        #expect(mistralSmall4.keyHeadDimension == 128)
+        #expect(mistralSmall4.valueHeadDimension == 128)
+        #expect(mistralSmall4.routedExperts == 128)
+        #expect(mistralSmall4.expertsPerToken == 4)
+
+        #expect(pixtral.verification == .installable)
+        #expect(pixtral.modalities == [.text, .vision])
+        #expect(pixtral.modelType == "pixtral")
+        #expect(pixtral.textConfigModelType == "mistral")
+        #expect(pixtral.keyHeadDimension == 128)
+        #expect(pixtral.valueHeadDimension == 128)
+
+        #expect(llama4.verification == .unsupported)
+        #expect(llama4.modalities.isEmpty)
+        #expect(llama4.reasons.contains("model_type llama4 is not registered in the linked MLX runtime."))
     }
 
     @Test

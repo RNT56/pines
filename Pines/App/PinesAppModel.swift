@@ -4094,13 +4094,16 @@ final class PinesAppModel: ObservableObject {
                 verification: result.verification,
                 state: result.verification == .unsupported ? .unsupported : .remote,
                 parameterCount: result.parameterCount,
-                estimatedBytes: result.estimatedBytes,
-                license: result.license,
-                modelType: result.modelType,
-                processorClass: result.processorClass,
-                keyHeadDimension: result.keyHeadDimension,
-                valueHeadDimension: result.valueHeadDimension
-            )
+	                estimatedBytes: result.estimatedBytes,
+	                license: result.license,
+	                modelType: result.modelType,
+	                textConfigModelType: result.textConfigModelType,
+	                processorClass: result.processorClass,
+	                keyHeadDimension: result.keyHeadDimension,
+	                valueHeadDimension: result.valueHeadDimension,
+	                routedExperts: result.routedExperts,
+	                expertsPerToken: result.expertsPerToken
+	            )
             let download = Self.latestDownloadByRepository(modelDownloads)[repository.lowercased()]
             let preview = Self.modelPreview(from: install, runtime: services.mlxRuntime, download: download)
             if let index = models.firstIndex(where: { $0.install.repository.caseInsensitiveCompare(repository) == .orderedSame }) {

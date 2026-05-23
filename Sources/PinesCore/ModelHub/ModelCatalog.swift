@@ -189,10 +189,13 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
     public var verification: ModelVerificationState
     public var modalities: Set<ModelModality>
     public var modelType: String?
+    public var textConfigModelType: String?
     public var processorClass: String?
     public var parameterCount: Int64?
     public var keyHeadDimension: Int?
     public var valueHeadDimension: Int?
+    public var routedExperts: Int?
+    public var expertsPerToken: Int?
     public var estimatedBytes: Int64
     public var reasons: [String]
     public var license: String?
@@ -202,10 +205,13 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
         verification: ModelVerificationState,
         modalities: Set<ModelModality>,
         modelType: String? = nil,
+        textConfigModelType: String? = nil,
         processorClass: String? = nil,
         parameterCount: Int64? = nil,
         keyHeadDimension: Int? = nil,
         valueHeadDimension: Int? = nil,
+        routedExperts: Int? = nil,
+        expertsPerToken: Int? = nil,
         estimatedBytes: Int64 = 0,
         reasons: [String] = [],
         license: String? = nil
@@ -214,10 +220,13 @@ public struct ModelPreflightResult: Hashable, Codable, Sendable {
         self.verification = verification
         self.modalities = modalities
         self.modelType = modelType
+        self.textConfigModelType = textConfigModelType
         self.processorClass = processorClass
         self.parameterCount = parameterCount
         self.keyHeadDimension = keyHeadDimension
         self.valueHeadDimension = valueHeadDimension
+        self.routedExperts = routedExperts
+        self.expertsPerToken = expertsPerToken
         self.estimatedBytes = estimatedBytes
         self.reasons = reasons
         self.license = license

@@ -316,8 +316,8 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "llama4", "any-to-any"]
             )
         )
-        try expectEqual(llama4.verification, .installable)
-        try expectEqual(llama4.modalities, [.text])
+        try expectEqual(llama4.verification, .unsupported)
+        try expectEqual(llama4.modalities, [])
 
         let deepseekV4 = ModelPreflightClassifier().classify(
             ModelPreflightInput(
@@ -547,7 +547,7 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS projects"), "missing project spaces table")
         try expect(sql.contains("ALTER TABLE conversations ADD COLUMN project_id"), "missing conversation project link")
         try expect(sql.contains("ALTER TABLE vault_documents ADD COLUMN project_id"), "missing vault project link")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 16)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 18)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")

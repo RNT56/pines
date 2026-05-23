@@ -19,8 +19,12 @@ public struct ModelPreflightClassifier: Sendable {
         let config = input.configJSON.flatMap(Self.decodeJSONObject)
         let processor = input.processorConfigJSON.flatMap(Self.decodeJSONObject)
         let modelType = config?["model_type"] as? String ?? inferredModelType(from: input.tags)
+        let textConfig = config?["text_config"] as? [String: Any]
+        let textConfigModelType = textConfig?["model_type"] as? String
         let processorClass = processor?["processor_class"] as? String
-        let headDimension = Self.headDimension(from: config, modelType: modelType)
+        let headDimensions = Self.headDimensions(from: config, modelType: modelType)
+        let routedExperts = Self.routedExperts(from: config)
+        let expertsPerToken = Self.expertsPerToken(from: config)
         let parameterCount = ModelDiscoveryResourcePolicy.inferredParameterCount(
             repository: input.repository,
             tags: input.tags
@@ -125,10 +129,13 @@ public struct ModelPreflightClassifier: Sendable {
             verification: verification,
             modalities: modalities,
             modelType: modelType,
+            textConfigModelType: textConfigModelType,
             processorClass: processorClass,
             parameterCount: parameterCount,
-            keyHeadDimension: headDimension,
-            valueHeadDimension: headDimension,
+            keyHeadDimension: headDimensions.key,
+            valueHeadDimension: headDimensions.value,
+            routedExperts: routedExperts,
+            expertsPerToken: expertsPerToken,
             estimatedBytes: size,
             reasons: reasons,
             license: input.license
@@ -143,23 +150,34 @@ public struct ModelPreflightClassifier: Sendable {
         path.split(separator: "/").last.map { String($0).lowercased() } ?? path.lowercased()
     }
 
-    private static func headDimension(from config: [String: Any]?, modelType: String?) -> Int? {
-        guard let config else { return nil }
+    private struct HeadDimensions {
+        var key: Int?
+        var value: Int?
+    }
+
+    private static func headDimensions(from config: [String: Any]?, modelType: String?) -> HeadDimensions {
+        guard let config else { return HeadDimensions(key: nil, value: nil) }
         if let explicit = positiveInt(config["head_dim"]) {
-            return explicit
+            return HeadDimensions(key: explicit, value: explicit)
         }
         if let textConfig = config["text_config"] as? [String: Any],
            let explicit = positiveInt(textConfig["head_dim"]) {
-            return explicit
+            return HeadDimensions(key: explicit, value: explicit)
+        }
+        if let mistral4 = mistral4HeadDimensions(from: config) {
+            return mistral4
         }
         if let runtimeDefault = runtimeDefaultHeadDimension(from: config, modelType: modelType) {
-            return runtimeDefault
+            return HeadDimensions(key: runtimeDefault, value: runtimeDefault)
         }
         if let modelType, modelTypesWithNonInferredHeadDimension.contains(modelType) {
-            return nil
+            return HeadDimensions(key: nil, value: nil)
         }
-        return inferredHeadDimension(from: config)
-            ?? (config["text_config"] as? [String: Any]).flatMap(inferredHeadDimension(from:))
+        if let inferred = inferredHeadDimension(from: config)
+            ?? (config["text_config"] as? [String: Any]).flatMap(inferredHeadDimension(from:)) {
+            return HeadDimensions(key: inferred, value: inferred)
+        }
+        return HeadDimensions(key: nil, value: nil)
     }
 
     private static let modelTypesWithNonInferredHeadDimension: Set<String> = [
@@ -192,6 +210,53 @@ public struct ModelPreflightClassifier: Sendable {
             return nil
         }
         return hiddenSize / attentionHeads
+    }
+
+    private static func mistral4HeadDimensions(from config: [String: Any]) -> HeadDimensions? {
+        let candidates = [
+            config,
+            config["text_config"] as? [String: Any],
+        ].compactMap { $0 }
+
+        for candidate in candidates {
+            let modelType = (candidate["model_type"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard modelType == "mistral4" else { continue }
+            guard let nope = positiveInt(candidate["qk_nope_head_dim"]),
+                  let rope = positiveInt(candidate["qk_rope_head_dim"]),
+                  let value = positiveInt(candidate["v_head_dim"])
+            else { return nil }
+            return HeadDimensions(key: nope + rope, value: value)
+        }
+        return nil
+    }
+
+    private static func routedExperts(from config: [String: Any]?) -> Int? {
+        configValue(
+            from: config,
+            keys: ["n_routed_experts", "num_routed_experts", "num_local_experts", "num_experts"]
+        )
+    }
+
+    private static func expertsPerToken(from config: [String: Any]?) -> Int? {
+        configValue(
+            from: config,
+            keys: ["num_experts_per_tok", "num_experts_per_token", "moe_top_k"]
+        )
+    }
+
+    private static func configValue(from config: [String: Any]?, keys: [String]) -> Int? {
+        guard let config else { return nil }
+        let textConfig = config["text_config"] as? [String: Any]
+        for source in [config, textConfig].compactMap({ $0 }) {
+            for key in keys {
+                if let value = positiveInt(source[key]) {
+                    return value
+                }
+            }
+        }
+        return nil
     }
 
     private static func positiveInt(_ value: Any?) -> Int? {
@@ -263,13 +328,13 @@ public struct ModelPreflightClassifier: Sendable {
     }
 
     public static let defaultSupportedLLMTypes: Set<String> = [
-        "llama", "llama4", "llama4_text", "mistral", "qwen2", "qwen3", "qwen3_moe", "gemma", "gemma2",
+        "llama", "mistral", "qwen2", "qwen3", "qwen3_moe", "gemma", "gemma2",
         "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant",
         "qwen3_next", "qwen3_5", "qwen3_5_moe", "qwen3_5_text", "qwen3_5_moe_text",
         "phi", "phi3", "phimoe", "deepseek_v3", "deepseek_v32", "deepseek_v4", "glm4", "glm4_moe",
         "glm4_moe_lite", "starcoder2", "cohere", "openelm", "internlm2",
         "granite", "granitemoehybrid", "mimo", "mimo_v2_flash", "minimax",
-        "minimax_m2", "mistral3", "bitnet", "smollm3", "ernie4_5", "lfm2", "lfm2_moe",
+        "minimax_m2", "mistral3", "ministral3", "bitnet", "smollm3", "ernie4_5", "lfm2", "lfm2_moe",
         "baichuan_m1", "exaone4", "olmo2", "olmo3", "olmoe", "falcon_h1",
         "jamba", "gpt_oss", "nanochat", "nemotron_h", "apertus", "afmoe",
         "bailing_moe", "minicpm", "lille-130m", "acereason",
