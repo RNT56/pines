@@ -38,6 +38,7 @@ context_max_tokens="${PINES_STRESS_CONTEXT_MAX_TOKENS:-}"
 context_target_tokens="${PINES_STRESS_CONTEXT_TARGET_TOKENS:-}"
 context_high_ratio="${PINES_STRESS_CONTEXT_HIGH_RATIO:-0.75}"
 context_reserve_tokens="${PINES_STRESS_CONTEXT_RESERVE_TOKENS:-1024}"
+disable_turboquant="${PINES_STRESS_DISABLE_TURBOQUANT:-0}"
 
 mkdir -p "$artifacts/logs" "$artifacts/polls" "$artifacts/app-diagnostics"
 
@@ -318,7 +319,8 @@ launch_environment="$(
     "$context_max_tokens" \
     "$context_target_tokens" \
     "$context_high_ratio" \
-    "$context_reserve_tokens" <<'PY'
+    "$context_reserve_tokens" \
+    "$disable_turboquant" <<'PY'
 import json
 import os
 import sys
@@ -336,6 +338,7 @@ import sys
     context_target_tokens,
     context_high_ratio,
     context_reserve_tokens,
+    disable_turboquant,
 ) = sys.argv[1:]
 environment = {
     "PINES_FREEZE_BREADCRUMBS": "1",
@@ -352,6 +355,7 @@ environment = {
     "PINES_STRESS_CONTEXT_HIGH_RATIO": context_high_ratio,
     "PINES_STRESS_CONTEXT_RESERVE_TOKENS": context_reserve_tokens,
     "PINES_STRESS_ALLOW_PRESSURE_RECOVERY": os.environ.get("PINES_STRESS_ALLOW_PRESSURE_RECOVERY", "0"),
+    "PINES_STRESS_DISABLE_TURBOQUANT": disable_turboquant,
 }
 if os.environ.get("PINES_STRESS_MODEL_ID"):
     environment["PINES_STRESS_MODEL_ID"] = os.environ["PINES_STRESS_MODEL_ID"]

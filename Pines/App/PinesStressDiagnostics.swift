@@ -27,6 +27,7 @@ struct PinesStressConfiguration: Sendable {
     var contextReserveTokens: Int
     var requestedModelID: String?
     var allowPressureRecovery: Bool
+    var disableTurboQuant: Bool
 
     static func current(
         arguments: [String] = ProcessInfo.processInfo.arguments,
@@ -51,7 +52,8 @@ struct PinesStressConfiguration: Sendable {
             contextHighWatermarkRatio: Self.contextHighWatermarkRatio(environment: environment),
             contextReserveTokens: max(128, Int(environment["PINES_STRESS_CONTEXT_RESERVE_TOKENS"] ?? "") ?? 1_024),
             requestedModelID: Self.optionalModelID(environment),
-            allowPressureRecovery: environment["PINES_STRESS_ALLOW_PRESSURE_RECOVERY"] == "1"
+            allowPressureRecovery: environment["PINES_STRESS_ALLOW_PRESSURE_RECOVERY"] == "1",
+            disableTurboQuant: environment["PINES_STRESS_DISABLE_TURBOQUANT"] == "1"
         )
     }
 

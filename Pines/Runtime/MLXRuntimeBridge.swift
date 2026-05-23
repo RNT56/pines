@@ -1429,7 +1429,8 @@ private actor MLXRuntimeState {
                             "local.generation.effective_max_tokens": effectiveMaxTokensOverride.map(String.init) ?? "none",
                             "local.generation.max_tokens_clamped": String(clampedCompletionTokens),
                         ]
-                        if install?.turboQuantFamilySupport == .hybridFull {
+                        if install?.turboQuantFamilySupport == .hybridFull,
+                           profile.quantization.kvCacheStrategy == .turboQuant {
                             contextMetadata[LocalProviderMetadataKeys.hybridStateExplanation] = "Attention KV caches use TurboQuant; architecture-specific native state caches remain exact."
                         }
                         if let profileID = profile.quantization.turboQuantProfileID {

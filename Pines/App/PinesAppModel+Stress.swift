@@ -23,6 +23,7 @@ extension PinesAppModel {
                 "context_reserve_tokens": String(configuration.contextReserveTokens),
                 "requested_model_id": configuration.requestedModelID ?? "first-installed",
                 "allow_pressure_recovery": String(configuration.allowPressureRecovery),
+                "disable_turboquant": String(configuration.disableTurboQuant),
             ],
             enabled: true
         )
@@ -33,6 +34,9 @@ extension PinesAppModel {
         configuration: PinesStressConfiguration,
         services: PinesAppServices
     ) async {
+        stressDisablesTurboQuant = configuration.disableTurboQuant
+        defer { stressDisablesTurboQuant = false }
+
         await writeStressStatus(
             configuration: configuration,
             state: "starting",
@@ -131,6 +135,7 @@ extension PinesAppModel {
                 "experts_per_token": install.expertsPerToken.map(String.init) ?? "none",
                 "cache_topology": install.cacheTopology.rawValue,
                 "turboquant_family_support": install.turboQuantFamilySupport.rawValue,
+                "disable_turboquant": String(configuration.disableTurboQuant),
             ],
             enabled: true
         )

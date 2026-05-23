@@ -385,6 +385,10 @@ final class CoreSurfaceTests: XCTestCase {
             contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesRootView.swift"),
             encoding: .utf8
         )
+        let appModel = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModel.swift"),
+            encoding: .utf8
+        )
         let stress = try String(
             contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModel+Stress.swift"),
             encoding: .utf8
@@ -460,11 +464,16 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(stress.contains("selectedStressInstall"))
         XCTAssertTrue(stress.contains("localStressOutputQualityFailure"))
         XCTAssertTrue(stress.contains("allowPressureRecovery"))
+        XCTAssertTrue(stress.contains("disable_turboquant"))
+        XCTAssertTrue(appModel.contains("stressDisablesTurboQuant"))
+        XCTAssertTrue(appModel.contains("stress_plain_kv_control"))
         XCTAssertTrue(diagnostics.contains("PINES_STRESS_MODEL_ID"))
         XCTAssertTrue(diagnostics.contains("PINES_STRESS_ALLOW_PRESSURE_RECOVERY"))
+        XCTAssertTrue(diagnostics.contains("PINES_STRESS_DISABLE_TURBOQUANT"))
         XCTAssertTrue(script.contains("PINES_STRESS_RECOVERY_COOLDOWN_SECONDS"))
         XCTAssertTrue(script.contains("PINES_STRESS_MODEL_ID"))
         XCTAssertTrue(script.contains("PINES_STRESS_ALLOW_PRESSURE_RECOVERY"))
+        XCTAssertTrue(script.contains("PINES_STRESS_DISABLE_TURBOQUANT"))
         XCTAssertTrue(script.contains("PINES_STRESS_CONTEXT_MODE"))
         XCTAssertTrue(script.contains("off|sweep|high|max|suite"))
         XCTAssertTrue(script.contains("PINES_STRESS_CONTEXT_TARGET_TOKENS"))

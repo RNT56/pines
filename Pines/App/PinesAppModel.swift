@@ -145,6 +145,9 @@ final class PinesAppModel: ObservableObject {
     let settingsState: PinesSettingsState
     let providerLifecycleState: PinesProviderLifecycleState
     let workflowState: PinesWorkflowState
+    #if DEBUG
+    var stressDisablesTurboQuant = false
+    #endif
 
     var threads: [PinesThreadPreview] {
         get { chatState.threads }
@@ -3660,6 +3663,21 @@ final class PinesAppModel: ObservableObject {
         } else {
             profile.quantization.maxKVSize = requestedContextTokens
         }
+        #if DEBUG
+        if stressDisablesTurboQuant {
+            profile.name = "\(profile.name) Stress Plain KV"
+            profile.quantization.algorithm = .none
+            profile.quantization.kvCacheStrategy = .none
+            profile.quantization.preset = nil
+            profile.quantization.requestedBackend = nil
+            profile.quantization.activeBackend = nil
+            profile.quantization.turboQuantValueBits = nil
+            profile.quantization.turboQuantProfileID = "stress_plain_kv_control"
+            profile.quantization.turboQuantProfileSource = "stress_environment_override"
+            profile.quantization.turboQuantProfileDiagnostics.append("PINES_STRESS_DISABLE_TURBOQUANT=1")
+            profile.quantization.maxKVSize = min(profile.quantization.maxKVSize ?? 4_096, 4_096)
+        }
+        #endif
         return profile
     }
 
