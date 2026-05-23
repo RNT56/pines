@@ -377,6 +377,10 @@ final class CoreSurfaceTests: XCTestCase {
             contentsOf: repoRoot.appendingPathComponent("Pines/Runtime/PinesRuntimeMetrics.swift"),
             encoding: .utf8
         )
+        let rootView = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesRootView.swift"),
+            encoding: .utf8
+        )
         let stress = try String(
             contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModel+Stress.swift"),
             encoding: .utf8
@@ -393,10 +397,14 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(inferenceTypes.contains("generationCancellationReason"))
         XCTAssertTrue(runtime.contains("generationCancellationReason"))
         XCTAssertTrue(runtime.contains("Local generation was cancelled because iOS reported memory pressure."))
-        XCTAssertTrue(runtime.contains("Local generation was cancelled because the device became too hot"))
+        XCTAssertTrue(runtime.contains("Local generation was cancelled because iOS reported critical thermal pressure"))
+        XCTAssertTrue(runtime.contains("mlx.memory_pressure.soft_recover"))
+        XCTAssertTrue(runtime.contains("maxSoftMemoryWarningsPerGeneration"))
+        XCTAssertTrue(runtime.contains("pressureAwareCompletionTokenLimit"))
         XCTAssertTrue(runtime.contains("mlx.thermal_pressure.cancel_unload"))
         XCTAssertTrue(runtime.contains("Memory.cacheLimit = mlxCacheLimit(for: profile)"))
         XCTAssertTrue(runtime.contains("Memory.clearCache()"))
+        XCTAssertTrue(runtime.contains("applySoftMemoryPressureMLXPolicy"))
         XCTAssertTrue(runtime.contains("resetMLXPeakMemory()"))
         XCTAssertTrue(runtime.contains("waitForActiveGenerationCancellationToDrain"))
         XCTAssertTrue(runtime.contains("pressureUnloadDrainTimeoutSeconds"))
@@ -408,12 +416,17 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(runtimeTypes.contains("mlxCacheMemoryBytes"))
         XCTAssertTrue(runtimeTypes.contains("constrainedModeActive"))
         XCTAssertTrue(runtimeTypes.contains("constrained.quantization.runtimePressureReason = pressureReason"))
+        XCTAssertTrue(runtimeTypes.contains("minimumAvailableMemoryBytes: Int64 = 600_000_000"))
         XCTAssertTrue(runtimeTypes.contains("constrainedAvailableMemoryBytes: Int64 = 2_000_000_000"))
+        XCTAssertFalse(runtimeTypes.contains("let severelyThermal = thermal == \"serious\" || thermal == \"critical\""))
+        XCTAssertTrue(runtimeTypes.contains("let criticallyThermal = thermal == \"critical\""))
         XCTAssertTrue(runtimeTypes.contains("requiresImmediateUnload: false"))
         XCTAssertTrue(monitor.contains("MLX.Memory.snapshot()"))
         XCTAssertTrue(monitor.contains("#if targetEnvironment(simulator)"))
         XCTAssertTrue(metrics.contains("mlx_cache="))
         XCTAssertTrue(metrics.contains("thermal_pressure physical="))
+        XCTAssertTrue(rootView.contains("ProcessInfo.processInfo.thermalState == .critical"))
+        XCTAssertFalse(rootView.contains("ProcessInfo.processInfo.thermalState == .serious"))
         XCTAssertTrue(stress.contains("stress.iteration.memory_pressure_recovered"))
         XCTAssertTrue(stress.contains("stress.iteration.memory_pressure_cooldown"))
         XCTAssertTrue(stress.contains("stress.iteration.thermal_pressure_recovered"))

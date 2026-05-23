@@ -3519,7 +3519,7 @@ struct CoreContractTests {
         #expect(safety.allowed)
         #expect(safety.constrainedModeActive)
         #expect(!safety.requiresImmediateUnload)
-        #expect(constrained.quantization.maxKVSize == 4_096)
+        #expect(constrained.quantization.maxKVSize == 2_048)
         #expect(constrained.prefillStepSize == 256)
         #expect(!constrained.streamExperts)
         #expect(!constrained.mtpEnabled)

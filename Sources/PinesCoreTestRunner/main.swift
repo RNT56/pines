@@ -957,16 +957,16 @@ struct PinesCoreTestRunner {
         let pressured = DeviceProfile.recommended(
             for: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 16_000_000_000,
-                availableMemoryBytes: 500_000_000,
+                availableMemoryBytes: 2_500_000_000,
                 thermalState: "serious"
             )
         )
-        try expectEqual(pressured.recommendedContextTokens, 4096)
-        try expectEqual(pressured.recommendedEmbeddingBatchSize, 4)
+        try expectEqual(pressured.recommendedContextTokens, 16_384)
+        try expectEqual(pressured.recommendedEmbeddingBatchSize, 8)
         try expectEqual(pressured.turboQuantOptimizationPolicy, .conservative)
         try expectEqual(pressured.runtimePressureReason, .thermalSerious)
-        try expect(pressured.thermalDownshiftActive, "thermal pressure should mark a downshift")
-        try expect(!pressured.allowsVisionModels, "thermal pressure should disable vision defaults")
+        try expect(!pressured.thermalDownshiftActive, "serious thermal state should reduce throughput without forcing context downshift")
+        try expect(pressured.allowsVisionModels, "serious thermal state should not disable vision defaults")
         let lowPowerA17 = DeviceProfile.recommended(
             for: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 8_000_000_000,
@@ -985,13 +985,25 @@ struct PinesCoreTestRunner {
             snapshot: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 8_000_000_000,
                 availableMemoryBytes: 2_000_000_000,
+                thermalState: "critical"
+            )
+        )
+        try expect(!unsafeThermal.allowed, "critical thermal state should pause local generation")
+        try expectEqual(unsafeThermal.pressureReason, .thermalCritical)
+        try expect(unsafeThermal.constrainedModeActive, "critical thermal state should constrain local runtime")
+        try expect(unsafeThermal.requiresImmediateUnload, "critical thermal state should unload local runtime")
+
+        let seriousThermal = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_000_000_000,
                 thermalState: "serious"
             )
         )
-        try expect(!unsafeThermal.allowed, "serious thermal state should pause local generation")
-        try expectEqual(unsafeThermal.pressureReason, .thermalSerious)
-        try expect(unsafeThermal.constrainedModeActive, "serious thermal state should constrain local runtime")
-        try expect(unsafeThermal.requiresImmediateUnload, "serious thermal state should unload local runtime")
+        try expect(seriousThermal.allowed, "serious thermal state should stay available in constrained mode")
+        try expectEqual(seriousThermal.pressureReason, .thermalSerious)
+        try expect(seriousThermal.constrainedModeActive, "serious thermal state should constrain local runtime")
+        try expect(!seriousThermal.requiresImmediateUnload, "serious thermal state should not unload local runtime")
 
         let constrainedSafety = LocalRuntimeSafetyPolicy.assess(
             snapshot: RuntimeMemorySnapshot(
@@ -1012,7 +1024,7 @@ struct PinesCoreTestRunner {
         try expect(constrainedSafety.allowed, "fair thermal pressure should constrain before denying")
         try expect(constrainedSafety.constrainedModeActive, "fair thermal pressure should enter constrained mode")
         try expect(!constrainedSafety.requiresImmediateUnload, "fair thermal pressure should not force immediate unload")
-        try expectEqual(constrainedProfile.quantization.maxKVSize, 4096)
+        try expectEqual(constrainedProfile.quantization.maxKVSize, 2048)
         try expect(!constrainedProfile.streamExperts, "constrained local profile should disable stream experts")
 
         let future = DeviceProfile.recommended(

@@ -203,9 +203,7 @@ struct PinesRootView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
-            guard ProcessInfo.processInfo.thermalState == .serious
-                || ProcessInfo.processInfo.thermalState == .critical
-            else { return }
+            guard ProcessInfo.processInfo.thermalState == .critical else { return }
             if let services {
                 Task {
                     await services.handleThermalPressure()

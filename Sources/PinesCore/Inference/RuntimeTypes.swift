@@ -919,16 +919,15 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
         let criticalThermal = thermalState == "critical"
         let seriousThermal = thermalState == "serious"
         let fairThermal = thermalState == "fair"
-        let severeThermal = seriousThermal || criticalThermal
         let thinThermal = profile.performanceClass == .a19ProThin && fairThermal
         let lowMemory = (snapshot.availableMemoryBytes ?? Int64.max) < 750_000_000
         let pressureReason: RuntimePressureReason
         if criticalThermal {
             pressureReason = .thermalCritical
-        } else if seriousThermal {
-            pressureReason = .thermalSerious
         } else if lowMemory {
             pressureReason = .lowMemory
+        } else if seriousThermal {
+            pressureReason = .thermalSerious
         } else if thinThermal {
             pressureReason = .thinThermal
         } else if fairThermal {
@@ -938,9 +937,9 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
         } else {
             pressureReason = .none
         }
-        let downshift = severeThermal || thinThermal || lowMemory
+        let downshift = criticalThermal || thinThermal || lowMemory
 
-        if severeThermal {
+        if criticalThermal {
             profile.recommendedContextTokens = min(profile.recommendedContextTokens, 4096)
             profile.recommendedSmallModelContextTokens = min(profile.recommendedSmallModelContextTokens, 4096)
             profile.recommendedPrefillStepSize = min(profile.recommendedPrefillStepSize, 256)
@@ -949,11 +948,6 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
             profile.allowsVisionModels = false
             profile.unloadsOnThermalPressure = true
             profile.turboQuantOptimizationPolicy = .conservative
-        } else if snapshot.lowPowerModeEnabled {
-            profile.recommendedPrefillStepSize = min(profile.recommendedPrefillStepSize, 256)
-            profile.recommendedEmbeddingBatchSize = min(profile.recommendedEmbeddingBatchSize, 4)
-            profile.recommendedVectorScanLimit = min(profile.recommendedVectorScanLimit, 1024)
-            profile.turboQuantOptimizationPolicy = .conservative
         } else if lowMemory {
             profile.recommendedContextTokens = min(profile.recommendedContextTokens, 4096)
             profile.recommendedSmallModelContextTokens = min(profile.recommendedSmallModelContextTokens, 4096)
@@ -961,6 +955,16 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
             profile.recommendedEmbeddingBatchSize = min(profile.recommendedEmbeddingBatchSize, 4)
             profile.recommendedVectorScanLimit = min(profile.recommendedVectorScanLimit, 1024)
             profile.turboQuantOptimizationPolicy = .preferMemory
+        } else if seriousThermal {
+            profile.recommendedPrefillStepSize = min(profile.recommendedPrefillStepSize, 256)
+            profile.recommendedEmbeddingBatchSize = min(profile.recommendedEmbeddingBatchSize, 8)
+            profile.recommendedVectorScanLimit = min(profile.recommendedVectorScanLimit, 2048)
+            profile.turboQuantOptimizationPolicy = .conservative
+        } else if snapshot.lowPowerModeEnabled {
+            profile.recommendedPrefillStepSize = min(profile.recommendedPrefillStepSize, 256)
+            profile.recommendedEmbeddingBatchSize = min(profile.recommendedEmbeddingBatchSize, 4)
+            profile.recommendedVectorScanLimit = min(profile.recommendedVectorScanLimit, 1024)
+            profile.turboQuantOptimizationPolicy = .conservative
         } else if thinThermal {
             profile.recommendedContextTokens = min(profile.recommendedContextTokens, 16_384)
             profile.recommendedSmallModelContextTokens = min(profile.recommendedSmallModelContextTokens, 16_384)
@@ -1245,7 +1249,7 @@ public struct LocalRuntimeSafetyAssessment: Hashable, Codable, Sendable {
 }
 
 public enum LocalRuntimeSafetyPolicy {
-    public static let minimumAvailableMemoryBytes: Int64 = 1_000_000_000
+    public static let minimumAvailableMemoryBytes: Int64 = 600_000_000
     public static let constrainedAvailableMemoryBytes: Int64 = 2_000_000_000
 
     public static func assess(snapshot: RuntimeMemorySnapshot) -> LocalRuntimeSafetyAssessment {
@@ -1259,14 +1263,14 @@ public enum LocalRuntimeSafetyPolicy {
     ) -> LocalRuntimeSafetyAssessment {
         let thermal = snapshot.thermalState.lowercased()
         let available = snapshot.availableMemoryBytes
-        let severelyThermal = thermal == "serious" || thermal == "critical"
+        let criticallyThermal = thermal == "critical"
         let memoryExhausted = available.map { $0 < minimumAvailableMemoryBytes } ?? false
 
-        if severelyThermal {
+        if criticallyThermal {
             return LocalRuntimeSafetyAssessment(
                 allowed: false,
-                reason: "Local MLX generation is paused because the device thermal state is \(thermal). Let the device cool down or use a cloud model.",
-                pressureReason: thermal == "critical" ? .thermalCritical : .thermalSerious,
+                reason: "Local MLX generation is paused because iOS reported critical thermal pressure. Let the device recover or use a cloud model.",
+                pressureReason: .thermalCritical,
                 recommendedMaxContextTokens: min(profile.recommendedContextTokens, 2_048),
                 recommendedPrefillStepSize: min(profile.recommendedPrefillStepSize, 128),
                 requiresImmediateUnload: true,
@@ -1300,10 +1304,27 @@ public enum LocalRuntimeSafetyPolicy {
             pressureReason = .none
         }
         let constrained = pressureReason != .none
-        let shouldConstrainContext = pressureReason == .lowMemory || pressureReason == .thinThermal
-        let maxContext = shouldConstrainContext
-            ? min(profile.recommendedContextTokens, pressureReason == .thinThermal ? 16_384 : 4_096)
-            : profile.recommendedContextTokens
+        let maxContext: Int
+        switch pressureReason {
+        case .lowMemory:
+            let lowMemoryCap: Int
+            if let available {
+                if available < 1_000_000_000 {
+                    lowMemoryCap = 1_024
+                } else if available < 1_600_000_000 {
+                    lowMemoryCap = 2_048
+                } else {
+                    lowMemoryCap = 4_096
+                }
+            } else {
+                lowMemoryCap = 2_048
+            }
+            maxContext = min(profile.recommendedContextTokens, lowMemoryCap)
+        case .thinThermal:
+            maxContext = min(profile.recommendedContextTokens, 16_384)
+        case .none, .lowPower, .thermalFair, .thermalSerious, .thermalCritical:
+            maxContext = profile.recommendedContextTokens
+        }
         let prefill = constrained
             ? min(profile.recommendedPrefillStepSize, 256)
             : profile.recommendedPrefillStepSize

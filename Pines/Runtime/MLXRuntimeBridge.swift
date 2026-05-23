@@ -598,6 +598,13 @@ struct MLXRuntimeBridge: Sendable {
             await supervisor.beginCancelling(reason: "memory_pressure")
         }
         switch handling {
+        case .softRecovered:
+            #if DEBUG
+            await FreezeBreadcrumbJournal.shared.record(
+                stage: "mlx.memory_pressure.soft_recover",
+                metadata: runtimeMemoryMetadata()
+            )
+            #endif
         case .unloaded:
             #if DEBUG
             await FreezeBreadcrumbJournal.shared.record(
@@ -621,6 +628,8 @@ struct MLXRuntimeBridge: Sendable {
             await supervisor.beginCancelling(reason: "thermal_pressure")
         }
         switch handling {
+        case .softRecovered:
+            assertionFailure("Critical thermal pressure must not soft-recover.")
         case .unloaded:
             #if DEBUG
             await FreezeBreadcrumbJournal.shared.record(
@@ -642,6 +651,7 @@ struct MLXRuntimeBridge: Sendable {
 }
 
 private enum MLXMemoryPressureHandling: Sendable {
+    case softRecovered
     case unloaded
     case ignoredDuringLoad
 }
@@ -725,7 +735,7 @@ extension MLXRuntimeBridge: InferenceProvider {
                                     if reason == "memory_pressure", finish.message == nil {
                                         finish.message = "Local generation was cancelled because iOS reported memory pressure."
                                     } else if reason == "thermal_pressure", finish.message == nil {
-                                        finish.message = "Local generation was cancelled because the device became too hot for on-device MLX inference."
+                                        finish.message = "Local generation was cancelled because iOS reported critical thermal pressure for on-device MLX inference."
                                     }
                                 }
                                 eventToYield = .finish(finish)
@@ -817,6 +827,7 @@ extension MLXRuntimeBridge: InferenceProvider {
 private actor MLXRuntimeState {
     private static let pressureUnloadDrainTimeoutSeconds: TimeInterval = 5
     private static let pressureUnloadDrainPollNanoseconds: UInt64 = 100_000_000
+    private static let maxSoftMemoryWarningsPerGeneration = 4
 
     private let deviceMonitor = DeviceRuntimeMonitor()
     private var activeInstall: ModelInstall?
@@ -826,6 +837,7 @@ private actor MLXRuntimeState {
     private var didRegisterModelAliases = false
     private var foregroundActive = true
     private var activeGenerationCancellation: MLXGenerationCancellationBox?
+    private var activeGenerationSoftMemoryWarningCount = 0
     private var isLoading = false
 
     private func runtimeMemoryMetadata(
@@ -996,6 +1008,19 @@ private actor MLXRuntimeState {
         #endif
     }
 
+    private static func applySoftMemoryPressureMLXPolicy() {
+        #if targetEnvironment(simulator)
+        return
+        #else
+        Stream.gpu.synchronize()
+        Memory.clearCache()
+        let softCacheLimit = 32 * 1_024 * 1_024
+        if Memory.cacheLimit > softCacheLimit {
+            Memory.cacheLimit = softCacheLimit
+        }
+        #endif
+    }
+
     private static func resetMLXPeakMemory() {
         #if targetEnvironment(simulator)
         return
@@ -1095,11 +1120,13 @@ private actor MLXRuntimeState {
     private func clearActiveGenerationCancellation(_ box: MLXGenerationCancellationBox) {
         if activeGenerationCancellation === box {
             activeGenerationCancellation = nil
+            activeGenerationSoftMemoryWarningCount = 0
         }
     }
 
     func unload() async {
         activeInstall = nil
+        activeGenerationSoftMemoryWarningCount = 0
         #if canImport(MLXLMCommon)
         textContainer = nil
         visionContainer = nil
@@ -1120,17 +1147,36 @@ private actor MLXRuntimeState {
     func handleMemoryPressure(
         willCancel: @Sendable () async -> Void
     ) async -> MLXMemoryPressureHandling {
-        await handlePressureUnload(willCancel: willCancel)
+        await handlePressureUnload(willCancel: willCancel, allowsSoftRecovery: true)
     }
 
     func handlePressureUnload(
         willCancel: @Sendable () async -> Void
     ) async -> MLXMemoryPressureHandling {
+        await handlePressureUnload(willCancel: willCancel, allowsSoftRecovery: false)
+    }
+
+    private func handlePressureUnload(
+        willCancel: @Sendable () async -> Void,
+        allowsSoftRecovery: Bool
+    ) async -> MLXMemoryPressureHandling {
         if isLoading {
             return .ignoredDuringLoad
         }
-        await willCancel()
+        #if canImport(MLX)
+        Self.applySoftMemoryPressureMLXPolicy()
+        #endif
         let generationCancellation = activeGenerationCancellation
+        let hasHardMemoryPressure = deviceMonitor.memoryCounters().availableMemoryBytes
+            .map { $0 < LocalRuntimeSafetyPolicy.minimumAvailableMemoryBytes } ?? true
+        if allowsSoftRecovery,
+           generationCancellation != nil,
+           !hasHardMemoryPressure,
+           activeGenerationSoftMemoryWarningCount < Self.maxSoftMemoryWarningsPerGeneration {
+            activeGenerationSoftMemoryWarningCount += 1
+            return .softRecovered
+        }
+        await willCancel()
         generationCancellation?.cancel()
         if let generationCancellation {
             await waitForActiveGenerationCancellationToDrain(generationCancellation)
@@ -1218,6 +1264,7 @@ private actor MLXRuntimeState {
         let stopStrings = activeStopStrings
         let generationCancellation = MLXGenerationCancellationBox()
         activeGenerationCancellation = generationCancellation
+        activeGenerationSoftMemoryWarningCount = 0
 
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -1237,13 +1284,30 @@ private actor MLXRuntimeState {
                         let audio = audioURLs.map(UserInput.Audio.url)
                         var tokenCount = 0
                         var finish: InferenceFinish?
-                        _ = try deviceMonitor.requireLocalGenerationSafety()
+                        let generationSafety = try deviceMonitor.requireLocalGenerationSafety()
                         let initialHistoryCharacterBudget = Self.localHistoryCharacterBudget(
                             maxContextTokens: profile.quantization.maxKVSize
                         )
                         let requestedCompletionTokens = request.sampling.maxTokens
                         var reservedCompletionTokens = requestedCompletionTokens ?? 0
+                        var effectiveMaxTokensOverride = requestedCompletionTokens
                         var clampedCompletionTokens = false
+                        if let pressureCompletionLimit = Self.pressureAwareCompletionTokenLimit(
+                            profile: profile,
+                            safety: generationSafety
+                        ) {
+                            if let requestedCompletionTokens {
+                                if requestedCompletionTokens > pressureCompletionLimit {
+                                    reservedCompletionTokens = pressureCompletionLimit
+                                    effectiveMaxTokensOverride = pressureCompletionLimit
+                                    clampedCompletionTokens = true
+                                }
+                            } else {
+                                reservedCompletionTokens = pressureCompletionLimit
+                                effectiveMaxTokensOverride = pressureCompletionLimit
+                                clampedCompletionTokens = true
+                            }
+                        }
                         var historyCharacterBudget = initialHistoryCharacterBudget
                         var reducedHistoryForContext = false
 
@@ -1304,6 +1368,7 @@ private actor MLXRuntimeState {
                             let availableCompletionTokens = maxContextTokens - input.text.tokens.size
                             if requestedCompletionTokens != nil, availableCompletionTokens > 0 {
                                 reservedCompletionTokens = min(reservedCompletionTokens, availableCompletionTokens)
+                                effectiveMaxTokensOverride = reservedCompletionTokens
                                 clampedCompletionTokens = true
                             } else {
                                 throw InferenceError.invalidRequest(
@@ -1315,7 +1380,7 @@ private actor MLXRuntimeState {
                             from: request,
                             profile: profile,
                             install: install,
-                            maxTokensOverride: requestedCompletionTokens == nil ? nil : reservedCompletionTokens
+                            maxTokensOverride: effectiveMaxTokensOverride
                         )
                         var contextMetadata: [String: String] = [
                             ChatContextMetadataKeys.exactInputTokens: String(input.text.tokens.size),
@@ -1326,7 +1391,7 @@ private actor MLXRuntimeState {
                             LocalProviderMetadataKeys.generationPrepareElapsedSeconds: String(prepareElapsedSeconds),
                             LocalProviderMetadataKeys.generationPreflightAttempts: String(preflightAttempts),
                             "local.generation.requested_max_tokens": requestedCompletionTokens.map(String.init) ?? "none",
-                            "local.generation.effective_max_tokens": requestedCompletionTokens == nil ? "none" : String(reservedCompletionTokens),
+                            "local.generation.effective_max_tokens": effectiveMaxTokensOverride.map(String.init) ?? "none",
                             "local.generation.max_tokens_clamped": String(clampedCompletionTokens),
                         ]
                         if let profileID = profile.quantization.turboQuantProfileID {
@@ -1685,6 +1750,23 @@ private actor MLXRuntimeState {
             repetitionContextSize: profile.repetitionContextSize,
             prefillStepSize: profile.prefillStepSize
         )
+    }
+
+    private static func pressureAwareCompletionTokenLimit(
+        profile: RuntimeProfile,
+        safety: LocalRuntimeSafetyAssessment
+    ) -> Int? {
+        guard safety.constrainedModeActive else { return nil }
+        switch safety.pressureReason {
+        case .lowMemory:
+            return min(profile.quantization.maxKVSize ?? 256, 256)
+        case .thermalFair, .thermalSerious, .thinThermal:
+            return min(profile.quantization.maxKVSize ?? 768, 768)
+        case .lowPower:
+            return min(profile.quantization.maxKVSize ?? 1_024, 1_024)
+        case .none, .thermalCritical:
+            return nil
+        }
     }
 
     private static func mlxKVCacheStrategy(
