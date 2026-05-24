@@ -21,8 +21,8 @@ Related Pines repo:
 | Repo | Branch | Observed HEAD | Dirty state |
 | --- | --- | --- | --- |
 | `pines` | `codex/local-runtime-hardening` | `3c21a2d2ae9d2062881990f9529a916bbfa85571` | unrelated artifact workspace files are modified locally and were not included in this pin promotion |
-| `mlx-swift` | `codex/turboquant-core-completion` | `44f8d89b98655d36f3f32918e51a9a189011880c` | nested `Source/Cmlx/mlx`, `Source/Cmlx/mlx-c` modified before this doc pass |
-| `mlx-swift-lm` | `codex/turboquant-completion-hardening` | `73ec46dcf19c9c2c8f2dfb072073723d2b212378` | clean before this doc pass |
+| `mlx-swift` | `codex/turboquant-core-completion` | `a90b1097df45e4e70b6e0bb367624f8f5857970b` | nested `Source/Cmlx/mlx`, `Source/Cmlx/mlx-c` modified before this doc pass |
+| `mlx-swift-lm` | `codex/turboquant-completion-hardening` | `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c` | clean before this doc pass |
 
 ## Observed Pines pins
 
@@ -30,15 +30,15 @@ Related Pines repo:
 
 | Package | Revision |
 | --- | --- |
-| `MLXSwift` | `44f8d89b98655d36f3f32918e51a9a189011880c` |
-| `MLXSwiftLM` | `73ec46dcf19c9c2c8f2dfb072073723d2b212378` |
+| `MLXSwift` | `a90b1097df45e4e70b6e0bb367624f8f5857970b` |
+| `MLXSwiftLM` | `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c` |
 
 `pines/docs/TURBOQUANT.md` now lists the same current-pin pair:
 
 | Package | Revision listed in `docs/TURBOQUANT.md` |
 | --- | --- |
-| `MLXSwift` | `44f8d89b98655d36f3f32918e51a9a189011880c` |
-| `MLXSwiftLM` | `73ec46dcf19c9c2c8f2dfb072073723d2b212378` |
+| `MLXSwift` | `a90b1097df45e4e70b6e0bb367624f8f5857970b` |
+| `MLXSwiftLM` | `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c` |
 
 Keeping `docs/TURBOQUANT.md`, `project.yml`, and the generated Xcode project synchronized is part of the release-train gate whenever the compatibility pair changes.
 
