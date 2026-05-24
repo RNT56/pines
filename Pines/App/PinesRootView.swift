@@ -133,7 +133,6 @@ struct PinesRootView: View {
             self.services = services
             #if DEBUG
             if PinesUITestLaunchConfiguration.isEnabled {
-                isUITestBootstrapReady = services.liveStore != nil
                 if services.liveStore == nil {
                     appModel.serviceError = services.defaultStoreStartupError ?? "UI test local store is unavailable."
                 }
@@ -172,8 +171,12 @@ struct PinesRootView: View {
                 if !storeReady, let error = services.defaultStoreStartupError {
                     appModel.serviceError = error
                 }
-                isUITestBootstrapReady = storeReady
                 await appModel.bootstrap(services: services)
+                #if DEBUG
+                if PinesUITestLaunchConfiguration.isEnabled {
+                    isUITestBootstrapReady = storeReady
+                }
+                #endif
                 #if DEBUG
                 await appModel.runLaunchStressModeIfNeeded(services: services)
                 #endif

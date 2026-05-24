@@ -951,6 +951,14 @@ final class PinesAppModel: ObservableObject {
         }
 
         observeRepositories(services: services)
+        #if DEBUG
+        if PinesUITestLaunchConfiguration.isEnabled {
+            didBootstrap = true
+            isBootstrapping = false
+            services.runtimeMetrics.recordStartupPhase("bootstrap_ui_test_ready", elapsedSeconds: Date().timeIntervalSince(startedAt))
+            return
+        }
+        #endif
         bootstrapBackgroundTask = Task(priority: .utility) { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: 750_000_000)

@@ -226,6 +226,11 @@ final class PinesUITests: XCTestCase {
     @MainActor
     private func openTab(_ title: String) {
         closeTransientControlsIfNeeded()
+        if let identifier = screenIdentifier(for: title),
+           app.descendants(matching: .any)[identifier].exists {
+            return
+        }
+
         XCTAssertTrue(tapFirstExisting([
             app.tabBars.buttons[title],
             app.buttons[title],
