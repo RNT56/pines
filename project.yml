@@ -10,10 +10,10 @@ packages:
     path: .
   MLXSwift:
     url: https://github.com/RNT56/mlx-swift
-    revision: 6820f3c6b85bdd73a288f5796ba78c4cd40efd91
+    revision: e1e20800039ee10fe2729f1e1b7079b72477b7b0
   MLXSwiftLM:
     url: https://github.com/RNT56/mlx-swift-lm
-    revision: 861a9bd0e581317ddfce7446d306cbbb7916a75f
+    revision: 457cf052669e65b85c1eb4f863e6a818e517848a
   SwiftTransformers:
     url: https://github.com/huggingface/swift-transformers
     from: 1.3.0
