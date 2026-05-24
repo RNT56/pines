@@ -1875,7 +1875,6 @@ private actor MLXRuntimeState {
                         let promptCacheKey: LocalPromptKVCacheKey?
                         let promptCacheStoreEligible: Bool
                         let cache: [KVCache]
-                        var reusedPrefixTokenCount = 0
                         if let promptCacheSkipReason {
                             promptCacheKey = nil
                             promptCacheStoreEligible = false
@@ -1902,7 +1901,6 @@ private actor MLXRuntimeState {
                             )
                             if let entry = lookup.entry {
                                 cache = entry.cache
-                                reusedPrefixTokenCount = lookup.reusedPrefixTokenCount
                                 contextMetadata[LocalProviderMetadataKeys.promptKVCacheStatus] = "hit"
                                 contextMetadata[LocalProviderMetadataKeys.promptKVCacheReusedPrefixTokens] = String(
                                     lookup.reusedPrefixTokenCount
@@ -1966,22 +1964,12 @@ private actor MLXRuntimeState {
                                     tools: toolSpecs
                                 )
                             } else {
-                                let iterator = if reusedPrefixTokenCount > 0 {
-                                    try TokenIterator(
-                                        input: input,
-                                        model: context.model,
-                                        cache: cache,
-                                        cachedPrefixTokenCount: reusedPrefixTokenCount,
-                                        parameters: parameters
-                                    )
-                                } else {
-                                    try TokenIterator(
-                                        input: input,
-                                        model: context.model,
-                                        cache: cache,
-                                        parameters: parameters
-                                    )
-                                }
+                                let iterator = try TokenIterator(
+                                    input: input,
+                                    model: context.model,
+                                    cache: cache,
+                                    parameters: parameters
+                                )
                                 (stream, generationTask) = MLXLMCommon.generateTask(
                                     promptTokenCount: input.text.tokens.size,
                                     modelConfiguration: context.configuration,

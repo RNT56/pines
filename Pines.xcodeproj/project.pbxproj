@@ -1432,7 +1432,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift";
 			requirement = {
 				kind = revision;
-				revision = dfa7eeb6655facc4916381e95a1deb83a6d8728a;
+				revision = 2cc1eecb4b45596dcc2ccf01cbff1af6ae057374;
 			};
 		};
 		A43A495519F824800780FBF4 /* XCRemoteSwiftPackageReference "SQLCipher.swift" */ = {
@@ -1448,7 +1448,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift-lm";
 			requirement = {
 				kind = revision;
-				revision = 9f29a48654b546615f4b33059b52d27af931753e;
+				revision = 25c2d56114c8778bc75dc03f667e3bac01221d79;
 			};
 		};
 		ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
