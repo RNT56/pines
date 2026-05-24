@@ -263,7 +263,7 @@ private struct ArtifactsGalleryCard: View {
     }
 }
 
-private struct ArtifactsArtifactPreviewSurface: View {
+struct ArtifactsArtifactPreviewSurface: View {
     @Environment(\.pinesTheme) private var theme
     let artifact: ProviderArtifactRecord
     var maxHeight: CGFloat = 280
