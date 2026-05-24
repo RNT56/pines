@@ -14,9 +14,13 @@ import Darwin
 struct DeviceRuntimeMonitor: Sendable {
     func snapshot() -> RuntimeMemorySnapshot {
         let mlxCapabilities = metalCapabilities()
+        let processMemory = processMemorySnapshot()
         return RuntimeMemorySnapshot(
             physicalMemoryBytes: Int64(ProcessInfo.processInfo.physicalMemory),
             availableMemoryBytes: availableMemoryBytes(),
+            processResidentMemoryBytes: processMemory.resident,
+            processPhysicalFootprintBytes: processMemory.physicalFootprint,
+            processPeakResidentMemoryBytes: processMemory.peakResident,
             thermalState: ProcessInfo.processInfo.thermalState.pinesRuntimeValue,
             hardwareModelIdentifier: hardwareModelIdentifier(),
             lowPowerModeEnabled: isLowPowerModeEnabled(),
@@ -31,6 +35,24 @@ struct DeviceRuntimeMonitor: Sendable {
         DeviceProfile.recommended(for: snapshot())
     }
 
+    func localGenerationSafety() -> LocalRuntimeSafetyAssessment {
+        let currentSnapshot = snapshot()
+        return LocalRuntimeSafetyPolicy.assess(
+            snapshot: currentSnapshot,
+            profile: DeviceProfile.recommended(for: currentSnapshot)
+        )
+    }
+
+    func requireLocalGenerationSafety() throws -> LocalRuntimeSafetyAssessment {
+        let safety = localGenerationSafety()
+        guard safety.allowed else {
+            throw InferenceError.unsupportedCapability(
+                safety.reason ?? "Local MLX generation is paused by runtime safety policy."
+            )
+        }
+        return safety
+    }
+
     func memoryCounters(
         kvCacheBytes: Int64? = nil,
         quantizedKVCacheBytes: Int64? = nil,
@@ -38,23 +60,60 @@ struct DeviceRuntimeMonitor: Sendable {
     ) -> RuntimeMemoryCounters {
         let currentSnapshot = snapshot()
         let profile = DeviceProfile.recommended(for: currentSnapshot)
+        let mlxMemory = mlxMemorySnapshot()
         return RuntimeMemoryCounters(
             kvCacheBytes: kvCacheBytes,
             quantizedKVCacheBytes: quantizedKVCacheBytes,
             vaultIndexBytes: vaultIndexBytes,
             physicalMemoryBytes: currentSnapshot.physicalMemoryBytes,
             availableMemoryBytes: currentSnapshot.availableMemoryBytes,
+            processResidentMemoryBytes: currentSnapshot.processResidentMemoryBytes,
+            processPhysicalFootprintBytes: currentSnapshot.processPhysicalFootprintBytes,
+            processPeakResidentMemoryBytes: currentSnapshot.processPeakResidentMemoryBytes,
             thermalState: currentSnapshot.thermalState,
             hardwareModelIdentifier: currentSnapshot.hardwareModelIdentifier,
             lowPowerModeEnabled: currentSnapshot.lowPowerModeEnabled,
             metalArchitectureName: currentSnapshot.metalArchitectureName,
             metalRecommendedWorkingSetBytes: currentSnapshot.metalRecommendedWorkingSetBytes,
+            mlxActiveMemoryBytes: mlxMemory.active,
+            mlxCacheMemoryBytes: mlxMemory.cache,
+            mlxPeakMemoryBytes: mlxMemory.peak,
+            mlxMemoryLimitBytes: mlxMemory.memoryLimit,
+            mlxCacheLimitBytes: mlxMemory.cacheLimit,
             devicePerformanceClass: profile.performanceClass,
             thermalDownshiftActive: profile.thermalDownshiftActive,
+            runtimePressureReason: profile.runtimePressureReason,
             recommendedContextTokens: profile.recommendedContextTokens,
+            recommendedSmallModelContextTokens: profile.recommendedSmallModelContextTokens,
+            recommendedPrefillStepSize: profile.recommendedPrefillStepSize,
             recommendedEmbeddingBatchSize: profile.recommendedEmbeddingBatchSize,
             recommendedVectorScanLimit: profile.recommendedVectorScanLimit
         )
+    }
+
+    private func mlxMemorySnapshot() -> (
+        active: Int64?,
+        cache: Int64?,
+        peak: Int64?,
+        memoryLimit: Int64?,
+        cacheLimit: Int64?
+    ) {
+        #if targetEnvironment(simulator)
+        return (nil, nil, nil, nil, nil)
+        #else
+        #if canImport(MLX)
+        let snapshot = MLX.Memory.snapshot()
+        return (
+            Int64(snapshot.activeMemory),
+            Int64(snapshot.cacheMemory),
+            Int64(snapshot.peakMemory),
+            Int64(MLX.Memory.memoryLimit),
+            Int64(MLX.Memory.cacheLimit)
+        )
+        #else
+        return (nil, nil, nil, nil, nil)
+        #endif
+        #endif
     }
 
     private func availableMemoryBytes() -> Int64? {
@@ -64,6 +123,32 @@ struct DeviceRuntimeMonitor: Sendable {
         return Int64(available)
         #else
         return nil
+        #endif
+    }
+
+    private func processMemorySnapshot() -> (
+        resident: Int64?,
+        physicalFootprint: Int64?,
+        peakResident: Int64?
+    ) {
+        #if canImport(Darwin)
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else {
+            return (nil, nil, nil)
+        }
+        return (
+            Int64(info.resident_size),
+            Int64(info.phys_footprint),
+            Int64(info.resident_size_peak)
+        )
+        #else
+        return (nil, nil, nil)
         #endif
     }
 
@@ -97,6 +182,14 @@ struct DeviceRuntimeMonitor: Sendable {
         selfTestStatus: PinesCore.TurboQuantSelfTestStatus?
     ) {
         let device = metalDeviceSnapshot()
+        #if targetEnvironment(simulator)
+        return (
+            device.architectureName,
+            device.recommendedWorkingSetBytes,
+            nil,
+            nil
+        )
+        #else
         #if canImport(MLX)
         let availability = MLX.TurboQuantKernelAvailability.current
         return (
@@ -112,6 +205,7 @@ struct DeviceRuntimeMonitor: Sendable {
             nil,
             nil
         )
+        #endif
         #endif
     }
 

@@ -13,6 +13,10 @@ public enum ChatContextMetadataKeys {
     public static let truncationApplied = "chat.context.truncation_applied"
     public static let budgetSource = "chat.context.budget_source"
     public static let exactInputTokens = "chat.context.exact_input_tokens"
+    public static let rollingSummaryApplied = "chat.context.rolling_summary_applied"
+    public static let rollingSummaryEstimatedTokens = "chat.context.rolling_summary_estimated_tokens"
+    public static let rollingSummaryMessageCount = "chat.context.rolling_summary_message_count"
+    public static let handoffStrategy = "chat.context.handoff_strategy"
 }
 
 public struct ChatContextPackingPolicy: Hashable, Sendable {
@@ -27,6 +31,9 @@ public struct ChatContextPackingPolicy: Hashable, Sendable {
     public var maximumMessages: Int
     public var anchorMessageID: UUID?
     public var strategy: String
+    public var rollingSummaryEnabled: Bool
+    public var rollingSummaryBudgetTokens: Int
+    public var rollingSummaryMaxMessages: Int
 
     public init(
         maxContextTokens: Int?,
@@ -39,7 +46,10 @@ public struct ChatContextPackingPolicy: Hashable, Sendable {
         minimumMessageTokens: Int = 64,
         maximumMessages: Int = 192,
         anchorMessageID: UUID? = nil,
-        strategy: String = "anchored-recent-conservative-estimate-v1"
+        strategy: String = "anchored-recent-conservative-estimate-v1",
+        rollingSummaryEnabled: Bool = true,
+        rollingSummaryBudgetTokens: Int = 1_024,
+        rollingSummaryMaxMessages: Int = 64
     ) {
         self.maxContextTokens = maxContextTokens
         self.reservedCompletionTokens = max(0, reservedCompletionTokens)
@@ -52,6 +62,9 @@ public struct ChatContextPackingPolicy: Hashable, Sendable {
         self.maximumMessages = max(1, maximumMessages)
         self.anchorMessageID = anchorMessageID
         self.strategy = strategy
+        self.rollingSummaryEnabled = rollingSummaryEnabled
+        self.rollingSummaryBudgetTokens = max(self.minimumMessageTokens, rollingSummaryBudgetTokens)
+        self.rollingSummaryMaxMessages = max(1, rollingSummaryMaxMessages)
     }
 }
 
@@ -64,11 +77,14 @@ public struct ChatContextPackingSummary: Hashable, Sendable {
     public var includedMessageCount: Int
     public var droppedMessageCount: Int
     public var clippedMessageCount: Int
+    public var rollingSummaryApplied: Bool
+    public var rollingSummaryEstimatedTokens: Int
+    public var rollingSummaryMessageCount: Int
     public var budgetSource: String
     public var strategy: String
 
     public var truncationApplied: Bool {
-        droppedMessageCount > 0 || clippedMessageCount > 0
+        droppedMessageCount > 0 || clippedMessageCount > 0 || rollingSummaryApplied
     }
 
     public var providerMetadata: [String: String] {
@@ -83,6 +99,10 @@ public struct ChatContextPackingSummary: Hashable, Sendable {
             ChatContextMetadataKeys.droppedMessageCount: String(droppedMessageCount),
             ChatContextMetadataKeys.clippedMessageCount: String(clippedMessageCount),
             ChatContextMetadataKeys.truncationApplied: String(truncationApplied),
+            ChatContextMetadataKeys.rollingSummaryApplied: String(rollingSummaryApplied),
+            ChatContextMetadataKeys.rollingSummaryEstimatedTokens: String(rollingSummaryEstimatedTokens),
+            ChatContextMetadataKeys.rollingSummaryMessageCount: String(rollingSummaryMessageCount),
+            ChatContextMetadataKeys.handoffStrategy: rollingSummaryApplied ? "deterministic-rolling-handoff-v1" : "none",
             ChatContextMetadataKeys.budgetSource: budgetSource,
         ]
     }
@@ -133,13 +153,26 @@ public enum ChatContextPacker {
                     includedMessageCount: 0,
                     droppedMessageCount: 0,
                     clippedMessageCount: 0,
+                    rollingSummaryApplied: false,
+                    rollingSummaryEstimatedTokens: 0,
+                    rollingSummaryMessageCount: 0,
                     budgetSource: inputBudget(for: policy).source,
                     strategy: policy.strategy
                 )
             )
         }
 
-        let budget = inputBudget(for: policy)
+        var budget = inputBudget(for: policy)
+        let totalInputBudgetTokens = budget.budget
+        let totalEstimatedTokens = messages.reduce(0) { $0 + estimatedTokens(for: $1, policy: policy) }
+        let shouldReserveRollingSummary = policy.rollingSummaryEnabled
+            && (totalEstimatedTokens > budget.budget || messages.count > policy.maximumMessages)
+        let reservedRollingSummaryBudget = shouldReserveRollingSummary
+            ? min(policy.rollingSummaryBudgetTokens, max(policy.minimumMessageTokens, budget.budget / 4))
+            : 0
+        if reservedRollingSummaryBudget > 0 {
+            budget.budget = max(policy.minimumMessageTokens, budget.budget - reservedRollingSummaryBudget)
+        }
         let anchorIndex = policy.anchorMessageID.flatMap { id in
             messages.firstIndex { $0.id == id }
         } ?? messages.lastIndex { $0.role == .user }
@@ -202,20 +235,47 @@ public enum ChatContextPacker {
             addMessage(item, tokenBudget: remainingTokens(), clipMode: .suffix)
         }
 
-        let packed = selected
+        var packed = selected
             .sorted { $0.key < $1.key }
             .map(\.value)
+        var rollingSummaryApplied = false
+        var rollingSummaryEstimatedTokens = 0
+        var rollingSummaryMessageCount = 0
+        if reservedRollingSummaryBudget > 0 {
+            let selectedIndexes = Set(selected.keys)
+            let summarizedItems = indexedMessages.filter { item in
+                item.index <= lastAllowedIndex
+                    && item.message.role != .system
+                    && !selectedIndexes.contains(item.index)
+            }
+            if let summaryMessage = rollingSummaryMessage(
+                from: summarizedItems,
+                tokenBudget: reservedRollingSummaryBudget,
+                policy: policy
+            ) {
+                rollingSummaryEstimatedTokens = estimatedTokens(for: summaryMessage, policy: policy)
+                rollingSummaryMessageCount = summarizedItems.count
+                rollingSummaryApplied = true
+                let insertIndex = packed.lastIndex { $0.role == .system }
+                    .map { packed.index(after: $0) }
+                    ?? packed.startIndex
+                packed.insert(summaryMessage, at: insertIndex)
+            }
+        }
         let estimatedInputTokens = packed.reduce(0) { $0 + estimatedTokens(for: $1, policy: policy) }
-        let droppedByBudget = max(0, messages.count - packed.count - droppedAfterAnchor)
+        let droppedByBudget = max(0, messages.count - selected.count - droppedAfterAnchor)
         let summary = ChatContextPackingSummary(
             estimatedInputTokens: estimatedInputTokens,
-            inputBudgetTokens: budget.budget,
+            inputBudgetTokens: totalInputBudgetTokens,
             contextWindowTokens: budget.contextWindow,
             reservedCompletionTokens: policy.reservedCompletionTokens,
             originalMessageCount: messages.count,
             includedMessageCount: packed.count,
             droppedMessageCount: droppedAfterAnchor + droppedByBudget,
             clippedMessageCount: clippedMessages,
+            rollingSummaryApplied: rollingSummaryApplied,
+            rollingSummaryEstimatedTokens: rollingSummaryEstimatedTokens,
+            rollingSummaryMessageCount: rollingSummaryMessageCount,
             budgetSource: budget.source,
             strategy: policy.strategy
         )
@@ -259,5 +319,96 @@ public enum ChatContextPacker {
             return String(content.suffix(maxCharacters))
         }
         return marker + String(content.suffix(maxCharacters - marker.count))
+    }
+
+    private static func rollingSummaryMessage(
+        from items: [IndexedMessage],
+        tokenBudget: Int,
+        policy: ChatContextPackingPolicy
+    ) -> ChatMessage? {
+        guard tokenBudget >= policy.minimumMessageTokens, !items.isEmpty else { return nil }
+        let fixedTokens = policy.perMessageOverheadTokens
+        let maxCharacters = max(0, (tokenBudget - fixedTokens) * policy.charactersPerToken)
+        guard maxCharacters > 128 else { return nil }
+
+        let summarizedItems = Array(items.suffix(policy.rollingSummaryMaxMessages))
+        var lines = [
+            "Earlier conversation handoff summary.",
+            "Use this as compressed context for turns that no longer fit verbatim.",
+            "Preserve decisions, constraints, open questions, tool outcomes, attachments, and user preferences from these earlier turns.",
+            "Source message count: \(items.count).",
+        ]
+        if summarizedItems.count < items.count {
+            lines.append("Oldest omitted source messages: \(items.count - summarizedItems.count).")
+        }
+        lines.append("Compressed source turns:")
+
+        for item in summarizedItems {
+            lines.append("- \(handoffRoleName(item.message.role)): \(handoffExcerpt(for: item.message, policy: policy))")
+        }
+
+        var content = lines.joined(separator: "\n")
+        if content.count > maxCharacters {
+            content = clippedPreservingEdges(content, maxCharacters: maxCharacters)
+        }
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+        return ChatMessage(
+            role: .system,
+            content: content,
+            providerMetadata: [
+                ChatContextMetadataKeys.handoffStrategy: "deterministic-rolling-handoff-v1",
+                ChatContextMetadataKeys.rollingSummaryMessageCount: String(items.count),
+            ]
+        )
+    }
+
+    private static func handoffRoleName(_ role: ChatRole) -> String {
+        switch role {
+        case .system:
+            return "System"
+        case .user:
+            return "User"
+        case .assistant:
+            return "Assistant"
+        case .tool:
+            return "Tool"
+        }
+    }
+
+    private static func handoffExcerpt(
+        for message: ChatMessage,
+        policy: ChatContextPackingPolicy
+    ) -> String {
+        var parts = [String]()
+        let normalized = message.content
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .split(separator: " ")
+            .joined(separator: " ")
+        let maxCharacters = max(96, policy.charactersPerToken * 96)
+        if normalized.count > maxCharacters {
+            parts.append(String(normalized.prefix(maxCharacters)) + " ...")
+        } else if !normalized.isEmpty {
+            parts.append(normalized)
+        }
+        if !message.attachments.isEmpty {
+            let attachmentSummary = message.attachments
+                .prefix(4)
+                .map { "\($0.kind.rawValue):\($0.fileName)" }
+                .joined(separator: ", ")
+            parts.append("[attachments: \(attachmentSummary)]")
+        }
+        if !message.toolCalls.isEmpty {
+            let toolSummary = message.toolCalls
+                .prefix(4)
+                .map(\.name)
+                .joined(separator: ", ")
+            parts.append("[tool calls: \(toolSummary)]")
+        }
+        if let toolName = message.toolName {
+            parts.append("[tool result: \(toolName)]")
+        }
+        return parts.isEmpty ? "[empty message]" : parts.joined(separator: " ")
     }
 }

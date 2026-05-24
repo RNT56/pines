@@ -183,6 +183,31 @@ public extension ConversationRepository {
         try await updateMessage(id: id, content: content, status: status, tokenCount: tokenCount, providerMetadata: nil)
     }
 
+    @discardableResult
+    func repairInterruptedMessages(reason: String) async throws -> Int {
+        let conversations = try await listConversations()
+        var repairCount = 0
+        for conversation in conversations {
+            let repairs = InterruptedChatRunRepair.repairs(
+                for: try await messages(in: conversation.id),
+                reason: reason
+            )
+            for repair in repairs {
+                try await updateMessage(
+                    id: repair.messageID,
+                    content: repair.content,
+                    status: repair.status,
+                    tokenCount: nil,
+                    providerMetadata: repair.providerMetadata,
+                    toolName: repair.toolName,
+                    toolCalls: repair.toolCalls
+                )
+                repairCount += 1
+            }
+        }
+        return repairCount
+    }
+
     func searchConversations(query: String, limit: Int) async throws -> [ConversationSearchResult] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedQuery.isEmpty else { return [] }

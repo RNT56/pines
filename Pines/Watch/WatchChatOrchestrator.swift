@@ -323,7 +323,15 @@ struct WatchChatOrchestrator {
                                     )
                                     continue
                                 }
-                                let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
+                                let status: MessageStatus
+                                switch finish.reason {
+                                case .cancelled:
+                                    status = .cancelled
+                                case .length, .error:
+                                    status = .failed
+                                case .stop, .toolCall:
+                                    status = .complete
+                                }
                                 let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if status == .complete && finalText.isEmpty {
                                     let message = Self.messageWithProviderDiagnostics(
@@ -357,14 +365,30 @@ struct WatchChatOrchestrator {
                                         tokenCount: tokenCount,
                                         providerMetadata: finalProviderMetadata
                                     )
+                                    let runStatus: WatchChatRunStatus
+                                    switch finish.reason {
+                                    case .cancelled:
+                                        runStatus = .cancelled
+                                    case .length, .error:
+                                        runStatus = .failed
+                                    case .stop, .toolCall:
+                                        runStatus = .completed
+                                    }
+                                    let errorMessage = finish.reason == .length
+                                        ? Self.messageWithProviderDiagnostics(
+                                            finish.message ?? "Local generation stopped before the model emitted a stop sequence.",
+                                            metadata: finalProviderMetadata
+                                        )
+                                        : nil
                                     continuation.yield(
                                         WatchChatRunUpdate(
                                             runID: runID,
                                             conversationID: conversationID,
                                             assistantMessageID: pendingAssistant.id,
-                                            status: finish.reason == .cancelled ? .cancelled : .completed,
+                                            status: runStatus,
                                             text: accumulated,
-                                            tokenCount: tokenCount
+                                            tokenCount: tokenCount,
+                                            errorMessage: errorMessage
                                         )
                                     )
                                 }
@@ -591,16 +615,14 @@ struct WatchChatOrchestrator {
     }
 
     private func localRuntimeProfile(for install: ModelInstall, settings: AppSettingsSnapshot?) -> RuntimeProfile {
-        var profile = services.mlxRuntime.defaultRuntimeProfile(for: install)
         let requestedContextTokens = AppSettingsSnapshot.normalizedLocalContextTokens(
             settings?.localMaxContextTokens ?? AppSettingsSnapshot.defaultLocalMaxContextTokens
         )
-        if let recommendedContextTokens = profile.quantization.maxKVSize {
-            profile.quantization.maxKVSize = min(requestedContextTokens, recommendedContextTokens)
-        } else {
-            profile.quantization.maxKVSize = requestedContextTokens
-        }
-        return profile
+        return services.mlxRuntime.defaultRuntimeProfile(
+            for: install,
+            userMode: settings?.localTurboQuantMode ?? AppSettingsSnapshot.defaultLocalTurboQuantMode,
+            requestedContextLength: requestedContextTokens
+        )
     }
 
     private func localRoutingCandidate(for install: ModelInstall?) -> (id: ProviderID, capabilities: ProviderCapabilities)? {
@@ -633,8 +655,11 @@ struct WatchChatOrchestrator {
             LocalProviderMetadataKeys.turboQuantAttentionPath,
             LocalProviderMetadataKeys.turboQuantKernelProfile,
             LocalProviderMetadataKeys.turboQuantSelfTestStatus,
+            LocalProviderMetadataKeys.turboQuantAdmissionDecision,
+            LocalProviderMetadataKeys.turboQuantAdmissionReason,
             LocalProviderMetadataKeys.turboQuantFallbackReason,
             LocalProviderMetadataKeys.turboQuantLastUnsupportedShape,
+            LocalProviderMetadataKeys.generationIncompleteReason,
         ]
         let diagnostics = diagnosticKeys.compactMap { key -> String? in
             guard let value = metadata[key], !value.isEmpty else { return nil }

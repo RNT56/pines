@@ -22,6 +22,52 @@ public enum ModelVerificationState: String, Codable, Sendable, CaseIterable {
     case unsupported
 }
 
+public enum ModelCacheTopology: String, Codable, Sendable, CaseIterable {
+    case standardAttention
+    case slidingAttention
+    case sharedKVAttention
+    case hybridAttentionAndNativeState
+    case visionLanguageAttention
+    case unsupported
+
+    public var displayName: String {
+        switch self {
+        case .standardAttention:
+            "Standard attention"
+        case .slidingAttention:
+            "Sliding attention"
+        case .sharedKVAttention:
+            "Shared KV attention"
+        case .hybridAttentionAndNativeState:
+            "Hybrid attention + native state"
+        case .visionLanguageAttention:
+            "Vision-language attention"
+        case .unsupported:
+            "Unsupported topology"
+        }
+    }
+}
+
+public enum TurboQuantFamilySupport: String, Codable, Sendable, CaseIterable {
+    case none
+    case attentionKVFull
+    case hybridFull
+    case unsupportedTopology
+
+    public var displayName: String {
+        switch self {
+        case .none:
+            "None"
+        case .attentionKVFull:
+            "TurboQuant full"
+        case .hybridFull:
+            "Hybrid full"
+        case .unsupportedTopology:
+            "Unsupported topology"
+        }
+    }
+}
+
 public enum QuantizationAlgorithm: String, Codable, Sendable, CaseIterable {
     case none
     case mlxAffine
@@ -198,6 +244,306 @@ public enum TurboQuantOptimizationPolicy: String, Codable, Sendable, CaseIterabl
     }
 }
 
+public enum TurboQuantUserMode: String, Codable, Sendable, CaseIterable {
+    case fastest
+    case balanced
+    case maxContext
+    case batterySaver
+
+    public var displayName: String {
+        switch self {
+        case .fastest:
+            "Fast"
+        case .balanced:
+            "Balanced"
+        case .maxContext:
+            "Max Context"
+        case .batterySaver:
+            "Battery Saver"
+        }
+    }
+}
+
+public enum TurboQuantFallbackPolicy: String, Codable, Sendable, CaseIterable {
+    case exactRequired
+    case packedAllowed
+    case compressedDecodeAllowed
+    case fatalOnFailure
+
+    public var displayName: String {
+        switch self {
+        case .exactRequired:
+            "Exact required"
+        case .packedAllowed:
+            "Packed allowed"
+        case .compressedDecodeAllowed:
+            "Compressed decode allowed"
+        case .fatalOnFailure:
+            "Fatal on failure"
+        }
+    }
+}
+
+public enum TurboQuantAdmissionDowngradeReason: String, Codable, Sendable, CaseIterable {
+    case releasedRawShadow
+    case disabledPackedFallback
+    case loweredValueBits
+    case movedBalancedToMaxContext
+    case reducedContext
+    case rollingSummaryMemory
+    case thermalOrBatterySaver
+    case refusedInsufficientMemory
+
+    public var displayName: String {
+        switch self {
+        case .releasedRawShadow:
+            "Released raw prefill shadow"
+        case .disabledPackedFallback:
+            "Disabled packed fallback"
+        case .loweredValueBits:
+            "Lowered value bits"
+        case .movedBalancedToMaxContext:
+            "Balanced moved to Max Context"
+        case .reducedContext:
+            "Reduced context"
+        case .rollingSummaryMemory:
+            "Rolling summary memory"
+        case .thermalOrBatterySaver:
+            "Thermal or battery saver"
+        case .refusedInsufficientMemory:
+            "Insufficient memory"
+        }
+    }
+}
+
+public struct TurboQuantAdmissionDowngrade: Hashable, Codable, Sendable {
+    public var reason: TurboQuantAdmissionDowngradeReason
+    public var message: String
+
+    public init(reason: TurboQuantAdmissionDowngradeReason, message: String) {
+        self.reason = reason
+        self.message = message
+    }
+}
+
+public struct RejectedPath: Hashable, Codable, Sendable {
+    public var path: String
+    public var reason: String
+
+    public init(path: String, reason: String) {
+        self.path = path
+        self.reason = reason
+    }
+}
+
+public struct TurboQuantLayerCacheFootprint: Hashable, Codable, Sendable {
+    public var layerCount: Int
+    public var kvHeadCount: Int
+    public var headDimension: Int
+    public var groupSize: Int
+    public var preset: TurboQuantPreset
+    public var valueBits: Int
+    public var groupsPerVector: Int
+    public var bitsetWordsPerGroup: Int
+    public var keyMagnitudeWordsPerGroup: Int
+    public var valueMagnitudeWordsPerGroup: Int
+    public var keyBytesPerTokenPerLayer: Int
+    public var valueBytesPerTokenPerLayer: Int
+    public var bytesPerTokenPerLayer: Int
+    public var bytesPerTokenAllLayers: Int
+    public var actualBitsPerValue: Double
+
+    public init(
+        layerCount: Int,
+        kvHeadCount: Int,
+        headDimension: Int,
+        groupSize: Int,
+        preset: TurboQuantPreset,
+        valueBits: Int,
+        groupsPerVector: Int,
+        bitsetWordsPerGroup: Int,
+        keyMagnitudeWordsPerGroup: Int,
+        valueMagnitudeWordsPerGroup: Int,
+        keyBytesPerTokenPerLayer: Int,
+        valueBytesPerTokenPerLayer: Int,
+        bytesPerTokenPerLayer: Int,
+        bytesPerTokenAllLayers: Int,
+        actualBitsPerValue: Double
+    ) {
+        self.layerCount = layerCount
+        self.kvHeadCount = kvHeadCount
+        self.headDimension = headDimension
+        self.groupSize = groupSize
+        self.preset = preset
+        self.valueBits = valueBits
+        self.groupsPerVector = groupsPerVector
+        self.bitsetWordsPerGroup = bitsetWordsPerGroup
+        self.keyMagnitudeWordsPerGroup = keyMagnitudeWordsPerGroup
+        self.valueMagnitudeWordsPerGroup = valueMagnitudeWordsPerGroup
+        self.keyBytesPerTokenPerLayer = keyBytesPerTokenPerLayer
+        self.valueBytesPerTokenPerLayer = valueBytesPerTokenPerLayer
+        self.bytesPerTokenPerLayer = bytesPerTokenPerLayer
+        self.bytesPerTokenAllLayers = bytesPerTokenAllLayers
+        self.actualBitsPerValue = actualBitsPerValue
+    }
+}
+
+public struct TurboQuantRuntimeMemoryZones: Hashable, Codable, Sendable {
+    public var availableAppMemoryBytes: Int
+    public var runtimeBudgetBytes: Int
+    public var mlxActiveBytes: Int
+    public var mlxCacheBytes: Int
+    public var modelResidentBytes: Int
+    public var compressedKVBytes: Int
+    public var rawShadowBytes: Int
+    public var fallbackReserveBytes: Int
+    public var scratchBytes: Int
+    public var promptAndTokenizerBytes: Int
+    public var uiReserveBytes: Int
+    public var safetyReserveBytes: Int
+    public var rollingSummaryBytes: Int
+    public var totalRuntimeBytes: Int
+    public var headroomBytes: Int
+
+    public init(
+        availableAppMemoryBytes: Int,
+        runtimeBudgetBytes: Int,
+        mlxActiveBytes: Int,
+        mlxCacheBytes: Int,
+        modelResidentBytes: Int,
+        compressedKVBytes: Int,
+        rawShadowBytes: Int,
+        fallbackReserveBytes: Int,
+        scratchBytes: Int,
+        promptAndTokenizerBytes: Int,
+        uiReserveBytes: Int,
+        safetyReserveBytes: Int,
+        rollingSummaryBytes: Int = 0,
+        totalRuntimeBytes: Int? = nil,
+        headroomBytes: Int? = nil
+    ) {
+        self.availableAppMemoryBytes = max(0, availableAppMemoryBytes)
+        self.runtimeBudgetBytes = max(0, runtimeBudgetBytes)
+        self.mlxActiveBytes = max(0, mlxActiveBytes)
+        self.mlxCacheBytes = max(0, mlxCacheBytes)
+        self.modelResidentBytes = max(0, modelResidentBytes)
+        self.compressedKVBytes = max(0, compressedKVBytes)
+        self.rawShadowBytes = max(0, rawShadowBytes)
+        self.fallbackReserveBytes = max(0, fallbackReserveBytes)
+        self.scratchBytes = max(0, scratchBytes)
+        self.promptAndTokenizerBytes = max(0, promptAndTokenizerBytes)
+        self.uiReserveBytes = max(0, uiReserveBytes)
+        self.safetyReserveBytes = max(0, safetyReserveBytes)
+        self.rollingSummaryBytes = max(0, rollingSummaryBytes)
+        let computedTotal =
+            self.mlxCacheBytes
+            + self.modelResidentBytes
+            + self.compressedKVBytes
+            + self.rawShadowBytes
+            + self.fallbackReserveBytes
+            + self.scratchBytes
+            + self.promptAndTokenizerBytes
+            + self.uiReserveBytes
+            + self.safetyReserveBytes
+            + self.rollingSummaryBytes
+        self.totalRuntimeBytes = max(0, totalRuntimeBytes ?? computedTotal)
+        self.headroomBytes = headroomBytes ?? (self.availableAppMemoryBytes - self.totalRuntimeBytes)
+    }
+}
+
+public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
+    public var requestedContextLength: Int
+    public var admittedContextLength: Int
+    public var requestedMode: TurboQuantUserMode
+    public var effectiveMode: TurboQuantUserMode
+    public var preset: TurboQuantPreset
+    public var valueBits: Int
+    public var groupSize: Int
+    public var fallbackPolicy: TurboQuantFallbackPolicy
+    public var rawBytesPerToken: Int
+    public var packedFallbackBytesPerToken: Int
+    public var compressedBytesPerToken: Int
+    public var layerFootprint: TurboQuantLayerCacheFootprint?
+    public var usesRawShadow: Bool
+    public var packedFallbackEnabled: Bool
+    public var usesRollingSummaryMemory: Bool
+    public var runtimeZones: TurboQuantRuntimeMemoryZones
+
+    public init(
+        requestedContextLength: Int,
+        admittedContextLength: Int,
+        requestedMode: TurboQuantUserMode,
+        effectiveMode: TurboQuantUserMode,
+        preset: TurboQuantPreset,
+        valueBits: Int,
+        groupSize: Int,
+        fallbackPolicy: TurboQuantFallbackPolicy,
+        rawBytesPerToken: Int,
+        packedFallbackBytesPerToken: Int,
+        compressedBytesPerToken: Int,
+        layerFootprint: TurboQuantLayerCacheFootprint? = nil,
+        usesRawShadow: Bool,
+        packedFallbackEnabled: Bool,
+        usesRollingSummaryMemory: Bool,
+        runtimeZones: TurboQuantRuntimeMemoryZones
+    ) {
+        self.requestedContextLength = requestedContextLength
+        self.admittedContextLength = admittedContextLength
+        self.requestedMode = requestedMode
+        self.effectiveMode = effectiveMode
+        self.preset = preset
+        self.valueBits = valueBits
+        self.groupSize = groupSize
+        self.fallbackPolicy = fallbackPolicy
+        self.rawBytesPerToken = rawBytesPerToken
+        self.packedFallbackBytesPerToken = packedFallbackBytesPerToken
+        self.compressedBytesPerToken = compressedBytesPerToken
+        self.layerFootprint = layerFootprint
+        self.usesRawShadow = usesRawShadow
+        self.packedFallbackEnabled = packedFallbackEnabled
+        self.usesRollingSummaryMemory = usesRollingSummaryMemory
+        self.runtimeZones = runtimeZones
+    }
+}
+
+public struct TurboQuantAdmission: Hashable, Codable, Sendable {
+    public var admitted: Bool
+    public var requestedContextLength: Int
+    public var admittedContextLength: Int
+    public var requestedMode: TurboQuantUserMode
+    public var selectedMode: TurboQuantUserMode
+    public var memoryPlan: TurboQuantMemoryPlan?
+    public var downgradeReasons: [TurboQuantAdmissionDowngrade]
+    public var rejectedPaths: [RejectedPath]
+    public var userMessage: String
+
+    public var primaryDowngradeReason: TurboQuantAdmissionDowngradeReason? {
+        downgradeReasons.first?.reason
+    }
+
+    public init(
+        admitted: Bool,
+        requestedContextLength: Int,
+        admittedContextLength: Int,
+        requestedMode: TurboQuantUserMode,
+        selectedMode: TurboQuantUserMode,
+        memoryPlan: TurboQuantMemoryPlan? = nil,
+        downgradeReasons: [TurboQuantAdmissionDowngrade] = [],
+        rejectedPaths: [RejectedPath] = [],
+        userMessage: String
+    ) {
+        self.admitted = admitted
+        self.requestedContextLength = requestedContextLength
+        self.admittedContextLength = admittedContextLength
+        self.requestedMode = requestedMode
+        self.selectedMode = selectedMode
+        self.memoryPlan = memoryPlan
+        self.downgradeReasons = downgradeReasons
+        self.rejectedPaths = rejectedPaths
+        self.userMessage = userMessage
+    }
+}
+
 public enum KVCacheStrategy: String, Codable, Sendable, CaseIterable {
     case none
     case mlxAffine
@@ -251,14 +597,25 @@ public struct RuntimeMemoryCounters: Hashable, Codable, Sendable {
     public var vaultIndexBytes: Int64?
     public var physicalMemoryBytes: Int64?
     public var availableMemoryBytes: Int64?
+    public var processResidentMemoryBytes: Int64?
+    public var processPhysicalFootprintBytes: Int64?
+    public var processPeakResidentMemoryBytes: Int64?
     public var thermalState: String?
     public var hardwareModelIdentifier: String?
     public var lowPowerModeEnabled: Bool?
     public var metalArchitectureName: String?
     public var metalRecommendedWorkingSetBytes: Int64?
+    public var mlxActiveMemoryBytes: Int64?
+    public var mlxCacheMemoryBytes: Int64?
+    public var mlxPeakMemoryBytes: Int64?
+    public var mlxMemoryLimitBytes: Int64?
+    public var mlxCacheLimitBytes: Int64?
     public var devicePerformanceClass: DevicePerformanceClass?
     public var thermalDownshiftActive: Bool?
+    public var runtimePressureReason: RuntimePressureReason?
     public var recommendedContextTokens: Int?
+    public var recommendedSmallModelContextTokens: Int?
+    public var recommendedPrefillStepSize: Int?
     public var recommendedEmbeddingBatchSize: Int?
     public var recommendedVectorScanLimit: Int?
 
@@ -268,14 +625,25 @@ public struct RuntimeMemoryCounters: Hashable, Codable, Sendable {
         vaultIndexBytes: Int64? = nil,
         physicalMemoryBytes: Int64? = nil,
         availableMemoryBytes: Int64? = nil,
+        processResidentMemoryBytes: Int64? = nil,
+        processPhysicalFootprintBytes: Int64? = nil,
+        processPeakResidentMemoryBytes: Int64? = nil,
         thermalState: String? = nil,
         hardwareModelIdentifier: String? = nil,
         lowPowerModeEnabled: Bool? = nil,
         metalArchitectureName: String? = nil,
         metalRecommendedWorkingSetBytes: Int64? = nil,
+        mlxActiveMemoryBytes: Int64? = nil,
+        mlxCacheMemoryBytes: Int64? = nil,
+        mlxPeakMemoryBytes: Int64? = nil,
+        mlxMemoryLimitBytes: Int64? = nil,
+        mlxCacheLimitBytes: Int64? = nil,
         devicePerformanceClass: DevicePerformanceClass? = nil,
         thermalDownshiftActive: Bool? = nil,
+        runtimePressureReason: RuntimePressureReason? = nil,
         recommendedContextTokens: Int? = nil,
+        recommendedSmallModelContextTokens: Int? = nil,
+        recommendedPrefillStepSize: Int? = nil,
         recommendedEmbeddingBatchSize: Int? = nil,
         recommendedVectorScanLimit: Int? = nil
     ) {
@@ -284,14 +652,25 @@ public struct RuntimeMemoryCounters: Hashable, Codable, Sendable {
         self.vaultIndexBytes = vaultIndexBytes
         self.physicalMemoryBytes = physicalMemoryBytes
         self.availableMemoryBytes = availableMemoryBytes
+        self.processResidentMemoryBytes = processResidentMemoryBytes
+        self.processPhysicalFootprintBytes = processPhysicalFootprintBytes
+        self.processPeakResidentMemoryBytes = processPeakResidentMemoryBytes
         self.thermalState = thermalState
         self.hardwareModelIdentifier = hardwareModelIdentifier
         self.lowPowerModeEnabled = lowPowerModeEnabled
         self.metalArchitectureName = metalArchitectureName
         self.metalRecommendedWorkingSetBytes = metalRecommendedWorkingSetBytes
+        self.mlxActiveMemoryBytes = mlxActiveMemoryBytes
+        self.mlxCacheMemoryBytes = mlxCacheMemoryBytes
+        self.mlxPeakMemoryBytes = mlxPeakMemoryBytes
+        self.mlxMemoryLimitBytes = mlxMemoryLimitBytes
+        self.mlxCacheLimitBytes = mlxCacheLimitBytes
         self.devicePerformanceClass = devicePerformanceClass
         self.thermalDownshiftActive = thermalDownshiftActive
+        self.runtimePressureReason = runtimePressureReason
         self.recommendedContextTokens = recommendedContextTokens
+        self.recommendedSmallModelContextTokens = recommendedSmallModelContextTokens
+        self.recommendedPrefillStepSize = recommendedPrefillStepSize
         self.recommendedEmbeddingBatchSize = recommendedEmbeddingBatchSize
         self.recommendedVectorScanLimit = recommendedVectorScanLimit
     }
@@ -300,6 +679,9 @@ public struct RuntimeMemoryCounters: Hashable, Codable, Sendable {
 public struct RuntimeMemorySnapshot: Hashable, Codable, Sendable {
     public var physicalMemoryBytes: Int64
     public var availableMemoryBytes: Int64?
+    public var processResidentMemoryBytes: Int64?
+    public var processPhysicalFootprintBytes: Int64?
+    public var processPeakResidentMemoryBytes: Int64?
     public var thermalState: String
     public var hardwareModelIdentifier: String?
     public var lowPowerModeEnabled: Bool
@@ -311,6 +693,9 @@ public struct RuntimeMemorySnapshot: Hashable, Codable, Sendable {
     public init(
         physicalMemoryBytes: Int64,
         availableMemoryBytes: Int64? = nil,
+        processResidentMemoryBytes: Int64? = nil,
+        processPhysicalFootprintBytes: Int64? = nil,
+        processPeakResidentMemoryBytes: Int64? = nil,
         thermalState: String = "nominal",
         hardwareModelIdentifier: String? = nil,
         lowPowerModeEnabled: Bool = false,
@@ -321,6 +706,9 @@ public struct RuntimeMemorySnapshot: Hashable, Codable, Sendable {
     ) {
         self.physicalMemoryBytes = physicalMemoryBytes
         self.availableMemoryBytes = availableMemoryBytes
+        self.processResidentMemoryBytes = processResidentMemoryBytes
+        self.processPhysicalFootprintBytes = processPhysicalFootprintBytes
+        self.processPeakResidentMemoryBytes = processPeakResidentMemoryBytes
         self.thermalState = thermalState
         self.hardwareModelIdentifier = hardwareModelIdentifier
         self.lowPowerModeEnabled = lowPowerModeEnabled
@@ -348,6 +736,9 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy?
     public var turboQuantValueBits: Int?
     public var thermalDownshiftActive: Bool?
+    public var runtimePressureReason: RuntimePressureReason?
+    public var turboQuantProfileID: String?
+    public var turboQuantProfileSource: String?
     public var lastUnsupportedAttentionShape: String?
     public var activeFallbackReason: String?
     public var memoryCounters: RuntimeMemoryCounters
@@ -376,6 +767,9 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy? = nil,
         turboQuantValueBits: Int? = nil,
         thermalDownshiftActive: Bool? = nil,
+        runtimePressureReason: RuntimePressureReason? = nil,
+        turboQuantProfileID: String? = nil,
+        turboQuantProfileSource: String? = nil,
         lastUnsupportedAttentionShape: String? = nil,
         activeFallbackReason: String? = nil,
         memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters(),
@@ -403,6 +797,9 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
         self.turboQuantValueBits = turboQuantValueBits
         self.thermalDownshiftActive = thermalDownshiftActive
+        self.runtimePressureReason = runtimePressureReason
+        self.turboQuantProfileID = turboQuantProfileID
+        self.turboQuantProfileSource = turboQuantProfileSource
         self.lastUnsupportedAttentionShape = lastUnsupportedAttentionShape
         self.activeFallbackReason = activeFallbackReason
         self.memoryCounters = memoryCounters
@@ -438,9 +835,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy
     public var turboQuantValueBits: Int?
     public var thermalDownshiftActive: Bool
+    public var runtimePressureReason: RuntimePressureReason
+    public var turboQuantProfileID: String?
+    public var turboQuantProfileSource: String?
+    public var turboQuantProfileDiagnostics: [String]
     public var lastUnsupportedAttentionShape: String?
     public var activeFallbackReason: String?
     public var memoryCounters: RuntimeMemoryCounters
+    public var turboQuantUserMode: TurboQuantUserMode
+    public var turboQuantAdmission: TurboQuantAdmission?
 
     private enum CodingKeys: String, CodingKey {
         case weightBits
@@ -464,9 +867,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case turboQuantOptimizationPolicy
         case turboQuantValueBits
         case thermalDownshiftActive
+        case runtimePressureReason
+        case turboQuantProfileID
+        case turboQuantProfileSource
+        case turboQuantProfileDiagnostics
         case lastUnsupportedAttentionShape
         case activeFallbackReason
         case memoryCounters
+        case turboQuantUserMode
+        case turboQuantAdmission
     }
 
     public init(
@@ -491,9 +900,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy = .auto,
         turboQuantValueBits: Int? = nil,
         thermalDownshiftActive: Bool = false,
+        runtimePressureReason: RuntimePressureReason = .none,
+        turboQuantProfileID: String? = nil,
+        turboQuantProfileSource: String? = nil,
+        turboQuantProfileDiagnostics: [String] = [],
         lastUnsupportedAttentionShape: String? = nil,
         activeFallbackReason: String? = nil,
-        memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters()
+        memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters(),
+        turboQuantUserMode: TurboQuantUserMode = .balanced,
+        turboQuantAdmission: TurboQuantAdmission? = nil
     ) {
         self.weightBits = weightBits
         self.kvBits = kvBits
@@ -516,9 +931,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
         self.turboQuantValueBits = turboQuantValueBits
         self.thermalDownshiftActive = thermalDownshiftActive
+        self.runtimePressureReason = runtimePressureReason
+        self.turboQuantProfileID = turboQuantProfileID
+        self.turboQuantProfileSource = turboQuantProfileSource
+        self.turboQuantProfileDiagnostics = turboQuantProfileDiagnostics
         self.lastUnsupportedAttentionShape = lastUnsupportedAttentionShape
         self.activeFallbackReason = activeFallbackReason
         self.memoryCounters = memoryCounters
+        self.turboQuantUserMode = turboQuantUserMode
+        self.turboQuantAdmission = turboQuantAdmission
     }
 
     public init(from decoder: Decoder) throws {
@@ -544,9 +965,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         turboQuantOptimizationPolicy = try container.decodeIfPresent(TurboQuantOptimizationPolicy.self, forKey: .turboQuantOptimizationPolicy) ?? .auto
         turboQuantValueBits = try container.decodeIfPresent(Int.self, forKey: .turboQuantValueBits)
         thermalDownshiftActive = try container.decodeIfPresent(Bool.self, forKey: .thermalDownshiftActive) ?? false
+        runtimePressureReason = try container.decodeIfPresent(RuntimePressureReason.self, forKey: .runtimePressureReason) ?? .none
+        turboQuantProfileID = try container.decodeIfPresent(String.self, forKey: .turboQuantProfileID)
+        turboQuantProfileSource = try container.decodeIfPresent(String.self, forKey: .turboQuantProfileSource)
+        turboQuantProfileDiagnostics = try container.decodeIfPresent([String].self, forKey: .turboQuantProfileDiagnostics) ?? []
         lastUnsupportedAttentionShape = try container.decodeIfPresent(String.self, forKey: .lastUnsupportedAttentionShape)
         activeFallbackReason = try container.decodeIfPresent(String.self, forKey: .activeFallbackReason)
         memoryCounters = try container.decodeIfPresent(RuntimeMemoryCounters.self, forKey: .memoryCounters) ?? RuntimeMemoryCounters()
+        turboQuantUserMode = try container.decodeIfPresent(TurboQuantUserMode.self, forKey: .turboQuantUserMode) ?? .balanced
+        turboQuantAdmission = try container.decodeIfPresent(TurboQuantAdmission.self, forKey: .turboQuantAdmission)
     }
 }
 
@@ -664,8 +1091,40 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
     public var estimatedBytes: Int64?
     public var license: String?
     public var modelType: String?
+    public var textConfigModelType: String?
     public var processorClass: String?
+    public var keyHeadDimension: Int?
+    public var valueHeadDimension: Int?
+    public var routedExperts: Int?
+    public var expertsPerToken: Int?
+    public var cacheTopology: ModelCacheTopology
+    public var turboQuantFamilySupport: TurboQuantFamilySupport
     public var createdAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case modelID
+        case displayName
+        case repository
+        case revision
+        case localURL
+        case modalities
+        case verification
+        case state
+        case parameterCount
+        case estimatedBytes
+        case license
+        case modelType
+        case textConfigModelType
+        case processorClass
+        case keyHeadDimension
+        case valueHeadDimension
+        case routedExperts
+        case expertsPerToken
+        case cacheTopology
+        case turboQuantFamilySupport
+        case createdAt
+    }
 
     public init(
         id: UUID = UUID(),
@@ -681,7 +1140,14 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
         estimatedBytes: Int64? = nil,
         license: String? = nil,
         modelType: String? = nil,
+        textConfigModelType: String? = nil,
         processorClass: String? = nil,
+        keyHeadDimension: Int? = nil,
+        valueHeadDimension: Int? = nil,
+        routedExperts: Int? = nil,
+        expertsPerToken: Int? = nil,
+        cacheTopology: ModelCacheTopology = .standardAttention,
+        turboQuantFamilySupport: TurboQuantFamilySupport = .attentionKVFull,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -697,8 +1163,41 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
         self.estimatedBytes = estimatedBytes
         self.license = license
         self.modelType = modelType
+        self.textConfigModelType = textConfigModelType
         self.processorClass = processorClass
+        self.keyHeadDimension = keyHeadDimension
+        self.valueHeadDimension = valueHeadDimension
+        self.routedExperts = routedExperts
+        self.expertsPerToken = expertsPerToken
+        self.cacheTopology = cacheTopology
+        self.turboQuantFamilySupport = turboQuantFamilySupport
         self.createdAt = createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        modelID = try container.decode(ModelID.self, forKey: .modelID)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        repository = try container.decode(String.self, forKey: .repository)
+        revision = try container.decodeIfPresent(String.self, forKey: .revision)
+        localURL = try container.decodeIfPresent(URL.self, forKey: .localURL)
+        modalities = try container.decodeIfPresent(Set<ModelModality>.self, forKey: .modalities) ?? [.text]
+        verification = try container.decodeIfPresent(ModelVerificationState.self, forKey: .verification) ?? .installable
+        state = try container.decodeIfPresent(ModelInstallState.self, forKey: .state) ?? .remote
+        parameterCount = try container.decodeIfPresent(Int64.self, forKey: .parameterCount)
+        estimatedBytes = try container.decodeIfPresent(Int64.self, forKey: .estimatedBytes)
+        license = try container.decodeIfPresent(String.self, forKey: .license)
+        modelType = try container.decodeIfPresent(String.self, forKey: .modelType)
+        textConfigModelType = try container.decodeIfPresent(String.self, forKey: .textConfigModelType)
+        processorClass = try container.decodeIfPresent(String.self, forKey: .processorClass)
+        keyHeadDimension = try container.decodeIfPresent(Int.self, forKey: .keyHeadDimension)
+        valueHeadDimension = try container.decodeIfPresent(Int.self, forKey: .valueHeadDimension)
+        routedExperts = try container.decodeIfPresent(Int.self, forKey: .routedExperts)
+        expertsPerToken = try container.decodeIfPresent(Int.self, forKey: .expertsPerToken)
+        cacheTopology = try container.decodeIfPresent(ModelCacheTopology.self, forKey: .cacheTopology) ?? .standardAttention
+        turboQuantFamilySupport = try container.decodeIfPresent(TurboQuantFamilySupport.self, forKey: .turboQuantFamilySupport) ?? .attentionKVFull
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 }
 
@@ -715,6 +1214,44 @@ public enum DeviceMemoryTier: String, Codable, Sendable, CaseIterable {
     case max
 }
 
+public enum RuntimePressureReason: String, Codable, Sendable, CaseIterable {
+    case none
+    case lowPower
+    case thermalFair
+    case thermalSerious
+    case thermalCritical
+    case lowMemory
+    case thinThermal
+
+    public var displayName: String {
+        switch self {
+        case .none:
+            "None"
+        case .lowPower:
+            "Low Power Mode"
+        case .thermalFair:
+            "System thermal fair"
+        case .thermalSerious:
+            "System thermal serious"
+        case .thermalCritical:
+            "System thermal critical"
+        case .lowMemory:
+            "Low memory"
+        case .thinThermal:
+            "Thin-device thermal constraint"
+        }
+    }
+
+    public var isThermal: Bool {
+        switch self {
+        case .thermalFair, .thermalSerious, .thermalCritical, .thinThermal:
+            true
+        case .none, .lowPower, .lowMemory:
+            false
+        }
+    }
+}
+
 public struct DeviceProfile: Hashable, Codable, Sendable {
     public var memoryTier: DeviceMemoryTier
     public var performanceClass: DevicePerformanceClass
@@ -728,6 +1265,7 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
     public var unloadsOnThermalPressure: Bool
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy
     public var thermalDownshiftActive: Bool
+    public var runtimePressureReason: RuntimePressureReason
 
     public init(
         memoryTier: DeviceMemoryTier,
@@ -741,7 +1279,8 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
         recommendedVectorScanLimit: Int = 4096,
         unloadsOnThermalPressure: Bool = true,
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy = .auto,
-        thermalDownshiftActive: Bool = false
+        thermalDownshiftActive: Bool = false,
+        runtimePressureReason: RuntimePressureReason = .none
     ) {
         self.memoryTier = memoryTier
         self.performanceClass = performanceClass
@@ -755,6 +1294,7 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
         self.unloadsOnThermalPressure = unloadsOnThermalPressure
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
         self.thermalDownshiftActive = thermalDownshiftActive
+        self.runtimePressureReason = runtimePressureReason
     }
 
     public static let compactA16Phone = DeviceProfile(
@@ -811,12 +1351,31 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
 
     public static func recommended(for snapshot: RuntimeMemorySnapshot) -> DeviceProfile {
         var profile = baseProfile(for: performanceClass(for: snapshot), physicalMemoryBytes: snapshot.physicalMemoryBytes)
-        let severeThermal = snapshot.thermalState == "serious" || snapshot.thermalState == "critical"
-        let thinThermal = profile.performanceClass == .a19ProThin && snapshot.thermalState == "fair"
+        let thermalState = snapshot.thermalState.lowercased()
+        let criticalThermal = thermalState == "critical"
+        let seriousThermal = thermalState == "serious"
+        let fairThermal = thermalState == "fair"
+        let thinThermal = profile.performanceClass == .a19ProThin && fairThermal
         let lowMemory = (snapshot.availableMemoryBytes ?? Int64.max) < 750_000_000
-        let downshift = severeThermal || thinThermal || lowMemory || snapshot.lowPowerModeEnabled
+        let pressureReason: RuntimePressureReason
+        if criticalThermal {
+            pressureReason = .thermalCritical
+        } else if lowMemory {
+            pressureReason = .lowMemory
+        } else if seriousThermal {
+            pressureReason = .thermalSerious
+        } else if thinThermal {
+            pressureReason = .thinThermal
+        } else if fairThermal {
+            pressureReason = .thermalFair
+        } else if snapshot.lowPowerModeEnabled {
+            pressureReason = .lowPower
+        } else {
+            pressureReason = .none
+        }
+        let downshift = criticalThermal || thinThermal
 
-        if severeThermal || snapshot.lowPowerModeEnabled {
+        if criticalThermal {
             profile.recommendedContextTokens = min(profile.recommendedContextTokens, 4096)
             profile.recommendedSmallModelContextTokens = min(profile.recommendedSmallModelContextTokens, 4096)
             profile.recommendedPrefillStepSize = min(profile.recommendedPrefillStepSize, 256)
@@ -832,6 +1391,16 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
             profile.recommendedEmbeddingBatchSize = min(profile.recommendedEmbeddingBatchSize, 4)
             profile.recommendedVectorScanLimit = min(profile.recommendedVectorScanLimit, 1024)
             profile.turboQuantOptimizationPolicy = .preferMemory
+        } else if seriousThermal {
+            profile.recommendedPrefillStepSize = min(profile.recommendedPrefillStepSize, 256)
+            profile.recommendedEmbeddingBatchSize = min(profile.recommendedEmbeddingBatchSize, 8)
+            profile.recommendedVectorScanLimit = min(profile.recommendedVectorScanLimit, 2048)
+            profile.turboQuantOptimizationPolicy = .conservative
+        } else if snapshot.lowPowerModeEnabled {
+            profile.recommendedPrefillStepSize = min(profile.recommendedPrefillStepSize, 256)
+            profile.recommendedEmbeddingBatchSize = min(profile.recommendedEmbeddingBatchSize, 4)
+            profile.recommendedVectorScanLimit = min(profile.recommendedVectorScanLimit, 1024)
+            profile.turboQuantOptimizationPolicy = .conservative
         } else if thinThermal {
             profile.recommendedContextTokens = min(profile.recommendedContextTokens, 16_384)
             profile.recommendedSmallModelContextTokens = min(profile.recommendedSmallModelContextTokens, 16_384)
@@ -839,6 +1408,7 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
             profile.turboQuantOptimizationPolicy = .conservative
         }
         profile.thermalDownshiftActive = downshift
+        profile.runtimePressureReason = pressureReason
 
         return profile
     }
@@ -1028,5 +1598,384 @@ public struct DeviceProfile: Hashable, Codable, Sendable {
         let suffix = hardware.dropFirst("iPad".count)
         let major = suffix.split(separator: ",").first
         return major.flatMap { Int($0) }
+    }
+}
+
+public struct LocalRuntimeSafetyAssessment: Hashable, Codable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case allowed
+        case reason
+        case pressureReason
+        case recommendedMaxContextTokens
+        case recommendedPrefillStepSize
+        case constrainedModeActive
+        case requiresImmediateUnload
+    }
+
+    public var allowed: Bool
+    public var reason: String?
+    public var pressureReason: RuntimePressureReason
+    public var recommendedMaxContextTokens: Int
+    public var recommendedPrefillStepSize: Int
+    public var constrainedModeActive: Bool
+    public var requiresImmediateUnload: Bool
+
+    public init(
+        allowed: Bool,
+        reason: String? = nil,
+        pressureReason: RuntimePressureReason = .none,
+        recommendedMaxContextTokens: Int,
+        recommendedPrefillStepSize: Int,
+        requiresImmediateUnload: Bool = false,
+        constrainedModeActive: Bool = false
+    ) {
+        self.allowed = allowed
+        self.reason = reason
+        self.pressureReason = pressureReason
+        self.recommendedMaxContextTokens = max(1_024, recommendedMaxContextTokens)
+        self.recommendedPrefillStepSize = max(64, recommendedPrefillStepSize)
+        self.constrainedModeActive = constrainedModeActive || requiresImmediateUnload
+        self.requiresImmediateUnload = requiresImmediateUnload
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let requiresImmediateUnload = try container.decodeIfPresent(Bool.self, forKey: .requiresImmediateUnload) ?? false
+        self.init(
+            allowed: try container.decode(Bool.self, forKey: .allowed),
+            reason: try container.decodeIfPresent(String.self, forKey: .reason),
+            pressureReason: try container.decodeIfPresent(RuntimePressureReason.self, forKey: .pressureReason) ?? .none,
+            recommendedMaxContextTokens: try container.decode(Int.self, forKey: .recommendedMaxContextTokens),
+            recommendedPrefillStepSize: try container.decode(Int.self, forKey: .recommendedPrefillStepSize),
+            requiresImmediateUnload: requiresImmediateUnload,
+            constrainedModeActive: try container.decodeIfPresent(Bool.self, forKey: .constrainedModeActive)
+                ?? requiresImmediateUnload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(allowed, forKey: .allowed)
+        try container.encodeIfPresent(reason, forKey: .reason)
+        try container.encode(pressureReason, forKey: .pressureReason)
+        try container.encode(recommendedMaxContextTokens, forKey: .recommendedMaxContextTokens)
+        try container.encode(recommendedPrefillStepSize, forKey: .recommendedPrefillStepSize)
+        try container.encode(constrainedModeActive, forKey: .constrainedModeActive)
+        try container.encode(requiresImmediateUnload, forKey: .requiresImmediateUnload)
+    }
+
+    public func constrainedRuntimeProfile(_ profile: RuntimeProfile) -> RuntimeProfile {
+        var constrained = profile
+        if let maxKVSize = constrained.quantization.maxKVSize {
+            constrained.quantization.maxKVSize = min(maxKVSize, recommendedMaxContextTokens)
+        } else {
+            constrained.quantization.maxKVSize = recommendedMaxContextTokens
+        }
+        constrained.prefillStepSize = min(constrained.prefillStepSize, recommendedPrefillStepSize)
+        constrained.quantization.runtimePressureReason = pressureReason
+        if constrainedModeActive {
+            constrained.unloadOnMemoryPressure = true
+            constrained.streamExperts = false
+            constrained.expertStreamingMode = .disabled
+            constrained.speculativeDecodingEnabled = false
+            constrained.mtpEnabled = false
+        }
+        return constrained
+    }
+}
+
+public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
+    public static let defaultKVCacheSizeFloorTokens = 1_024
+    public static let defaultKVCacheSizeAlignmentTokens = 256
+
+    public var requestedCompletionTokens: Int?
+    public var reservedCompletionTokens: Int
+    public var effectiveMaxTokens: Int?
+    public var maxTokensClamped: Bool
+    public var pressureCompletionTokenLimit: Int?
+    public var effectiveMaxKVSize: Int?
+    public var maxKVSizeClamped: Bool
+    public var initialAvailableMemoryBytes: Int64?
+    public var pressureReason: RuntimePressureReason
+    public var constrainedModeActive: Bool
+
+    public init(
+        requestedCompletionTokens: Int?,
+        reservedCompletionTokens: Int,
+        effectiveMaxTokens: Int?,
+        maxTokensClamped: Bool,
+        pressureCompletionTokenLimit: Int?,
+        effectiveMaxKVSize: Int? = nil,
+        maxKVSizeClamped: Bool = false,
+        initialAvailableMemoryBytes: Int64?,
+        pressureReason: RuntimePressureReason,
+        constrainedModeActive: Bool
+    ) {
+        self.requestedCompletionTokens = requestedCompletionTokens
+        self.reservedCompletionTokens = max(0, reservedCompletionTokens)
+        self.effectiveMaxTokens = effectiveMaxTokens.map { max(1, $0) }
+        self.maxTokensClamped = maxTokensClamped
+        self.pressureCompletionTokenLimit = pressureCompletionTokenLimit.map { max(1, $0) }
+        self.effectiveMaxKVSize = effectiveMaxKVSize.map { max(1, $0) }
+        self.maxKVSizeClamped = maxKVSizeClamped
+        self.initialAvailableMemoryBytes = initialAvailableMemoryBytes
+        self.pressureReason = pressureReason
+        self.constrainedModeActive = constrainedModeActive
+    }
+
+    public init(
+        requestedCompletionTokens: Int?,
+        profile: RuntimeProfile,
+        safety: LocalRuntimeSafetyAssessment,
+        initialAvailableMemoryBytes: Int64?
+    ) {
+        let pressureLimit = Self.pressureCompletionTokenLimit(
+            profile: profile,
+            safety: safety,
+            availableMemoryBytes: initialAvailableMemoryBytes
+        )
+        let requested = requestedCompletionTokens.map { max(1, $0) }
+        let reserved: Int
+        let effective: Int?
+        let clamped: Bool
+        if let pressureLimit {
+            if let requested {
+                let capped = min(requested, pressureLimit)
+                reserved = capped
+                effective = capped
+                clamped = capped != requested
+            } else {
+                reserved = pressureLimit
+                effective = pressureLimit
+                clamped = true
+            }
+        } else {
+            reserved = requested ?? 0
+            effective = requested
+            clamped = false
+        }
+
+        self.init(
+            requestedCompletionTokens: requested,
+            reservedCompletionTokens: reserved,
+            effectiveMaxTokens: effective,
+            maxTokensClamped: clamped,
+            pressureCompletionTokenLimit: pressureLimit,
+            effectiveMaxKVSize: profile.quantization.maxKVSize,
+            maxKVSizeClamped: false,
+            initialAvailableMemoryBytes: initialAvailableMemoryBytes,
+            pressureReason: safety.pressureReason,
+            constrainedModeActive: safety.constrainedModeActive
+        )
+    }
+
+    public mutating func constrainToContext(
+        promptTokenCount: Int,
+        maxContextTokens: Int
+    ) -> Bool {
+        fitPreparedPrompt(
+            promptTokenCount: promptTokenCount,
+            maxContextTokens: maxContextTokens
+        )
+    }
+
+    public mutating func fitPreparedPrompt(
+        promptTokenCount: Int,
+        maxContextTokens: Int,
+        minKVCacheSizeTokens: Int = Self.defaultKVCacheSizeFloorTokens,
+        kvCacheSizeAlignmentTokens: Int = Self.defaultKVCacheSizeAlignmentTokens
+    ) -> Bool {
+        let promptTokenCount = max(0, promptTokenCount)
+        guard promptTokenCount + reservedCompletionTokens > maxContextTokens else {
+            fitKVCacheToPreparedPrompt(
+                promptTokenCount: promptTokenCount,
+                maxContextTokens: maxContextTokens,
+                minKVCacheSizeTokens: minKVCacheSizeTokens,
+                kvCacheSizeAlignmentTokens: kvCacheSizeAlignmentTokens
+            )
+            return true
+        }
+        let availableCompletionTokens = maxContextTokens - promptTokenCount
+        guard availableCompletionTokens > 0 else {
+            return false
+        }
+
+        reservedCompletionTokens = min(reservedCompletionTokens, availableCompletionTokens)
+        effectiveMaxTokens = reservedCompletionTokens
+        maxTokensClamped = true
+        fitKVCacheToPreparedPrompt(
+            promptTokenCount: promptTokenCount,
+            maxContextTokens: maxContextTokens,
+            minKVCacheSizeTokens: minKVCacheSizeTokens,
+            kvCacheSizeAlignmentTokens: kvCacheSizeAlignmentTokens
+        )
+        return true
+    }
+
+    public func providerMetadata() -> [String: String] {
+        [
+            LocalProviderMetadataKeys.generationRequestedMaxTokens: requestedCompletionTokens
+                .map(String.init) ?? "none",
+            LocalProviderMetadataKeys.generationEffectiveMaxTokens: effectiveMaxTokens
+                .map(String.init) ?? "none",
+            LocalProviderMetadataKeys.generationMaxTokensClamped: String(maxTokensClamped),
+            LocalProviderMetadataKeys.generationPressureCompletionLimit: pressureCompletionTokenLimit
+                .map(String.init) ?? "none",
+            LocalProviderMetadataKeys.generationEffectiveMaxKVSize: effectiveMaxKVSize
+                .map(String.init) ?? "none",
+            LocalProviderMetadataKeys.generationMaxKVSizeClamped: String(maxKVSizeClamped),
+            LocalProviderMetadataKeys.generationInitialAvailableMemoryBytes: initialAvailableMemoryBytes
+                .map(String.init) ?? "unknown",
+        ]
+    }
+
+    public static func pressureCompletionTokenLimit(
+        profile: RuntimeProfile,
+        safety: LocalRuntimeSafetyAssessment,
+        availableMemoryBytes: Int64?
+    ) -> Int? {
+        guard safety.constrainedModeActive else { return nil }
+        let policyLimit: Int?
+        switch safety.pressureReason {
+        case .lowMemory:
+            if let availableMemoryBytes {
+                if availableMemoryBytes < 1_000_000_000 {
+                    policyLimit = 128
+                } else if availableMemoryBytes < 1_200_000_000 {
+                    policyLimit = 256
+                } else if availableMemoryBytes < LocalRuntimeSafetyPolicy.constrainedAvailableMemoryBytes {
+                    policyLimit = 512
+                } else {
+                    policyLimit = 1_024
+                }
+            } else {
+                policyLimit = 512
+            }
+        case .thermalFair, .thermalSerious, .thinThermal:
+            policyLimit = 768
+        case .lowPower:
+            policyLimit = 1_024
+        case .none, .thermalCritical:
+            policyLimit = nil
+        }
+
+        guard let policyLimit else { return nil }
+        return min(profile.quantization.maxKVSize ?? policyLimit, policyLimit)
+    }
+
+    private mutating func fitKVCacheToPreparedPrompt(
+        promptTokenCount: Int,
+        maxContextTokens: Int,
+        minKVCacheSizeTokens: Int,
+        kvCacheSizeAlignmentTokens: Int
+    ) {
+        guard effectiveMaxTokens != nil else {
+            effectiveMaxKVSize = maxContextTokens
+            maxKVSizeClamped = false
+            return
+        }
+
+        let requiredTokens = max(1, promptTokenCount + reservedCompletionTokens)
+        let floorTokens = min(max(1, minKVCacheSizeTokens), maxContextTokens)
+        let alignmentTokens = max(1, kvCacheSizeAlignmentTokens)
+        let flooredTokens = max(requiredTokens, floorTokens)
+        let alignedTokens = ((flooredTokens + alignmentTokens - 1) / alignmentTokens)
+            * alignmentTokens
+        let fittedTokens = min(maxContextTokens, max(requiredTokens, alignedTokens))
+        effectiveMaxKVSize = fittedTokens
+        maxKVSizeClamped = fittedTokens < maxContextTokens
+    }
+}
+
+public enum LocalRuntimeSafetyPolicy {
+    public static let minimumAvailableMemoryBytes: Int64 = 900_000_000
+    public static let constrainedAvailableMemoryBytes: Int64 = 1_500_000_000
+
+    public static func assess(snapshot: RuntimeMemorySnapshot) -> LocalRuntimeSafetyAssessment {
+        let profile = DeviceProfile.recommended(for: snapshot)
+        return assess(snapshot: snapshot, profile: profile)
+    }
+
+    public static func assess(
+        snapshot: RuntimeMemorySnapshot,
+        profile: DeviceProfile
+    ) -> LocalRuntimeSafetyAssessment {
+        let thermal = snapshot.thermalState.lowercased()
+        let available = snapshot.availableMemoryBytes
+        let criticallyThermal = thermal == "critical"
+        let memoryExhausted = available.map { $0 < minimumAvailableMemoryBytes } ?? false
+
+        if criticallyThermal {
+            return LocalRuntimeSafetyAssessment(
+                allowed: false,
+                reason: "Local MLX generation is paused because iOS reported critical thermal pressure. Let the device recover or use a cloud model.",
+                pressureReason: .thermalCritical,
+                recommendedMaxContextTokens: min(profile.recommendedContextTokens, 2_048),
+                recommendedPrefillStepSize: min(profile.recommendedPrefillStepSize, 128),
+                requiresImmediateUnload: true,
+                constrainedModeActive: true
+            )
+        }
+
+        if memoryExhausted {
+            return LocalRuntimeSafetyAssessment(
+                allowed: false,
+                reason: "Local MLX generation is paused because available memory is critically low. Close other apps, wait a moment, or use a smaller/cloud model.",
+                pressureReason: .lowMemory,
+                recommendedMaxContextTokens: min(profile.recommendedContextTokens, 2_048),
+                recommendedPrefillStepSize: min(profile.recommendedPrefillStepSize, 128),
+                requiresImmediateUnload: true,
+                constrainedModeActive: true
+            )
+        }
+
+        let constrainedByMemory = available.map { $0 < constrainedAvailableMemoryBytes } ?? false
+        let pressureReason: RuntimePressureReason
+        if constrainedByMemory {
+            pressureReason = .lowMemory
+        } else if profile.runtimePressureReason != .none {
+            pressureReason = profile.runtimePressureReason
+        } else if thermal == "fair" {
+            pressureReason = .thermalFair
+        } else if snapshot.lowPowerModeEnabled {
+            pressureReason = .lowPower
+        } else {
+            pressureReason = .none
+        }
+        let constrained = pressureReason != .none
+        let maxContext: Int
+        switch pressureReason {
+        case .lowMemory:
+            let lowMemoryCap: Int
+            if let available {
+                if available < 1_000_000_000 {
+                    lowMemoryCap = 1_024
+                } else if available < 1_600_000_000 {
+                    lowMemoryCap = 2_048
+                } else {
+                    lowMemoryCap = 4_096
+                }
+            } else {
+                lowMemoryCap = 2_048
+            }
+            maxContext = min(profile.recommendedContextTokens, lowMemoryCap)
+        case .thinThermal:
+            maxContext = min(profile.recommendedContextTokens, 16_384)
+        case .none, .lowPower, .thermalFair, .thermalSerious, .thermalCritical:
+            maxContext = profile.recommendedContextTokens
+        }
+        let prefill = constrained
+            ? min(profile.recommendedPrefillStepSize, 256)
+            : profile.recommendedPrefillStepSize
+
+        return LocalRuntimeSafetyAssessment(
+            allowed: true,
+            reason: constrained ? "Local runtime using pressure-aware settings for \(pressureReason.rawValue)." : nil,
+            pressureReason: pressureReason,
+            recommendedMaxContextTokens: maxContext,
+            recommendedPrefillStepSize: prefill,
+            requiresImmediateUnload: false,
+            constrainedModeActive: constrained
+        )
     }
 }

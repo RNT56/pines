@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import HighlightSwift
 import PinesCore
 import SwiftUI
@@ -20,7 +21,7 @@ struct MarkdownMessageView: View {
     private var renderTaskID: MarkdownRenderTaskID {
         MarkdownRenderTaskID(
             messageID: messageID,
-            contentHash: content.hashValue,
+            contentDigest: stableMarkdownDigest(content),
             contentLength: content.count,
             themeKey: theme.template.rawValue,
             colorSchemeKey: theme.colorScheme == .dark ? "dark" : "light",
@@ -381,7 +382,7 @@ private struct MarkdownCodeBlockView: View {
 
     private var taskID: SyntaxHighlightTaskID {
         SyntaxHighlightTaskID(
-            codeHash: code.hashValue,
+            codeDigest: stableMarkdownDigest(code),
             codeLength: code.count,
             language: language?.lowercased() ?? "",
             themeKey: theme.template.rawValue,
@@ -563,7 +564,7 @@ private actor MarkdownRenderCache {
         colorSchemeKey: String,
         dynamicTypeKey: String
     ) -> ParsedMarkdownMessage {
-        let key = "\(messageID.uuidString)|\(content.hashValue)|\(content.count)|\(themeKey)|\(colorSchemeKey)|\(dynamicTypeKey)" as NSString
+        let key = "\(messageID.uuidString)|\(stableMarkdownDigest(content))|\(content.count)|\(themeKey)|\(colorSchemeKey)|\(dynamicTypeKey)" as NSString
         if let cached = cache.object(forKey: key) {
             return cached.parsedMessage
         }
@@ -577,7 +578,6 @@ private actor MarkdownRenderCache {
 private actor SyntaxHighlightingService {
     static let shared = SyntaxHighlightingService()
 
-    private let highlighter = Highlight()
     private let maxHighlightedBytes = 200_000
     private let timeoutNanoseconds: UInt64 = 750_000_000
     private var cache = [SyntaxHighlightTaskID: HighlightedCode]()
@@ -591,7 +591,7 @@ private actor SyntaxHighlightingService {
         fallbackLabel: String
     ) async -> HighlightedCode {
         let key = SyntaxHighlightTaskID(
-            codeHash: code.hashValue,
+            codeDigest: stableMarkdownDigest(code),
             codeLength: code.count,
             language: language?.lowercased() ?? "",
             themeKey: themeKey,
@@ -636,12 +636,12 @@ private actor SyntaxHighlightingService {
 
         let mode: HighlightMode = normalizedLanguage.map { .languageAliasIgnoreIllegal($0) } ?? .automatic
         let colors = Self.highlightColors(themeKey: themeKey, colorSchemeKey: colorSchemeKey)
-        let highlighter = highlighter
         let timeoutNanoseconds = timeoutNanoseconds
         do {
             let result = try await withThrowingTaskGroup(of: HighlightResult.self) { group in
                 group.addTask {
-                    try await highlighter.request(code, mode: mode, colors: colors)
+                    let highlighter = Highlight()
+                    return try await highlighter.request(code, mode: mode, colors: colors)
                 }
                 group.addTask {
                     try await Task.sleep(nanoseconds: timeoutNanoseconds)
@@ -743,7 +743,7 @@ private struct HighlightedCode: Sendable {
 
 private struct MarkdownRenderTaskID: Hashable {
     var messageID: UUID
-    var contentHash: Int
+    var contentDigest: String
     var contentLength: Int
     var themeKey: String
     var colorSchemeKey: String
@@ -752,11 +752,17 @@ private struct MarkdownRenderTaskID: Hashable {
 }
 
 private struct SyntaxHighlightTaskID: Hashable, Sendable {
-    var codeHash: Int
+    var codeDigest: String
     var codeLength: Int
     var language: String
     var themeKey: String
     var colorSchemeKey: String
+}
+
+private func stableMarkdownDigest(_ text: String) -> String {
+    SHA256.hash(data: Data(text.utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
 }
 
 private enum SyntaxHighlightError: Error {

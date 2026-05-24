@@ -97,16 +97,16 @@ Normal chat, VLM prompts, embeddings, vault retrieval, and history are local-fir
 
 The router must never silently fall back to cloud. If local capability is missing, the UI should show a consent/configuration path. When local vault or MCP resource context would be included in a cloud request, the app asks for per-turn approval and can continue without that context.
 
-`DeviceRuntimeMonitor` adapts local runtime defaults from physical memory, available process memory, and thermal state. Compact 6 GB devices use lower prefill, embedding batch, and vector scan limits; iOS memory warnings stop the active run and unload transient MLX containers.
+`DeviceRuntimeMonitor` adapts local runtime defaults from physical memory, available process memory, and thermal state. Compact 6 GB devices use lower prefill, embedding batch, vector scan, and pressure-aware completion limits. iOS memory warnings soft-recover during active generation while emergency headroom remains; otherwise they stop the active run and unload transient MLX containers.
 
 Vault retrieval stores both FP16 embeddings and compressed TurboQuant vector codes. Search first uses the compressed code path, filters by embedding model where possible, reranks with FP16 cosine, and falls back to SQLite FTS when embeddings are missing.
 
 The app links MLX through exact fork pins in `project.yml`:
 
-- `https://github.com/RNT56/mlx-swift` at `8f0718404a323698c7b5730f2de3af2b5e21f854`
-- `https://github.com/RNT56/mlx-swift-lm` at `bf7bab132f9810d8ab3e5c6e0adbcf3db0b40551`
-- Nested `mlx` inside `RNT56/mlx-swift` at `8f13e02fa85252f2a569a43c6759f07490b816a5`
-- Nested `mlx-c` inside `RNT56/mlx-swift` at `fff19671eed2e556bdf4552328a1791a8f37b651`
+- `https://github.com/RNT56/mlx-swift` at `a90b1097df45e4e70b6e0bb367624f8f5857970b`
+- `https://github.com/RNT56/mlx-swift-lm` at `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c`
+- Nested `mlx` inside `RNT56/mlx-swift` at `3eb8ef074b911b00ecdbeb47f7bdafd91a123ad0`
+- Nested `mlx-c` inside `RNT56/mlx-swift` at `2abc34daff6ded246054d9e15b98870b5cd08b97`
 
 Compatibility implementations for model families not yet present in linked MLX packages are split into `MLXCompatibleModels+Llama4.swift` and `MLXCompatibleModels+DeepseekV4.swift`.
 

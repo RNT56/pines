@@ -516,7 +516,7 @@ final class WatchChatViewModel: NSObject, ObservableObject, WCSessionDelegate {
             } catch {
                 return
             }
-            await self?.saveCachedStateNow()
+            self?.saveCachedStateNow()
         }
     }
 

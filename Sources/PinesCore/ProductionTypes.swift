@@ -1468,7 +1468,7 @@ public struct BrowserAction: Identifiable, Hashable, Codable, Sendable {
 public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let defaultCloudMaxCompletionTokens = 16_384
     public static let defaultLocalMaxCompletionTokens = 1_024
-    public static let defaultLocalMaxContextTokens = 16_384
+    public static let defaultLocalMaxContextTokens = 65_536
     public static let minCompletionTokens = 128
     public static let maxCompletionTokens = 128_000
     public static let minLocalContextTokens = 1_024
@@ -1483,6 +1483,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let defaultCloudAccessMode: CloudAccessMode = .byok
     public static let defaultProEntitlementStatus: ProEntitlementStatus = .inactive
     public static let defaultManagedCloudConsent: ManagedCloudConsent = .notAsked
+    public static let defaultLocalTurboQuantMode: TurboQuantUserMode = .balanced
 
     public var securityConfiguration: SecurityConfiguration
     public var executionMode: AgentExecutionMode
@@ -1496,6 +1497,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var cloudMaxCompletionTokens: Int
     public var localMaxCompletionTokens: Int
     public var localMaxContextTokens: Int
+    public var localTurboQuantMode: TurboQuantUserMode
     public var openAIReasoningEffort: OpenAIReasoningEffort
     public var openAITextVerbosity: OpenAITextVerbosity
     public var anthropicEffort: AnthropicEffort
@@ -1526,6 +1528,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         case cloudMaxCompletionTokens
         case localMaxCompletionTokens
         case localMaxContextTokens
+        case localTurboQuantMode
         case openAIReasoningEffort
         case openAITextVerbosity
         case anthropicEffort
@@ -1557,6 +1560,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         cloudMaxCompletionTokens: Int = Self.defaultCloudMaxCompletionTokens,
         localMaxCompletionTokens: Int = Self.defaultLocalMaxCompletionTokens,
         localMaxContextTokens: Int = Self.defaultLocalMaxContextTokens,
+        localTurboQuantMode: TurboQuantUserMode = Self.defaultLocalTurboQuantMode,
         openAIReasoningEffort: OpenAIReasoningEffort = Self.defaultOpenAIReasoningEffort,
         openAITextVerbosity: OpenAITextVerbosity = Self.defaultOpenAITextVerbosity,
         anthropicEffort: AnthropicEffort = Self.defaultAnthropicEffort,
@@ -1586,6 +1590,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         self.cloudMaxCompletionTokens = Self.normalizedCompletionTokens(cloudMaxCompletionTokens)
         self.localMaxCompletionTokens = Self.normalizedCompletionTokens(localMaxCompletionTokens)
         self.localMaxContextTokens = Self.normalizedLocalContextTokens(localMaxContextTokens)
+        self.localTurboQuantMode = localTurboQuantMode
         self.openAIReasoningEffort = openAIReasoningEffort
         self.openAITextVerbosity = openAITextVerbosity
         self.anthropicEffort = anthropicEffort
@@ -1624,6 +1629,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         localMaxContextTokens = Self.normalizedLocalContextTokens(
             try container.decodeIfPresent(Int.self, forKey: .localMaxContextTokens) ?? Self.defaultLocalMaxContextTokens
         )
+        localTurboQuantMode = try container.decodeIfPresent(TurboQuantUserMode.self, forKey: .localTurboQuantMode) ?? Self.defaultLocalTurboQuantMode
         openAIReasoningEffort = try container.decodeIfPresent(OpenAIReasoningEffort.self, forKey: .openAIReasoningEffort) ?? Self.defaultOpenAIReasoningEffort
         openAITextVerbosity = try container.decodeIfPresent(OpenAITextVerbosity.self, forKey: .openAITextVerbosity) ?? Self.defaultOpenAITextVerbosity
         anthropicEffort = try container.decodeIfPresent(AnthropicEffort.self, forKey: .anthropicEffort) ?? Self.defaultAnthropicEffort

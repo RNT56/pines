@@ -80,7 +80,12 @@ extension GRDBPinesStore {
     }
 
     static func message(from row: Row) -> ChatMessage {
-        ChatMessage(
+        var providerMetadata = decodeProviderMetadata(row["provider_metadata_json"] as String?)
+        if let rawStatus = row["status"] as String?,
+           MessageStatus(rawValue: rawStatus) != nil {
+            providerMetadata[ChatTranscriptMetadataKeys.persistedMessageStatus] = rawStatus
+        }
+        return ChatMessage(
             id: UUID(uuidString: row["id"]) ?? UUID(),
             role: ChatRole(rawValue: row["role"]) ?? .assistant,
             content: row["content"],
@@ -88,7 +93,7 @@ extension GRDBPinesStore {
             toolCallID: row["tool_call_id"] as String?,
             toolName: row["tool_name"] as String?,
             toolCalls: decodeToolCalls(row["tool_calls_json"] as String?),
-            providerMetadata: decodeProviderMetadata(row["provider_metadata_json"] as String?)
+            providerMetadata: providerMetadata
         )
     }
 
@@ -115,10 +120,18 @@ extension GRDBPinesStore {
             modalities: decodeModalities(row["modalities"]),
             verification: ModelVerificationState(rawValue: row["verification"]) ?? .installable,
             state: ModelInstallState(rawValue: row["state"]) ?? .remote,
+            parameterCount: row["parameter_count"] as Int64?,
             estimatedBytes: row["estimated_bytes"] as Int64?,
             license: row["license"] as String?,
             modelType: row["model_type"] as String?,
+            textConfigModelType: row["text_config_model_type"] as String?,
             processorClass: row["processor_class"] as String?,
+            keyHeadDimension: row["key_head_dimension"] as Int?,
+            valueHeadDimension: row["value_head_dimension"] as Int?,
+            routedExperts: row["routed_experts"] as Int?,
+            expertsPerToken: row["experts_per_token"] as Int?,
+            cacheTopology: ModelCacheTopology(rawValue: row["cache_topology"] as String? ?? "") ?? .standardAttention,
+            turboQuantFamilySupport: TurboQuantFamilySupport(rawValue: row["turbo_quant_family_support"] as String? ?? "") ?? .attentionKVFull,
             createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
         )
     }
@@ -300,7 +313,7 @@ extension GRDBPinesStore {
     static func vaultTurboQuantCodec(modelID: ModelID, dimensions: Int) -> TurboQuantVectorCodec {
         TurboQuantVectorCodec(
             preset: .vaultVectorDefault,
-            seed: TurboQuantVectorCodec.stableSeed(for: "\(modelID.rawValue)|\(dimensions)|vault-v1")
+            seed: TurboQuantVectorCodec.stableSeed(for: "\(modelID.rawValue)|\(dimensions)|vault-v2")
         )
     }
 

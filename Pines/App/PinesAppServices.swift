@@ -278,6 +278,11 @@ final class PinesAppServices: @unchecked Sendable {
         await mlxRuntime.handleMemoryPressure()
     }
 
+    func handleThermalPressure() async {
+        runtimeMetrics.recordThermalPressure(mlxRuntime.runtimeDiagnostics.memoryCounters)
+        await mlxRuntime.handleThermalPressure()
+    }
+
     var serviceHealth: [ServiceHealth] {
         [
             ServiceHealth(
@@ -504,7 +509,13 @@ final class PinesAppServices: @unchecked Sendable {
         #if canImport(GRDB)
         let startedAt = Date()
         do {
-            let store = try GRDBPinesStore(runtimeMetrics: runtimeMetrics)
+            if PinesUITestLaunchConfiguration.resetsStore {
+                try resetUITestStore(fileName: PinesUITestLaunchConfiguration.databaseFileName)
+            }
+            let store = try GRDBPinesStore(
+                configuration: PinesUITestLaunchConfiguration.storeConfiguration,
+                runtimeMetrics: runtimeMetrics
+            )
             runtimeMetrics.recordStartupPhase("store_init", elapsedSeconds: Date().timeIntervalSince(startedAt))
             return (store, nil)
         } catch {
@@ -514,6 +525,22 @@ final class PinesAppServices: @unchecked Sendable {
         #else
         return (nil, "GRDB store is unavailable in this build.")
         #endif
+    }
+
+    private static func resetUITestStore(fileName: String) throws {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = base.appending(path: "Pines", directoryHint: .isDirectory)
+        let databaseURL = directory.appending(path: fileName)
+        for suffix in ["", "-wal", "-shm"] {
+            let url = URL(fileURLWithPath: databaseURL.path + suffix)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            try FileManager.default.removeItem(at: url)
+        }
     }
 
     private func registerBuiltInTool<Input: ToolInput, Output: ToolOutput>(

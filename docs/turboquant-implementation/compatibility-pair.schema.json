@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schtack.local/schemas/turboquant-compatibility-pair.schema.json",
+  "title": "TurboQuantCompatibilityPair",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "pines",
+    "mlxSwift",
+    "mlxSwiftLM",
+    "schemaSet",
+    "validatedAt",
+    "validationCommands",
+    "signoffs",
+    "notes"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "green", "failed", "revoked"]
+    },
+    "pines": { "$ref": "#/$defs/repoRef" },
+    "mlxSwift": { "$ref": "#/$defs/repoRef" },
+    "mlxSwiftLM": { "$ref": "#/$defs/repoRef" },
+    "schemaSet": {
+      "type": "object",
+      "additionalProperties": { "type": "integer" }
+    },
+    "validatedAt": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "validationCommands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "repo", "result"],
+        "properties": {
+          "repo": { "type": "string" },
+          "command": { "type": "string" },
+          "result": { "type": "string", "enum": ["pending", "passed", "failed", "skipped"] },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "signoffs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mlxCoreContracts", "lmTypedErrors", "pinesBridgeIntegration"],
+      "properties": {
+        "mlxCoreContracts": { "$ref": "#/$defs/signoff" },
+        "lmTypedErrors": { "$ref": "#/$defs/signoff" },
+        "pinesBridgeIntegration": { "$ref": "#/$defs/signoff" }
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "repoRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "branch", "commit", "dirtyAtValidation"],
+      "properties": {
+        "repo": { "type": "string" },
+        "branch": { "type": "string" },
+        "commit": { "type": "string" },
+        "dirtyAtValidation": { "type": "boolean" }
+      }
+    },
+    "signoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "approvedBy", "approvedAt", "notes"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "approvedBy": { "type": ["string", "null"] },
+        "approvedAt": { "type": ["string", "null"], "format": "date-time" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

@@ -157,6 +157,7 @@ struct ModelsView: View {
                 )
             }
         }
+        .accessibilityIdentifier("pines.screen.models")
     }
 
     private var searchTextBinding: Binding<String> {

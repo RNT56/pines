@@ -138,6 +138,7 @@ struct VaultView: View {
                 )
             }
         }
+        .accessibilityIdentifier("pines.screen.vault")
     }
 
     private func selectDefaultItemIfNeeded() {

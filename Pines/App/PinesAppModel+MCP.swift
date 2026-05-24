@@ -175,6 +175,7 @@ extension PinesAppModel {
                 }
                 return result
             } catch {
+                await services.mlxRuntime.unload()
                 recordRecoverableIssue("mcp_sampling.local_attempt", error: error, services: services)
             }
         }
@@ -286,8 +287,11 @@ extension PinesAppModel {
             LocalProviderMetadataKeys.turboQuantAttentionPath,
             LocalProviderMetadataKeys.turboQuantKernelProfile,
             LocalProviderMetadataKeys.turboQuantSelfTestStatus,
+            LocalProviderMetadataKeys.turboQuantAdmissionDecision,
+            LocalProviderMetadataKeys.turboQuantAdmissionReason,
             LocalProviderMetadataKeys.turboQuantFallbackReason,
             LocalProviderMetadataKeys.turboQuantLastUnsupportedShape,
+            LocalProviderMetadataKeys.generationIncompleteReason,
         ]
         let diagnostics = diagnosticKeys.compactMap { key -> String? in
             guard let value = metadata[key], !value.isEmpty else { return nil }
@@ -441,7 +445,11 @@ extension PinesAppModel {
         provider: any InferenceProvider,
         modelID: ModelID
     ) async throws -> MCPSamplingResult {
-        let stream = try await provider.streamEvents(request)
+        let rawStream = try await provider.streamEvents(request)
+        let stream = PinesInferenceStreamGuard.guardedIfLocal(
+            rawStream,
+            isLocal: provider.capabilities.local
+        )
         var text = ""
         var stopReason = "endTurn"
         for try await event in stream {

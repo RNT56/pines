@@ -68,6 +68,51 @@ enum ArtifactsProviderScope: Hashable, Identifiable {
     }
 }
 
+enum ArtifactsAssetKindFilter: String, CaseIterable, Identifiable, Hashable {
+    case all
+    case reports
+    case images
+    case video
+    case audio
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .reports: "Reports"
+        case .images: "Images"
+        case .video: "Video"
+        case .audio: "Audio"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .all: "square.grid.2x2"
+        case .reports: "doc.text"
+        case .images: "photo"
+        case .video: "film"
+        case .audio: "waveform"
+        }
+    }
+
+    func matches(_ artifact: ProviderArtifactRecord) -> Bool {
+        switch self {
+        case .all:
+            true
+        case .reports:
+            artifact.galleryPresentation == .report
+        case .images:
+            artifact.galleryPresentation == .image
+        case .video:
+            artifact.galleryPresentation == .video
+        case .audio:
+            artifact.galleryPresentation == .audio
+        }
+    }
+}
+
 enum ArtifactsSort: String, CaseIterable, Identifiable, Hashable {
     case newest
     case oldest
@@ -191,6 +236,23 @@ struct ArtifactsResourceSummary: Identifiable, Hashable {
     let metricItems: [PinesMetricPillGroup.Item]
 }
 
+struct ArtifactsAssetViewModel: Identifiable {
+    var id: String { artifact.id }
+    let artifact: ProviderArtifactRecord
+    let summary: ArtifactsResourceSummary
+
+    var selection: ArtifactsSelection { summary.selection }
+    var title: String { summary.title }
+    var detail: String { summary.detail }
+    var providerID: ProviderID? { summary.providerID }
+    var providerKind: CloudProviderKind { summary.providerKind }
+    var kind: String { summary.kind }
+    var presentation: ArtifactsGalleryPresentation { artifact.galleryPresentation }
+    var status: PinesCloudStatus { summary.status }
+    var secondaryStatus: PinesCloudStatus? { summary.secondaryStatus }
+    var createdAt: Date? { summary.createdAt }
+}
+
 enum ArtifactsMediaKind: String, CaseIterable, Identifiable, Hashable {
     case image
     case video
@@ -307,6 +369,27 @@ enum ArtifactsWorkspaceDeriver {
                 )
             }
             .sorted(by: sorter(filter.sort))
+    }
+
+    static func assetViewModels(
+        artifacts: [ProviderArtifactRecord],
+        filter: ArtifactsResourceFilter,
+        assetKind: ArtifactsAssetKindFilter
+    ) -> [ArtifactsAssetViewModel] {
+        let visibleArtifacts = artifacts
+            .filter(\.isVisibleInArtifactsGallery)
+            .filter { assetKind.matches($0) }
+        let artifactsByID = visibleArtifacts.reduce(into: [String: ProviderArtifactRecord]()) { result, artifact in
+            result[artifact.id] = artifact
+        }
+        return artifactSummaries(artifacts: visibleArtifacts, filter: filter).compactMap { summary in
+            guard case .artifact(let id) = summary.selection,
+                  let artifact = artifactsByID[id]
+            else {
+                return nil
+            }
+            return ArtifactsAssetViewModel(artifact: artifact, summary: summary)
+        }
     }
 
     static func fileSummaries(files: [ProviderFileRecord], filter: ArtifactsResourceFilter) -> [ArtifactsResourceSummary] {
@@ -709,7 +792,8 @@ enum ArtifactsWorkspaceDeriver {
             ]
         case .gemini:
             [
-                .init(id: "deep-research-pro-preview-12-2025", title: "Gemini Deep Research Pro", detail: "Gemini 3 Pro Deep Research agent", isFromProviderCapability: false),
+                .init(id: "deep-research-preview-04-2026", title: "Gemini Deep Research", detail: "Preview research agent optimized for streamed UI workflows", isFromProviderCapability: false),
+                .init(id: "deep-research-max-preview-04-2026", title: "Gemini Deep Research Max", detail: "Maximum-comprehensiveness Gemini research agent", isFromProviderCapability: false),
             ]
         default:
             []
@@ -904,6 +988,19 @@ extension ProviderArtifactRecord {
             return data
         }
         return content.flatMap(Self.firstBase64ImageData(in:))
+    }
+
+    var isRemixableImageArtifact: Bool {
+        guard galleryPresentation == .image else { return false }
+        if localURL != nil || remoteURL != nil { return true }
+        return content.flatMap(Self.firstBase64ImageData(in:)) != nil
+    }
+
+    var remixDisabledReason: String? {
+        guard galleryPresentation == .image else {
+            return "Only image artifacts can be remixed in this release."
+        }
+        return isRemixableImageArtifact ? nil : "This image has no local file, remote URL, or embedded image data to use as a reference."
     }
 
     var galleryDetail: String {

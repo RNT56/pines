@@ -39,7 +39,7 @@ actor GRDBPinesStore:
         let url = try Self.databaseURL(fileName: configuration.databaseFileName)
         runtimeMetrics.recordStartupPhase("store_url", elapsedSeconds: Date().timeIntervalSince(urlStartedAt))
 
-        let databaseKey = try Self.prepareEncryptedDatabase(at: url, dataProtection: configuration.dataProtection)
+        let databaseKey = try Self.prepareDatabaseKey(at: url, dataProtection: configuration.dataProtection)
 
         let openStartedAt = Date()
         database = try DatabasePool(path: url.path, configuration: Self.databaseConfiguration(databaseKey: databaseKey))
@@ -66,7 +66,13 @@ actor GRDBPinesStore:
         return directory.appending(path: fileName)
     }
 
-    private static func prepareEncryptedDatabase(at url: URL, dataProtection: DataProtectionClass) throws -> Data {
+    private static func prepareDatabaseKey(at url: URL, dataProtection: DataProtectionClass) throws -> Data? {
+        #if DEBUG
+        if PinesUITestLaunchConfiguration.usesPlaintextDatabase {
+            try applyProtection(dataProtection, to: url.deletingLastPathComponent())
+            return nil
+        }
+        #endif
         #if canImport(SQLCipher)
         let key = try SecureKeyStore.loadOrCreateDataKey(purpose: .encryptedDatabase, keyID: SecureKeyStore.databaseKeyID)
         if isPlaintextSQLiteDatabase(at: url) {
@@ -80,8 +86,14 @@ actor GRDBPinesStore:
         #endif
     }
 
-    private static func databaseConfiguration(databaseKey: Data) throws -> Configuration {
+    private static func databaseConfiguration(databaseKey: Data?) throws -> Configuration {
         var configuration = Configuration()
+        guard let databaseKey else {
+            configuration.prepareDatabase { db in
+                try db.execute(sql: "PRAGMA foreign_keys = ON")
+            }
+            return configuration
+        }
         #if canImport(SQLCipher)
         let rawKey = databaseKey.map { String(format: "%02x", $0) }.joined()
         configuration.prepareDatabase { db in
@@ -765,8 +777,8 @@ actor GRDBPinesStore:
             try db.execute(
                 sql: """
                 INSERT INTO model_installs
-                    (id, repository, display_name, revision, local_path, modalities, verification, state, model_type, processor_class, estimated_bytes, license, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, repository, display_name, revision, local_path, modalities, verification, state, parameter_count, model_type, text_config_model_type, processor_class, key_head_dimension, value_head_dimension, routed_experts, experts_per_token, cache_topology, turbo_quant_family_support, estimated_bytes, license, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(repository) DO UPDATE SET
                     display_name = excluded.display_name,
                     revision = excluded.revision,
@@ -774,8 +786,16 @@ actor GRDBPinesStore:
                     modalities = excluded.modalities,
                     verification = excluded.verification,
                     state = excluded.state,
+                    parameter_count = excluded.parameter_count,
                     model_type = excluded.model_type,
+                    text_config_model_type = excluded.text_config_model_type,
                     processor_class = excluded.processor_class,
+                    key_head_dimension = excluded.key_head_dimension,
+                    value_head_dimension = excluded.value_head_dimension,
+                    routed_experts = excluded.routed_experts,
+                    experts_per_token = excluded.experts_per_token,
+                    cache_topology = excluded.cache_topology,
+                    turbo_quant_family_support = excluded.turbo_quant_family_support,
                     estimated_bytes = excluded.estimated_bytes,
                     license = excluded.license,
                     updated_at = excluded.updated_at
@@ -789,8 +809,16 @@ actor GRDBPinesStore:
                     Self.encodeModalities(install.modalities),
                     install.verification.rawValue,
                     install.state.rawValue,
+                    install.parameterCount,
                     install.modelType,
+                    install.textConfigModelType,
                     install.processorClass,
+                    install.keyHeadDimension,
+                    install.valueHeadDimension,
+                    install.routedExperts,
+                    install.expertsPerToken,
+                    install.cacheTopology.rawValue,
+                    install.turboQuantFamilySupport.rawValue,
                     install.estimatedBytes,
                     install.license,
                     install.createdAt.timeIntervalSinceReferenceDate,
@@ -1125,8 +1153,7 @@ actor GRDBPinesStore:
                     continue
                 }
                 let codec = Self.vaultTurboQuantCodec(modelID: embeddings.modelID, dimensions: embedding.vector.count)
-                let encodedCode = try codec.encode(embedding.vector)
-                let codeData = try JSONEncoder().encode(encodedCode)
+                let codeData = try codec.encodeToData(embedding.vector)
                 try db.execute(
                     sql: """
                     INSERT INTO vault_embeddings
@@ -1148,7 +1175,7 @@ actor GRDBPinesStore:
                         Self.encodeFP16(embedding.vector),
                         codeData,
                         Double(norm),
-                        encodedCode.codecVersion,
+                        TurboQuantVectorCodec.codecVersion,
                         StableSearchHash.hexDigest(for: "\(chunk.checksum)|\(embeddings.modelID.rawValue)|\(embedding.vector.count)"),
                         now,
                     ]
@@ -1200,10 +1227,20 @@ actor GRDBPinesStore:
             let profileID = embeddingProfile.id
             let now = Date().timeIntervalSinceReferenceDate
             let embeddingByChunkID = Dictionary(uniqueKeysWithValues: embeddings.embeddings.map { ($0.chunkID, $0) })
-            try db.execute(
-                sql: "DELETE FROM vault_embeddings WHERE document_id = ? AND profile_id = ?",
-                arguments: [documentID.uuidString, profileID]
-            )
+            let chunkIDsForBatch = Array(embeddingByChunkID.keys).sorted()
+            if !chunkIDsForBatch.isEmpty {
+                var deleteArguments = StatementArguments(chunkIDsForBatch)
+                _ = deleteArguments.append(contentsOf: StatementArguments([documentID.uuidString, profileID]))
+                try db.execute(
+                    sql: """
+                    DELETE FROM vault_embeddings
+                    WHERE chunk_id IN (\(Array(repeating: "?", count: chunkIDsForBatch.count).joined(separator: ",")))
+                      AND document_id = ?
+                      AND profile_id = ?
+                    """,
+                    arguments: deleteArguments
+                )
+            }
 
             for chunk in chunks {
                 guard let embedding = embeddingByChunkID[chunk.id], !embedding.vector.isEmpty else {
@@ -1214,8 +1251,7 @@ actor GRDBPinesStore:
                     continue
                 }
                 let codec = Self.vaultTurboQuantCodec(modelID: embeddings.modelID, dimensions: embedding.vector.count)
-                let encodedCode = try codec.encode(embedding.vector)
-                let codeData = try JSONEncoder().encode(encodedCode)
+                let codeData = try codec.encodeToData(embedding.vector)
                 try db.execute(
                     sql: """
                     INSERT INTO vault_embeddings
@@ -1237,7 +1273,7 @@ actor GRDBPinesStore:
                         Self.encodeFP16(embedding.vector),
                         codeData,
                         Double(norm),
-                        encodedCode.codecVersion,
+                        TurboQuantVectorCodec.codecVersion,
                         StableSearchHash.hexDigest(for: "\(chunk.checksum)|\(embeddings.modelID.rawValue)|\(embedding.vector.count)"),
                         now,
                     ]
@@ -1409,7 +1445,7 @@ actor GRDBPinesStore:
                         let codeData: Data = row["turboquant_code"]
                         let code: TurboQuantVectorCode
                         do {
-                            code = try JSONDecoder().decode(TurboQuantVectorCode.self, from: codeData)
+                            code = try TurboQuantVectorCodec.decodeCode(data: codeData)
                         } catch {
                             decodeFailureCount += 1
                             return nil
@@ -1417,7 +1453,10 @@ actor GRDBPinesStore:
                         let codec = TurboQuantVectorCodec(preset: code.preset, seed: code.seed)
                         let score: Double
                         do {
-                            score = try codec.approximateCosineSimilarity(query: embedding, code: code)
+                            score = try codec.approximateCosineSimilarityStreaming(
+                                query: embedding,
+                                code: code
+                            )
                         } catch {
                             scoringFailureCount += 1
                             return nil
@@ -2568,7 +2607,7 @@ actor GRDBPinesStore:
         var messages = try Row.fetchAll(
             db,
             sql: """
-            SELECT id, role, content, created_at, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
+            SELECT id, role, content, created_at, status, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
             FROM messages
             WHERE conversation_id = ? AND deleted_at IS NULL
             ORDER BY created_at ASC, rowid ASC
@@ -2633,6 +2672,7 @@ actor GRDBPinesStore:
                     role,
                     content,
                     created_at,
+                    status,
                     tool_call_id,
                     tool_name,
                     tool_calls_json,
@@ -2641,7 +2681,7 @@ actor GRDBPinesStore:
                 FROM messages
                 WHERE conversation_id = ? AND deleted_at IS NULL
             )
-            SELECT id, role, content, created_at, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
+            SELECT id, role, content, created_at, status, tool_call_id, tool_name, tool_calls_json, provider_metadata_json
             FROM ranked_messages
             WHERE recent_rank <= ?\(requiredClause)
             ORDER BY created_at ASC, message_rowid ASC

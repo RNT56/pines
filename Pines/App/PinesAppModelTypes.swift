@@ -18,7 +18,14 @@ extension ModelInstall {
         copy.parameterCount = preflight.parameterCount ?? copy.parameterCount
         copy.license = preflight.license ?? copy.license
         copy.modelType = preflight.modelType ?? copy.modelType
+        copy.textConfigModelType = preflight.textConfigModelType ?? copy.textConfigModelType
         copy.processorClass = preflight.processorClass ?? copy.processorClass
+        copy.keyHeadDimension = preflight.keyHeadDimension ?? copy.keyHeadDimension
+        copy.valueHeadDimension = preflight.valueHeadDimension ?? copy.valueHeadDimension
+        copy.routedExperts = preflight.routedExperts ?? copy.routedExperts
+        copy.expertsPerToken = preflight.expertsPerToken ?? copy.expertsPerToken
+        copy.cacheTopology = preflight.cacheTopology
+        copy.turboQuantFamilySupport = preflight.turboQuantFamilySupport
         return copy
     }
 }
@@ -472,6 +479,31 @@ struct PinesProviderDeepResearchRequest: Hashable, Sendable {
     let reportFormat: String
     let vectorStoreIDs: [String]
     let providerFileIDs: [String]
+    let metadata: [String: String]
+
+    init(
+        providerID: ProviderID,
+        providerKind: CloudProviderKind,
+        modelID: ModelID,
+        title: String,
+        prompt: String,
+        depth: String,
+        reportFormat: String,
+        vectorStoreIDs: [String],
+        providerFileIDs: [String],
+        metadata: [String: String] = [:]
+    ) {
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.modelID = modelID
+        self.title = title
+        self.prompt = prompt
+        self.depth = depth
+        self.reportFormat = reportFormat
+        self.vectorStoreIDs = vectorStoreIDs
+        self.providerFileIDs = providerFileIDs
+        self.metadata = metadata
+    }
 }
 
 struct PinesProviderRealtimeSessionRequest: Hashable, Sendable {

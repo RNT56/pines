@@ -6,7 +6,11 @@ private enum ChatStreamPerformance {
     static let eventCoalescingInterval: TimeInterval = 0.08
     static let maxCoalescedCharacters = 512
     static let renderInterval: TimeInterval = 0.10
+    static let maxRenderInterval: TimeInterval = 0.50
+    static let minimumRenderCharacterDelta = 24
     static let persistenceInterval: TimeInterval = 0.75
+    static let maxPersistenceInterval: TimeInterval = 3.0
+    static let minimumPersistenceCharacterDelta = 160
 
     static func coalesced(
         _ source: AsyncThrowingStream<InferenceStreamEvent, Error>
@@ -63,6 +67,13 @@ private enum ChatStreamPerformance {
             }
         }
     }
+
+    static func guardedIfLocal(
+        _ source: AsyncThrowingStream<InferenceStreamEvent, Error>,
+        isLocal: Bool
+    ) -> AsyncThrowingStream<InferenceStreamEvent, Error> {
+        PinesInferenceStreamGuard.guardedIfLocal(source, isLocal: isLocal)
+    }
 }
 
 private enum ChatMetadataKeys {
@@ -82,12 +93,18 @@ private enum ChatLocalGenerationPerformance {
         outputTokens: Int,
         startedAt: Date?,
         measuredTokensPerSecond: Double?,
+        firstTokenLatencySeconds: TimeInterval? = nil,
+        lastTokenAt: Date? = nil,
         now: Date = Date()
     ) -> [String: String]? {
         var metadata = base ?? [:]
-        guard outputTokens > 0 else {
-            return metadata.isEmpty ? nil : metadata
+        if let firstTokenLatencySeconds, firstTokenLatencySeconds.isFinite, firstTokenLatencySeconds >= 0 {
+            metadata[LocalProviderMetadataKeys.generationFirstTokenLatencySeconds] = String(firstTokenLatencySeconds)
         }
+        if let lastTokenAt {
+            metadata[LocalProviderMetadataKeys.generationLastTokenAt] = ISO8601DateFormatter().string(from: lastTokenAt)
+        }
+        guard outputTokens > 0 else { return metadata.isEmpty ? nil : metadata }
 
         metadata[LocalProviderMetadataKeys.generationCompletionTokens] = String(outputTokens)
         if let startedAt {
@@ -128,6 +145,9 @@ final class PinesAppModel: ObservableObject {
     let settingsState: PinesSettingsState
     let providerLifecycleState: PinesProviderLifecycleState
     let workflowState: PinesWorkflowState
+    #if DEBUG
+    var stressDisablesTurboQuant = false
+    #endif
 
     var threads: [PinesThreadPreview] {
         get { chatState.threads }
@@ -312,6 +332,11 @@ final class PinesAppModel: ObservableObject {
     var localMaxContextTokens: Int {
         get { settingsState.localMaxContextTokens }
         set { settingsState.localMaxContextTokens = newValue }
+    }
+
+    var localTurboQuantMode: TurboQuantUserMode {
+        get { settingsState.localTurboQuantMode }
+        set { settingsState.localTurboQuantMode = newValue }
     }
 
     var openAIReasoningEffort: OpenAIReasoningEffort {
@@ -580,8 +605,17 @@ final class PinesAppModel: ObservableObject {
     }
 
     private func setChatError(_ message: String) {
-        setIfChanged(\.chatError, message)
-        setIfChanged(\.serviceError, message)
+        let normalized = Self.normalizedChatErrorMessage(message)
+        setIfChanged(\.chatError, normalized)
+        setIfChanged(\.serviceError, normalized)
+    }
+
+    static func normalizedChatErrorMessage(_ message: String) -> String {
+        let lowercased = message.lowercased()
+        if lowercased.contains("swift.cancellationerror") {
+            return "Local generation was cancelled while iOS was recovering memory. Retry once the device is responsive, or use a smaller/cloud model."
+        }
+        return message
     }
 
     func recordRecoverableIssue(_ component: String, error: any Error, services: PinesAppServices) {
@@ -917,6 +951,14 @@ final class PinesAppModel: ObservableObject {
         }
 
         observeRepositories(services: services)
+        #if DEBUG
+        if PinesUITestLaunchConfiguration.isEnabled {
+            didBootstrap = true
+            isBootstrapping = false
+            services.runtimeMetrics.recordStartupPhase("bootstrap_ui_test_ready", elapsedSeconds: Date().timeIntervalSince(startedAt))
+            return
+        }
+        #endif
         bootstrapBackgroundTask = Task(priority: .utility) { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: 750_000_000)
@@ -947,11 +989,28 @@ final class PinesAppModel: ObservableObject {
                 setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
             }
 
+            await repairInterruptedChatRuns(services: services)
+            try await services.modelLifecycleService?.validateInstalledModels()
             await refreshProviderLifecycleState(services: services)
             try await refreshModelPreviews(services: services, enrichRuntime: false)
             setIfChanged(\.serviceError, nil)
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    private func repairInterruptedChatRuns(services: PinesAppServices) async {
+        guard let conversationRepository = services.conversationRepository else { return }
+        let startedAt = Date()
+        do {
+            let repaired = try await conversationRepository.repairInterruptedMessages(reason: "app_launch")
+            guard repaired > 0 else { return }
+            services.runtimeMetrics.recordInterruptedChatRepair(
+                repairedMessages: repaired,
+                elapsedSeconds: Date().timeIntervalSince(startedAt)
+            )
+        } catch {
+            recordRecoverableIssue("chat.repair_interrupted_runs", error: error, services: services)
         }
     }
 
@@ -1672,6 +1731,7 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.cloudMaxCompletionTokens, settings.cloudMaxCompletionTokens)
         setIfChanged(\.localMaxCompletionTokens, settings.localMaxCompletionTokens)
         setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
+        setIfChanged(\.localTurboQuantMode, settings.localTurboQuantMode)
         setIfChanged(\.openAIReasoningEffort, settings.openAIReasoningEffort)
         setIfChanged(\.openAITextVerbosity, settings.openAITextVerbosity)
         setIfChanged(\.anthropicEffort, settings.anthropicEffort)
@@ -2167,7 +2227,11 @@ final class PinesAppModel: ObservableObject {
         _ messages: [ChatMessage],
         requiredAttachmentMessageIDs: Set<UUID>
     ) throws -> [ChatMessage] {
-        try messages.map { message in
+        let sanitized = ChatTranscriptSanitizer.messagesForProviderRequest(
+            messages,
+            requiredUserMessageIDs: requiredAttachmentMessageIDs
+        )
+        return try sanitized.messages.map { message in
             guard !message.attachments.isEmpty else { return message }
             var next = message
             if requiredAttachmentMessageIDs.contains(message.id) {
@@ -2341,7 +2405,11 @@ final class PinesAppModel: ObservableObject {
         var tokenCount = 0
         var failureMessage: String?
         var isLocalRun = false
+        var localRequestStartedAt: Date?
         var localGenerationStartedAt: Date?
+        var localFirstTokenLatencySeconds: TimeInterval?
+        var localLastTokenAt: Date?
+        var selectedLocalInstall: ModelInstall?
         var measuredLocalTokensPerSecond: Double?
         var lastRenderedContent = ""
         var lastPersistedContent = ""
@@ -2373,7 +2441,9 @@ final class PinesAppModel: ObservableObject {
                     merging: metadata,
                     outputTokens: tokenCount,
                     startedAt: localGenerationStartedAt,
-                    measuredTokensPerSecond: measuredLocalTokensPerSecond
+                    measuredTokensPerSecond: measuredLocalTokensPerSecond,
+                    firstTokenLatencySeconds: localFirstTokenLatencySeconds,
+                    lastTokenAt: localLastTokenAt
                 )
             }
             guard isAgentMode, let assistantMessageID else { return metadata }
@@ -2449,8 +2519,13 @@ final class PinesAppModel: ObservableObject {
                 repository: repository,
                 services: services
             )
-            let messages = try Self.providerReadyMessages(
+            let transcriptSanitizing = ChatTranscriptSanitizer.messagesForProviderRequest(
                 persistedMessages,
+                requiredUserMessageIDs: [userMessage.id]
+            )
+            runProviderMetadata.merge(transcriptSanitizing.summary.providerMetadata) { _, new in new }
+            let messages = try Self.providerReadyMessages(
+                transcriptSanitizing.messages,
                 requiredAttachmentMessageIDs: [userMessage.id]
             )
             let vaultContext = await projectVaultContextMessage(
@@ -2476,7 +2551,13 @@ final class PinesAppModel: ObservableObject {
             let selectedProvider: any InferenceProvider
             let selectedProviderID: ProviderID
             let selectedModelID: ModelID
-            if let requestedSelection {
+            if let uiTestProvider = PinesUITestLaunchConfiguration.inferenceProvider(localProviderID: services.mlxRuntime.localProviderID),
+               let uiTestModelID = PinesUITestLaunchConfiguration.inferenceModelID {
+                selectedProvider = uiTestProvider
+                selectedProviderID = uiTestProvider.id
+                selectedModelID = uiTestModelID
+                isLocalRun = uiTestProvider.capabilities.local
+            } else if let requestedSelection {
                 if requestedSelection.providerID == services.mlxRuntime.localProviderID {
                     guard let localInstall = installedModel(for: requestedSelection.modelID) else {
                         failPendingChatStart("Download the selected local text model before starting chat.", runToken: runToken)
@@ -2491,14 +2572,20 @@ final class PinesAppModel: ObservableObject {
                         return
                     }
                     markCurrentRunUsesLocalRuntime(runToken)
+                    let runtimeProfile = localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                    if let admissionFailure = localAdmissionFailureMessage(for: runtimeProfile) {
+                        failPendingChatStart(admissionFailure, runToken: runToken)
+                        return
+                    }
                     try await services.mlxRuntime.load(
                         localInstall,
-                        profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                        profile: runtimeProfile
                     )
                     selectedProvider = services.mlxRuntime
                     selectedProviderID = services.mlxRuntime.localProviderID
                     selectedModelID = localInstall.modelID
                     isLocalRun = true
+                    selectedLocalInstall = localInstall
                 } else if requestedSelection.providerID == ManagedCloudPolicy.providerID {
                     let managedProvider = ManagedCloudInferenceProvider(service: services.managedCloudService, availability: managedAvailability)
                     guard managedAvailability.supports(.chat) else {
@@ -2561,9 +2648,14 @@ final class PinesAppModel: ObservableObject {
                         return
                     }
                     markCurrentRunUsesLocalRuntime(runToken)
+                    let runtimeProfile = localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                    if let admissionFailure = localAdmissionFailureMessage(for: runtimeProfile) {
+                        failPendingChatStart(admissionFailure, runToken: runToken)
+                        return
+                    }
                     try await services.mlxRuntime.load(
                         localInstall,
-                        profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                        profile: runtimeProfile
                     )
                     selectedProvider = services.mlxRuntime
                     selectedProviderID = services.mlxRuntime.localProviderID
@@ -2622,9 +2714,18 @@ final class PinesAppModel: ObservableObject {
                 let now = Date()
                 let effectiveProviderMetadata = providerMetadataWithRunState(providerMetadata)
                 let renderedToolCallsChanged = toolCalls.map { $0 != lastRenderedToolCalls } ?? false
+                let renderCharacterDelta = abs(content.count - lastRenderedContent.count)
+                let renderElapsed = now.timeIntervalSince(lastRenderedAt)
                 let shouldRender = force
                     || renderedToolCallsChanged
-                    || (content != lastRenderedContent && now.timeIntervalSince(lastRenderedAt) >= ChatStreamPerformance.renderInterval)
+                    || (
+                        content != lastRenderedContent
+                            && (
+                                (renderCharacterDelta >= ChatStreamPerformance.minimumRenderCharacterDelta
+                                    && renderElapsed >= ChatStreamPerformance.renderInterval)
+                                || renderElapsed >= ChatStreamPerformance.maxRenderInterval
+                            )
+                    )
                 if shouldRender {
                     if force {
                         updateThreadMessage(
@@ -2658,7 +2759,15 @@ final class PinesAppModel: ObservableObject {
                     lastRenderedAt = now
                 }
                 let shouldPersistToolCalls = toolCalls.map { $0 != lastPersistedToolCalls } ?? false
-                if force || shouldPersistToolCalls || (content != lastPersistedContent && now.timeIntervalSince(lastPersistedAt) >= ChatStreamPerformance.persistenceInterval) {
+                let persistenceCharacterDelta = abs(content.count - lastPersistedContent.count)
+                let persistenceElapsed = now.timeIntervalSince(lastPersistedAt)
+                let shouldPersistContent = content != lastPersistedContent
+                    && (
+                        (persistenceCharacterDelta >= ChatStreamPerformance.minimumPersistenceCharacterDelta
+                            && persistenceElapsed >= ChatStreamPerformance.persistenceInterval)
+                        || persistenceElapsed >= ChatStreamPerformance.maxPersistenceInterval
+                    )
+                if force || shouldPersistToolCalls || shouldPersistContent {
                     try await repository.updateMessage(
                         id: assistantMessage.id,
                         content: content,
@@ -2729,6 +2838,18 @@ final class PinesAppModel: ObservableObject {
             )
             requestMessages = contextPacking.messages
             runProviderMetadata.merge(contextPacking.summary.providerMetadata) { _, new in new }
+            #if DEBUG
+            if isLocalRun {
+                await FreezeBreadcrumbJournal.shared.record(
+                    stage: "chat.context.packed",
+                    metadata: contextPacking.summary.providerMetadata.merging([
+                        "model_id": selectedModelID.rawValue,
+                        "provider_id": selectedProviderID.rawValue,
+                        "is_local_run": String(isLocalRun),
+                    ]) { _, new in new }
+                )
+            }
+            #endif
 
             let request = ChatRequest(
                 modelID: selectedModelID,
@@ -2788,8 +2909,12 @@ final class PinesAppModel: ObservableObject {
                     }
                 )
             )
+            if isLocalRun {
+                localRequestStartedAt = Date()
+            }
+            let rawStream = runner.run(session: session, request: request, provider: selectedProvider)
             let stream = ChatStreamPerformance.coalesced(
-                runner.run(session: session, request: request, provider: selectedProvider)
+                ChatStreamPerformance.guardedIfLocal(rawStream, isLocal: isLocalRun)
             )
             let generationStartedAt = Date()
             var streamHaptics = PinesStreamHapticGate()
@@ -2801,7 +2926,14 @@ final class PinesAppModel: ObservableObject {
                 switch event {
                 case let .token(delta):
                     if isLocalRun, localGenerationStartedAt == nil {
-                        localGenerationStartedAt = Date()
+                        let firstTokenAt = Date()
+                        localGenerationStartedAt = firstTokenAt
+                        if let localRequestStartedAt {
+                            localFirstTokenLatencySeconds = firstTokenAt.timeIntervalSince(localRequestStartedAt)
+                        }
+                    }
+                    if isLocalRun {
+                        localLastTokenAt = Date()
                     }
                     accumulated += delta.text
                     tokenCount += max(delta.tokenCount, 1)
@@ -2813,6 +2945,16 @@ final class PinesAppModel: ObservableObject {
                 case let .finish(finish):
                     didReceiveTerminalEvent = true
                     finalProviderMetadata = finish.providerMetadata
+                    if isLocalRun,
+                       let stage = finalProviderMetadata[LocalProviderMetadataKeys.generationWatchdogStage],
+                       let elapsed = finalProviderMetadata[LocalProviderMetadataKeys.generationWatchdogElapsedSeconds].flatMap(TimeInterval.init) {
+                        services.runtimeMetrics.recordGenerationWatchdog(
+                            modelID: selectedModelID,
+                            stage: stage,
+                            elapsedSeconds: elapsed
+                        )
+                        await services.mlxRuntime.unload()
+                    }
                     if failureMessage == nil {
                         if finish.reason == .error {
                             let baseMessage = finish.message ?? "The inference stream failed before the model produced a complete response."
@@ -2824,7 +2966,17 @@ final class PinesAppModel: ObservableObject {
                             emitHaptic(.runFailed)
                             continue
                         }
-                        let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
+                        let status: MessageStatus
+                        switch finish.reason {
+                        case .cancelled:
+                            status = .cancelled
+                        case .length:
+                            status = .failed
+                        case .stop, .toolCall:
+                            status = .complete
+                        case .error:
+                            status = .failed
+                        }
                         if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             let baseMessage = finish.message ?? emptyCloudOutputMessage(
                                 providerID: selectedProviderID,
@@ -2838,8 +2990,18 @@ final class PinesAppModel: ObservableObject {
                             emitHaptic(.runFailed)
                         } else {
                             try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata, toolCalls: completedToolCalls)
-                            clearChatError()
-                            emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
+                            if finish.reason == .length {
+                                let message = messageWithProviderDiagnostics(
+                                    finish.message ?? "Local generation stopped before the model emitted a stop sequence.",
+                                    metadata: finalProviderMetadata
+                                )
+                                failureMessage = message
+                                setChatError(message)
+                                emitHaptic(.runFailed)
+                            } else {
+                                clearChatError()
+                                emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
+                            }
                         }
                     }
                 case let .failure(failure):
@@ -2931,6 +3093,40 @@ final class PinesAppModel: ObservableObject {
             if let runRepository, let runConversationID {
                 await refreshThread(conversationID: runConversationID, repository: runRepository, status: .local)
             }
+        } catch is CancellationError {
+            if let runRepository, let assistantMessageID {
+                do {
+                    try await runRepository.updateMessage(
+                        id: assistantMessageID,
+                        content: accumulated,
+                        status: .cancelled,
+                        tokenCount: tokenCount,
+                        providerMetadata: providerMetadataForRun(assistantMessageID: assistantMessageID),
+                        toolName: nil,
+                        toolCalls: completedToolCalls
+                    )
+                } catch {
+                    recordRecoverableIssue("chat.persist_cancelled_message", error: error, services: services)
+                }
+            }
+            if let runConversationID, let assistantMessageID {
+                updateThreadMessage(
+                    conversationID: runConversationID,
+                    messageID: assistantMessageID,
+                    content: accumulated,
+                    status: .local,
+                    providerMetadata: providerMetadataForRun(assistantMessageID: assistantMessageID),
+                    toolCalls: completedToolCalls
+                )
+                removeLiveThreadMessage(assistantMessageID)
+            }
+            if currentRunToken == runToken {
+                clearRunStateIfCurrent(runToken)
+                emitHaptic(.runCancelled)
+            }
+            if let runRepository, let runConversationID {
+                await refreshThread(conversationID: runConversationID, repository: runRepository, status: .local)
+            }
         } catch {
             let message = failureMessage ?? error.localizedDescription
             if let runRepository, let assistantMessageID {
@@ -2969,6 +3165,33 @@ final class PinesAppModel: ObservableObject {
             if currentRunToken == nil || currentRunToken == runToken {
                 setChatError(message)
             }
+            if isLocalRun {
+                await markLocalInstallFailedIfIncomplete(
+                    errorMessage: message,
+                    install: selectedLocalInstall,
+                    services: services
+                )
+            }
+        }
+    }
+
+    private func markLocalInstallFailedIfIncomplete(
+        errorMessage: String,
+        install: ModelInstall?,
+        services: PinesAppServices
+    ) async {
+        guard let install else { return }
+        let lowercased = errorMessage.lowercased()
+        guard lowercased.contains("installed model"),
+              lowercased.contains("incomplete")
+        else {
+            return
+        }
+        do {
+            try await services.modelInstallRepository?.updateInstallState(.failed, for: install.repository)
+            try await refreshModelPreviews(services: services, enrichRuntime: false)
+        } catch {
+            recordRecoverableIssue("models.mark_incomplete_install_failed", error: error, services: services)
         }
     }
 
@@ -3338,6 +3561,7 @@ final class PinesAppModel: ObservableObject {
                 cloudMaxCompletionTokens: cloudMaxCompletionTokens,
                 localMaxCompletionTokens: localMaxCompletionTokens,
                 localMaxContextTokens: localMaxContextTokens,
+                localTurboQuantMode: localTurboQuantMode,
                 openAIReasoningEffort: openAIReasoningEffort,
                 openAITextVerbosity: openAITextVerbosity,
                 anthropicEffort: anthropicEffort,
@@ -3475,16 +3699,39 @@ final class PinesAppModel: ObservableObject {
         settings: AppSettingsSnapshot?,
         services: PinesAppServices
     ) -> RuntimeProfile {
-        var profile = services.mlxRuntime.defaultRuntimeProfile(for: install)
         let requestedContextTokens = AppSettingsSnapshot.normalizedLocalContextTokens(
             settings?.localMaxContextTokens ?? localMaxContextTokens
         )
-        if let recommendedContextTokens = profile.quantization.maxKVSize {
-            profile.quantization.maxKVSize = min(requestedContextTokens, recommendedContextTokens)
-        } else {
-            profile.quantization.maxKVSize = requestedContextTokens
+        var profile = services.mlxRuntime.defaultRuntimeProfile(
+            for: install,
+            userMode: settings?.localTurboQuantMode ?? localTurboQuantMode,
+            requestedContextLength: requestedContextTokens
+        )
+        #if DEBUG
+        if stressDisablesTurboQuant {
+            profile.name = "\(profile.name) Stress Plain KV"
+            profile.quantization.algorithm = .none
+            profile.quantization.kvCacheStrategy = .none
+            profile.quantization.preset = nil
+            profile.quantization.requestedBackend = nil
+            profile.quantization.activeBackend = nil
+            profile.quantization.turboQuantValueBits = nil
+            profile.quantization.turboQuantProfileID = "stress_plain_kv_control"
+            profile.quantization.turboQuantProfileSource = "stress_environment_override"
+            profile.quantization.turboQuantProfileDiagnostics.append("PINES_STRESS_DISABLE_TURBOQUANT=1")
+            profile.quantization.maxKVSize = min(profile.quantization.maxKVSize ?? 4_096, 4_096)
         }
+        #endif
         return profile
+    }
+
+    private func localAdmissionFailureMessage(for profile: RuntimeProfile) -> String? {
+        guard let admission = profile.quantization.turboQuantAdmission,
+              !admission.admitted
+        else {
+            return nil
+        }
+        return admission.userMessage
     }
 
     func installModel(
@@ -3921,7 +4168,14 @@ final class PinesAppModel: ObservableObject {
                 estimatedBytes: result.estimatedBytes,
                 license: result.license,
                 modelType: result.modelType,
-                processorClass: result.processorClass
+                textConfigModelType: result.textConfigModelType,
+                processorClass: result.processorClass,
+                keyHeadDimension: result.keyHeadDimension,
+                valueHeadDimension: result.valueHeadDimension,
+                routedExperts: result.routedExperts,
+                expertsPerToken: result.expertsPerToken,
+                cacheTopology: result.cacheTopology,
+                turboQuantFamilySupport: result.turboQuantFamilySupport
             )
             let download = Self.latestDownloadByRepository(modelDownloads)[repository.lowercased()]
             let preview = Self.modelPreview(from: install, runtime: services.mlxRuntime, download: download)
@@ -5075,6 +5329,7 @@ final class PinesAppModel: ObservableObject {
                         self?.setIfChanged(\.cloudMaxCompletionTokens, settings.cloudMaxCompletionTokens)
                         self?.setIfChanged(\.localMaxCompletionTokens, settings.localMaxCompletionTokens)
                         self?.setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
+                        self?.setIfChanged(\.localTurboQuantMode, settings.localTurboQuantMode)
                         self?.setIfChanged(\.openAIReasoningEffort, settings.openAIReasoningEffort)
                         self?.setIfChanged(\.openAITextVerbosity, settings.openAITextVerbosity)
                         self?.setIfChanged(\.anthropicEffort, settings.anthropicEffort)

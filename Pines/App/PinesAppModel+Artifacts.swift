@@ -75,6 +75,26 @@ extension PinesAppModel {
         return artifacts
     }
 
+    @discardableResult
+    func remixOpenAIImageArtifact(
+        providerID: ProviderID,
+        modelID: ModelID?,
+        prompt: String,
+        reference: ProviderArtifactRecord,
+        fields: [String: JSONValue] = [:],
+        services: PinesAppServices
+    ) async throws -> [ProviderArtifactRecord] {
+        let artifacts = try await artifactOpenAILifecycle(providerID: providerID, services: services)
+            .createImageEditArtifacts(
+                prompt: prompt,
+                model: modelID?.rawValue,
+                reference: reference,
+                fields: fields
+            )
+        await refreshProviderLifecycleState(services: services)
+        return artifacts
+    }
+
     private func artifactOpenAILifecycle(
         providerID: ProviderID,
         services: PinesAppServices

@@ -56,6 +56,254 @@ struct CoreContractTests {
         #expect(result.summary.estimatedInputTokens <= result.summary.inputBudgetTokens)
     }
 
+    @Test
+    func chatContextPackerAddsRollingHandoffForDroppedOlderTurns() {
+        let anchorID = UUID()
+        var messages = [ChatMessage(role: .system, content: "System instruction")]
+        for index in 0..<18 {
+            messages.append(ChatMessage(role: .user, content: "Earlier user decision \(index): " + String(repeating: "context ", count: 40)))
+            messages.append(ChatMessage(role: .assistant, content: "Earlier assistant result \(index): " + String(repeating: "detail ", count: 40)))
+        }
+        messages.append(ChatMessage(id: anchorID, role: .user, content: "Current question"))
+
+        let result = ChatContextPacker.pack(
+            messages,
+            policy: ChatContextPackingPolicy(
+                maxContextTokens: 1_024,
+                reservedCompletionTokens: 128,
+                safetyMarginTokens: 64,
+                maximumMessages: 12,
+                anchorMessageID: anchorID,
+                rollingSummaryBudgetTokens: 256
+            )
+        )
+
+        #expect(result.messages.contains { $0.id == anchorID })
+        #expect(result.messages.contains { $0.role == .system && $0.content.contains("Earlier conversation handoff summary") })
+        #expect(result.summary.rollingSummaryApplied)
+        #expect(result.summary.rollingSummaryMessageCount > 0)
+        #expect(result.summary.providerMetadata[ChatContextMetadataKeys.rollingSummaryApplied] == "true")
+        #expect(result.summary.estimatedInputTokens <= result.summary.inputBudgetTokens)
+    }
+
+    @Test
+    func chatTranscriptSanitizerDropsIncompleteAssistantRowsFromContinuedChats() {
+        let latestUserID = UUID()
+        let messages = [
+            ChatMessage(role: .user, content: "Earlier question").withPersistedMessageStatus(.complete),
+            ChatMessage(role: .assistant, content: "Earlier answer").withPersistedMessageStatus(.complete),
+            ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(.streaming),
+            ChatMessage(role: .assistant, content: "The previous run failed.").withPersistedMessageStatus(.failed),
+            ChatMessage(id: latestUserID, role: .user, content: "Continue from here").withPersistedMessageStatus(.complete),
+        ]
+
+        let result = ChatTranscriptSanitizer.messagesForProviderRequest(
+            messages,
+            requiredUserMessageIDs: [latestUserID]
+        )
+
+        #expect(result.messages.map(\.role) == [.user, .assistant, .user])
+        #expect(result.messages.map(\.content) == ["Earlier question", "Earlier answer", "Continue from here"])
+        #expect(result.summary.droppedIncompleteAssistantCount == 2)
+        #expect(result.summary.droppedMessageCount == 2)
+        #expect(result.summary.providerMetadata[ChatTranscriptMetadataKeys.droppedMessageCount] == "2")
+    }
+
+    @Test
+    func chatTranscriptSanitizerStripsInternalStatusMetadataBeforeProviderRequest() {
+        var assistant = ChatMessage(role: .assistant, content: "Ready.").withPersistedMessageStatus(.complete)
+        assistant.providerMetadata[CloudProviderMetadataKeys.openAIResponseID] = "resp_123"
+
+        let result = ChatTranscriptSanitizer.messagesForProviderRequest([assistant])
+
+        #expect(result.messages.count == 1)
+        #expect(result.messages[0].providerMetadata[ChatTranscriptMetadataKeys.persistedMessageStatus] == nil)
+        #expect(result.messages[0].providerMetadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_123")
+    }
+
+    @Test
+    func chatTranscriptSanitizerDropsEmptyAssistantButKeepsCurrentAttachmentOnlyUserTurn() {
+        let latestUserID = UUID()
+        let attachment = ChatAttachment(
+            kind: .document,
+            fileName: "notes.txt",
+            contentType: "text/plain",
+            byteCount: 42
+        )
+        let messages = [
+            ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(.complete),
+            ChatMessage(id: latestUserID, role: .user, content: "", attachments: [attachment]).withPersistedMessageStatus(.complete),
+        ]
+
+        let result = ChatTranscriptSanitizer.messagesForProviderRequest(
+            messages,
+            requiredUserMessageIDs: [latestUserID]
+        )
+
+        #expect(result.messages.count == 1)
+        #expect(result.messages[0].id == latestUserID)
+        #expect(result.messages[0].attachments == [attachment])
+        #expect(result.summary.droppedEmptyAssistantCount == 1)
+    }
+
+    @Test
+    func freezeBreadcrumbJournalIsExplicitlyEnabledForStressRuns() {
+        #expect(FreezeBreadcrumbJournal.isEnabled(environment: ["PINES_FREEZE_BREADCRUMBS": "1"]))
+        #expect(FreezeBreadcrumbJournal.isEnabled(environment: ["PINES_STRESS_MODE": "local-generation"]))
+        #expect(FreezeBreadcrumbJournal.isEnabled(arguments: ["pines", "--pines-stress-local-generation"], environment: [:]))
+        #expect(!FreezeBreadcrumbJournal.isEnabled(arguments: ["pines"], environment: [:]))
+    }
+
+    @Test
+    func freezeBreadcrumbJournalKeepsBoundedJsonlHistory() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pines-freeze-breadcrumb-\(UUID().uuidString)")
+            .appendingPathExtension("jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        let journal = FreezeBreadcrumbJournal(fileURL: fileURL, maximumEvents: 2)
+
+        await journal.record(stage: "one", enabled: true)
+        await journal.record(stage: "two", enabled: true)
+        await journal.record(stage: "three", enabled: true)
+
+        let events = await journal.events()
+        #expect(events.map(\.stage) == ["two", "three"])
+
+        let contents = try String(contentsOf: fileURL, encoding: .utf8)
+        #expect(contents.split(separator: "\n").count == 2)
+        #expect(contents.contains("\"stage\":\"three\""))
+    }
+
+    @Test
+    func interruptedChatRunRepairMarksStaleStreamingAssistantMessagesFailed() {
+        let streaming = ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(.streaming)
+        let pendingTool = ChatMessage(
+            role: .tool,
+            content: "partial",
+            toolCallID: "tool_1",
+            toolName: "search"
+        ).withPersistedMessageStatus(.pending)
+        let complete = ChatMessage(role: .assistant, content: "done").withPersistedMessageStatus(.complete)
+
+        let repairs = InterruptedChatRunRepair.repairs(
+            for: [streaming, pendingTool, complete],
+            reason: "app_launch"
+        )
+
+        #expect(repairs.count == 2)
+        #expect(repairs[0].messageID == streaming.id)
+        #expect(repairs[0].status == .failed)
+        #expect(repairs[0].content == InterruptedChatRunRepair.defaultInterruptedAssistantMessage)
+        #expect(repairs[0].providerMetadata[ChatTranscriptMetadataKeys.persistedMessageStatus] == nil)
+        #expect(repairs[0].providerMetadata[ChatTranscriptMetadataKeys.interruptedRunOriginalStatus] == MessageStatus.streaming.rawValue)
+        #expect(repairs[1].toolName == "search")
+        #expect(repairs[1].content == "partial")
+        #expect(repairs[1].providerMetadata[ChatTranscriptMetadataKeys.interruptedRunOriginalStatus] == MessageStatus.pending.rawValue)
+    }
+
+    @Test
+    func inferenceStreamWatchdogFailsWhenFirstEventStalls() async throws {
+        let source = AsyncThrowingStream<InferenceStreamEvent, Error> { continuation in
+            let task = Task {
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    continuation.yield(.token(TokenDelta(text: "late", tokenCount: 1)))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: InferenceError.cancelled)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+
+        let guarded = InferenceStreamWatchdog.guarded(
+            source,
+            configuration: InferenceStreamWatchdogConfiguration(
+                firstEventTimeoutSeconds: 0.1,
+                progressTimeoutSeconds: 1,
+                pollIntervalSeconds: 0.05
+            )
+        )
+        var events = [InferenceStreamEvent]()
+        for try await event in guarded {
+            events.append(event)
+        }
+
+        guard case let .finish(finish)? = events.last else {
+            Issue.record("Expected watchdog finish event.")
+            return
+        }
+        #expect(finish.reason == .error)
+        #expect(finish.providerMetadata[LocalProviderMetadataKeys.generationWatchdogStage] == InferenceStreamWatchdogTimeoutStage.firstEvent.rawValue)
+    }
+
+    @Test
+    func inferenceStreamWatchdogFailsWhenProgressStalls() async throws {
+        let source = AsyncThrowingStream<InferenceStreamEvent, Error> { continuation in
+            let task = Task {
+                do {
+                    continuation.yield(.token(TokenDelta(text: "hello", tokenCount: 1)))
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: InferenceError.cancelled)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+
+        let guarded = InferenceStreamWatchdog.guarded(
+            source,
+            configuration: InferenceStreamWatchdogConfiguration(
+                firstEventTimeoutSeconds: 1,
+                progressTimeoutSeconds: 0.1,
+                pollIntervalSeconds: 0.05
+            )
+        )
+        var events = [InferenceStreamEvent]()
+        for try await event in guarded {
+            events.append(event)
+        }
+
+        #expect(events.contains(.token(TokenDelta(text: "hello", tokenCount: 1))))
+        guard case let .finish(finish)? = events.last else {
+            Issue.record("Expected watchdog finish event.")
+            return
+        }
+        #expect(finish.reason == .error)
+        #expect(finish.providerMetadata[LocalProviderMetadataKeys.generationWatchdogStage] == InferenceStreamWatchdogTimeoutStage.progress.rawValue)
+    }
+
+    @Test
+    func inferenceStreamWatchdogAllowsHealthyStream() async throws {
+        let source = AsyncThrowingStream<InferenceStreamEvent, Error> { continuation in
+            continuation.yield(.token(TokenDelta(text: "ok", tokenCount: 1)))
+            continuation.yield(.finish(InferenceFinish(reason: .stop)))
+            continuation.finish()
+        }
+
+        let guarded = InferenceStreamWatchdog.guarded(
+            source,
+            configuration: InferenceStreamWatchdogConfiguration(
+                firstEventTimeoutSeconds: 1,
+                progressTimeoutSeconds: 1,
+                pollIntervalSeconds: 0.05
+            )
+        )
+        var events = [InferenceStreamEvent]()
+        for try await event in guarded {
+            events.append(event)
+        }
+
+        #expect(events == [
+            .token(TokenDelta(text: "ok", tokenCount: 1)),
+            .finish(InferenceFinish(reason: .stop)),
+        ])
+    }
+
     private static func vaultChunk(id: String, documentID: UUID, text: String) -> VaultChunk {
         VaultChunk(
             id: id,
@@ -1569,6 +1817,7 @@ struct CoreContractTests {
         #expect(decoded.cloudMaxCompletionTokens == AppSettingsSnapshot.defaultCloudMaxCompletionTokens)
         #expect(decoded.localMaxCompletionTokens == AppSettingsSnapshot.defaultLocalMaxCompletionTokens)
         #expect(decoded.localMaxContextTokens == AppSettingsSnapshot.defaultLocalMaxContextTokens)
+        #expect(decoded.localTurboQuantMode == .balanced)
         #expect(decoded.openAIReasoningEffort == .low)
         #expect(decoded.openAITextVerbosity == .low)
         #expect(decoded.anthropicEffort == .medium)
@@ -1586,6 +1835,7 @@ struct CoreContractTests {
             cloudMaxCompletionTokens: 1,
             localMaxCompletionTokens: 1_000_000,
             localMaxContextTokens: 1,
+            localTurboQuantMode: .batterySaver,
             openAIReasoningEffort: .high,
             openAITextVerbosity: .medium,
             anthropicEffort: .xhigh,
@@ -1596,6 +1846,7 @@ struct CoreContractTests {
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
         #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
         #expect(clamped.localMaxContextTokens == AppSettingsSnapshot.minLocalContextTokens)
+        #expect(clamped.localTurboQuantMode == .batterySaver)
         #expect(clamped.openAIReasoningEffort == .high)
         #expect(clamped.openAITextVerbosity == .medium)
         #expect(clamped.anthropicEffort == .xhigh)
@@ -1869,10 +2120,11 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 16)
+        #expect(PinesDatabaseSchema.currentVersion == 19)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
         let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
         let projectSpacesMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 16 })
+        let runtimeMetadataMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 17 })
         let sql = openAIMigration.sql.joined(separator: "\n")
 
         for table in [
@@ -1923,6 +2175,22 @@ struct CoreContractTests {
         #expect(projectSQL.contains("CREATE TABLE IF NOT EXISTS projects"))
         #expect(projectSQL.contains("ALTER TABLE conversations ADD COLUMN project_id"))
         #expect(projectSQL.contains("ALTER TABLE vault_documents ADD COLUMN project_id"))
+
+        let runtimeMetadataSQL = runtimeMetadataMigration.sql.joined(separator: "\n")
+        #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN parameter_count"))
+        #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN key_head_dimension"))
+        #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN value_head_dimension"))
+
+        let nestedRuntimeMetadataMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 18 })
+        let nestedRuntimeMetadataSQL = nestedRuntimeMetadataMigration.sql.joined(separator: "\n")
+        #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN text_config_model_type"))
+        #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN routed_experts"))
+        #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN experts_per_token"))
+
+        let cacheTopologyMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 19 })
+        let cacheTopologySQL = cacheTopologyMigration.sql.joined(separator: "\n")
+        #expect(cacheTopologySQL.contains("ALTER TABLE model_installs ADD COLUMN cache_topology"))
+        #expect(cacheTopologySQL.contains("ALTER TABLE model_installs ADD COLUMN turbo_quant_family_support"))
     }
 
     @Test
@@ -2617,6 +2885,347 @@ struct CoreContractTests {
     }
 
     @Test
+    func qwenTurboQuantPreflightCarriesProfileMetadataForExpandedFamilies() throws {
+        let classifier = ModelPreflightClassifier()
+
+        for spec in qwenTurboQuantProfileCases {
+            let result = classifier.classify(spec.preflightInput)
+
+            #expect(result.repository == spec.repository)
+            #expect(result.verification == .verified)
+            #expect(result.modalities == spec.modalities)
+            #expect(result.modelType == spec.modelType)
+            #expect(result.processorClass == spec.processorClass)
+            #expect(result.parameterCount == spec.parameterCount)
+            #expect(result.keyHeadDimension == spec.headDimension)
+            #expect(result.valueHeadDimension == spec.headDimension)
+            #expect(result.cacheTopology == .hybridAttentionAndNativeState)
+            #expect(result.turboQuantFamilySupport == .hybridFull)
+            #expect(result.estimatedBytes == spec.expectedDownloadBytes)
+            #expect(result.reasons.isEmpty)
+
+            let install = ModelInstall(
+                modelID: ModelID(rawValue: spec.repository),
+                displayName: spec.displayName,
+                repository: spec.repository,
+                modalities: result.modalities,
+                verification: result.verification,
+                parameterCount: result.parameterCount,
+                estimatedBytes: result.estimatedBytes,
+                modelType: result.modelType,
+                processorClass: result.processorClass,
+                keyHeadDimension: result.keyHeadDimension,
+                valueHeadDimension: result.valueHeadDimension,
+                cacheTopology: result.cacheTopology,
+                turboQuantFamilySupport: result.turboQuantFamilySupport
+            )
+            let roundTrippedInstall = try JSONDecoder().decode(
+                ModelInstall.self,
+                from: JSONEncoder().encode(install)
+            )
+
+            #expect(roundTrippedInstall.repository == spec.repository)
+            #expect(roundTrippedInstall.modelType == spec.modelType)
+            #expect(roundTrippedInstall.parameterCount == spec.parameterCount)
+            #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
+            #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
+            #expect(roundTrippedInstall.cacheTopology == .hybridAttentionAndNativeState)
+            #expect(roundTrippedInstall.turboQuantFamilySupport == .hybridFull)
+
+            let hints = ModelRuntimeConfigurationHints.infer(
+                repository: spec.repository,
+                modelType: result.modelType,
+                processorClass: result.processorClass,
+                metadataFiles: [
+                    "config.json": spec.configJSON,
+                    "tokenizer_config.json": spec.tokenizerConfigJSON,
+                ]
+            )
+
+            #expect(hints.extraEOSTokens.contains("<|im_end|>"))
+        }
+    }
+
+    @Test
+    func qwenTurboQuantResourcePolicyKeepsLargeModelsBehindDownloadGates() throws {
+        let compactPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 3_800_000_000)
+        let proPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 5_500_000_000)
+        let specsByRepository = Dictionary(uniqueKeysWithValues: qwenTurboQuantProfileCases.map { ($0.repository, $0) })
+
+        for repository in [
+            "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+            "mlx-community/Qwen3.5-2B-MLX-4bit",
+        ] {
+            let spec = try #require(specsByRepository[repository])
+            let decision = compactPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
+            #expect(!decision.isRejected)
+            #expect(decision.knownDownloadBytes == spec.expectedDownloadBytes)
+            #expect(decision.inferredParameterCount == spec.parameterCount)
+            #expect(decision.inferredWeightBits == 4)
+            #expect(decision.inferredWeightBitsAreExplicit)
+        }
+
+        let qwen4B = try #require(specsByRepository["mlx-community/Qwen3.5-4B-MLX-4bit"])
+        let qwen4BDecision = compactPolicy.evaluate(qwen4B.preflightInput, modalities: qwen4B.modalities)
+        #expect(qwen4BDecision.isRejected)
+        #expect(qwen4BDecision.knownDownloadBytes == qwen4B.expectedDownloadBytes)
+
+        let qwen9B = try #require(specsByRepository["mlx-community/Qwen3.5-9B-MLX-4bit"])
+        let qwen9BDecision = proPolicy.evaluate(qwen9B.preflightInput, modalities: qwen9B.modalities)
+        #expect(qwen9BDecision.isRejected)
+        #expect(qwen9BDecision.knownDownloadBytes == qwen9B.expectedDownloadBytes)
+
+        for repository in [
+            "mlx-community/Qwen3.5-27B-4bit",
+            "mlx-community/Qwen3.6-27B-4bit",
+            "mlx-community/Qwen3.5-40B-4bit",
+            "mlx-community/Qwen3.6-40B-4bit",
+            "mlx-community/Qwen3.5-35B-A3B-4bit",
+            "mlx-community/Qwen3.6-35B-A3B-4bit",
+            "mlx-community/Qwen3.5-REAP-97B-A10B-4bit",
+            "mlx-community/Qwen3.5-122B-A10B-4bit",
+            "mlx-community/Qwen3.5-397B-A17B-4bit",
+        ] {
+            let spec = try #require(specsByRepository[repository])
+            let decision = proPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
+            #expect(decision.isRejected)
+            #expect(decision.knownDownloadBytes == spec.expectedDownloadBytes)
+            #expect(decision.inferredParameterCount == spec.parameterCount)
+        }
+    }
+
+    @Test
+    func gemmaTurboQuantPreflightCarriesProfileMetadataForExpandedFamilies() throws {
+        let classifier = ModelPreflightClassifier()
+
+        for spec in gemmaTurboQuantProfileCases {
+            let result = classifier.classify(spec.preflightInput)
+            let isPromotedFamily = ["gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant"]
+                .contains(spec.modelType)
+
+            #expect(result.repository == spec.repository)
+            let expectedVerification: ModelVerificationState = spec.modelType == "gemma4_assistant"
+                ? .experimental
+                : (isPromotedFamily ? .verified : .installable)
+            #expect(result.verification == expectedVerification)
+            #expect(result.modalities == spec.modalities)
+            #expect(result.modelType == spec.modelType)
+            #expect(result.processorClass == spec.processorClass)
+            #expect(result.parameterCount == spec.parameterCount)
+            #expect(result.keyHeadDimension == spec.headDimension)
+            #expect(result.valueHeadDimension == spec.headDimension)
+            #expect(result.cacheTopology == spec.expectedCacheTopology)
+            #expect(result.turboQuantFamilySupport == .attentionKVFull)
+            #expect(result.estimatedBytes == spec.expectedDownloadBytes)
+            #expect(result.reasons.isEmpty)
+
+            let install = ModelInstall(
+                modelID: ModelID(rawValue: spec.repository),
+                displayName: spec.displayName,
+                repository: spec.repository,
+                modalities: result.modalities,
+                verification: result.verification,
+                parameterCount: result.parameterCount,
+                estimatedBytes: result.estimatedBytes,
+                modelType: result.modelType,
+                processorClass: result.processorClass,
+                keyHeadDimension: result.keyHeadDimension,
+                valueHeadDimension: result.valueHeadDimension,
+                cacheTopology: result.cacheTopology,
+                turboQuantFamilySupport: result.turboQuantFamilySupport
+            )
+            let roundTrippedInstall = try JSONDecoder().decode(
+                ModelInstall.self,
+                from: JSONEncoder().encode(install)
+            )
+
+            #expect(roundTrippedInstall.repository == spec.repository)
+            #expect(roundTrippedInstall.modelType == spec.modelType)
+            #expect(roundTrippedInstall.parameterCount == spec.parameterCount)
+            #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
+            #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
+            #expect(roundTrippedInstall.cacheTopology == spec.expectedCacheTopology)
+            #expect(roundTrippedInstall.turboQuantFamilySupport == .attentionKVFull)
+
+            let hints = ModelRuntimeConfigurationHints.infer(
+                repository: spec.repository,
+                modelType: result.modelType,
+                processorClass: result.processorClass,
+                metadataFiles: [
+                    "config.json": spec.configJSON,
+                    "tokenizer_config.json": spec.tokenizerConfigJSON,
+                ]
+            )
+
+            #expect(hints.extraEOSTokens.contains("<end_of_turn>"))
+            #expect(hints.extraEOSTokens.contains("<turn|>"))
+            #expect(!hints.stopStrings.contains("<start_of_turn>"))
+        }
+    }
+
+    @Test
+    func gemmaTurboQuantResourcePolicyKeepsLargeModelsBehindDownloadGates() throws {
+        let compactPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 3_800_000_000)
+        let proPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 5_500_000_000)
+        let maxPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 8_000_000_000)
+        let specsByRepository = Dictionary(uniqueKeysWithValues: gemmaTurboQuantProfileCases.map { ($0.repository, $0) })
+
+        for repository in [
+            "mlx-community/gemma-3-270m-it-qat-4bit",
+            "mlx-community/gemma-3-1b-it-qat-4bit",
+            "mlx-community/gemma-3n-E2B-it-lm-4bit",
+        ] {
+            let spec = try #require(specsByRepository[repository])
+            let decision = compactPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
+            #expect(!decision.isRejected)
+            #expect(decision.knownDownloadBytes == spec.expectedDownloadBytes)
+            #expect(decision.inferredParameterCount == spec.parameterCount)
+            #expect(decision.inferredWeightBits == 4)
+            #expect(decision.inferredWeightBitsAreExplicit)
+        }
+
+        let gemma4E2B = try #require(specsByRepository["mlx-community/gemma-4-e2b-it-OptiQ-4bit"])
+        let gemma4E2BDecision = proPolicy.evaluate(gemma4E2B.preflightInput, modalities: gemma4E2B.modalities)
+        #expect(!gemma4E2BDecision.isRejected)
+        #expect(gemma4E2BDecision.knownDownloadBytes == gemma4E2B.expectedDownloadBytes)
+
+        let gemma4E4B = try #require(specsByRepository["mlx-community/gemma-4-e4b-it-OptiQ-4bit"])
+        let gemma4E4BDecision = proPolicy.evaluate(gemma4E4B.preflightInput, modalities: gemma4E4B.modalities)
+        #expect(gemma4E4BDecision.isRejected)
+        #expect(gemma4E4BDecision.knownDownloadBytes == gemma4E4B.expectedDownloadBytes)
+        #expect(gemma4E4BDecision.reason?.contains("on-device discovery limit") == true)
+
+        for repository in [
+            "mlx-community/gemma-2-9b-it-4bit",
+            "mlx-community/gemma-2-27b-it-4bit",
+            "mlx-community/gemma-3-12b-it-qat-4bit",
+            "mlx-community/gemma-3-27b-it-qat-4bit",
+            "mlx-community/gemma-4-26b-it-OptiQ-4bit",
+            "mlx-community/gemma-4-31b-it-OptiQ-4bit",
+        ] {
+            let spec = try #require(specsByRepository[repository])
+            let decision = maxPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
+            #expect(decision.isRejected)
+            #expect(decision.knownDownloadBytes == spec.expectedDownloadBytes)
+            #expect(decision.inferredParameterCount == spec.parameterCount)
+            #expect(decision.inferredWeightBits == 4)
+            #expect(decision.inferredWeightBitsAreExplicit)
+            if spec.expectedDownloadBytes > maxPolicy.maxDownloadBytes {
+                #expect(decision.reason?.contains("on-device discovery limit") == true)
+            } else {
+                #expect(decision.estimatedWeightBytes ?? 0 > maxPolicy.maxDownloadBytes)
+                #expect(decision.reason?.contains("device profile limit") == true)
+            }
+        }
+    }
+
+    @Test
+    func llamaAndMistralTurboQuantPreflightCarriesNestedProfileMetadata() throws {
+        let classifier = ModelPreflightClassifier()
+        let llama = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
+                configJSON: #"{"model_type":"llama","hidden_size":4096,"num_attention_heads":32}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "model.safetensors", size: 4_800_000_000),
+                ],
+                tags: ["mlx", "llama", "4bit"]
+            )
+        )
+        let mistralSmall4 = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Mistral-Small-4-119B-A6B-Instruct-4bit",
+                configJSON: #"{"model_type":"mistral3","text_config":{"model_type":"mistral4","qk_nope_head_dim":64,"qk_rope_head_dim":64,"v_head_dim":128,"n_routed_experts":128,"num_experts_per_tok":4}}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "model.safetensors", size: 72_000_000_000),
+                ],
+                tags: ["mlx", "mistral3", "4bit"]
+            )
+        )
+        let pixtral = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Pixtral-12B-2409-4bit",
+                configJSON: #"{"model_type":"pixtral","text_config":{"model_type":"mistral","head_dim":128}}"#.data(using: .utf8),
+                processorConfigJSON: #"{"processor_class":"PixtralProcessor"}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 7_200_000_000),
+                ],
+                tags: ["mlx", "pixtral", "image-text-to-text", "4bit"]
+            )
+        )
+        let llama4 = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit",
+                configJSON: #"{"model_type":"llama4","text_config":{"model_type":"llama4_text","head_dim":128}}"#.data(using: .utf8),
+                processorConfigJSON: #"{"processor_class":"Llama4Processor"}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 40_000_000_000),
+                ],
+                tags: ["mlx", "llama4", "any-to-any", "4bit"]
+            )
+        )
+        let mllama = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
+                configJSON: #"{"model_type":"mllama","text_config":{"model_type":"llama","head_dim":128}}"#.data(using: .utf8),
+                processorConfigJSON: #"{"processor_class":"MllamaProcessor"}"#.data(using: .utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 7_200_000_000),
+                ],
+                tags: ["mlx", "mllama", "image-text-to-text", "4bit"]
+            )
+        )
+
+        #expect(llama.verification == .verified)
+        #expect(llama.modelType == "llama")
+        #expect(llama.keyHeadDimension == 128)
+        #expect(llama.valueHeadDimension == 128)
+        #expect(llama.textConfigModelType == nil)
+        #expect(llama.cacheTopology == .standardAttention)
+        #expect(llama.turboQuantFamilySupport == .attentionKVFull)
+
+        #expect(mistralSmall4.verification == .installable)
+        #expect(mistralSmall4.modelType == "mistral3")
+        #expect(mistralSmall4.textConfigModelType == "mistral4")
+        #expect(mistralSmall4.keyHeadDimension == 128)
+        #expect(mistralSmall4.valueHeadDimension == 128)
+        #expect(mistralSmall4.routedExperts == 128)
+        #expect(mistralSmall4.expertsPerToken == 4)
+
+        #expect(pixtral.verification == .installable)
+        #expect(pixtral.modalities == [.text, .vision])
+        #expect(pixtral.modelType == "pixtral")
+        #expect(pixtral.textConfigModelType == "mistral")
+        #expect(pixtral.keyHeadDimension == 128)
+        #expect(pixtral.valueHeadDimension == 128)
+
+        #expect(llama4.verification == .unsupported)
+        #expect(llama4.modalities.isEmpty)
+        #expect(llama4.cacheTopology == .unsupported)
+        #expect(llama4.turboQuantFamilySupport == .unsupportedTopology)
+        #expect(llama4.reasons.contains("model_type llama4 is not registered in the linked MLX runtime."))
+
+        #expect(mllama.verification == .unsupported)
+        #expect(mllama.modalities.isEmpty)
+        #expect(mllama.cacheTopology == .unsupported)
+        #expect(mllama.turboQuantFamilySupport == .unsupportedTopology)
+        #expect(mllama.reasons.contains("model_type mllama requires an MLX Swift LM fork with Llama 3.2 Vision registry, processor, cache topology, and TurboQuant profile support."))
+    }
+
+    @Test
     func preflightMarksQwen17BRuntimeGateExperimental() throws {
         let config = try JSONSerialization.data(withJSONObject: ["model_type": "qwen3"])
         let input = ModelPreflightInput(
@@ -2633,6 +3242,129 @@ struct CoreContractTests {
 
         #expect(result.verification == .experimental)
         #expect(result.reasons.contains(ModelPreflightClassifier.runtimeCompatibilityGateReason))
+    }
+
+    @Test
+    func preflightPrefersExplicitHeadDimensionMetadata() throws {
+        let explicit = ModelPreflightInput(
+            repository: "mlx-community/Qwen3-0.6B-4bit",
+            configJSON: #"{"model_type":"qwen3","head_dim":128,"hidden_size":2048,"num_attention_heads":32}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ]
+        )
+        let nested = ModelPreflightInput(
+            repository: "mlx-community/Phi-4-mini-instruct-4bit",
+            configJSON: #"{"model_type":"phi3","text_config":{"head_dim":96,"hidden_size":3072,"num_attention_heads":32}}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ]
+        )
+        let inferred = ModelPreflightInput(
+            repository: "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+            configJSON: #"{"model_type":"qwen2","hidden_size":2048,"num_attention_heads":16}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ]
+        )
+        let legacyLlama = ModelPreflightInput(
+            repository: "mlx-community/Llama-2-7b-chat-mlx",
+            configJSON: #"{"model_type":"llama","dim":4096,"n_heads":32}"#.data(using: .utf8),
+            files: [
+                ModelFileInfo(path: "model.safetensors"),
+                ModelFileInfo(path: "tokenizer.json"),
+            ]
+        )
+
+        let classifier = ModelPreflightClassifier()
+        let explicitResult = classifier.classify(explicit)
+        let nestedResult = classifier.classify(nested)
+        let inferredResult = classifier.classify(inferred)
+        let legacyLlamaResult = classifier.classify(legacyLlama)
+
+        #expect(explicitResult.keyHeadDimension == 128)
+        #expect(explicitResult.valueHeadDimension == 128)
+        #expect(nestedResult.keyHeadDimension == 96)
+        #expect(nestedResult.valueHeadDimension == 96)
+        #expect(inferredResult.keyHeadDimension == 128)
+        #expect(inferredResult.valueHeadDimension == 128)
+        #expect(legacyLlamaResult.keyHeadDimension == 128)
+        #expect(legacyLlamaResult.valueHeadDimension == 128)
+    }
+
+    @Test
+    func preflightInfersDenseTransformerParameterCountFromConfigWhenNameOmitsSize() throws {
+        let config = """
+        {
+          "model_type": "mistral",
+          "hidden_size": 4096,
+          "intermediate_size": 14336,
+          "num_attention_heads": 32,
+          "num_key_value_heads": 8,
+          "num_hidden_layers": 32,
+          "vocab_size": 32000,
+          "tie_word_embeddings": false
+        }
+        """.data(using: .utf8)
+        let input = ModelPreflightInput(
+            repository: "mlx-community/mistral-ft-optimized-1227-4bit-mlx",
+            configJSON: config,
+            files: [
+                ModelFileInfo(path: "model.safetensors", size: 3_900_000_000),
+                ModelFileInfo(path: "tokenizer.json", size: 2_000_000),
+            ],
+            tags: ["mlx", "mistral"]
+        )
+
+        let result = ModelPreflightClassifier().classify(input)
+        let resourceDecision = ModelDiscoveryResourcePolicy(maxDownloadBytes: 12_000_000_000)
+            .evaluate(input, modalities: result.modalities)
+
+        #expect(result.parameterCount == 7_241_465_856)
+        #expect(result.keyHeadDimension == 128)
+        #expect(result.valueHeadDimension == 128)
+        #expect(resourceDecision.inferredParameterCount == 7_241_465_856)
+    }
+
+    @Test
+    func preflightUsesGemmaRuntimeDefaultHeadDimensionWhenConfigOmitsHeadDim() throws {
+        let classifier = ModelPreflightClassifier()
+        let examples: [(String, String)] = [
+            (
+                "mlx-community/gemma-3-4b-it-4bit",
+                #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":2560,"num_attention_heads":8}}"#
+            ),
+            (
+                "mlx-community/gemma-3-text-4b-it-4bit",
+                #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":2560,"num_attention_heads":8,"num_key_value_heads":4}}"#
+            ),
+            (
+                "mlx-community/gemma-3-12b-it-4bit",
+                #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":3840,"num_attention_heads":16,"num_key_value_heads":8}}"#
+            ),
+        ]
+
+        for (repository, configJSON) in examples {
+            let result = classifier.classify(
+                ModelPreflightInput(
+                    repository: repository,
+                    configJSON: Data(configJSON.utf8),
+                    processorConfigJSON: #"{"processor_class":"Gemma3Processor"}"#.data(using: .utf8),
+                    files: [
+                        ModelFileInfo(path: "model.safetensors"),
+                        ModelFileInfo(path: "tokenizer.json"),
+                        ModelFileInfo(path: "processor_config.json"),
+                    ]
+                )
+            )
+
+            #expect(result.verification == .verified)
+            #expect(result.keyHeadDimension == 256)
+            #expect(result.valueHeadDimension == 256)
+        }
     }
 
     @Test
@@ -2709,6 +3441,21 @@ struct CoreContractTests {
             ) == 1_700_000_000
         )
         #expect(
+            ModelDiscoveryResourcePolicy.inferredParameterCount(
+                repository: "mlx-community/AMD-Llama-135m-4bit",
+                tags: [
+                    "dataset:cerebras/SlimPajama-627B",
+                    "base_model:amd/AMD-Llama-135m",
+                ]
+            ) == 135_000_000
+        )
+        #expect(
+            ModelDiscoveryResourcePolicy.inferredParameterCount(
+                repository: "mlx-community/Llama-3.1-SuperNova-Lite-4bit",
+                tags: ["base_model:meta-llama/Llama-3.1-8B-Instruct"]
+            ) == 8_000_000_000
+        )
+        #expect(
             ModelDiscoveryResourcePolicy.inferredWeightBits(
                 repository: "mlx-community/Qwen3-4B-Instruct-2507-mxfp8",
                 tags: []
@@ -2762,6 +3509,264 @@ struct CoreContractTests {
     }
 
     @Test
+    func localRuntimeSafetyPausesGenerationUnderCriticalDevicePressure() {
+        let thermal = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "critical"
+            )
+        )
+        #expect(!thermal.allowed)
+        #expect(thermal.constrainedModeActive)
+        #expect(thermal.requiresImmediateUnload)
+
+        let seriousThermal = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "serious"
+            )
+        )
+        #expect(seriousThermal.allowed)
+        #expect(seriousThermal.pressureReason == .thermalSerious)
+        #expect(seriousThermal.constrainedModeActive)
+        #expect(!seriousThermal.requiresImmediateUnload)
+
+        let memory = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 500_000_000,
+                thermalState: "nominal"
+            )
+        )
+        #expect(!memory.allowed)
+        #expect(memory.constrainedModeActive)
+        #expect(memory.requiresImmediateUnload)
+        #expect(memory.recommendedMaxContextTokens <= 2_048)
+    }
+
+    @Test
+    func localRuntimeSafetyConstrainsProfileUnderModeratePressure() {
+        let profile = RuntimeProfile(
+            quantization: QuantizationProfile(maxKVSize: 16_384),
+            streamExperts: true,
+            expertStreamingMode: .directNVMe,
+            mtpEnabled: true,
+            prefillStepSize: 1_024,
+            speculativeDecodingEnabled: true
+        )
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_250_000_000,
+                thermalState: "fair"
+            )
+        )
+        let constrained = safety.constrainedRuntimeProfile(profile)
+
+        #expect(safety.allowed)
+        #expect(safety.constrainedModeActive)
+        #expect(!safety.requiresImmediateUnload)
+        #expect(constrained.quantization.maxKVSize == 2_048)
+        #expect(constrained.prefillStepSize == 256)
+        #expect(!constrained.streamExperts)
+        #expect(!constrained.mtpEnabled)
+        #expect(!constrained.speculativeDecodingEnabled)
+    }
+
+    @Test
+    func localGenerationPipelinePlanDoesNotClampOrdinaryLoadedModelHeadroom() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_800_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        #expect(safety.allowed)
+        #expect(safety.pressureReason == .none)
+        #expect(plan.pressureCompletionTokenLimit == nil)
+        #expect(plan.reservedCompletionTokens == 2_048)
+        #expect(plan.effectiveMaxTokens == 2_048)
+        #expect(!plan.maxTokensClamped)
+        #expect(
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationEffectiveMaxTokens] == "2048"
+        )
+        #expect(
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationInitialAvailableMemoryBytes]
+                == "1800000000"
+        )
+    }
+
+    @Test
+    func localGenerationPipelinePlanHonorsSmallerRequestedCompletionBudget() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_800_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 20,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        #expect(plan.pressureCompletionTokenLimit == nil)
+        #expect(plan.reservedCompletionTokens == 20)
+        #expect(plan.effectiveMaxTokens == 20)
+        #expect(!plan.maxTokensClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanFitsCompletionBudgetToContextAfterTokenization() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_800_000_000,
+                thermalState: "nominal"
+            )
+        )
+        var plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        let fitsContext = plan.constrainToContext(promptTokenCount: 4_080, maxContextTokens: 4_096)
+        #expect(fitsContext)
+        #expect(plan.reservedCompletionTokens == 16)
+        #expect(plan.effectiveMaxTokens == 16)
+        #expect(plan.maxTokensClamped)
+        #expect(plan.effectiveMaxKVSize == 4_096)
+        #expect(!plan.maxKVSizeClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanRightSizesKVWindowAfterTokenization() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_800_000_000,
+                thermalState: "nominal"
+            )
+        )
+        var plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        let fitsContext = plan.fitPreparedPrompt(promptTokenCount: 47, maxContextTokens: 4_096)
+        #expect(fitsContext)
+        #expect(plan.reservedCompletionTokens == 2_048)
+        #expect(plan.effectiveMaxTokens == 2_048)
+        #expect(plan.effectiveMaxKVSize == 2_304)
+        #expect(plan.maxKVSizeClamped)
+        #expect(
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationEffectiveMaxKVSize] == "2304"
+        )
+        #expect(
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationMaxKVSizeClamped] == "true"
+        )
+    }
+
+    @Test
+    func localGenerationPipelinePlanPreservesFullKVWindowForUnboundedCompletion() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyAssessment(
+            allowed: true,
+            recommendedMaxContextTokens: 4_096,
+            recommendedPrefillStepSize: 512
+        )
+        var plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: nil,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 3_000_000_000
+        )
+
+        let fitsContext = plan.fitPreparedPrompt(promptTokenCount: 47, maxContextTokens: 4_096)
+        #expect(fitsContext)
+        #expect(plan.effectiveMaxTokens == nil)
+        #expect(plan.effectiveMaxKVSize == 4_096)
+        #expect(!plan.maxKVSizeClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanUsesEmergencyLowMemoryCap() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_100_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: nil,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_100_000_000
+        )
+
+        #expect(plan.pressureCompletionTokenLimit == 256)
+        #expect(plan.reservedCompletionTokens == 256)
+        #expect(plan.effectiveMaxTokens == 256)
+        #expect(plan.maxTokensClamped)
+    }
+
+    @Test
+    func lowPowerModeKeepsContextWindowButConservesPrefill() {
+        let profile = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPhone16,2",
+                lowPowerModeEnabled: true
+            )
+        )
+
+        #expect(profile.performanceClass == .a17Pro)
+        #expect(profile.runtimePressureReason == .lowPower)
+        #expect(!profile.thermalDownshiftActive)
+        #expect(profile.recommendedContextTokens == 16_384)
+        #expect(profile.recommendedSmallModelContextTokens == 24_576)
+        #expect(profile.recommendedPrefillStepSize == 256)
+
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPhone16,2",
+                lowPowerModeEnabled: true
+            )
+        )
+        #expect(safety.allowed)
+        #expect(safety.pressureReason == .lowPower)
+        #expect(safety.recommendedMaxContextTokens == 16_384)
+        #expect(safety.recommendedPrefillStepSize == 256)
+    }
+
+    @Test
     func calculatorHonorsOperatorPrecedenceAndRejectsDivisionByZero() throws {
         let evaluator = SafeCalculatorEvaluator()
 
@@ -2769,6 +3774,22 @@ struct CoreContractTests {
         #expect(try evaluator.evaluate("(2 + 3) * 4") == 20)
         #expect(throws: CalculatorEvaluationError.divisionByZero) {
             try evaluator.evaluate("1 / 0")
+        }
+    }
+
+    @Test
+    func userSuppliedConfigurationValidationThrows() throws {
+        #expect(throws: VaultChunkerConfigurationError.invalidMaxCharacterCount(0)) {
+            _ = try VaultChunker.Configuration(maxCharacterCount: 0)
+        }
+        #expect(throws: VaultChunkerConfigurationError.overlapNotSmallerThanMax(overlap: 8, max: 8)) {
+            _ = try VaultChunker.Configuration(maxCharacterCount: 8, overlapCharacterCount: 8)
+        }
+        #expect(throws: CalculatorEvaluationError.invalidMaximumExpressionLength(0)) {
+            _ = try SafeCalculatorEvaluator(maximumExpressionLength: 0)
+        }
+        #expect(throws: EndpointSecurityError.insecureRemoteHTTP(URL(string: "http://example.com")!)) {
+            _ = try HuggingFaceModelCatalogService(baseURL: URL(string: "http://example.com")!)
         }
     }
 
@@ -3511,10 +4532,385 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
     private static func geminiToolCallCount(_ metadata: [String: String]) -> Int {
         jsonArray(fromJSONString: metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]).count
     }
+}
 
-    private static func iso8601Date(_ raw: String) -> Date? {
-        ISO8601DateFormatter().date(from: raw)
+private var qwenTurboQuantProfileCases: [QwenTurboQuantProfileCase] {
+        [
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+                displayName: "Qwen3.5 0.8B MLX 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 800_000_000,
+                modelBytes: 700_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-2B-MLX-4bit",
+                displayName: "Qwen3.5 2B MLX 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 2_000_000_000,
+                modelBytes: 1_550_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-4B-MLX-4bit",
+                displayName: "Qwen3.5 4B MLX 4-bit",
+                modelType: "qwen3_5_text",
+                parameterCount: 4_000_000_000,
+                modelBytes: 3_290_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-9B-MLX-4bit",
+                displayName: "Qwen3.5 9B MLX 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 9_000_000_000,
+                modelBytes: 5_600_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-27B-4bit",
+                displayName: "Qwen3.5 27B 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 27_000_000_000,
+                modelBytes: 16_200_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.6-27B-4bit",
+                displayName: "Qwen3.6 27B 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 27_000_000_000,
+                modelBytes: 16_200_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-40B-4bit",
+                displayName: "Qwen3.5 40B 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 40_000_000_000,
+                modelBytes: 24_000_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.6-40B-4bit",
+                displayName: "Qwen3.6 40B 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 40_000_000_000,
+                modelBytes: 24_000_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-35B-A3B-4bit",
+                displayName: "Qwen3.5 35B-A3B 4-bit",
+                modelType: "qwen3_5_moe",
+                parameterCount: 35_000_000_000,
+                modelBytes: 21_000_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.6-35B-A3B-4bit",
+                displayName: "Qwen3.6 35B-A3B 4-bit",
+                modelType: "qwen3_5_moe_text",
+                parameterCount: 35_000_000_000,
+                modelBytes: 21_000_000_000,
+                processorClass: "Qwen2VLProcessor"
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-REAP-97B-A10B-4bit",
+                displayName: "Qwen3.5 REAP 97B-A10B 4-bit",
+                modelType: "qwen3_5_moe",
+                parameterCount: 97_000_000_000,
+                modelBytes: 58_200_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-122B-A10B-4bit",
+                displayName: "Qwen3.5 122B-A10B 4-bit",
+                modelType: "qwen3_5_moe",
+                parameterCount: 122_000_000_000,
+                modelBytes: 73_200_000_000
+            ),
+            QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-397B-A17B-4bit",
+                displayName: "Qwen3.5 397B-A17B 4-bit",
+                modelType: "qwen3_5_moe",
+                parameterCount: 397_000_000_000,
+                modelBytes: 238_200_000_000
+            ),
+        ]
     }
+
+private struct QwenTurboQuantProfileCase {
+        static let configBytes: Int64 = 10_000
+        static let tokenizerBytes: Int64 = 8_000_000
+        static let processorBytes: Int64 = 12_000
+
+        var repository: String
+        var displayName: String
+        var modelType: String
+        var parameterCount: Int64
+        var headDimension: Int = 256
+        var modelBytes: Int64
+        var processorClass: String?
+
+        var modalities: Set<ModelModality> {
+            processorClass == nil ? [.text] : [.text, .vision]
+        }
+
+        var expectedDownloadBytes: Int64 {
+            modelBytes + Self.configBytes + Self.tokenizerBytes + (processorClass == nil ? 0 : Self.processorBytes)
+        }
+
+        var configJSON: Data {
+            Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension),"full_attention_interval":4,"linear_num_value_heads":8,"linear_conv_kernel_dim":4}"#.utf8)
+        }
+
+        var tokenizerConfigJSON: Data {
+            Data(#"{"chat_template":"<|im_start|>user\n{{ content }}<|im_end|>\n<|im_start|>assistant\n","additional_special_tokens":["<|im_start|>","<|im_end|>"]}"#.utf8)
+        }
+
+        var processorConfigJSON: Data? {
+            processorClass.map { Data(#"{"processor_class":"\#($0)"}"#.utf8) }
+        }
+
+        var preflightInput: ModelPreflightInput {
+            var files = [
+                ModelFileInfo(path: "config.json", size: Self.configBytes),
+                ModelFileInfo(path: "tokenizer.json", size: Self.tokenizerBytes),
+                ModelFileInfo(path: "model.safetensors", size: modelBytes),
+            ]
+            if processorClass != nil {
+                files.append(ModelFileInfo(path: "processor_config.json", size: Self.processorBytes))
+            }
+            return ModelPreflightInput(
+                repository: repository,
+                configJSON: configJSON,
+                processorConfigJSON: processorConfigJSON,
+                files: files,
+                tags: ["mlx", modelType, "4bit"]
+            )
+        }
+    }
+
+private var gemmaTurboQuantProfileCases: [GemmaTurboQuantProfileCase] {
+        [
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-1.1-2b-it-4bit",
+                displayName: "Gemma 1.1 2B IT 4-bit",
+                modelType: "gemma",
+                parameterCount: 2_000_000_000,
+                headDimension: 256,
+                modelBytes: 1_700_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-1.1-7b-it-4bit",
+                displayName: "Gemma 1.1 7B IT 4-bit",
+                modelType: "gemma",
+                parameterCount: 7_000_000_000,
+                headDimension: 256,
+                modelBytes: 4_500_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-2-9b-it-4bit",
+                displayName: "Gemma 2 9B IT 4-bit",
+                modelType: "gemma2",
+                parameterCount: 9_000_000_000,
+                headDimension: 256,
+                modelBytes: 5_900_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-2-27b-it-4bit",
+                displayName: "Gemma 2 27B IT 4-bit",
+                modelType: "gemma2",
+                parameterCount: 27_000_000_000,
+                headDimension: 128,
+                modelBytes: 16_200_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-270m-it-qat-4bit",
+                displayName: "Gemma 3 270M IT QAT 4-bit",
+                modelType: "gemma3_text",
+                parameterCount: 270_000_000,
+                headDimension: 256,
+                modelBytes: 340_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-1b-it-qat-4bit",
+                displayName: "Gemma 3 1B IT QAT 4-bit",
+                modelType: "gemma3_text",
+                parameterCount: 1_000_000_000,
+                headDimension: 256,
+                modelBytes: 770_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-4b-it-qat-4bit",
+                displayName: "Gemma 3 4B IT QAT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 4_000_000_000,
+                headDimension: 256,
+                modelBytes: 2_900_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-4b-it-4bit",
+                displayName: "Gemma 3 4B IT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 4_000_000_000,
+                headDimension: 256,
+                modelBytes: 2_900_000_000,
+                configJSONOverride: Data(#"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":2560,"num_attention_heads":8,"num_key_value_heads":4}}"#.utf8),
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-12b-it-qat-4bit",
+                displayName: "Gemma 3 12B IT QAT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 12_000_000_000,
+                headDimension: 256,
+                modelBytes: 7_800_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-12b-it-4bit",
+                displayName: "Gemma 3 12B IT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 12_000_000_000,
+                headDimension: 256,
+                modelBytes: 7_800_000_000,
+                configJSONOverride: Data(#"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":3840,"num_attention_heads":16,"num_key_value_heads":8}}"#.utf8),
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-27b-it-qat-4bit",
+                displayName: "Gemma 3 27B IT QAT 4-bit",
+                modelType: "gemma3",
+                parameterCount: 27_000_000_000,
+                headDimension: 128,
+                modelBytes: 16_300_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma3Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3n-E2B-it-lm-4bit",
+                displayName: "Gemma 3n E2B IT LM 4-bit",
+                modelType: "gemma3n",
+                parameterCount: 2_000_000_000,
+                headDimension: 256,
+                modelBytes: 2_550_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3n-E4B-it-lm-4bit",
+                displayName: "Gemma 3n E4B IT LM 4-bit",
+                modelType: "gemma3n",
+                parameterCount: 4_000_000_000,
+                headDimension: 256,
+                modelBytes: 4_400_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-4-e2b-it-OptiQ-4bit",
+                displayName: "Gemma 4 E2B IT OptiQ 4-bit",
+                modelType: "gemma4",
+                parameterCount: 2_000_000_000,
+                headDimension: 256,
+                modelBytes: 4_330_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma4Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-4-e4b-it-OptiQ-4bit",
+                displayName: "Gemma 4 E4B IT OptiQ 4-bit",
+                modelType: "gemma4",
+                parameterCount: 4_000_000_000,
+                headDimension: 256,
+                modelBytes: 6_570_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma4Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-4-26b-it-OptiQ-4bit",
+                displayName: "Gemma 4 26B IT OptiQ 4-bit",
+                modelType: "gemma4",
+                parameterCount: 26_000_000_000,
+                headDimension: 256,
+                modelBytes: 15_800_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma4Processor"
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-4-31b-it-OptiQ-4bit",
+                displayName: "Gemma 4 31B IT OptiQ 4-bit",
+                modelType: "gemma4",
+                parameterCount: 31_000_000_000,
+                headDimension: 256,
+                modelBytes: 18_600_000_000,
+                modalities: [.text, .vision],
+                processorClass: "Gemma4Processor"
+            ),
+        ]
+    }
+
+private struct GemmaTurboQuantProfileCase {
+        static let configBytes: Int64 = 10_000
+        static let tokenizerBytes: Int64 = 8_000_000
+        static let processorBytes: Int64 = 12_000
+
+        var repository: String
+        var displayName: String
+        var modelType: String
+        var parameterCount: Int64
+        var headDimension: Int
+        var modelBytes: Int64
+        var configJSONOverride: Data?
+        var modalities: Set<ModelModality> = [.text]
+        var processorClass: String?
+        var expectedCacheTopology: ModelCacheTopology {
+            if modalities.contains(.vision), modelType == "gemma3" || modelType == "gemma4" {
+                return .visionLanguageAttention
+            }
+            if modelType == "gemma3n" || modelType == "gemma4_text" || modelType == "gemma4_assistant" {
+                return .sharedKVAttention
+            }
+            return .standardAttention
+        }
+
+        var expectedDownloadBytes: Int64 {
+            modelBytes + Self.configBytes + Self.tokenizerBytes + (processorClass == nil ? 0 : Self.processorBytes)
+        }
+
+        var configJSON: Data {
+            if let configJSONOverride {
+                return configJSONOverride
+            }
+            if modelType == "gemma3n" {
+                return Data(#"{"model_type":"gemma3n","head_dim":\#(headDimension),"layer_types":["sliding_attention","full_attention"],"sliding_window":2048,"num_kv_shared_layers":4}"#.utf8)
+            }
+            return Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension)}"#.utf8)
+        }
+
+        var tokenizerConfigJSON: Data {
+            Data(#"{"chat_template":"<start_of_turn>user\n{{ content }}<end_of_turn>\n<start_of_turn>model\n","additional_special_tokens":["<start_of_turn>","<end_of_turn>","<turn|>"]}"#.utf8)
+        }
+
+        var processorConfigJSON: Data? {
+            processorClass.map { Data(#"{"processor_class":"\#($0)"}"#.utf8) }
+        }
+
+        var preflightInput: ModelPreflightInput {
+            var files = [
+                ModelFileInfo(path: "config.json", size: Self.configBytes),
+                ModelFileInfo(path: "tokenizer.json", size: Self.tokenizerBytes),
+                ModelFileInfo(path: "model.safetensors", size: modelBytes),
+            ]
+            if processorClass != nil {
+                files.append(ModelFileInfo(path: "processor_config.json", size: Self.processorBytes))
+            }
+            return ModelPreflightInput(
+                repository: repository,
+                configJSON: configJSON,
+                processorConfigJSON: processorConfigJSON,
+                files: files,
+                tags: ["mlx", modelType, "4bit"]
+            )
+        }
+    }
+
+private func iso8601Date(_ raw: String) -> Date? {
+    ISO8601DateFormatter().date(from: raw)
 }
 
 private extension Dictionary where Key == String, Value == JSONValue {

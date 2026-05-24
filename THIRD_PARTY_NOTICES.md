@@ -2,14 +2,14 @@
 
 This file documents third-party software dependencies used by Pines. The Pines repository license does not relicense third-party software. Each dependency remains available under its own license.
 
-This inventory was checked against `project.yml`, `Package.swift`, dependency manifests, and the committed package lockfile on May 19, 2026. The Swift package lockfile covers package/test dependencies; the iOS app MLX fork dependencies are exact revision pins in `project.yml`.
+This inventory was checked against `project.yml`, `Package.swift`, dependency manifests, and the committed package lockfile on May 24, 2026. The Swift package lockfile covers package/test dependencies; the iOS app MLX fork dependencies are exact revision pins in `project.yml`.
 
 ## Direct Swift Package Dependencies
 
 | Package | Source | Version or revision | Products used | License | Notice |
 | --- | --- | --- | --- | --- | --- |
-| MLXSwift | <https://github.com/RNT56/mlx-swift> | `8f0718404a323698c7b5730f2de3af2b5e21f854` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
-| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `bf7bab132f9810d8ab3e5c6e0adbcf3db0b40551` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
+| MLXSwift | <https://github.com/RNT56/mlx-swift> | `a90b1097df45e4e70b6e0bb367624f8f5857970b` | `MLX`, `MLXNN` | MIT | Copyright (c) 2023 ml-explore |
+| MLXSwiftLM | <https://github.com/RNT56/mlx-swift-lm> | `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c` | `MLXLLM`, `MLXVLM`, `MLXEmbedders`, `MLXLMCommon` | MIT | Copyright (c) 2024 ml-explore |
 | SwiftHuggingFace | <https://github.com/huggingface/swift-huggingface.git> | `0.9.0`, with `Xet` trait enabled through `PinesHubXetSupport` | `HuggingFace` | Apache-2.0 | See Apache-2.0 text below. |
 | SwiftTransformers | <https://github.com/huggingface/swift-transformers> | `1.3.2` | `Tokenizers` | Apache-2.0 | See Apache-2.0 text below. |
 | GRDB | <https://github.com/groue/GRDB.swift.git> | `7.10.0` | `GRDB` | MIT | Copyright (C) 2015-2025 Gwendal Roué |

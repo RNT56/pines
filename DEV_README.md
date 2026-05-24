@@ -190,9 +190,9 @@ Device profile defaults from `DeviceProfile`:
 Downshift rules:
 
 - Serious/critical thermal state or Low Power Mode caps context and small-model context at `4,096`, prefill at `256`, embedding batch at `4`, vector scan at `1,024`, disables vision defaults, and uses conservative TurboQuant policy.
-- Available memory below `750 MB` applies the same caps and prefers memory.
+- Available memory below `2 GB` enters low-memory constrained mode; below `900 MB` local generation is rejected before start. Constrained local generation uses the smaller context/prefill caps and also clamps completion tokens from measured generation-start headroom (`32` tokens below `2 GB`, `16` below `1.2 GB`).
 - A19 Pro thin devices downshift under fair thermal state to at most `16,384` context and `512` prefill.
-- iOS memory warnings must stop the active local run and unload transient MLX containers.
+- iOS memory warnings soft-recover a bounded number of times during active generation while emergency headroom remains; otherwise they stop the active run and unload transient MLX containers.
 
 Runtime development rules:
 
@@ -220,10 +220,10 @@ Current app-level limits and defaults:
 
 The iOS app links exact maintained MLX fork revisions through `project.yml` and the generated Xcode project:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `8f0718404a323698c7b5730f2de3af2b5e21f854`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `bf7bab132f9810d8ab3e5c6e0adbcf3db0b40551`
-- Nested `mlx` inside `MLXSwift`: `8f13e02fa85252f2a569a43c6759f07490b816a5`
-- Nested `mlx-c` inside `MLXSwift`: `fff19671eed2e556bdf4552328a1791a8f37b651`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `a90b1097df45e4e70b6e0bb367624f8f5857970b`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c`
+- Nested `mlx` inside `MLXSwift`: `3eb8ef074b911b00ecdbeb47f7bdafd91a123ad0`
+- Nested `mlx-c` inside `MLXSwift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
 
 These pins are intentional because Pines consumes additive TurboQuant and compatibility APIs not assumed to exist in upstream package releases yet.
 

@@ -17,6 +17,7 @@
 		1081E1DAB330D3ED36C90BE5 /* ArtifactsWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C6FF18172BCCD1C796B34F4 /* ArtifactsWorkspaceView.swift */; };
 		1280CC834227C905E3AD4423 /* PinesProEntitlementService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C3513B3057477BB0863B2F /* PinesProEntitlementService.swift */; };
 		14619B70F3093CC492C66E1E /* MCPStreamableHTTPPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 453D050E47134A672156FBA7 /* MCPStreamableHTTPPayloads.swift */; };
+		148670557457CDC793E77B74 /* PinesStressDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD7A1C3BB2F375BB75558DEF /* PinesStressDiagnostics.swift */; };
 		14C935C0C8E726C774184D06 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FFFEAD9040192EA2246EDAD7 /* PrivacyInfo.xcprivacy */; };
 		1696C482B2BFEADAD7A1744D /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */; };
 		16E0EFE03D0794F515FE4916 /* GeminiLiveSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A577E1122CE291EF5ECF16D2 /* GeminiLiveSessionService.swift */; };
@@ -34,6 +35,7 @@
 		2D09CE6C392BBD594E95F249 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = D09EC77F4F444343B14A238C /* PinesCore */; };
 		2DC7F4355DC8D047D2D5460C /* PinesAppModelTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */; };
 		30026D20DA004DF5A0C2BE13 /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */; };
+		338E625EF11210ABD3D670AC /* PinesUITestLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E14D0CA724B74DAE144184C /* PinesUITestLaunchConfiguration.swift */; };
 		368944A065D96B6F78A3E0E6 /* GRDBPinesStore+CloudKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54110781FB02FBE823BC3F9C /* GRDBPinesStore+CloudKit.swift */; };
 		38172F301F9B09B3CBA85F97 /* PinesWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C379B46E87980ED73F59DCD /* PinesWatchApp.swift */; };
 		38B759D4F9C428922E0CBE72 /* PinesManagedCloudService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E192242783074E1BD4EDE4BD /* PinesManagedCloudService.swift */; };
@@ -51,6 +53,7 @@
 		56FB9E2B958AE80AB1CB0856 /* MarkdownMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BD9A00CA54B90E791E77F56 /* MarkdownMessageView.swift */; };
 		57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */; };
 		5A73B2F9FA959A8D2A6173EF /* BYOKCloudInferenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */; };
+		5BEDAE409D8D0BE9350E4A92 /* PinesUITestInferenceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42338086683D67DAAB5A0244 /* PinesUITestInferenceProvider.swift */; };
 		5DEFA11F0FB695B117D0E944 /* PinesHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103EAAA54824744E18DB139D /* PinesHaptics.swift */; };
 		5FD69B3226A215FF6D6C5A48 /* ModelsViewComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E832CA92705405D1734D955 /* ModelsViewComponents.swift */; };
 		603860ECCF6BEE2F45D305E4 /* OpenAIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */; };
@@ -71,6 +74,7 @@
 		87777CD59861247F27DE9C34 /* PinesRefreshRateSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095ED637BD4CD7B01DBD9F9C /* PinesRefreshRateSupport.swift */; };
 		8876615E142B278FD678F6A4 /* SecurityResetCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8CF846797DB3246FDC4FE5F /* SecurityResetCoordinator.swift */; };
 		8B285F546F931039BCA44F33 /* ModelDownloadActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A472B2663AB6487C0FB5A6B /* ModelDownloadActivityAttributes.swift */; };
+		8BA43F9B205B9683A03F3CD4 /* PinesAppModel+Stress.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3E7E5D4E7D39C6BCD7C151 /* PinesAppModel+Stress.swift */; };
 		8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */; };
 		8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 79248E6D82F6B41C4A99016B /* Tokenizers */; };
 		9134D9CF0C70BA7DB70339E4 /* PinesAppModel+GeminiLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 315265784B0270582992F131 /* PinesAppModel+GeminiLifecycle.swift */; };
@@ -89,6 +93,7 @@
 		AC60887E8A580F4E2A88EEA2 /* AnthropicProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E23600ED90D04F53D655F7 /* AnthropicProviderService.swift */; };
 		B11DDE4F6B5FAC4D4C811660 /* BYOKCloudInferenceProvider+Payloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB2DDD7A0B86BB137BF397A /* BYOKCloudInferenceProvider+Payloads.swift */; };
 		B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8627F9808A76C0F0A91729 /* SettingsView.swift */; };
+		B7A642333FC08377576C9C3F /* PinesUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA70907A54EAB3A9DE13642D /* PinesUITests.swift */; };
 		B925E264EAB46D0C3EB6B307 /* PinesHubXetSupport in Frameworks */ = {isa = PBXBuildFile; productRef = F5BE958969B414C35418437A /* PinesHubXetSupport */; };
 		BAF84E40F21C59F00422283F /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 97ADD97B0749021A162048FE /* MLXNN */; };
 		BDB1CA0CE1D6AA812EC96D4F /* ArtifactsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7FFC4A75A71DA8C323BB59 /* ArtifactsModels.swift */; };
@@ -127,6 +132,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 547D6AC8E60F928C9CB70C27;
 			remoteInfo = PinesLiveActivities;
+		};
+		96F6C734AF0DE55E5242AC3D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A68EBAF465EDED0F2EE626D4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5ABD42396BC25E46F453A6A1;
+			remoteInfo = Pines;
 		};
 		9C830131F3E6535F1036559E /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -191,12 +203,14 @@
 		3E48CEB7F9E4EE2A4D9522F2 /* AnthropicProviderRecordMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicProviderRecordMapper.swift; sourceTree = "<group>"; };
 		413251F8572CA2D6F3D0BD30 /* SettingsDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsDetailView.swift; sourceTree = "<group>"; };
 		41ED12D2A8BE4F962735AC89 /* WatchChatOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchChatOrchestrator.swift; sourceTree = "<group>"; };
+		42338086683D67DAAB5A0244 /* PinesUITestInferenceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesUITestInferenceProvider.swift; sourceTree = "<group>"; };
 		443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitSyncService.swift; sourceTree = "<group>"; };
 		453D050E47134A672156FBA7 /* MCPStreamableHTTPPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPStreamableHTTPPayloads.swift; sourceTree = "<group>"; };
 		45C618F4FAB69FDDE0FC788B /* PinesDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesDesignSystem.swift; sourceTree = "<group>"; };
 		46107CC67D229C2D05C33A59 /* VaultEmbeddingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultEmbeddingService.swift; sourceTree = "<group>"; };
 		48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WKWebViewBrowserRuntime.swift; sourceTree = "<group>"; };
 		4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProviderService.swift; sourceTree = "<group>"; };
+		4E14D0CA724B74DAE144184C /* PinesUITestLaunchConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesUITestLaunchConfiguration.swift; sourceTree = "<group>"; };
 		500C1CF070133DCF6885979F /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
 		5111BF39FD0BF9D28CDB406D /* OpenAIProviderLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProviderLifecycleCoordinator.swift; sourceTree = "<group>"; };
 		54110781FB02FBE823BC3F9C /* GRDBPinesStore+CloudKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GRDBPinesStore+CloudKit.swift"; sourceTree = "<group>"; };
@@ -234,12 +248,14 @@
 		A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHaptics.swift; sourceTree = "<group>"; };
 		A790E0D7CCFB1AF34B214B13 /* PinesHuggingFaceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesHuggingFaceBridge.swift; sourceTree = "<group>"; };
 		A8B838038B4F8ACF52E8F8EB /* PinesAppModel+Artifacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+Artifacts.swift"; sourceTree = "<group>"; };
+		AA70907A54EAB3A9DE13642D /* PinesUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesUITests.swift; sourceTree = "<group>"; };
 		ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitRecordCipher.swift; sourceTree = "<group>"; };
 		AE7FFC4A75A71DA8C323BB59 /* ArtifactsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactsModels.swift; sourceTree = "<group>"; };
 		AEC56EEE76C86B70FF02D9AF /* GRDBPinesStore+Mapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GRDBPinesStore+Mapping.swift"; sourceTree = "<group>"; };
 		AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRuntimeMetrics.swift; sourceTree = "<group>"; };
 		B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProviderService.swift; sourceTree = "<group>"; };
 		BD4AAEA18A8AFE76C3844F9A /* GeminiProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiProviderService.swift; sourceTree = "<group>"; };
+		BD7A1C3BB2F375BB75558DEF /* PinesStressDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesStressDiagnostics.swift; sourceTree = "<group>"; };
 		C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
 		C4BAE1B582D05CB5B511A886 /* EncryptedBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptedBlobStore.swift; sourceTree = "<group>"; };
 		C7E23600ED90D04F53D655F7 /* AnthropicProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicProviderService.swift; sourceTree = "<group>"; };
@@ -252,6 +268,8 @@
 		DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppServices.swift; sourceTree = "<group>"; };
 		DC95D2DA4ED0AE5A971C6BA3 /* WatchTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTranscriptView.swift; sourceTree = "<group>"; };
 		DC9FA9E25B03EF1B185466EA /* MLXCompatibleModels+Llama4.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MLXCompatibleModels+Llama4.swift"; sourceTree = "<group>"; };
+		DD3E7E5D4E7D39C6BCD7C151 /* PinesAppModel+Stress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+Stress.swift"; sourceTree = "<group>"; };
+		DECDDBBF2E84B8CD8C5F6740 /* PinesUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PinesUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E192242783074E1BD4EDE4BD /* PinesManagedCloudService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesManagedCloudService.swift; sourceTree = "<group>"; };
 		E77223EE304350F39F109139 /* PinesLiveActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesLiveActivities.swift; sourceTree = "<group>"; };
 		EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXRuntimeBridge.swift; sourceTree = "<group>"; };
@@ -385,9 +403,18 @@
 				09B527187860134DB6F5922F /* Pines */,
 				ED0458AACAA6981F23967E2B /* PinesLiveActivities */,
 				285BEA30994142C0C5392A14 /* PinesTests */,
+				31041296B530F58238F644FF /* PinesUITests */,
 				4016F5BFE6C8B5E64B8D93C9 /* PinesWatch */,
 				44B966D0C304F06A65EAD9F3 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		31041296B530F58238F644FF /* PinesUITests */ = {
+			isa = PBXGroup;
+			children = (
+				AA70907A54EAB3A9DE13642D /* PinesUITests.swift */,
+			);
+			path = PinesUITests;
 			sourceTree = "<group>";
 		};
 		4016F5BFE6C8B5E64B8D93C9 /* PinesWatch */ = {
@@ -414,6 +441,7 @@
 				231A63B8882B7235FD4DD6B7 /* Pines.app */,
 				2EC8BB0262D2F49A7518608A /* PinesLiveActivities.appex */,
 				1485AEE015D2E1E941159B3F /* PinesTests.xctest */,
+				DECDDBBF2E84B8CD8C5F6740 /* PinesUITests.xctest */,
 				1E1D28BDF947E8721585572A /* PinesWatch.app */,
 			);
 			name = Products;
@@ -565,10 +593,14 @@
 				F57763E1BB7A0DD285BE66BC /* PinesAppModel+OpenAIMediaWorkflows.swift */,
 				99ABB45AA2309B6667A25016 /* PinesAppModel+OpenAIProviderStorage.swift */,
 				27F8A15281AD531830EEBB98 /* PinesAppModel+Presentation.swift */,
+				DD3E7E5D4E7D39C6BCD7C151 /* PinesAppModel+Stress.swift */,
 				0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */,
 				DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */,
 				95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */,
 				77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */,
+				BD7A1C3BB2F375BB75558DEF /* PinesStressDiagnostics.swift */,
+				42338086683D67DAAB5A0244 /* PinesUITestInferenceProvider.swift */,
+				4E14D0CA724B74DAE144184C /* PinesUITestLaunchConfiguration.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -715,6 +747,24 @@
 			productReference = 1485AEE015D2E1E941159B3F /* PinesTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		EA208B0F1AFB233C6F8426F9 /* PinesUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9E39851D5CD49C4E170B82CB /* Build configuration list for PBXNativeTarget "PinesUITests" */;
+			buildPhases = (
+				01C2F2621B857F06868C1DF1 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C0C9BE4AB1493A9422B9C152 /* PBXTargetDependency */,
+			);
+			name = PinesUITests;
+			packageProductDependencies = (
+			);
+			productName = PinesUITests;
+			productReference = DECDDBBF2E84B8CD8C5F6740 /* PinesUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -739,6 +789,11 @@
 					9C0C5645F73C831E8B61CB9F = {
 						DevelopmentTeam = WLDMWQ963U;
 						ProvisioningStyle = Automatic;
+					};
+					EA208B0F1AFB233C6F8426F9 = {
+						DevelopmentTeam = WLDMWQ963U;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 5ABD42396BC25E46F453A6A1;
 					};
 				};
 			};
@@ -769,6 +824,7 @@
 				5ABD42396BC25E46F453A6A1 /* Pines */,
 				547D6AC8E60F928C9CB70C27 /* PinesLiveActivities */,
 				9C0C5645F73C831E8B61CB9F /* PinesTests */,
+				EA208B0F1AFB233C6F8426F9 /* PinesUITests */,
 				82648A6E9285BDBBB41FA8FB /* PinesWatch */,
 			);
 		};
@@ -787,6 +843,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		01C2F2621B857F06868C1DF1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B7A642333FC08377576C9C3F /* PinesUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		788EA23122E009F1A05FB98F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -849,6 +913,7 @@
 				F7B13175B183F946D3F5ABAB /* PinesAppModel+OpenAIMediaWorkflows.swift in Sources */,
 				A9753F68411A3E16284D04EF /* PinesAppModel+OpenAIProviderStorage.swift in Sources */,
 				F3D59B7E54F622FED196570C /* PinesAppModel+Presentation.swift in Sources */,
+				8BA43F9B205B9683A03F3CD4 /* PinesAppModel+Stress.swift in Sources */,
 				E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */,
 				2DC7F4355DC8D047D2D5460C /* PinesAppModelTypes.swift in Sources */,
 				D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */,
@@ -862,6 +927,9 @@
 				87777CD59861247F27DE9C34 /* PinesRefreshRateSupport.swift in Sources */,
 				57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */,
 				FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */,
+				148670557457CDC793E77B74 /* PinesStressDiagnostics.swift in Sources */,
+				5BEDAE409D8D0BE9350E4A92 /* PinesUITestInferenceProvider.swift in Sources */,
+				338E625EF11210ABD3D670AC /* PinesUITestLaunchConfiguration.swift in Sources */,
 				FF7A2AF24CE204653E49DD36 /* SecureKeyStore.swift in Sources */,
 				8876615E142B278FD678F6A4 /* SecurityResetCoordinator.swift in Sources */,
 				45E76EAAE862C883439A1A7E /* SettingsDetailView.swift in Sources */,
@@ -912,6 +980,11 @@
 			target = 547D6AC8E60F928C9CB70C27 /* PinesLiveActivities */;
 			targetProxy = 695D05E47C68DE935A435861 /* PBXContainerItemProxy */;
 		};
+		C0C9BE4AB1493A9422B9C152 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5ABD42396BC25E46F453A6A1 /* Pines */;
+			targetProxy = 96F6C734AF0DE55E5242AC3D /* PBXContainerItemProxy */;
+		};
 		D857AB5EC4889CC8664D728C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 82648A6E9285BDBBB41FA8FB /* PinesWatch */;
@@ -939,6 +1012,26 @@
 			};
 			name = Release;
 		};
+		13AAD42CEF4172D7CAA8DABD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = WLDMWQ963U;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Pines;
+			};
+			name = Debug;
+		};
 		2012DF6BD7E9EAB45D583F1D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -960,6 +1053,26 @@
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		44585D33D9F700E01A4A8B79 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = WLDMWQ963U;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Pines;
 			};
 			name = Release;
 		};
@@ -1262,6 +1375,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		9E39851D5CD49C4E170B82CB /* Build configuration list for PBXNativeTarget "PinesUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				13AAD42CEF4172D7CAA8DABD /* Debug */,
+				44585D33D9F700E01A4A8B79 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		A4C482C3F3FE0F9117C82810 /* Build configuration list for PBXNativeTarget "PinesLiveActivities" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1310,7 +1432,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift";
 			requirement = {
 				kind = revision;
-				revision = 8f0718404a323698c7b5730f2de3af2b5e21f854;
+				revision = cbea339ac81d701ea24df1bdc8b3008bcb99945a;
 			};
 		};
 		A43A495519F824800780FBF4 /* XCRemoteSwiftPackageReference "SQLCipher.swift" */ = {
@@ -1326,7 +1448,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift-lm";
 			requirement = {
 				kind = revision;
-				revision = bf7bab132f9810d8ab3e5c6e0adbcf3db0b40551;
+				revision = 86b5d6bb1c0192f3b229a8b2c08fab59a918957b;
 			};
 		};
 		ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {

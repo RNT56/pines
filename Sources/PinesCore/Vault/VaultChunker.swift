@@ -1,5 +1,22 @@
 import Foundation
 
+public enum VaultChunkerConfigurationError: Error, Equatable, LocalizedError, Sendable {
+    case invalidMaxCharacterCount(Int)
+    case negativeOverlapCharacterCount(Int)
+    case overlapNotSmallerThanMax(overlap: Int, max: Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .invalidMaxCharacterCount(value):
+            "maxCharacterCount must be greater than zero; got \(value)."
+        case let .negativeOverlapCharacterCount(value):
+            "overlapCharacterCount cannot be negative; got \(value)."
+        case let .overlapNotSmallerThanMax(overlap, max):
+            "overlapCharacterCount (\(overlap)) must be smaller than maxCharacterCount (\(max))."
+        }
+    }
+}
+
 public struct VaultChunker: Sendable {
     public struct Configuration: Equatable, Hashable, Sendable {
         public let maxCharacterCount: Int
@@ -13,20 +30,34 @@ public struct VaultChunker: Sendable {
             overlapCharacterCount
         }
 
-        public init(maxCharacterCount: Int = 1_200, overlapCharacterCount: Int = 160) {
-            precondition(maxCharacterCount > 0, "maxCharacterCount must be greater than zero")
-            precondition(overlapCharacterCount >= 0, "overlapCharacterCount cannot be negative")
-            precondition(
-                overlapCharacterCount < maxCharacterCount,
-                "overlapCharacterCount must be smaller than maxCharacterCount"
-            )
+        public init() {
+            self.maxCharacterCount = 1_200
+            self.overlapCharacterCount = 160
+        }
 
+        public init(maxCharacterCount: Int, overlapCharacterCount: Int = 160) throws {
+            try Self.validate(maxCharacterCount: maxCharacterCount, overlapCharacterCount: overlapCharacterCount)
             self.maxCharacterCount = maxCharacterCount
             self.overlapCharacterCount = overlapCharacterCount
         }
 
-        public init(maxCharacters: Int, overlapCharacters: Int) {
-            self.init(maxCharacterCount: maxCharacters, overlapCharacterCount: overlapCharacters)
+        public init(maxCharacters: Int, overlapCharacters: Int) throws {
+            try self.init(maxCharacterCount: maxCharacters, overlapCharacterCount: overlapCharacters)
+        }
+
+        private static func validate(maxCharacterCount: Int, overlapCharacterCount: Int) throws {
+            guard maxCharacterCount > 0 else {
+                throw VaultChunkerConfigurationError.invalidMaxCharacterCount(maxCharacterCount)
+            }
+            guard overlapCharacterCount >= 0 else {
+                throw VaultChunkerConfigurationError.negativeOverlapCharacterCount(overlapCharacterCount)
+            }
+            guard overlapCharacterCount < maxCharacterCount else {
+                throw VaultChunkerConfigurationError.overlapNotSmallerThanMax(
+                    overlap: overlapCharacterCount,
+                    max: maxCharacterCount
+                )
+            }
         }
     }
 

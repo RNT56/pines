@@ -1,6 +1,7 @@
 # Xcode
 DerivedData/
 build/
+artifacts/
 *.xcuserstate
 *.xccheckout
 *.moved-aside

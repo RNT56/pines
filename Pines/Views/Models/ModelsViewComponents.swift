@@ -750,11 +750,24 @@ struct ModelDetailView: View {
             .init("Runtime", model.runtime, systemImage: "cpu"),
             .init("Profile", model.runtimeProfile.name, systemImage: "slider.horizontal.3"),
             .init("KV cache", quantization.algorithm.title, systemImage: "memorychip"),
+            .init("Family support", model.install.turboQuantFamilySupport.displayName, systemImage: "checklist"),
+            .init("Topology", model.install.cacheTopology.displayName, systemImage: "point.3.connected.trianglepath.dotted"),
             .init("Metal codec", quantization.metalCodecAvailable ? "Available" : "Unavailable", systemImage: "bolt.horizontal"),
             .init("Metal attention", quantization.metalAttentionAvailable ? "Available" : "Unavailable", systemImage: "scope"),
             .init("Optimization", quantization.turboQuantOptimizationPolicy.displayName, systemImage: "gauge")
         ]
+        items.append(.init("Mode", quantization.turboQuantUserMode.displayName, systemImage: "speedometer"))
+        if let admission = quantization.turboQuantAdmission {
+            items.append(.init("Admitted context", "\(admission.admittedContextLength.formatted()) tokens", systemImage: "text.word.spacing"))
+            items.append(.init("Selected mode", admission.selectedMode.displayName, systemImage: "dial.medium"))
+            if let reason = admission.primaryDowngradeReason {
+                items.append(.init("Downgrade", reason.displayName, systemImage: "arrow.down.forward.circle"))
+            }
+            items.append(.init("Memory message", admission.userMessage, systemImage: "memorychip", copyable: true))
+        }
         if let preset = quantization.preset { items.append(.init("KV preset", preset.displayName)) }
+        if let profileID = quantization.turboQuantProfileID { items.append(.init("Profile ID", profileID, copyable: true)) }
+        if let profileSource = quantization.turboQuantProfileSource { items.append(.init("Profile source", profileSource)) }
         if let valueBits = quantization.turboQuantValueBits { items.append(.init("Value bits", "\(valueBits)")) }
         if let requestedBackend = quantization.requestedBackend { items.append(.init("Requested backend", requestedBackend.displayName)) }
         if let activeBackend = quantization.activeBackend { items.append(.init("Active backend", activeBackend.displayName)) }
@@ -762,7 +775,15 @@ struct ModelDetailView: View {
         if let kernelProfile = quantization.metalKernelProfile { items.append(.init("Kernel", kernelProfile.displayName)) }
         if let selfTest = quantization.metalSelfTestStatus { items.append(.init("MLX self-test", selfTest.displayName)) }
         if let rawFallbackAllocated = quantization.rawFallbackAllocated { items.append(.init("Raw KV fallback", rawFallbackAllocated ? "Allocated" : "Not allocated")) }
-        if quantization.thermalDownshiftActive { items.append(.init("Thermal downshift", "Active")) }
+        if quantization.runtimePressureReason != .none {
+            items.append(.init("Pressure reason", quantization.runtimePressureReason.displayName))
+        }
+        if quantization.thermalDownshiftActive {
+            items.append(.init("Pressure downshift", "Active"))
+        }
+        if !quantization.turboQuantProfileDiagnostics.isEmpty {
+            items.append(.init("Profile diagnostics", quantization.turboQuantProfileDiagnostics.joined(separator: " | "), copyable: true))
+        }
         if let unsupportedShape = quantization.lastUnsupportedAttentionShape { items.append(.init("Unsupported shape", unsupportedShape, copyable: true)) }
         if let fallback = quantization.activeFallbackReason { items.append(.init("Fallback", fallback, copyable: true)) }
         return items
@@ -780,7 +801,10 @@ struct ModelDetailView: View {
         var items: [PinesKeyValueGrid.Item] = []
         if let performanceClass = quantization.devicePerformanceClass { items.append(.init("Performance", performanceClass.displayName, systemImage: "speedometer")) }
         if let contextTokens = memory.recommendedContextTokens { items.append(.init("Context", "\(contextTokens.formatted()) tokens", systemImage: "text.word.spacing")) }
-        if let thermalState = memory.thermalState { items.append(.init("Thermal state", thermalState.capitalized, systemImage: "thermometer.medium")) }
+        if let pressureReason = memory.runtimePressureReason, pressureReason != .none {
+            items.append(.init("Pressure reason", pressureReason.displayName, systemImage: "gauge.with.dots.needle.67percent"))
+        }
+        if let thermalState = memory.thermalState { items.append(.init("System thermal state", thermalState.capitalized, systemImage: "thermometer.medium")) }
         if let physicalMemory = memory.physicalMemoryBytes { items.append(.init("Device memory", ByteCountFormatter.string(fromByteCount: physicalMemory, countStyle: .memory), systemImage: "memorychip")) }
         if let availableMemory = memory.availableMemoryBytes { items.append(.init("Available memory", ByteCountFormatter.string(fromByteCount: availableMemory, countStyle: .memory))) }
         if let workingSet = memory.metalRecommendedWorkingSetBytes { items.append(.init("MLX working set", ByteCountFormatter.string(fromByteCount: workingSet, countStyle: .memory))) }

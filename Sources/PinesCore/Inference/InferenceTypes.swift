@@ -23,6 +23,29 @@ public enum LocalProviderMetadataKeys {
     public static let turboQuantFallbackReason = "local.turboquant.fallback_reason"
     public static let turboQuantLastUnsupportedShape = "local.turboquant.last_unsupported_shape"
     public static let turboQuantRawFallbackAllocated = "local.turboquant.raw_fallback_allocated"
+    public static let turboQuantProfileID = "local.turboquant.profile_id"
+    public static let turboQuantProfileSource = "local.turboquant.profile_source"
+    public static let turboQuantProfileDiagnostics = "local.turboquant.profile_diagnostics"
+    public static let turboQuantAdmissionDecision = "local.turboquant.admission_decision"
+    public static let turboQuantAdmissionReason = "local.turboquant.admission_reason"
+    public static let turboQuantUserMode = "local.turboquant.user_mode"
+    public static let turboQuantSelectedMode = "local.turboquant.selected_mode"
+    public static let turboQuantAdmittedContext = "local.turboquant.admitted_context_tokens"
+    public static let turboQuantDowngradeReason = "local.turboquant.downgrade_reason"
+    public static let turboQuantMemoryMessage = "local.turboquant.memory_message"
+    public static let turboQuantRuntimeBudgetBytes = "local.turboquant.runtime_budget_bytes"
+    public static let turboQuantRuntimeHeadroomBytes = "local.turboquant.runtime_headroom_bytes"
+    public static let turboQuantCompressedKVBytes = "local.turboquant.compressed_kv_bytes"
+    public static let turboQuantFallbackReserveBytes = "local.turboquant.fallback_reserve_bytes"
+    public static let cacheTopology = "local.cache.topology"
+    public static let turboQuantFamilySupport = "local.turboquant.family_support"
+    public static let attentionCacheCount = "local.cache.attention_count"
+    public static let nativeStateCacheCount = "local.cache.native_state_count"
+    public static let hybridStateExplanation = "local.cache.hybrid_state_explanation"
+    public static let runtimePressureReason = "local.runtime.pressure_reason"
+    public static let runtimeLowPowerMode = "local.runtime.low_power_mode"
+    public static let runtimeMaxKVSize = "local.runtime.max_kv_size"
+    public static let runtimePrefillStepSize = "local.runtime.prefill_step_size"
     public static let ssdThroughputMBperS = "local.ssd.throughput_mb_per_s"
     public static let ssdTotalBytesRead = "local.ssd.total_bytes_read"
     public static let ssdTotalChunks = "local.ssd.total_chunks"
@@ -35,6 +58,30 @@ public enum LocalProviderMetadataKeys {
     public static let generationCompletionTokens = "local.generation.completion_tokens"
     public static let generationElapsedSeconds = "local.generation.elapsed_seconds"
     public static let generationTokensPerSecond = "local.generation.tokens_per_second"
+    public static let generationFirstTokenLatencySeconds = "local.generation.first_token_latency_seconds"
+    public static let generationPrepareElapsedSeconds = "local.generation.prepare_elapsed_seconds"
+    public static let generationCacheCreateElapsedSeconds = "local.generation.cache_create_elapsed_seconds"
+    public static let generationPreflightAttempts = "local.generation.preflight_attempts"
+    public static let generationRequestedMaxTokens = "local.generation.requested_max_tokens"
+    public static let generationEffectiveMaxTokens = "local.generation.effective_max_tokens"
+    public static let generationMaxTokensClamped = "local.generation.max_tokens_clamped"
+    public static let generationPressureCompletionLimit = "local.generation.pressure_completion_limit"
+    public static let generationInitialAvailableMemoryBytes = "local.generation.initial_available_memory_bytes"
+    public static let generationEffectiveMaxKVSize = "local.generation.effective_max_kv_size"
+    public static let generationMaxKVSizeClamped = "local.generation.max_kv_size_clamped"
+    public static let generationLastTokenAt = "local.generation.last_token_at"
+    public static let generationCancellationReason = "local.generation.cancellation_reason"
+    public static let generationIncompleteReason = "local.generation.incomplete_reason"
+    public static let generationWatchdogCode = "local.generation.watchdog.code"
+    public static let generationWatchdogStage = "local.generation.watchdog.stage"
+    public static let generationWatchdogElapsedSeconds = "local.generation.watchdog.elapsed_seconds"
+    public static let promptKVCacheStatus = "local.prompt_kv_cache.status"
+    public static let promptKVCacheMissReason = "local.prompt_kv_cache.miss_reason"
+    public static let promptKVCacheEvictionReason = "local.prompt_kv_cache.eviction_reason"
+    public static let promptKVCacheReusedPrefixTokens = "local.prompt_kv_cache.reused_prefix_tokens"
+    public static let promptKVCacheSuffixPrefillTokens = "local.prompt_kv_cache.suffix_prefill_tokens"
+    public static let promptKVCacheStoredTokens = "local.prompt_kv_cache.stored_tokens"
+    public static let mlxCachePressureAction = "local.mlx_cache_pressure.action"
 }
 
 public struct ModelID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
@@ -1650,6 +1697,7 @@ public enum InferenceError: Error, Equatable, Sendable {
     case unsupportedCapability(String)
     case cloudNotAllowed
     case invalidRequest(String)
+    case localRuntimeFailure(String)
     case cancelled
 }
 
@@ -1666,6 +1714,8 @@ extension InferenceError: LocalizedError {
             "Cloud inference is not allowed for this request."
         case let .invalidRequest(message):
             message
+        case let .localRuntimeFailure(diagnostic):
+            "Local MLX runtime failure: \(diagnostic)"
         case .cancelled:
             "The inference request was cancelled."
         }

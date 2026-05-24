@@ -255,6 +255,8 @@ struct GeminiProviderLifecycleCoordinator: Sendable {
             response = try await service.generateVideos(modelID: modelID, body: body)
         case .predict:
             response = try await service.predict(modelID: modelID, body: body)
+        case .generateContent:
+            response = try await service.generateContent(modelID: modelID, body: body)
         }
         let artifact = try await persistMediaOperationAndArtifacts(
             from: response.json,
@@ -295,6 +297,8 @@ struct GeminiProviderLifecycleCoordinator: Sendable {
             response = try await service.generateVideos(modelID: modelID, body: body)
         case .predict:
             response = try await service.predict(modelID: modelID, body: body)
+        case .generateContent:
+            response = try await service.generateContent(modelID: modelID, body: body)
         }
         let records = GeminiProviderRecordMapper.generatedMediaArtifacts(
             from: response.json,
@@ -494,10 +498,11 @@ struct GeminiFilePolling: Sendable {
 enum GeminiGeneratedMediaMethod: String, Sendable {
     case predict
     case generateVideos
+    case generateContent
 
     var artifactKind: String {
         switch self {
-        case .predict:
+        case .predict, .generateContent:
             "generated_media"
         case .generateVideos:
             "media_operation"
@@ -601,8 +606,9 @@ struct GeminiDeepResearchRequest: Sendable {
 
         var agentConfig: [String: JSONValue] = [
             "type": .string("deep-research"),
-            "thinking_summaries": .string("none"),
-            "visualization": .string("off"),
+            "thinking_summaries": .string("auto"),
+            "visualization": .string("auto"),
+            "collaborative_planning": .bool(false),
             "depth": .string(depth),
             "report_format": .string(reportFormat),
             "source_policy": sourcePolicy,

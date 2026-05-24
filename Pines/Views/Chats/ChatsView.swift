@@ -106,6 +106,7 @@ struct ChatsView: View {
                         NavigationLink(value: thread.id) {
                             ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
                         }
+                        .accessibilityIdentifier("pines.chat.thread.row")
                         .pinesSidebarListRow()
                         .contextMenu {
                             Button("All Chats") {
@@ -182,6 +183,7 @@ struct ChatsView: View {
                         Image(systemName: "plus")
                     }
                     .accessibilityLabel("Create")
+                    .accessibilityIdentifier("pines.chat.create")
                 }
             }
             .onAppear(perform: selectDefaultThreadIfNeeded)
@@ -213,6 +215,7 @@ struct ChatsView: View {
                 )
             }
         }
+        .accessibilityIdentifier("pines.screen.chats")
     }
 
     private func selectDefaultThreadIfNeeded() {
@@ -621,6 +624,7 @@ private struct ChatTranscriptView: View {
             )
         }
         .navigationTitle(thread.title)
+        .accessibilityIdentifier("pines.chat.transcript")
         .task(id: thread.id) {
             await appModel.loadThreadMessages(
                 threadID: thread.id,
@@ -952,6 +956,7 @@ private struct ChatMessageRowContent: View {
                 editMessage: editMessage,
                 addAttachmentsToVault: addAttachmentsToVault
             )
+            .accessibilityIdentifier("pines.chat.message.\(message.role.rawValue)")
 
             if showsLocalTokenRate,
                let performance = ChatLocalTokenRateSummary(metadata: message.providerMetadata) {
@@ -1100,6 +1105,8 @@ private struct ChatBubble: View {
             .shadow(color: theme.shadow.panelColor.opacity(message.role == .assistant ? 0.55 : 0.32), radius: theme.shadow.panelRadius * 0.25, x: 0, y: theme.shadow.panelY * 0.20)
             .scaleEffect(isStreaming && !reduceMotion ? 1.006 : 1)
             .animation(reduceMotion ? nil : theme.motion.fast, value: isStreaming)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(message.role.title): \(message.content)")
             .contextMenu {
                 Button {
                     haptics.play(.primaryAction)
@@ -2249,6 +2256,7 @@ struct ChatQuickSettingsButton: View {
                 .contentShape(RoundedRectangle(cornerRadius: theme.radius.control + 6, style: .continuous))
         }
         .accessibilityLabel("Model quick settings")
+        .accessibilityIdentifier("pines.chat.model.quick-settings")
         .accessibilityValue(accessibilityValue)
         .simultaneousGesture(TapGesture().onEnded { haptics.play(.navigationSelected) })
     }

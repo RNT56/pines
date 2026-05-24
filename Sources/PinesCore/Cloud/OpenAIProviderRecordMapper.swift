@@ -103,8 +103,10 @@ public enum OpenAIProviderRecordMapper {
         let fields = response?.objectValue ?? [:]
         let responseID = fields.string(for: "id")
         let status = normalizedStatus(fields.string(for: "status") ?? OpenAIBackgroundResponseStatus.queued.rawValue)
-        let metadata = metadata(from: fields["metadata"]).merging(request.metadata) { provider, _ in provider }
         let output = fields["output"]
+        let metadata = metadata(from: fields["metadata"])
+            .merging(request.metadata) { provider, _ in provider }
+            .merging(researchMetadata(in: output)) { _, derived in derived }
         return ProviderResearchRunRecord(
             id: request.id.uuidString,
             providerID: request.providerID,
@@ -141,7 +143,9 @@ public enum OpenAIProviderRecordMapper {
         updated.status = normalizedStatus(fields.string(for: "status") ?? run.status)
         updated.citationCount = max(run.citationCount, citationCount(in: output))
         updated.toolCallCount = max(run.toolCallCount, toolCallCount(in: output))
-        updated.providerMetadata = run.providerMetadata.merging(metadata(from: fields["metadata"])) { _, provider in provider }
+        updated.providerMetadata = run.providerMetadata
+            .merging(metadata(from: fields["metadata"])) { _, provider in provider }
+            .merging(researchMetadata(in: output)) { _, derived in derived }
         updated.updatedAt = Date()
         updated.completedAt = completedAt(status: updated.status, fields: fields) ?? run.completedAt
         updated.lastError = errorMessage(from: fields["last_error"] ?? fields["error"]) ?? run.lastError
@@ -233,6 +237,140 @@ public enum OpenAIProviderRecordMapper {
         return object.string(for: "message")
             ?? object.string(for: "error")
             ?? object.string(for: "code")
+    }
+
+    private static func researchMetadata(in output: JSONValue?) -> [String: String] {
+        var result = [String: String]()
+        let citations = webSearchCitations(in: output)
+        if !citations.isEmpty,
+           let data = try? JSONEncoder().encode(citations),
+           let json = String(data: data, encoding: .utf8) {
+            result[CloudProviderMetadataKeys.webSearchCitationsJSON] = json
+        }
+        let queries = webSearchQueries(in: output)
+        if !queries.isEmpty,
+           let data = try? JSONEncoder().encode(queries),
+           let json = String(data: data, encoding: .utf8) {
+            result[CloudProviderMetadataKeys.webSearchQueriesJSON] = json
+        }
+        let toolCalls = hostedToolCalls(in: output)
+        if !toolCalls.isEmpty,
+           let json = jsonString(from: .array(toolCalls.map(JSONValue.object))) {
+            result[CloudProviderMetadataKeys.openAIHostedToolCallsJSON] = json
+        }
+        return result
+    }
+
+    private static func webSearchCitations(in value: JSONValue?) -> [WebSearchCitation] {
+        var citations = [WebSearchCitation]()
+        collectWebSearchCitations(in: value, into: &citations)
+        var seen = Set<String>()
+        return citations.filter { citation in
+            seen.insert(citation.url).inserted
+        }
+    }
+
+    private static func collectWebSearchCitations(in value: JSONValue?, into citations: inout [WebSearchCitation]) {
+        switch value {
+        case let .object(object):
+            if object.string(for: "type") == "url_citation",
+               let url = object.string(for: "url") ?? object.string(for: "uri") {
+                citations.append(WebSearchCitation(
+                    title: object.string(for: "title") ?? title(fromURLString: url),
+                    url: url,
+                    source: "OpenAI citation"
+                ))
+            }
+            if object.string(for: "type") == "web_search_call",
+               let action = object["action"]?.objectValue {
+                appendSources(from: action["sources"], fallbackSource: action.string(for: "type") ?? "OpenAI web search", into: &citations)
+            }
+            appendSources(from: object["sources"], fallbackSource: object.string(for: "type") ?? "OpenAI source", into: &citations)
+            object.values.forEach { collectWebSearchCitations(in: $0, into: &citations) }
+        case let .array(values):
+            values.forEach { collectWebSearchCitations(in: $0, into: &citations) }
+        case .string, .number, .bool, .null, nil:
+            break
+        }
+    }
+
+    private static func appendSources(from value: JSONValue?, fallbackSource: String, into citations: inout [WebSearchCitation]) {
+        guard case let .array(sources) = value else { return }
+        for source in sources {
+            guard let object = source.objectValue,
+                  let url = object.string(for: "url") ?? object.string(for: "uri")
+            else { continue }
+            citations.append(WebSearchCitation(
+                title: object.string(for: "title") ?? object.string(for: "name") ?? title(fromURLString: url),
+                url: url,
+                source: object.string(for: "source") ?? fallbackSource
+            ))
+        }
+    }
+
+    private static func webSearchQueries(in value: JSONValue?) -> [String] {
+        var queries = [String]()
+        collectWebSearchQueries(in: value, into: &queries)
+        var seen = Set<String>()
+        return queries.filter { query in
+            seen.insert(query).inserted
+        }
+    }
+
+    private static func collectWebSearchQueries(in value: JSONValue?, into queries: inout [String]) {
+        switch value {
+        case let .object(object):
+            if object.string(for: "type") == "web_search_call",
+               let action = object["action"]?.objectValue {
+                if let query = action.string(for: "query") {
+                    queries.append(query)
+                }
+                if case let .array(values) = action["queries"] {
+                    queries.append(contentsOf: values.compactMap(\.stringValue))
+                }
+            }
+            object.values.forEach { collectWebSearchQueries(in: $0, into: &queries) }
+        case let .array(values):
+            values.forEach { collectWebSearchQueries(in: $0, into: &queries) }
+        case .string, .number, .bool, .null, nil:
+            break
+        }
+    }
+
+    private static func hostedToolCalls(in value: JSONValue?) -> [[String: JSONValue]] {
+        var calls = [[String: JSONValue]]()
+        collectHostedToolCalls(in: value, into: &calls)
+        var seen = Set<String>()
+        return calls.filter { call in
+            let identifier = call.string(for: "id") ?? call.string(for: "call_id") ?? String(describing: call)
+            return seen.insert(identifier).inserted
+        }
+    }
+
+    private static func collectHostedToolCalls(in value: JSONValue?, into calls: inout [[String: JSONValue]]) {
+        switch value {
+        case let .object(object):
+            if let type = object.string(for: "type"),
+               type.hasSuffix("_call") || type == "code_interpreter" || type == "file_search" {
+                calls.append(object)
+            }
+            object.values.forEach { collectHostedToolCalls(in: $0, into: &calls) }
+        case let .array(values):
+            values.forEach { collectHostedToolCalls(in: $0, into: &calls) }
+        case .string, .number, .bool, .null, nil:
+            break
+        }
+    }
+
+    private static func title(fromURLString urlString: String) -> String {
+        URL(string: urlString)?.host ?? urlString
+    }
+
+    private static func jsonString(from value: JSONValue?) -> String? {
+        guard let value,
+              let data = try? JSONEncoder().encode(value)
+        else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private static func citationCount(in value: JSONValue?) -> Int {

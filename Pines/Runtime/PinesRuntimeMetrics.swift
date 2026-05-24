@@ -37,6 +37,18 @@ final class PinesRuntimeMetrics: NSObject, @unchecked Sendable {
         )
     }
 
+    func recordGenerationWatchdog(modelID: ModelID, stage: String, elapsedSeconds: TimeInterval) {
+        logger.warning(
+            "generation_watchdog model=\(modelID.rawValue, privacy: .public) stage=\(stage, privacy: .public) elapsed=\(elapsedSeconds, privacy: .public)"
+        )
+    }
+
+    func recordInterruptedChatRepair(repairedMessages: Int, elapsedSeconds: TimeInterval) {
+        logger.warning(
+            "interrupted_chat_repair messages=\(repairedMessages, privacy: .public) elapsed=\(elapsedSeconds, privacy: .public)"
+        )
+    }
+
     func recordChatStreamUIUpdate(messageID: UUID, characters: Int, tokenCount: Int, live: Bool) {
         logger.debug(
             "chat_stream_ui_update message=\(messageID.uuidString, privacy: .public) chars=\(characters, privacy: .public) tokens=\(tokenCount, privacy: .public) live=\(live, privacy: .public)"
@@ -57,7 +69,13 @@ final class PinesRuntimeMetrics: NSObject, @unchecked Sendable {
 
     func recordMemoryPressure(_ counters: RuntimeMemoryCounters) {
         logger.warning(
-            "memory_pressure physical=\(counters.physicalMemoryBytes ?? 0, privacy: .public) available=\(counters.availableMemoryBytes ?? -1, privacy: .public) thermal=\(counters.thermalState ?? "unknown", privacy: .public)"
+            "memory_pressure physical=\(counters.physicalMemoryBytes ?? 0, privacy: .public) available=\(counters.availableMemoryBytes ?? -1, privacy: .public) thermal=\(counters.thermalState ?? "unknown", privacy: .public) mlx_active=\(counters.mlxActiveMemoryBytes ?? -1, privacy: .public) mlx_cache=\(counters.mlxCacheMemoryBytes ?? -1, privacy: .public) mlx_peak=\(counters.mlxPeakMemoryBytes ?? -1, privacy: .public) mlx_cache_limit=\(counters.mlxCacheLimitBytes ?? -1, privacy: .public)"
+        )
+    }
+
+    func recordThermalPressure(_ counters: RuntimeMemoryCounters) {
+        logger.warning(
+            "thermal_pressure physical=\(counters.physicalMemoryBytes ?? 0, privacy: .public) available=\(counters.availableMemoryBytes ?? -1, privacy: .public) thermal=\(counters.thermalState ?? "unknown", privacy: .public) mlx_active=\(counters.mlxActiveMemoryBytes ?? -1, privacy: .public) mlx_cache=\(counters.mlxCacheMemoryBytes ?? -1, privacy: .public) mlx_peak=\(counters.mlxPeakMemoryBytes ?? -1, privacy: .public) mlx_cache_limit=\(counters.mlxCacheLimitBytes ?? -1, privacy: .public)"
         )
     }
 

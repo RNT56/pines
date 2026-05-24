@@ -31,6 +31,7 @@ struct PinesRootView: View {
     @State private var isPrivacyCoverVisible = false
     @State private var isPrivacyLocked = false
     @State private var appUnlockError: String?
+    @State private var isUITestBootstrapReady = false
 
     init() {
         let chatState = PinesChatState()
@@ -65,6 +66,10 @@ struct PinesRootView: View {
         )
     }
 
+    private var canShowPrivacyLock: Bool {
+        !PinesUITestLaunchConfiguration.isEnabled
+    }
+
     var body: some View {
         ZStack {
             if isMainUIReady, let services {
@@ -93,10 +98,22 @@ struct PinesRootView: View {
                     .zIndex(1)
             }
 
-            if isPrivacyCoverVisible || isPrivacyLocked {
+            if canShowPrivacyLock, isPrivacyCoverVisible || isPrivacyLocked {
                 privacyCover
                     .zIndex(2)
             }
+
+            #if DEBUG
+            if isUITestBootstrapReady {
+                Text(".")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.clear)
+                    .frame(width: 10, height: 10)
+                    .accessibilityElement()
+                    .accessibilityLabel("Pines UI test ready")
+                    .accessibilityIdentifier("pines.ui-test.ready")
+            }
+            #endif
         }
         .pinesHighRefreshRate()
         .preferredColorScheme(settingsState.interfaceMode.colorScheme)
@@ -112,8 +129,15 @@ struct PinesRootView: View {
             PinesRuntimeMetrics.shared.recordStartupPhase("boot_first_frame_yield", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
 
             let servicesStartedAt = Date()
-            let services = PinesAppServices(loadsDefaultStore: false)
+            let services = PinesAppServices(loadsDefaultStore: PinesUITestLaunchConfiguration.isEnabled)
             self.services = services
+            #if DEBUG
+            if PinesUITestLaunchConfiguration.isEnabled {
+                if services.liveStore == nil {
+                    appModel.serviceError = services.defaultStoreStartupError ?? "UI test local store is unavailable."
+                }
+            }
+            #endif
             services.runtimeMetrics.recordStartupPhase("services_init", elapsedSeconds: Date().timeIntervalSince(servicesStartedAt))
 
             await services.prepareForFirstFrame()
@@ -148,6 +172,14 @@ struct PinesRootView: View {
                     appModel.serviceError = error
                 }
                 await appModel.bootstrap(services: services)
+                #if DEBUG
+                if PinesUITestLaunchConfiguration.isEnabled {
+                    isUITestBootstrapReady = storeReady
+                }
+                #endif
+                #if DEBUG
+                await appModel.runLaunchStressModeIfNeeded(services: services)
+                #endif
                 haptics.prepare()
                 services.runtimeMetrics.recordStartupPhase("root_bootstrap_complete", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
             }
@@ -160,7 +192,7 @@ struct PinesRootView: View {
             handleScenePhase(phase)
         }
         .onChange(of: settingsState.securityConfiguration.appLockEnabled) { _, enabled in
-            guard enabled else {
+            guard canShowPrivacyLock, enabled else {
                 isPrivacyLocked = false
                 isPrivacyCoverVisible = false
                 appUnlockError = nil
@@ -171,10 +203,17 @@ struct PinesRootView: View {
             Task { await authenticateAppUnlock() }
         }
         .onPinesMemoryWarning {
-            appModel.stopCurrentRun()
             if let services {
                 Task {
                     await services.handleMemoryPressure()
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
+            guard ProcessInfo.processInfo.thermalState == .critical else { return }
+            if let services {
+                Task {
+                    await services.handleThermalPressure()
                 }
             }
         }
@@ -299,6 +338,7 @@ struct PinesRootView: View {
     }
 
     private func handleScenePhase(_ phase: ScenePhase) {
+        let appLockEnabled = canShowPrivacyLock && settingsState.securityConfiguration.appLockEnabled
         switch phase {
         case .active:
             if let services {
@@ -306,29 +346,34 @@ struct PinesRootView: View {
                     await services.mlxRuntime.setForegroundActive(true)
                 }
             }
-            if settingsState.securityConfiguration.appLockEnabled, isPrivacyLocked {
+            if appLockEnabled, isPrivacyLocked {
                 Task { await authenticateAppUnlock() }
-            } else if !settingsState.securityConfiguration.appLockEnabled {
+            } else if !appLockEnabled {
                 isPrivacyCoverVisible = false
+                isPrivacyLocked = false
+                appUnlockError = nil
             }
         case .inactive, .background:
-            isPrivacyCoverVisible = true
+            isPrivacyCoverVisible = canShowPrivacyLock
             if let services {
                 Task {
                     await appModel.stopLocalRuntimeForBackground(services: services)
                 }
             }
-            if settingsState.securityConfiguration.appLockEnabled {
+            if appLockEnabled {
                 isPrivacyLocked = true
+            } else {
+                isPrivacyLocked = false
+                appUnlockError = nil
             }
         @unknown default:
-            isPrivacyCoverVisible = true
+            isPrivacyCoverVisible = canShowPrivacyLock
         }
     }
 
     @MainActor
     private func authenticateAppUnlock() async {
-        guard settingsState.securityConfiguration.appLockEnabled else {
+        guard canShowPrivacyLock, settingsState.securityConfiguration.appLockEnabled else {
             isPrivacyLocked = false
             isPrivacyCoverVisible = false
             appUnlockError = nil
@@ -360,23 +405,29 @@ struct PinesRootView: View {
             ChatsView()
                 .tabItem { Label(PinesTab.chats.title, systemImage: PinesTab.chats.systemImage) }
                 .tag(PinesTab.chats)
+                .accessibilityIdentifier("pines.tab.chats")
 
             ModelsView()
                 .tabItem { Label(PinesTab.models.title, systemImage: PinesTab.models.systemImage) }
                 .tag(PinesTab.models)
+                .accessibilityIdentifier("pines.tab.models")
 
             VaultView()
                 .tabItem { Label(PinesTab.vault.title, systemImage: PinesTab.vault.systemImage) }
                 .tag(PinesTab.vault)
+                .accessibilityIdentifier("pines.tab.vault")
 
             ArtifactsWorkspaceView()
                 .tabItem { Label(PinesTab.artifacts.title, systemImage: PinesTab.artifacts.systemImage) }
                 .tag(PinesTab.artifacts)
+                .accessibilityIdentifier("pines.tab.artifacts")
 
             SettingsView()
                 .tabItem { Label(PinesTab.settings.title, systemImage: PinesTab.settings.systemImage) }
                 .tag(PinesTab.settings)
+                .accessibilityIdentifier("pines.tab.settings")
         }
+        .accessibilityIdentifier("pines.root.tabs")
         .pinesAdaptiveTabViewStyle()
         .tint(theme.colors.accent)
         .background {
@@ -406,7 +457,13 @@ struct PinesOpenModelsPageAction: Sendable {
 private extension View {
     @ViewBuilder
     func pinesAdaptiveTabViewStyle() -> some View {
-        if #available(iOS 18.0, *) {
+        if PinesUITestLaunchConfiguration.isEnabled {
+            if #available(iOS 18.0, *) {
+                tabViewStyle(.tabBarOnly)
+            } else {
+                self
+            }
+        } else if #available(iOS 18.0, *) {
             tabViewStyle(.sidebarAdaptable)
         } else {
             self

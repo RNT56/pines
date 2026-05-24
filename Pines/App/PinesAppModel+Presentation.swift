@@ -122,7 +122,14 @@ extension PinesAppModel {
             estimatedBytes: preflight.estimatedBytes > 0 ? preflight.estimatedBytes : nil,
             license: preflight.license,
             modelType: preflight.modelType,
-            processorClass: preflight.processorClass
+            textConfigModelType: preflight.textConfigModelType,
+            processorClass: preflight.processorClass,
+            keyHeadDimension: preflight.keyHeadDimension,
+            valueHeadDimension: preflight.valueHeadDimension,
+            routedExperts: preflight.routedExperts,
+            expertsPerToken: preflight.expertsPerToken,
+            cacheTopology: preflight.cacheTopology,
+            turboQuantFamilySupport: preflight.turboQuantFamilySupport
         )
     }
 
@@ -209,9 +216,16 @@ extension PinesAppModel {
                 ),
                 promptCacheIdentifier: install.repository
             )
-        let contextWindow = enrichRuntime
-            ? (runtime.capabilities.maxContextTokens.map { "\($0 / 1000)K" } ?? "Unknown")
-            : "Pending"
+        let contextWindow: String
+        if enrichRuntime,
+           let admittedContext = runtimeProfile.quantization.turboQuantAdmission?.admittedContextLength,
+           admittedContext > 0 {
+            contextWindow = "\(admittedContext.formatted()) tokens"
+        } else {
+            contextWindow = enrichRuntime
+                ? (runtime.capabilities.maxContextTokens.map { "\($0 / 1000)K" } ?? "Unknown")
+                : "Pending"
+        }
 
         return PinesModelPreview(
             install: install,

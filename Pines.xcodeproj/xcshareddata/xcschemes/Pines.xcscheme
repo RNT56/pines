@@ -37,6 +37,20 @@
          </BuildActionEntry>
          <BuildActionEntry
             buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "EA208B0F1AFB233C6F8426F9"
+               BuildableName = "PinesUITests.xctest"
+               BlueprintName = "PinesUITests"
+               ReferencedContainer = "container:Pines.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
             buildForRunning = "YES"
             buildForProfiling = "YES"
             buildForArchiving = "YES"
@@ -76,6 +90,17 @@
                BlueprintIdentifier = "9C0C5645F73C831E8B61CB9F"
                BuildableName = "PinesTests.xctest"
                BlueprintName = "PinesTests"
+               ReferencedContainer = "container:Pines.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "EA208B0F1AFB233C6F8426F9"
+               BuildableName = "PinesUITests.xctest"
+               BlueprintName = "PinesUITests"
                ReferencedContainer = "container:Pines.xcodeproj">
             </BuildableReference>
          </TestableReference>

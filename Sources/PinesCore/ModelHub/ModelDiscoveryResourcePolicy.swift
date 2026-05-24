@@ -59,7 +59,11 @@ public struct ModelDiscoveryResourcePolicy: Hashable, Codable, Sendable {
     ) -> ModelResourceLimitDecision {
         let downloadableFiles = Self.downloadCandidateFiles(from: input.files, modalities: modalities)
         let downloadFootprint = Self.knownDownloadFootprint(from: downloadableFiles)
-        let parameterCount = Self.inferredParameterCount(repository: input.repository, tags: input.tags)
+        let parameterCount = Self.inferredParameterCount(
+            repository: input.repository,
+            tags: input.tags,
+            configJSON: input.configJSON
+        )
         let explicitWeightBits = Self.inferredWeightBits(repository: input.repository, tags: input.tags)
         let weightBits = explicitWeightBits ?? assumedUnquantizedWeightBits
         let estimatedWeightBytes = parameterCount.map {
@@ -120,9 +124,21 @@ public struct ModelDiscoveryResourcePolicy: Hashable, Codable, Sendable {
     }
 
     public static func inferredParameterCount(repository: String, tags: [String]) -> Int64? {
-        let candidates = ([repository] + tags).flatMap { parameterCandidates(in: $0) }
+        let candidates = ([repository] + tags.compactMap(parameterHintSource(from:)))
+            .flatMap { parameterCandidates(in: $0) }
         guard let largest = candidates.max(), largest.isFinite, largest > 0 else { return nil }
         return Int64(largest.rounded())
+    }
+
+    public static func inferredParameterCount(
+        repository: String,
+        tags: [String],
+        configJSON: Data?
+    ) -> Int64? {
+        inferredParameterCount(repository: repository, tags: tags)
+            ?? configJSON
+                .flatMap(decodeJSONObject)
+                .flatMap(inferredParameterCount(from:))
     }
 
     public static func inferredWeightBits(repository: String, tags: [String]) -> Int? {
@@ -261,6 +277,23 @@ public struct ModelDiscoveryResourcePolicy: Hashable, Codable, Sendable {
         return candidates
     }
 
+    private static func parameterHintSource(from tag: String) -> String? {
+        let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("dataset:")
+            || lower.hasPrefix("license:")
+            || lower.hasPrefix("region:")
+            || lower.hasPrefix("language:")
+            || lower.hasPrefix("arxiv:")
+        {
+            return nil
+        }
+        if lower.hasPrefix("base_model:") {
+            return String(trimmed.dropFirst("base_model:".count))
+        }
+        return trimmed
+    }
+
     private static func expertProductParameterCount(from token: String) -> Double? {
         let parts = token.split(whereSeparator: { $0 == "x" || $0 == "×" }).map(String.init)
         guard parts.count == 2,
@@ -289,6 +322,111 @@ public struct ModelDiscoveryResourcePolicy: Hashable, Codable, Sendable {
         number = number.replacingOccurrences(of: "_", with: ".")
         guard let value = Double(number), value.isFinite, value > 0 else { return nil }
         return value * (unit == "b" ? 1_000_000_000 : 1_000_000)
+    }
+
+    private static func inferredParameterCount(from config: [String: Any]) -> Int64? {
+        let configs = [
+            config,
+            config["text_config"] as? [String: Any],
+        ].compactMap { $0 }
+
+        for candidate in configs {
+            if let explicit = explicitParameterCount(from: candidate) {
+                return explicit
+            }
+        }
+        for candidate in configs {
+            if let estimated = estimatedDenseTransformerParameterCount(from: candidate) {
+                return estimated
+            }
+        }
+        return nil
+    }
+
+    private static func explicitParameterCount(from config: [String: Any]) -> Int64? {
+        let keys = [
+            "num_parameters",
+            "parameter_count",
+            "parameters",
+            "total_parameters",
+            "num_params",
+            "n_params",
+        ]
+        for key in keys {
+            if let count = positiveInt64(config[key]) {
+                return count
+            }
+            if let text = config[key] as? String,
+               let largest = parameterCandidates(in: text).max(),
+               largest.isFinite,
+               largest > 0 {
+                return Int64(largest.rounded())
+            }
+        }
+        return nil
+    }
+
+    private static func estimatedDenseTransformerParameterCount(from config: [String: Any]) -> Int64? {
+        guard let hiddenSize = positiveInt64(config["hidden_size"]) ?? positiveInt64(config["dim"]),
+              let layers = positiveInt64(config["num_hidden_layers"]) ?? positiveInt64(config["n_layers"]),
+              let intermediateSize = positiveInt64(config["intermediate_size"])
+                ?? positiveInt64(config["hidden_dim"])
+                ?? positiveInt64(config["ffn_dim"])
+        else {
+            return nil
+        }
+
+        let attentionHeads = positiveInt64(config["num_attention_heads"])
+            ?? positiveInt64(config["n_heads"])
+        let keyValueHeads = positiveInt64(config["num_key_value_heads"])
+            ?? positiveInt64(config["n_kv_heads"])
+            ?? attentionHeads
+        let headDimension = positiveInt64(config["head_dim"])
+            ?? {
+                guard let attentionHeads, attentionHeads > 0, hiddenSize.isMultiple(of: attentionHeads) else {
+                    return nil
+                }
+                return hiddenSize / attentionHeads
+            }()
+
+        let queryDimension = attentionHeads.map { $0 * (headDimension ?? (hiddenSize / max($0, 1))) } ?? hiddenSize
+        let keyValueDimension = keyValueHeads.map { $0 * (headDimension ?? (hiddenSize / max($0, 1))) }
+            ?? queryDimension
+        let attentionParameters = hiddenSize
+            * (queryDimension + keyValueDimension + keyValueDimension + hiddenSize)
+        let mlpParameters = Int64(3) * hiddenSize * intermediateSize
+        let perLayerParameters = attentionParameters + mlpParameters
+
+        let vocabSize = positiveInt64(config["vocab_size"]) ?? 0
+        let embeddingParameters = vocabSize * hiddenSize
+        let tiedEmbeddings = (config["tie_word_embeddings"] as? Bool) == true
+        let outputParameters = tiedEmbeddings ? 0 : embeddingParameters
+        let total = layers * perLayerParameters + embeddingParameters + outputParameters
+        guard total > 0 else { return nil }
+        return total
+    }
+
+    private static func decodeJSONObject(_ data: Data) -> [String: Any]? {
+        (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private static func positiveInt64(_ value: Any?) -> Int64? {
+        switch value {
+        case let value as Int:
+            return value > 0 ? Int64(value) : nil
+        case let value as Int64:
+            return value > 0 ? value : nil
+        case let value as Double:
+            return value.isFinite && value > 0 ? Int64(value.rounded()) : nil
+        case let value as NSNumber:
+            let intValue = value.int64Value
+            return intValue > 0 ? intValue : nil
+        case let value as String:
+            guard let parsed = Double(value), parsed.isFinite, parsed > 0 else { return nil }
+            return Int64(parsed.rounded())
+        default:
+            return nil
+        }
     }
 
     private static func lexicalTokens(in text: String) -> [String] {

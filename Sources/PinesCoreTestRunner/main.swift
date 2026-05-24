@@ -184,7 +184,7 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "gemma4", "any-to-any"]
             )
         )
-        try expectEqual(gemma4.verification, .installable)
+        try expectEqual(gemma4.verification, .verified)
         try expectEqual(gemma4.modalities, [.text, .vision])
 
         let qwen35 = ModelPreflightClassifier().classify(
@@ -256,8 +256,12 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "gemma4_assistant"]
             )
         )
-        try expectEqual(gemma4Assistant.verification, .installable)
+        try expectEqual(gemma4Assistant.verification, .experimental)
         try expectEqual(gemma4Assistant.modalities, [.text])
+        try expect(
+            gemma4Assistant.reasons.contains(ModelPreflightClassifier.gemma4AssistantCapabilityGateReason),
+            "Gemma4 assistant should explain the required MTP capability gate"
+        )
 
         let deepseekV32 = ModelPreflightClassifier().classify(
             ModelPreflightInput(
@@ -316,8 +320,8 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "llama4", "any-to-any"]
             )
         )
-        try expectEqual(llama4.verification, .installable)
-        try expectEqual(llama4.modalities, [.text])
+        try expectEqual(llama4.verification, .unsupported)
+        try expectEqual(llama4.modalities, [])
 
         let deepseekV4 = ModelPreflightClassifier().classify(
             ModelPreflightInput(
@@ -330,8 +334,12 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "deepseek_v4"]
             )
         )
-        try expectEqual(deepseekV4.verification, .installable)
+        try expectEqual(deepseekV4.verification, .experimental)
         try expectEqual(deepseekV4.modalities, [.text])
+        try expect(
+            deepseekV4.reasons.contains(ModelPreflightClassifier.deepSeekV4CapabilityGateReason),
+            "DeepSeek V4 should explain the required canonical runtime gate"
+        )
 
         let unsupportedMoEType = ModelPreflightClassifier().classify(
             ModelPreflightInput(
@@ -413,7 +421,7 @@ struct PinesCoreTestRunner {
             ]
             """
         )
-        let service = HuggingFaceModelCatalogService(client: client, baseURL: URL(string: "https://hub.test")!)
+        let service = try HuggingFaceModelCatalogService(client: client, baseURL: URL(string: "https://hub.test")!)
         let models = try await service.search(filters: ModelSearchFilters(query: "qwen", task: .featureExtraction, limit: 5))
         let requestURL = try await client.lastURL()
         let queryItems = Dictionary(uniqueKeysWithValues: URLComponents(url: requestURL, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
@@ -455,7 +463,7 @@ struct PinesCoreTestRunner {
             ]
             """
         )
-        let lightweightService = HuggingFaceModelCatalogService(client: lightweightClient, baseURL: URL(string: "https://hub.test")!)
+        let lightweightService = try HuggingFaceModelCatalogService(client: lightweightClient, baseURL: URL(string: "https://hub.test")!)
         let lightweightModels = try await lightweightService.search(
             filters: ModelSearchFilters(query: "qwen", task: .textGeneration, limit: 5, includeConfig: false)
         )
@@ -489,7 +497,7 @@ struct PinesCoreTestRunner {
             }
             """
         )
-        let metadataService = HuggingFaceModelCatalogService(client: metadataClient, baseURL: URL(string: "https://hub.test")!)
+        let metadataService = try HuggingFaceModelCatalogService(client: metadataClient, baseURL: URL(string: "https://hub.test")!)
         let metadata = try await metadataService.modelMetadata(repository: "example/Qwen3-4B-4bit-MLX")
         let metadataURL = try await metadataClient.lastURL()
         let metadataQueryItems = Dictionary(uniqueKeysWithValues: URLComponents(url: metadataURL, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
@@ -547,7 +555,7 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS projects"), "missing project spaces table")
         try expect(sql.contains("ALTER TABLE conversations ADD COLUMN project_id"), "missing conversation project link")
         try expect(sql.contains("ALTER TABLE vault_documents ADD COLUMN project_id"), "missing vault project link")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 16)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 19)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")
@@ -801,6 +809,7 @@ struct PinesCoreTestRunner {
             cloudMaxCompletionTokens: 32768,
             localMaxCompletionTokens: 2048,
             localMaxContextTokens: 32768,
+            localTurboQuantMode: .maxContext,
             anthropicTokenCountPreflightEnabled: true,
             requireToolApproval: true,
             braveSearchEnabled: true,
@@ -817,6 +826,7 @@ struct PinesCoreTestRunner {
         try expectEqual(decoded.cloudMaxCompletionTokens, 32768)
         try expectEqual(decoded.localMaxCompletionTokens, 2048)
         try expectEqual(decoded.localMaxContextTokens, 32768)
+        try expectEqual(decoded.localTurboQuantMode, .maxContext)
         try expectEqual(decoded.anthropicTokenCountPreflightEnabled, true)
 
         let runtimeProfile = RuntimeProfile()
@@ -826,7 +836,9 @@ struct PinesCoreTestRunner {
         try expectEqual(runtimeProfile.quantization.requestedBackend, .metalPolarQJL)
         try expectEqual(runtimeProfile.quantization.activeBackend, .mlxPacked)
         try expectEqual(runtimeProfile.quantization.metalCodecAvailable, false)
+        try expectEqual(runtimeProfile.quantization.turboQuantUserMode, .balanced)
         try expectEqual(TurboQuantPreset.allCases, [.turbo2_5, .turbo3_5, .turbo4, .turbo4v2])
+        try expectEqual(TurboQuantUserMode.allCases, [.fastest, .balanced, .maxContext, .batterySaver])
         try expectEqual(TurboQuantPreset.defaultGeneration, .turbo4v2)
         try expectEqual(TurboQuantPreset.conservativeFallback, .turbo3_5)
         try expectEqual(TurboQuantPreset.vaultVectorDefault, .turbo4v2)
@@ -886,6 +898,7 @@ struct PinesCoreTestRunner {
         try expectEqual(a17Pro.memoryTier, .balanced)
         try expectEqual(a17Pro.performanceClass, .a17Pro)
         try expectEqual(a17Pro.recommendedMaxModelBytes, 3_800_000_000)
+        try expectEqual(a17Pro.runtimePressureReason, .none)
         let a17ProPolicy = ModelDiscoveryResourcePolicy.deviceDefault(for: a17Pro)
         let gemma4E2BDecision = a17ProPolicy.evaluate(
             ModelPreflightInput(
@@ -956,15 +969,75 @@ struct PinesCoreTestRunner {
         let pressured = DeviceProfile.recommended(
             for: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 16_000_000_000,
-                availableMemoryBytes: 500_000_000,
+                availableMemoryBytes: 2_500_000_000,
                 thermalState: "serious"
             )
         )
-        try expectEqual(pressured.recommendedContextTokens, 4096)
-        try expectEqual(pressured.recommendedEmbeddingBatchSize, 4)
+        try expectEqual(pressured.recommendedContextTokens, 16_384)
+        try expectEqual(pressured.recommendedEmbeddingBatchSize, 8)
         try expectEqual(pressured.turboQuantOptimizationPolicy, .conservative)
-        try expect(pressured.thermalDownshiftActive, "thermal pressure should mark a downshift")
-        try expect(!pressured.allowsVisionModels, "thermal pressure should disable vision defaults")
+        try expectEqual(pressured.runtimePressureReason, .thermalSerious)
+        try expect(!pressured.thermalDownshiftActive, "serious thermal state should reduce throughput without forcing context downshift")
+        try expect(pressured.allowsVisionModels, "serious thermal state should not disable vision defaults")
+        let lowPowerA17 = DeviceProfile.recommended(
+            for: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_500_000_000,
+                thermalState: "nominal",
+                hardwareModelIdentifier: "iPhone16,2",
+                lowPowerModeEnabled: true
+            )
+        )
+        try expectEqual(lowPowerA17.runtimePressureReason, .lowPower)
+        try expect(!lowPowerA17.thermalDownshiftActive, "low power mode should not masquerade as thermal downshift")
+        try expectEqual(lowPowerA17.recommendedContextTokens, 16_384)
+        try expectEqual(lowPowerA17.recommendedSmallModelContextTokens, 24_576)
+        try expectEqual(lowPowerA17.recommendedPrefillStepSize, 256)
+        let unsafeThermal = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_000_000_000,
+                thermalState: "critical"
+            )
+        )
+        try expect(!unsafeThermal.allowed, "critical thermal state should pause local generation")
+        try expectEqual(unsafeThermal.pressureReason, .thermalCritical)
+        try expect(unsafeThermal.constrainedModeActive, "critical thermal state should constrain local runtime")
+        try expect(unsafeThermal.requiresImmediateUnload, "critical thermal state should unload local runtime")
+
+        let seriousThermal = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_000_000_000,
+                thermalState: "serious"
+            )
+        )
+        try expect(seriousThermal.allowed, "serious thermal state should stay available in constrained mode")
+        try expectEqual(seriousThermal.pressureReason, .thermalSerious)
+        try expect(seriousThermal.constrainedModeActive, "serious thermal state should constrain local runtime")
+        try expect(!seriousThermal.requiresImmediateUnload, "serious thermal state should not unload local runtime")
+
+        let constrainedSafety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_250_000_000,
+                thermalState: "fair"
+            )
+        )
+        let constrainedProfile = constrainedSafety.constrainedRuntimeProfile(
+            RuntimeProfile(
+                quantization: QuantizationProfile(maxKVSize: 16_384),
+                streamExperts: true,
+                expertStreamingMode: .directNVMe,
+                mtpEnabled: true,
+                speculativeDecodingEnabled: true
+            )
+        )
+        try expect(constrainedSafety.allowed, "fair thermal pressure should constrain before denying")
+        try expect(constrainedSafety.constrainedModeActive, "fair thermal pressure should enter constrained mode")
+        try expect(!constrainedSafety.requiresImmediateUnload, "fair thermal pressure should not force immediate unload")
+        try expectEqual(constrainedProfile.quantization.maxKVSize, 2048)
+        try expect(!constrainedProfile.streamExperts, "constrained local profile should disable stream experts")
 
         let future = DeviceProfile.recommended(
             for: RuntimeMemorySnapshot(
@@ -1253,14 +1326,14 @@ struct PinesCoreTestRunner {
     }
 
     private static func testVaultChunking() throws {
-        let chunker = VaultChunker(configuration: .init(maxCharacterCount: 5, overlapCharacterCount: 2))
+        let chunker = try VaultChunker(configuration: .init(maxCharacterCount: 5, overlapCharacterCount: 2))
         let first = chunker.chunk("abcdefghijkl", sourceID: "doc-a")
         let second = chunker.chunk("abcdefghijkl", sourceID: "doc-a")
         try expectEqual(first, second)
         try expectEqual(first.map(\.text), ["abcde", "defgh", "ghijk", "jkl"])
         try expectEqual(first.map(\.startOffset), [0, 3, 6, 9])
 
-        let natural = VaultChunker(configuration: .init(maxCharacterCount: 12, overlapCharacterCount: 0))
+        let natural = try VaultChunker(configuration: .init(maxCharacterCount: 12, overlapCharacterCount: 0))
             .chunk("alpha beta gamma delta", sourceID: "doc-b")
         try expectEqual(natural.map(\.text), ["alpha beta", "gamma delta"])
     }
@@ -1298,15 +1371,25 @@ struct PinesCoreTestRunner {
 
         let score = try codec.approximateCosineSimilarity(query: vector, code: encoded)
         try expect(score > 0.92, "TurboQuant approximation should preserve self-similarity")
+        var decodedScoreBuffer = [Float]()
+        let decodedScore = try codec.approximateCosineSimilarity(query: vector, code: encoded, decodeBuffer: &decodedScoreBuffer)
+        let streamingScore = try codec.approximateCosineSimilarityStreaming(query: vector, code: encoded)
+        try expect(abs(decodedScore - streamingScore) < 0.0001, "Streaming TurboQuant scoring should match decoded scoring")
 
-        let roundTrip = try codec.decode(data: try codec.encodeToData(vector))
+        let binaryData = try codec.encodeToData(vector)
+        try expect(Array(binaryData.prefix(6)) == Array("PNTQV2".utf8), "TurboQuant vector writes should use the binary v2 envelope")
+        let roundTrip = try codec.decode(data: binaryData)
         try expectEqual(roundTrip.count, vector.count)
 
         let legacyCodec = TurboQuantVectorCodec(preset: .turbo3_5, seed: 42)
-        let legacyEncoded = try legacyCodec.encode(vector)
+        var legacyEncoded = try legacyCodec.encode(vector)
+        legacyEncoded.codecVersion = TurboQuantVectorCodec.legacyJSONCodecVersion
         try expectEqual(legacyEncoded.preset, .turbo3_5)
         let legacyScore = try codec.approximateCosineSimilarity(query: vector, code: legacyEncoded)
         try expect(legacyScore > 0.92, "Legacy TurboQuant approximation should remain readable")
+        let legacyData = try JSONEncoder().encode(legacyEncoded)
+        let legacyRoundTrip = try codec.decode(data: legacyData)
+        try expectEqual(legacyRoundTrip.count, vector.count)
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {

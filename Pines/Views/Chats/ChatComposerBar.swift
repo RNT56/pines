@@ -274,6 +274,7 @@ struct ChatComposerBar: View {
             .padding(.vertical, theme.spacing.xsmall)
             .frame(minHeight: 44, alignment: .center)
             .submitLabel(.send)
+            .accessibilityIdentifier("pines.chat.composer.input")
             .onSubmit {
                 guard chatState.activeRunID == nil else { return }
                 sendDraft()
@@ -289,6 +290,7 @@ struct ChatComposerBar: View {
         .frame(width: horizontalSizeClass == .compact ? 132 : 150)
         .disabled(chatState.activeRunID != nil)
         .accessibilityLabel("Run mode")
+        .accessibilityIdentifier("pines.chat.composer.run-mode")
     }
 
     private var attachButton: some View {
@@ -318,6 +320,7 @@ struct ChatComposerBar: View {
             Image(systemName: "paperclip")
         }
         .accessibilityLabel("Attach")
+        .accessibilityIdentifier("pines.chat.composer.attach")
         .disabled(chatState.activeRunID != nil || isImportingAttachments || isImportingVaultAttachment || attachments.count >= Self.maxAttachmentCount)
         .pinesButtonStyle(.icon)
     }
@@ -335,6 +338,7 @@ struct ChatComposerBar: View {
             Image(systemName: "text.bubble")
         }
         .accessibilityLabel("MCP prompts")
+        .accessibilityIdentifier("pines.chat.composer.mcp-prompts")
         .pinesButtonStyle(.icon)
     }
 
@@ -365,6 +369,7 @@ struct ChatComposerBar: View {
             Image(systemName: "wrench.and.screwdriver")
         }
         .accessibilityLabel("Agent tools")
+        .accessibilityIdentifier("pines.chat.composer.agent-tools")
         .pinesButtonStyle(.icon)
     }
 
@@ -380,6 +385,7 @@ struct ChatComposerBar: View {
                 .symbolEffect(.bounce, options: .nonRepeating, value: didCommitSend)
         }
         .accessibilityLabel(chatState.activeRunID == nil ? "Send" : "Stop")
+        .accessibilityIdentifier("pines.chat.composer.send")
         .disabled(chatState.activeRunID == nil && !canSend)
         .pinesButtonStyle(sendButtonStyle)
     }
