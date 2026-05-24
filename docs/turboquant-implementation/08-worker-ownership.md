@@ -16,7 +16,7 @@ Use [Worker Launch Schedule](14-worker-launch-schedule.md) for executable order.
 | Wave 4 | W11, W14A, W14B, W17, iOS lifecycle policy | parallel after evidence gate |
 | Wave 5 | W13, optimization evidence update | gated optimization after measurement exists |
 | Wave 6 | W15A, W15B, W29+ | speculative and platform work after rollback/cache proof |
- 
+
 The tables below preserve worker ownership and scope. They are grouped by earliest legal launch window.
 
 ## Lanes
