@@ -200,7 +200,17 @@ run_tests() {
     return 0
   fi
 
-  echo "Running iOS runtime smoke tests..."
+  : > "$log_dir/xcodebuild-test-run.log"
+  run_xcode_test_phase "$simulator_id" "unit tests" -only-testing:PinesTests
+  run_xcode_test_phase "$simulator_id" "UI smoke tests" -only-testing:PinesUITests
+}
+
+run_xcode_test_phase() {
+  local simulator_id="$1"
+  local label="$2"
+  shift 2
+
+  echo "Running iOS runtime smoke tests ($label)..."
   set -o pipefail
   xcodebuild \
     -project "$project" \
@@ -210,7 +220,8 @@ run_tests() {
     "${xcode_package_flags[@]}" \
     CODE_SIGNING_ALLOWED=NO \
     ONLY_ACTIVE_ARCH=YES \
-    test-without-building | tee "$log_dir/xcodebuild-test-run.log"
+    "$@" \
+    test-without-building | tee -a "$log_dir/xcodebuild-test-run.log"
 }
 
 finalize_validation() {
