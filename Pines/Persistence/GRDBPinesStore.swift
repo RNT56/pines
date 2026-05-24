@@ -1153,8 +1153,7 @@ actor GRDBPinesStore:
                     continue
                 }
                 let codec = Self.vaultTurboQuantCodec(modelID: embeddings.modelID, dimensions: embedding.vector.count)
-                let encodedCode = try codec.encode(embedding.vector)
-                let codeData = try JSONEncoder().encode(encodedCode)
+                let codeData = try codec.encodeToData(embedding.vector)
                 try db.execute(
                     sql: """
                     INSERT INTO vault_embeddings
@@ -1176,7 +1175,7 @@ actor GRDBPinesStore:
                         Self.encodeFP16(embedding.vector),
                         codeData,
                         Double(norm),
-                        encodedCode.codecVersion,
+                        TurboQuantVectorCodec.codecVersion,
                         StableSearchHash.hexDigest(for: "\(chunk.checksum)|\(embeddings.modelID.rawValue)|\(embedding.vector.count)"),
                         now,
                     ]
@@ -1242,8 +1241,7 @@ actor GRDBPinesStore:
                     continue
                 }
                 let codec = Self.vaultTurboQuantCodec(modelID: embeddings.modelID, dimensions: embedding.vector.count)
-                let encodedCode = try codec.encode(embedding.vector)
-                let codeData = try JSONEncoder().encode(encodedCode)
+                let codeData = try codec.encodeToData(embedding.vector)
                 try db.execute(
                     sql: """
                     INSERT INTO vault_embeddings
@@ -1265,7 +1263,7 @@ actor GRDBPinesStore:
                         Self.encodeFP16(embedding.vector),
                         codeData,
                         Double(norm),
-                        encodedCode.codecVersion,
+                        TurboQuantVectorCodec.codecVersion,
                         StableSearchHash.hexDigest(for: "\(chunk.checksum)|\(embeddings.modelID.rawValue)|\(embedding.vector.count)"),
                         now,
                     ]
@@ -1432,12 +1430,13 @@ actor GRDBPinesStore:
                 scannedRows += rows.count
                 offset += rows.count
 
+                var decodeBuffer = [Float]()
                 topCandidates.append(
                     contentsOf: rows.compactMap { row -> Candidate? in
                         let codeData: Data = row["turboquant_code"]
                         let code: TurboQuantVectorCode
                         do {
-                            code = try JSONDecoder().decode(TurboQuantVectorCode.self, from: codeData)
+                            code = try TurboQuantVectorCodec.decodeCode(data: codeData)
                         } catch {
                             decodeFailureCount += 1
                             return nil
@@ -1445,7 +1444,11 @@ actor GRDBPinesStore:
                         let codec = TurboQuantVectorCodec(preset: code.preset, seed: code.seed)
                         let score: Double
                         do {
-                            score = try codec.approximateCosineSimilarity(query: embedding, code: code)
+                            score = try codec.approximateCosineSimilarity(
+                                query: embedding,
+                                code: code,
+                                decodeBuffer: &decodeBuffer
+                            )
                         } catch {
                             scoringFailureCount += 1
                             return nil

@@ -4,6 +4,7 @@ public enum CalculatorEvaluationError: Error, Equatable, CustomStringConvertible
     case divisionByZero
     case emptyExpression
     case expressionTooLong(maximum: Int)
+    case invalidMaximumExpressionLength(Int)
     case invalidCharacter(String, position: Int)
     case invalidNumber(String, position: Int)
     case nonFiniteResult
@@ -19,6 +20,8 @@ public enum CalculatorEvaluationError: Error, Equatable, CustomStringConvertible
             "Expression must not be empty."
         case let .expressionTooLong(maximum):
             "Expression must be \(maximum) characters or fewer."
+        case let .invalidMaximumExpressionLength(maximum):
+            "maximumExpressionLength must be greater than zero; got \(maximum)."
         case let .invalidCharacter(character, position):
             "Invalid character \(character) at position \(position)."
         case let .invalidNumber(number, position):
@@ -38,8 +41,14 @@ public enum CalculatorEvaluationError: Error, Equatable, CustomStringConvertible
 public struct SafeCalculatorEvaluator: Sendable {
     public let maximumExpressionLength: Int
 
-    public init(maximumExpressionLength: Int = 256) {
-        precondition(maximumExpressionLength > 0, "maximumExpressionLength must be positive")
+    public init() {
+        self.maximumExpressionLength = 256
+    }
+
+    public init(maximumExpressionLength: Int) throws {
+        guard maximumExpressionLength > 0 else {
+            throw CalculatorEvaluationError.invalidMaximumExpressionLength(maximumExpressionLength)
+        }
         self.maximumExpressionLength = maximumExpressionLength
     }
 

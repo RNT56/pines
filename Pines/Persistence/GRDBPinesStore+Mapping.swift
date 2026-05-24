@@ -313,7 +313,7 @@ extension GRDBPinesStore {
     static func vaultTurboQuantCodec(modelID: ModelID, dimensions: Int) -> TurboQuantVectorCodec {
         TurboQuantVectorCodec(
             preset: .vaultVectorDefault,
-            seed: TurboQuantVectorCodec.stableSeed(for: "\(modelID.rawValue)|\(dimensions)|vault-v1")
+            seed: TurboQuantVectorCodec.stableSeed(for: "\(modelID.rawValue)|\(dimensions)|vault-v2")
         )
     }
 

@@ -123,6 +123,8 @@ public struct ModelPreflightClassifier: Sendable {
             repository: lowerRepository,
             modelType: modelType
         )
+        let requiresGemma4AssistantCapabilityGate = modelType == "gemma4_assistant"
+        let requiresDeepSeekV4CapabilityGate = modelType == "deepseek_v4"
 
         let verification: ModelVerificationState
         if modalities.isEmpty
@@ -136,6 +138,12 @@ public struct ModelPreflightClassifier: Sendable {
         } else if requiresRuntimeCompatibilityGate {
             verification = .experimental
             reasons.append(Self.runtimeCompatibilityGateReason)
+        } else if requiresGemma4AssistantCapabilityGate {
+            verification = .experimental
+            reasons.append(Self.gemma4AssistantCapabilityGateReason)
+        } else if requiresDeepSeekV4CapabilityGate {
+            verification = .experimental
+            reasons.append(Self.deepSeekV4CapabilityGateReason)
         } else if CuratedModelManifest.default.contains(repository: input.repository) {
             verification = .verified
         } else if VerifiedModelFamilyManifest.default.contains(
@@ -539,6 +547,8 @@ public struct ModelPreflightClassifier: Sendable {
     }
 
     public static let runtimeCompatibilityGateReason = "Qwen3 1.7B MLX 4-bit variants require the fixed MLX TurboQuant UInt32 seed path and a passing on-device TurboQuant Metal self-test before local loading."
+    public static let gemma4AssistantCapabilityGateReason = "Gemma4 assistant models require MLX Swift LM dual-model MTP orchestration support and are not exposed through the standalone local runtime path."
+    public static let deepSeekV4CapabilityGateReason = "DeepSeek V4 models require canonical MLX Swift LM DeepSeek V4 runtime support before Pines can enable local loading."
 
     public static func requiresRuntimeCompatibilityGate(repository: String, modelType: String?) -> Bool {
         let normalized = repository.lowercased()

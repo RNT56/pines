@@ -256,8 +256,12 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "gemma4_assistant"]
             )
         )
-        try expectEqual(gemma4Assistant.verification, .verified)
+        try expectEqual(gemma4Assistant.verification, .experimental)
         try expectEqual(gemma4Assistant.modalities, [.text])
+        try expect(
+            gemma4Assistant.reasons.contains(ModelPreflightClassifier.gemma4AssistantCapabilityGateReason),
+            "Gemma4 assistant should explain the required MTP capability gate"
+        )
 
         let deepseekV32 = ModelPreflightClassifier().classify(
             ModelPreflightInput(
@@ -330,8 +334,12 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "deepseek_v4"]
             )
         )
-        try expectEqual(deepseekV4.verification, .installable)
+        try expectEqual(deepseekV4.verification, .experimental)
         try expectEqual(deepseekV4.modalities, [.text])
+        try expect(
+            deepseekV4.reasons.contains(ModelPreflightClassifier.deepSeekV4CapabilityGateReason),
+            "DeepSeek V4 should explain the required canonical runtime gate"
+        )
 
         let unsupportedMoEType = ModelPreflightClassifier().classify(
             ModelPreflightInput(
@@ -413,7 +421,7 @@ struct PinesCoreTestRunner {
             ]
             """
         )
-        let service = HuggingFaceModelCatalogService(client: client, baseURL: URL(string: "https://hub.test")!)
+        let service = try HuggingFaceModelCatalogService(client: client, baseURL: URL(string: "https://hub.test")!)
         let models = try await service.search(filters: ModelSearchFilters(query: "qwen", task: .featureExtraction, limit: 5))
         let requestURL = try await client.lastURL()
         let queryItems = Dictionary(uniqueKeysWithValues: URLComponents(url: requestURL, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
@@ -455,7 +463,7 @@ struct PinesCoreTestRunner {
             ]
             """
         )
-        let lightweightService = HuggingFaceModelCatalogService(client: lightweightClient, baseURL: URL(string: "https://hub.test")!)
+        let lightweightService = try HuggingFaceModelCatalogService(client: lightweightClient, baseURL: URL(string: "https://hub.test")!)
         let lightweightModels = try await lightweightService.search(
             filters: ModelSearchFilters(query: "qwen", task: .textGeneration, limit: 5, includeConfig: false)
         )
@@ -489,7 +497,7 @@ struct PinesCoreTestRunner {
             }
             """
         )
-        let metadataService = HuggingFaceModelCatalogService(client: metadataClient, baseURL: URL(string: "https://hub.test")!)
+        let metadataService = try HuggingFaceModelCatalogService(client: metadataClient, baseURL: URL(string: "https://hub.test")!)
         let metadata = try await metadataService.modelMetadata(repository: "example/Qwen3-4B-4bit-MLX")
         let metadataURL = try await metadataClient.lastURL()
         let metadataQueryItems = Dictionary(uniqueKeysWithValues: URLComponents(url: metadataURL, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
@@ -1314,14 +1322,14 @@ struct PinesCoreTestRunner {
     }
 
     private static func testVaultChunking() throws {
-        let chunker = VaultChunker(configuration: .init(maxCharacterCount: 5, overlapCharacterCount: 2))
+        let chunker = try VaultChunker(configuration: .init(maxCharacterCount: 5, overlapCharacterCount: 2))
         let first = chunker.chunk("abcdefghijkl", sourceID: "doc-a")
         let second = chunker.chunk("abcdefghijkl", sourceID: "doc-a")
         try expectEqual(first, second)
         try expectEqual(first.map(\.text), ["abcde", "defgh", "ghijk", "jkl"])
         try expectEqual(first.map(\.startOffset), [0, 3, 6, 9])
 
-        let natural = VaultChunker(configuration: .init(maxCharacterCount: 12, overlapCharacterCount: 0))
+        let natural = try VaultChunker(configuration: .init(maxCharacterCount: 12, overlapCharacterCount: 0))
             .chunk("alpha beta gamma delta", sourceID: "doc-b")
         try expectEqual(natural.map(\.text), ["alpha beta", "gamma delta"])
     }
@@ -1360,14 +1368,20 @@ struct PinesCoreTestRunner {
         let score = try codec.approximateCosineSimilarity(query: vector, code: encoded)
         try expect(score > 0.92, "TurboQuant approximation should preserve self-similarity")
 
-        let roundTrip = try codec.decode(data: try codec.encodeToData(vector))
+        let binaryData = try codec.encodeToData(vector)
+        try expect(Array(binaryData.prefix(6)) == Array("PNTQV2".utf8), "TurboQuant vector writes should use the binary v2 envelope")
+        let roundTrip = try codec.decode(data: binaryData)
         try expectEqual(roundTrip.count, vector.count)
 
         let legacyCodec = TurboQuantVectorCodec(preset: .turbo3_5, seed: 42)
-        let legacyEncoded = try legacyCodec.encode(vector)
+        var legacyEncoded = try legacyCodec.encode(vector)
+        legacyEncoded.codecVersion = TurboQuantVectorCodec.legacyJSONCodecVersion
         try expectEqual(legacyEncoded.preset, .turbo3_5)
         let legacyScore = try codec.approximateCosineSimilarity(query: vector, code: legacyEncoded)
         try expect(legacyScore > 0.92, "Legacy TurboQuant approximation should remain readable")
+        let legacyData = try JSONEncoder().encode(legacyEncoded)
+        let legacyRoundTrip = try codec.decode(data: legacyData)
+        try expectEqual(legacyRoundTrip.count, vector.count)
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {

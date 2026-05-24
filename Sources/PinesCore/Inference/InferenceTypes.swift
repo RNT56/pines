@@ -66,6 +66,13 @@ public enum LocalProviderMetadataKeys {
     public static let generationWatchdogCode = "local.generation.watchdog.code"
     public static let generationWatchdogStage = "local.generation.watchdog.stage"
     public static let generationWatchdogElapsedSeconds = "local.generation.watchdog.elapsed_seconds"
+    public static let promptKVCacheStatus = "local.prompt_kv_cache.status"
+    public static let promptKVCacheMissReason = "local.prompt_kv_cache.miss_reason"
+    public static let promptKVCacheEvictionReason = "local.prompt_kv_cache.eviction_reason"
+    public static let promptKVCacheReusedPrefixTokens = "local.prompt_kv_cache.reused_prefix_tokens"
+    public static let promptKVCacheSuffixPrefillTokens = "local.prompt_kv_cache.suffix_prefill_tokens"
+    public static let promptKVCacheStoredTokens = "local.prompt_kv_cache.stored_tokens"
+    public static let mlxCachePressureAction = "local.mlx_cache_pressure.action"
 }
 
 public struct ModelID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
@@ -1681,6 +1688,7 @@ public enum InferenceError: Error, Equatable, Sendable {
     case unsupportedCapability(String)
     case cloudNotAllowed
     case invalidRequest(String)
+    case localRuntimeFailure(String)
     case cancelled
 }
 
@@ -1697,6 +1705,8 @@ extension InferenceError: LocalizedError {
             "Cloud inference is not allowed for this request."
         case let .invalidRequest(message):
             message
+        case let .localRuntimeFailure(diagnostic):
+            "Local MLX runtime failure: \(diagnostic)"
         case .cancelled:
             "The inference request was cancelled."
         }

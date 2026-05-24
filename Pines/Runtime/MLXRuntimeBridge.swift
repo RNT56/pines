@@ -25,6 +25,46 @@ import Tokenizers
 
 private let activeGenerationEmergencyMinimumAvailableBytes: Int64 = 650_000_000
 
+private struct StableLocalDigest: Sendable {
+    private var value: UInt64 = 0xcbf29ce484222325
+
+    mutating func append(_ string: String) {
+        for byte in string.utf8 {
+            append(byte)
+        }
+        append(0)
+    }
+
+    mutating func append(_ int: Int) {
+        append(Int64(int))
+    }
+
+    mutating func append(_ int: Int64) {
+        append(UInt64(bitPattern: int))
+    }
+
+    mutating func append(_ int: UInt64) {
+        for shift in stride(from: 0, to: 64, by: 8) {
+            append(UInt8(truncatingIfNeeded: int >> shift))
+        }
+    }
+
+    mutating func append(contentsOf data: Data) {
+        for byte in data {
+            append(byte)
+        }
+    }
+
+    var hexString: String {
+        String(format: "%016llx", value)
+    }
+
+    private mutating func append(_ byte: UInt8) {
+        value ^= UInt64(byte)
+        value &*= 0x100000001b3
+    }
+}
+
 private final class MLXGenerationCancellationBox: @unchecked Sendable {
     private let lock = NSLock()
     private var task: Task<Void, Never>?
@@ -48,6 +88,206 @@ private final class MLXGenerationCancellationBox: @unchecked Sendable {
         task?.cancel()
     }
 }
+
+#if canImport(MLX)
+private final class MLXCachePressureController: @unchecked Sendable {
+    static let shared = MLXCachePressureController()
+
+    private let lock = NSLock()
+    private var delayedIdleClear: Task<Void, Never>?
+    private let idleClearDelayNanoseconds: UInt64 = 15_000_000_000
+
+    private init() {}
+
+    func configureActive(limit: Int) {
+        lock.lock()
+        delayedIdleClear?.cancel()
+        delayedIdleClear = nil
+        lock.unlock()
+        setCacheLimit(limit)
+    }
+
+    func settleAfterGeneration(idleLimit: Int, clearImmediately: Bool) {
+        lock.lock()
+        delayedIdleClear?.cancel()
+        delayedIdleClear = nil
+        lock.unlock()
+
+        setCacheLimit(idleLimit)
+        if clearImmediately {
+            Self.synchronizeAndClearCache(limit: idleLimit)
+            return
+        }
+
+        let task = Task { [idleClearDelayNanoseconds] in
+            do {
+                try await Task.sleep(nanoseconds: idleClearDelayNanoseconds)
+            } catch {
+                return
+            }
+            Self.synchronizeAndClearCache(limit: idleLimit)
+        }
+
+        lock.lock()
+        delayedIdleClear = task
+        lock.unlock()
+    }
+
+    func clearImmediately(limit: Int) {
+        lock.lock()
+        delayedIdleClear?.cancel()
+        delayedIdleClear = nil
+        lock.unlock()
+        Self.synchronizeAndClearCache(limit: limit)
+    }
+
+    private func setCacheLimit(_ limit: Int) {
+        #if targetEnvironment(simulator)
+        return
+        #else
+        Memory.cacheLimit = limit
+        #endif
+    }
+
+    private static func synchronizeAndClearCache(limit: Int) {
+        #if targetEnvironment(simulator)
+        return
+        #else
+        if Memory.cacheLimit > limit {
+            Memory.cacheLimit = limit
+        }
+        Stream.gpu.synchronize()
+        Memory.clearCache()
+        #endif
+    }
+}
+#endif
+
+#if canImport(MLXLMCommon)
+private struct LocalPromptKVCacheKey: Hashable, Sendable {
+    var modelID: String
+    var repository: String
+    var revision: String
+    var tokenizerTemplateDigest: String
+    var quantizationStrategy: String
+    var turboQuantPreset: String
+    var turboQuantBackend: String
+    var turboQuantSeed: String
+    var turboQuantValueBits: String
+    var kvBits: String
+    var kvGroupSize: Int
+    var quantizedKVStart: Int
+    var maxKVSize: String
+    var capabilityShape: String
+}
+
+private struct LocalPromptKVCacheEntry: @unchecked Sendable {
+    var key: LocalPromptKVCacheKey
+    var tokenIDs: [Int32]
+    var tokenDigest: String
+    var cache: [KVCache]
+    var storedAt: Date
+}
+
+private struct LocalPromptKVCacheLookup: @unchecked Sendable {
+    var entry: LocalPromptKVCacheEntry?
+    var reusedPrefixTokenCount: Int
+    var suffixPrefillTokenCount: Int
+    var missReason: String?
+
+    static func miss(_ reason: String) -> LocalPromptKVCacheLookup {
+        LocalPromptKVCacheLookup(
+            entry: nil,
+            reusedPrefixTokenCount: 0,
+            suffixPrefillTokenCount: 0,
+            missReason: reason
+        )
+    }
+}
+
+private actor LocalPromptKVCacheStore {
+    private var entries: [LocalPromptKVCacheKey: LocalPromptKVCacheEntry] = [:]
+    private(set) var lastEvictionReason: String?
+
+    func take(
+        key: LocalPromptKVCacheKey,
+        promptTokenIDs: [Int32]
+    ) -> LocalPromptKVCacheLookup {
+        guard var entry = entries.removeValue(forKey: key) else {
+            return .miss("empty")
+        }
+        guard !promptTokenIDs.isEmpty, !entry.tokenIDs.isEmpty else {
+            lastEvictionReason = "empty_prompt"
+            return .miss("empty_prompt")
+        }
+
+        let prefix = Self.commonPrefixLength(entry.tokenIDs, promptTokenIDs)
+        guard prefix > 0 else {
+            lastEvictionReason = "prefix_mismatch"
+            return .miss("prefix_mismatch")
+        }
+
+        let cachedSuffixTokenCount = entry.tokenIDs.count - prefix
+        if cachedSuffixTokenCount > 0 {
+            guard canTrimPromptCache(entry.cache) else {
+                lastEvictionReason = "prefix_mismatch_untrimmable"
+                return .miss("prefix_mismatch_untrimmable")
+            }
+            let trimmed = trimPromptCache(entry.cache, numTokens: cachedSuffixTokenCount)
+            guard trimmed == cachedSuffixTokenCount else {
+                lastEvictionReason = "prefix_trim_failed"
+                return .miss("prefix_trim_failed")
+            }
+            entry.tokenIDs = Array(entry.tokenIDs.prefix(prefix))
+            entry.tokenDigest = Self.tokenDigest(entry.tokenIDs)
+        }
+
+        let cachedTokenCount = entry.cache.map(\.offset).min() ?? 0
+        guard cachedTokenCount >= prefix else {
+            lastEvictionReason = "cache_offset_mismatch"
+            return .miss("cache_offset_mismatch")
+        }
+
+        return LocalPromptKVCacheLookup(
+            entry: entry,
+            reusedPrefixTokenCount: prefix,
+            suffixPrefillTokenCount: max(0, promptTokenIDs.count - prefix),
+            missReason: nil
+        )
+    }
+
+    func store(_ entry: LocalPromptKVCacheEntry) {
+        guard !entry.tokenIDs.isEmpty, !entry.cache.isEmpty else { return }
+        entries[entry.key] = entry
+    }
+
+    @discardableResult
+    func evictAll(reason: String) -> Int {
+        let count = entries.count
+        entries.removeAll(keepingCapacity: true)
+        lastEvictionReason = reason
+        return count
+    }
+
+    static func tokenDigest(_ tokenIDs: [Int32]) -> String {
+        var digest = StableLocalDigest()
+        digest.append(tokenIDs.count)
+        for tokenID in tokenIDs {
+            digest.append(Int64(tokenID))
+        }
+        return digest.hexString
+    }
+
+    private static func commonPrefixLength(_ lhs: [Int32], _ rhs: [Int32]) -> Int {
+        let count = min(lhs.count, rhs.count)
+        var index = 0
+        while index < count, lhs[index] == rhs[index] {
+            index += 1
+        }
+        return index
+    }
+}
+#endif
 
 private enum LocalRuntimeSupervisorState: String, Sendable {
     case idle
@@ -987,6 +1227,7 @@ private actor MLXRuntimeState {
     #if canImport(MLXLMCommon)
     private var textContainer: MLXLMCommon.ModelContainer?
     private var visionContainer: MLXLMCommon.ModelContainer?
+    private let promptKVCacheStore = LocalPromptKVCacheStore()
     #endif
 
     #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
@@ -1022,6 +1263,9 @@ private actor MLXRuntimeState {
                     ]
                 )
                 #endif
+                if !profileMatches {
+                    await promptKVCacheStore.evictAll(reason: "runtime_profile_changed")
+                }
                 activeProfile = profile
                 return
             }
@@ -1029,6 +1273,13 @@ private actor MLXRuntimeState {
         #endif
         isLoading = true
         defer { isLoading = false }
+        #if canImport(MLXLMCommon)
+        if activeInstall?.modelID != install.modelID
+            || activeInstall?.repository != install.repository
+            || activeProfile != profile {
+            await promptKVCacheStore.evictAll(reason: "model_or_profile_changed")
+        }
+        #endif
         activeInstall = install
         activeProfile = profile
 
@@ -1074,7 +1325,7 @@ private actor MLXRuntimeState {
         #if targetEnvironment(simulator)
         return
         #else
-        Memory.cacheLimit = mlxCacheLimit(for: profile)
+        MLXCachePressureController.shared.configureActive(limit: mlxCacheLimit(for: profile))
         #endif
     }
 
@@ -1103,12 +1354,27 @@ private actor MLXRuntimeState {
         #endif
     }
 
+    private static func mlxIdleCacheLimit(for profile: RuntimeProfile) -> Int {
+        #if os(iOS)
+        min(mlxCacheLimit(for: profile), 64 * 1_024 * 1_024)
+        #else
+        Memory.cacheLimit
+        #endif
+    }
+
+    private static func mlxPressureCacheLimit() -> Int {
+        #if os(iOS)
+        64 * 1_024 * 1_024
+        #else
+        Memory.cacheLimit
+        #endif
+    }
+
     private static func clearCachedMLXBuffers() {
         #if targetEnvironment(simulator)
         return
         #else
-        Stream.gpu.synchronize()
-        Memory.clearCache()
+        MLXCachePressureController.shared.clearImmediately(limit: mlxPressureCacheLimit())
         #endif
     }
 
@@ -1116,11 +1382,11 @@ private actor MLXRuntimeState {
         #if targetEnvironment(simulator)
         return
         #else
-        guard profile.quantization.runtimePressureReason == .lowMemory
-            || profile.quantization.thermalDownshiftActive
-        else { return }
-        Stream.gpu.synchronize()
-        Memory.clearCache()
+        MLXCachePressureController.shared.settleAfterGeneration(
+            idleLimit: mlxIdleCacheLimit(for: profile),
+            clearImmediately: profile.quantization.runtimePressureReason == .lowMemory
+                || profile.quantization.thermalDownshiftActive
+        )
         #endif
     }
 
@@ -1128,12 +1394,7 @@ private actor MLXRuntimeState {
         #if targetEnvironment(simulator)
         return
         #else
-        Stream.gpu.synchronize()
-        Memory.clearCache()
-        let softCacheLimit = 64 * 1_024 * 1_024
-        if Memory.cacheLimit > softCacheLimit {
-            Memory.cacheLimit = softCacheLimit
-        }
+        MLXCachePressureController.shared.clearImmediately(limit: mlxPressureCacheLimit())
         #endif
     }
 
@@ -1144,6 +1405,19 @@ private actor MLXRuntimeState {
         Memory.peakMemory = 0
         #endif
     }
+
+    private static func localRuntimeFailure(from error: Error) -> InferenceError {
+        if let inferenceError = error as? InferenceError {
+            return inferenceError
+        }
+        if let mlxError = error as? MLX.MLXError {
+            switch mlxError {
+            case let .caught(message):
+                return .localRuntimeFailure(message)
+            }
+        }
+        return .localRuntimeFailure(error.localizedDescription)
+    }
     #endif
 
     #if canImport(MLXLLM) && canImport(MLXLMCommon)
@@ -1153,7 +1427,11 @@ private actor MLXRuntimeState {
 
         await LLMTypeRegistry.shared.registerModelType(
             "gemma4_assistant",
-            creator: Self.llmCreator(Gemma4Configuration.self, Gemma4Model.init)
+            creator: { _ in
+                throw InferenceError.unsupportedCapability(
+                    ModelPreflightClassifier.gemma4AssistantCapabilityGateReason
+                )
+            }
         )
         await LLMTypeRegistry.shared.registerModelType(
             "llama4",
@@ -1171,7 +1449,14 @@ private actor MLXRuntimeState {
         )
         await LLMTypeRegistry.shared.registerModelType(
             "deepseek_v4",
-            creator: Self.llmCreator(PinesDeepseekV4Configuration.self, PinesDeepseekV4Model.init)
+            creator: { data in
+                guard Self.hasCanonicalDeepSeekV4RuntimeSupport else {
+                    throw InferenceError.unsupportedCapability(
+                        ModelPreflightClassifier.deepSeekV4CapabilityGateReason
+                    )
+                }
+                return try Self.llmCreator(PinesDeepseekV4Configuration.self, PinesDeepseekV4Model.init)(data)
+            }
         )
         await LLMTypeRegistry.shared.registerModelType(
             "minimax_m2",
@@ -1255,6 +1540,9 @@ private actor MLXRuntimeState {
         #if canImport(MLX)
         Self.applySoftMemoryPressureMLXPolicy()
         #endif
+        #if canImport(MLXLMCommon)
+        await promptKVCacheStore.evictAll(reason: "active_generation_memory_pressure")
+        #endif
 
         let counters = deviceMonitor.memoryCounters()
         if let availableMemoryBytes = counters.availableMemoryBytes,
@@ -1283,6 +1571,7 @@ private actor MLXRuntimeState {
         activeInstall = nil
         activeGenerationSoftMemoryWarningCount = 0
         #if canImport(MLXLMCommon)
+        await promptKVCacheStore.evictAll(reason: "model_unload")
         textContainer = nil
         visionContainer = nil
         activePartitionSummary = nil
@@ -1320,6 +1609,9 @@ private actor MLXRuntimeState {
         }
         #if canImport(MLX)
         Self.applySoftMemoryPressureMLXPolicy()
+        #endif
+        #if canImport(MLXLMCommon)
+        await promptKVCacheStore.evictAll(reason: "memory_pressure")
         #endif
         let generationCancellation = activeGenerationCancellation
         let availableMemoryBytes = deviceMonitor.memoryCounters().availableMemoryBytes
@@ -1570,7 +1862,64 @@ private actor MLXRuntimeState {
                             contextMetadata[ChatContextMetadataKeys.clippedMessageCount] = "1"
                         }
                         let cacheStartedAt = Date()
-                        let cache = context.model.newCache(parameters: parameters)
+                        let hasToolSpecs = !(toolSpecs?.isEmpty ?? true)
+                        let promptTokenIDs = Self.promptTokenIDs(from: input.text.tokens)
+                        let promptCacheSkipReason = Self.promptCacheMissReason(
+                            input: input,
+                            promptTokenIDs: promptTokenIDs,
+                            profile: profile,
+                            hasTools: hasToolSpecs,
+                            hasVisionInput: !imageURLs.isEmpty,
+                            hasAudioInput: !audioURLs.isEmpty
+                        )
+                        let promptCacheKey: LocalPromptKVCacheKey?
+                        let promptCacheStoreEligible: Bool
+                        let cache: [KVCache]
+                        var reusedPrefixTokenCount = 0
+                        if let promptCacheSkipReason {
+                            promptCacheKey = nil
+                            promptCacheStoreEligible = false
+                            cache = context.model.newCache(parameters: parameters)
+                            contextMetadata[LocalProviderMetadataKeys.promptKVCacheStatus] = "disabled"
+                            contextMetadata[LocalProviderMetadataKeys.promptKVCacheMissReason] = promptCacheSkipReason
+                            contextMetadata[LocalProviderMetadataKeys.promptKVCacheReusedPrefixTokens] = "0"
+                            contextMetadata[LocalProviderMetadataKeys.promptKVCacheSuffixPrefillTokens] = String(promptTokenIDs.count)
+                        } else {
+                            let key = Self.localPromptKVCacheKey(
+                                request: request,
+                                install: install,
+                                profile: profile,
+                                parameters: parameters,
+                                hasTools: hasToolSpecs,
+                                hasVisionInput: false,
+                                hasAudioInput: false
+                            )
+                            promptCacheKey = key
+                            promptCacheStoreEligible = true
+                            let lookup = await promptKVCacheStore.take(
+                                key: key,
+                                promptTokenIDs: promptTokenIDs
+                            )
+                            if let entry = lookup.entry {
+                                cache = entry.cache
+                                reusedPrefixTokenCount = lookup.reusedPrefixTokenCount
+                                contextMetadata[LocalProviderMetadataKeys.promptKVCacheStatus] = "hit"
+                                contextMetadata[LocalProviderMetadataKeys.promptKVCacheReusedPrefixTokens] = String(
+                                    lookup.reusedPrefixTokenCount
+                                )
+                                contextMetadata[LocalProviderMetadataKeys.promptKVCacheSuffixPrefillTokens] = String(
+                                    lookup.suffixPrefillTokenCount
+                                )
+                            } else {
+                                cache = context.model.newCache(parameters: parameters)
+                                contextMetadata[LocalProviderMetadataKeys.promptKVCacheStatus] = "miss"
+                                contextMetadata[LocalProviderMetadataKeys.promptKVCacheMissReason] = lookup.missReason ?? "unknown"
+                                contextMetadata[LocalProviderMetadataKeys.promptKVCacheReusedPrefixTokens] = "0"
+                                contextMetadata[LocalProviderMetadataKeys.promptKVCacheSuffixPrefillTokens] = String(promptTokenIDs.count)
+                            }
+                        }
+                        contextMetadata[LocalProviderMetadataKeys.mlxCachePressureAction] =
+                            Self.mlxCachePressureAction(for: profile)
                         contextMetadata[LocalProviderMetadataKeys.generationCacheCreateElapsedSeconds] = String(
                             Date().timeIntervalSince(cacheStartedAt)
                         )
@@ -1617,12 +1966,22 @@ private actor MLXRuntimeState {
                                     tools: toolSpecs
                                 )
                             } else {
-                                let iterator = try TokenIterator(
-                                    input: input,
-                                    model: context.model,
-                                    cache: cache,
-                                    parameters: parameters
-                                )
+                                let iterator = if reusedPrefixTokenCount > 0 {
+                                    try TokenIterator(
+                                        input: input,
+                                        model: context.model,
+                                        cache: cache,
+                                        cachedPrefixTokenCount: reusedPrefixTokenCount,
+                                        parameters: parameters
+                                    )
+                                } else {
+                                    try TokenIterator(
+                                        input: input,
+                                        model: context.model,
+                                        cache: cache,
+                                        parameters: parameters
+                                    )
+                                }
                                 (stream, generationTask) = MLXLMCommon.generateTask(
                                     promptTokenCount: input.text.tokens.size,
                                     modelConfiguration: context.configuration,
@@ -1711,6 +2070,40 @@ private actor MLXRuntimeState {
                         if !pendingText.isEmpty {
                             continuation.yield(.token(TokenDelta(kind: .token, text: pendingText, tokenCount: 1)))
                         }
+                        if promptCacheStoreEligible, let promptCacheKey {
+                            if canTrimPromptCache(cache) {
+                                let generatedTokenCount = completionInfo?.generationTokenCount ?? tokenCount
+                                let trimmedGeneratedTokens = generatedTokenCount > 0
+                                    ? trimPromptCache(cache, numTokens: generatedTokenCount)
+                                    : 0
+                                if trimmedGeneratedTokens == generatedTokenCount {
+                                    await promptKVCacheStore.store(
+                                        LocalPromptKVCacheEntry(
+                                            key: promptCacheKey,
+                                            tokenIDs: promptTokenIDs,
+                                            tokenDigest: LocalPromptKVCacheStore.tokenDigest(promptTokenIDs),
+                                            cache: cache,
+                                            storedAt: Date()
+                                        )
+                                    )
+                                    contextMetadata[LocalProviderMetadataKeys.promptKVCacheStoredTokens] = String(
+                                        promptTokenIDs.count
+                                    )
+                                } else {
+                                    await promptKVCacheStore.evictAll(reason: "generated_token_trim_failed")
+                                    contextMetadata[LocalProviderMetadataKeys.promptKVCacheEvictionReason] =
+                                        "generated_token_trim_failed"
+                                }
+                            } else {
+                                await promptKVCacheStore.evictAll(reason: "untrimmable_cache")
+                                contextMetadata[LocalProviderMetadataKeys.promptKVCacheEvictionReason] =
+                                    "untrimmable_cache"
+                            }
+                        }
+                        if var existingFinish = finish {
+                            existingFinish.providerMetadata.merge(contextMetadata) { _, new in new }
+                            finish = existingFinish
+                        }
                         if finish == nil, let completionInfo {
                             var providerMetadata = Self.localProviderMetadata(
                                 from: cache,
@@ -1755,10 +2148,12 @@ private actor MLXRuntimeState {
                     continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
                     continuation.finish()
                 } catch {
+                    let reportedError = Self.localRuntimeFailure(from: error)
+                    let failureMessage = reportedError.localizedDescription
                     #if DEBUG
                     await FreezeBreadcrumbJournal.shared.record(
                         stage: "mlx.generation.failed",
-                        detail: error.localizedDescription,
+                        detail: failureMessage,
                         metadata: runtimeMemoryMetadata(merging: [
                             "model_id": request.modelID.rawValue,
                         ])
@@ -1767,8 +2162,13 @@ private actor MLXRuntimeState {
                     continuation.yield(
                         .failure(
                             InferenceStreamFailure(
-                                code: "mlx_generation_failed",
-                                message: error.localizedDescription,
+                                code: {
+                                    if case .localRuntimeFailure = reportedError {
+                                        return "mlx_local_runtime_failure"
+                                    }
+                                    return "mlx_generation_failed"
+                                }(),
+                                message: failureMessage,
                                 recoverable: true
                             )
                         )
@@ -2016,6 +2416,109 @@ private actor MLXRuntimeState {
             prefillStepSize: profile.prefillStepSize
         )
     }
+
+    #if canImport(MLX) && canImport(MLXLMCommon)
+    private static func promptTokenIDs(from tokens: MLXArray) -> [Int32] {
+        tokens.asArray(Int32.self)
+    }
+
+    private static func localPromptKVCacheKey(
+        request: ChatRequest,
+        install: ModelInstall?,
+        profile: RuntimeProfile,
+        parameters: GenerateParameters,
+        hasTools: Bool,
+        hasVisionInput: Bool,
+        hasAudioInput: Bool
+    ) -> LocalPromptKVCacheKey {
+        LocalPromptKVCacheKey(
+            modelID: request.modelID.rawValue,
+            repository: install?.repository ?? request.modelID.rawValue,
+            revision: install?.revision ?? "main",
+            tokenizerTemplateDigest: tokenizerTemplateDigest(for: install),
+            quantizationStrategy: profile.quantization.kvCacheStrategy.rawValue,
+            turboQuantPreset: parameters.turboQuantPreset.rawValue,
+            turboQuantBackend: parameters.turboQuantBackend.rawValue,
+            turboQuantSeed: parameters.turboQuantSeed.map(String.init) ?? "none",
+            turboQuantValueBits: parameters.turboQuantValueBits.map(String.init) ?? "none",
+            kvBits: parameters.kvBits.map(String.init) ?? "none",
+            kvGroupSize: parameters.kvGroupSize,
+            quantizedKVStart: parameters.quantizedKVStart,
+            maxKVSize: parameters.maxKVSize.map(String.init) ?? "none",
+            capabilityShape: [
+                "tools=\(hasTools)",
+                "vision=\(hasVisionInput)",
+                "audio=\(hasAudioInput)",
+                "mtp=\(profile.mtpEnabled)",
+                "dflash=\(profile.dflashEnabled)",
+            ].joined(separator: ";")
+        )
+    }
+
+    private static func tokenizerTemplateDigest(for install: ModelInstall?) -> String {
+        var digest = StableLocalDigest()
+        digest.append(install?.repository ?? "unknown")
+        digest.append(install?.revision ?? "main")
+        guard let install,
+              let directory = try? resolvedModelDirectory(for: install)
+        else {
+            digest.append("no-local-tokenizer")
+            return digest.hexString
+        }
+
+        for fileName in ["tokenizer_config.json", "chat_template.jinja", "tokenizer.json"] {
+            let url = directory.appending(path: fileName)
+            digest.append(fileName)
+            appendFileDigest(url, to: &digest)
+        }
+        return digest.hexString
+    }
+
+    private static func appendFileDigest(_ url: URL, to digest: inout StableLocalDigest) {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let handle = try? FileHandle(forReadingFrom: url)
+        else {
+            digest.append("missing")
+            return
+        }
+        defer {
+            try? handle.close()
+        }
+        while let chunk = try? handle.read(upToCount: 64 * 1_024),
+              !chunk.isEmpty {
+            digest.append(contentsOf: chunk)
+        }
+    }
+
+    private static func promptCacheMissReason(
+        input: LMInput,
+        promptTokenIDs: [Int32],
+        profile: RuntimeProfile,
+        hasTools: Bool,
+        hasVisionInput: Bool,
+        hasAudioInput: Bool
+    ) -> String? {
+        guard profile.promptCacheEnabled else { return "profile_disabled" }
+        guard !profile.mtpEnabled else { return "mtp_enabled" }
+        guard !hasTools else { return "tools_enabled" }
+        guard !hasVisionInput, input.image == nil, input.video == nil else { return "vision_or_video_input" }
+        guard !hasAudioInput, input.audio == nil else { return "audio_input" }
+        guard !promptTokenIDs.isEmpty else { return "empty_prompt" }
+        guard profile.quantization.runtimePressureReason != .lowMemory,
+              !profile.quantization.thermalDownshiftActive else {
+            return "runtime_pressure"
+        }
+        return nil
+    }
+
+    private static func mlxCachePressureAction(for profile: RuntimeProfile) -> String {
+        if profile.quantization.runtimePressureReason == .lowMemory
+            || profile.quantization.thermalDownshiftActive {
+            return "immediate_clear"
+        }
+        return "idle_decay"
+    }
+    #endif
 
     private static func mlxKVCacheStrategy(
         from strategy: PinesCore.KVCacheStrategy
@@ -2347,6 +2850,10 @@ private actor MLXRuntimeState {
             }
             return .cancelled
         }
+    }
+
+    private nonisolated static var hasCanonicalDeepSeekV4RuntimeSupport: Bool {
+        false
     }
     #endif
 

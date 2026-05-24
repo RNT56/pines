@@ -302,10 +302,29 @@ public struct HuggingFaceModelCatalogService: Sendable {
 
     public init(
         client: any HTTPClient = URLSession.shared,
-        baseURL: URL = URL(string: "https://huggingface.co")!,
         modelAuthor: String = Self.defaultModelAuthor
     ) {
-        precondition((try? EndpointSecurityPolicy().validate(baseURL, useCase: .modelCatalog)) != nil, "Model catalog base URL must use HTTPS.")
+        self.init(
+            validatedClient: client,
+            baseURL: URL(string: "https://huggingface.co")!,
+            modelAuthor: modelAuthor
+        )
+    }
+
+    public init(
+        client: any HTTPClient = URLSession.shared,
+        baseURL: URL,
+        modelAuthor: String = Self.defaultModelAuthor
+    ) throws {
+        try EndpointSecurityPolicy().validate(baseURL, useCase: .modelCatalog)
+        self.init(validatedClient: client, baseURL: baseURL, modelAuthor: modelAuthor)
+    }
+
+    private init(
+        validatedClient client: any HTTPClient,
+        baseURL: URL,
+        modelAuthor: String
+    ) {
         self.client = client
         self.baseURL = baseURL
         self.modelAuthor = modelAuthor

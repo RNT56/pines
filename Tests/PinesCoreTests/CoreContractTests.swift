@@ -3001,7 +3001,10 @@ struct CoreContractTests {
                 .contains(spec.modelType)
 
             #expect(result.repository == spec.repository)
-            #expect(result.verification == (isPromotedFamily ? .verified : .installable))
+            let expectedVerification: ModelVerificationState = spec.modelType == "gemma4_assistant"
+                ? .experimental
+                : (isPromotedFamily ? .verified : .installable)
+            #expect(result.verification == expectedVerification)
             #expect(result.modalities == spec.modalities)
             #expect(result.modelType == spec.modelType)
             #expect(result.processorClass == spec.processorClass)
@@ -3768,6 +3771,22 @@ struct CoreContractTests {
         #expect(try evaluator.evaluate("(2 + 3) * 4") == 20)
         #expect(throws: CalculatorEvaluationError.divisionByZero) {
             try evaluator.evaluate("1 / 0")
+        }
+    }
+
+    @Test
+    func userSuppliedConfigurationValidationThrows() throws {
+        #expect(throws: VaultChunkerConfigurationError.invalidMaxCharacterCount(0)) {
+            _ = try VaultChunker.Configuration(maxCharacterCount: 0)
+        }
+        #expect(throws: VaultChunkerConfigurationError.overlapNotSmallerThanMax(overlap: 8, max: 8)) {
+            _ = try VaultChunker.Configuration(maxCharacterCount: 8, overlapCharacterCount: 8)
+        }
+        #expect(throws: CalculatorEvaluationError.invalidMaximumExpressionLength(0)) {
+            _ = try SafeCalculatorEvaluator(maximumExpressionLength: 0)
+        }
+        #expect(throws: EndpointSecurityError.insecureRemoteHTTP(URL(string: "http://example.com")!)) {
+            _ = try HuggingFaceModelCatalogService(baseURL: URL(string: "http://example.com")!)
         }
     }
 
