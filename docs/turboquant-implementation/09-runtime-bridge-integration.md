@@ -2,6 +2,8 @@
 
 INT-1 is the integration point where the Pines control plane begins driving local MLX generation. This is intentionally a late integration branch so DTOs, failure mapping, admission, and run ledger can be implemented independently first.
 
+In the executable launch schedule, INT-1 is Wave 2 and is serialized. Do not start it until Wave 0 safety/contracts and Wave 1 admission/RunDecision building blocks are usable. Do not run competing edits against the main runtime bridge while INT-1 is active.
+
 ## Owned files
 
 INT-1 owns:

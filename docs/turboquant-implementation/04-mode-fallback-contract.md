@@ -2,6 +2,8 @@
 
 User modes are product-level contracts, not just presets. Each mode defines context target, fallback reserve, performance goal, and what Pines may do when the preferred compressed path is unavailable.
 
+Launch wave: Wave 0. W24 defines this contract before W8 admission and INT-1 bridge integration consume it.
+
 ## User modes
 
 | Mode | Goal | Context | Fallback | Notes |

@@ -2,6 +2,8 @@
 
 Evidence-backed compatibility requires correctness and quality gates. A boolean `qualityPassed` is not enough; the system must record what was measured, which thresholds applied, and why evidence is allowed to make product claims.
 
+Launch waves: W22 can define schema and suite IDs in Wave 1; full quality measurement and evidence-level activation happen in Wave 3.
+
 ## Quality gate object
 
 ```swift

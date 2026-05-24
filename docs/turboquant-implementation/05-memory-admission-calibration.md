@@ -2,6 +2,8 @@
 
 Admission is the spine of the product. Any feature that affects memory, correctness, fallback, or runtime path must feed into admission before local generation starts.
 
+Launch waves: W8 admission is Wave 1; W23 calibration starts as a Wave 1 skeleton and becomes fully active in Wave 3 after bridge metadata and benchmark evidence exist.
+
 ## Why admission is required
 
 On iOS, the relevant resource is not total device RAM. It is memory currently available to the app, under current thermal state, Low Power Mode, foreground/background policy, model weights, UI allocations, vault indexes, prompt buffers, Metal scratch, and fallback reserves.

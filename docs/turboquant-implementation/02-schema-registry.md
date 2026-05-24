@@ -2,6 +2,8 @@
 
 This document defines versioning rules for every persisted, exported, or cross-repo TurboQuant object. It is intentionally stricter than normal app DTO versioning because stale cache state, stale benchmark evidence, or mismatched model profiles can produce incorrect output.
 
+Launch wave: Wave 0 for registry foundations. Later waves may add schemas, but they must update this registry before implementation branches depend on them.
+
 ## Scope
 
 Use schema envelopes for:

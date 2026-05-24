@@ -2,6 +2,8 @@
 
 This document lists validation commands, release-gate checks, and definition of done for each release milestone.
 
+Use [Worker Launch Schedule](14-worker-launch-schedule.md) for the executable order that feeds these gates. A wave may produce implementation artifacts before a gate is fully product-active, but each gate must pass before the corresponding capability is exposed as supported or verified.
+
 ## Validation commands
 
 Pines:

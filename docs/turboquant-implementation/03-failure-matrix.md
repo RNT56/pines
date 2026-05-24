@@ -2,6 +2,8 @@
 
 Every TurboQuant runtime failure must have deterministic behavior. The system may reject, downgrade, retry shorter, fallback, quarantine, revoke evidence, or emit a typed error. It must not return silent wrong output, fatal in product paths, or silently route to cloud.
 
+Launch wave: Wave 0 for the matrix and typed failure taxonomy. Wave 1 and Wave 2 workers must map their behavior back to this file.
+
 ## Failure behavior vocabulary
 
 | Behavior | Meaning |

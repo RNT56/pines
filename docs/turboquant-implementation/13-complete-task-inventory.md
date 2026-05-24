@@ -2,6 +2,23 @@
 
 This file preserves the full backlog depth for the multi-worker implementation. It is intentionally detailed so workers can branch from this planning packet without reconstructing scope from chat history.
 
+Use [Worker Launch Schedule](14-worker-launch-schedule.md) to decide execution order. This file is the complete scope catalogue.
+
+## Executable wave index
+
+| Wave | Launch condition | Workers/tasks |
+| --- | --- | --- |
+| Wave 0 | start immediately | W25, W0, W20, W21, W4, W1, W7, W24 |
+| Wave 1 | W1/W4/W7/W24 usable | W2, W5, W8, W9, W10 skeleton, W22 skeleton, W23 skeleton |
+| Wave 2 | W8/W9 ready and W4 safe | INT-1, INT-2A |
+| Wave 3 | bridge integrated | W3, W6, W10 full, W22 full, W23 full, W12, real-device runner |
+| Wave 3.5 | one verified tuple and green compatibility branch | INT-2B |
+| Wave 4 | MVP 1.5 evidence gate passed | W11, W14A, W14B, W17, iOS lifecycle policy |
+| Wave 5 | benchmark/quality/memory loop exists | W13, optimization evidence update |
+| Wave 6 | rollback-safe compressed cache exists | W15A, W15B, platform backlog |
+
+Inventory tables below retain the original task depth. If a task appears in a later queue, it can be implemented behind a disabled flag earlier only if it does not modify serialized files or product activation.
+
 ## P0 - Safety and contracts
 
 | ID | Repo | Task |

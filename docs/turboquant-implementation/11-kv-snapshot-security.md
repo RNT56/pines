@@ -2,6 +2,8 @@
 
 KV snapshots are a powerful UX unlock and a correctness risk. They must be local, encrypted, identity-validated, quota-limited, and fail closed.
 
+Launch wave: Snapshot export/import and storage are Wave 4. Snapshot design can be reviewed earlier, but product activation waits for lifecycle, evidence, and security gates.
+
 ## Product goal
 
 Enable:

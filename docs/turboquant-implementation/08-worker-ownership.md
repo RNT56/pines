@@ -2,6 +2,23 @@
 
 This document assigns repo lanes, worker cards, file ownership, merge dependencies, and PR requirements. It is designed to allow parallel work without agents fighting over central files.
 
+Use [Worker Launch Schedule](14-worker-launch-schedule.md) for executable order. This file is the ownership and dependency reference that keeps each wave safe.
+
+## Primary executable structure
+
+| Wave | Workers | Parallelism |
+| --- | --- | --- |
+| Wave 0 | W25, W0, W20, W21, W4, W1, W7, W24 | start immediately in parallel, except compatibility-pair promotion is W0-owned |
+| Wave 1 | W2, W5, W8, W9, W10 skeleton, W22 skeleton, W23 skeleton | parallel after W1/W4/W7/W24 are usable |
+| Wave 2 | INT-1, INT-2A | serialized integration |
+| Wave 3 | W3, W6, W10 full, W22 full, W23 full, W12, real-device runner | parallel evidence activation after bridge integration |
+| Wave 3.5 | INT-2B | serialized production pin promotion |
+| Wave 4 | W11, W14A, W14B, W17, iOS lifecycle policy | parallel after evidence gate |
+| Wave 5 | W13, optimization evidence update | gated optimization after measurement exists |
+| Wave 6 | W15A, W15B, W29+ | speculative and platform work after rollback/cache proof |
+ 
+The tables below preserve worker ownership and scope. They are grouped by earliest legal launch window.
+
 ## Lanes
 
 - Coordination lane
@@ -14,7 +31,7 @@ This document assigns repo lanes, worker cards, file ownership, merge dependenci
 - Optimization lane
 - Platform lane
 
-## Immediate start workers
+## Wave 0 - immediate start workers
 
 | Worker | Repo | Phase | Priority | Branch | Task |
 | --- | --- | --- | --- | --- | --- |
@@ -26,25 +43,47 @@ This document assigns repo lanes, worker cards, file ownership, merge dependenci
 | W1 | `mlx-swift` | MVP 0 | P0 | `tq/core-contracts` | core public contracts |
 | W7 | `pines` | MVP 0 | P0 | `tq/pines-contract-shims` | local DTO shims |
 | W24 | `pines` | MVP 0/1 | P0 | `tq/mode-fallback-contract` | mode/fallback contract |
-| W8 | `pines` | MVP 1 | P0 | `tq/pines-admission` | admission service |
-| W9 | `pines` | MVP 1 | P0 | `tq/pines-run-decision` | RunDecision ledger |
 
-## After contracts compile
+## Wave 1 - control-plane building blocks
 
 | Worker | Repo | Phase | Priority | Branch | Task |
 | --- | --- | --- | --- | --- | --- |
 | W2 | `mlx-swift` | MVP 1 | P1 | `tq/core-validation-router` | validation/router |
-| W3 | `mlx-swift` | MVP 1.5 | P1 | `tq/core-benchmark-json` | benchmark JSON and hidden-copy audit |
 | W5 | `mlx-swift-lm` | MVP 1 | P1 | `tq/lm-cache-lifecycle` | cache lifecycle/runtime snapshot |
-| W6 | `mlx-swift-lm` | MVP 1.5 | P1 | `tq/lm-profile-v2` | profile schema v2 |
-| W10 | `pines` | MVP 1.5 | P1 | `tq/pines-evidence-store` | ProfileEvidenceStore |
-| W22 | `mlx-swift-lm`, `pines` | MVP 1.5 | P1 | `tq/quality-gates` | quality gates |
-| W23 | `pines` | MVP 1.5 | P1 | `tq/memory-calibration` | memory calibration |
-| W12 | `pines` | MVP 1/1.5 | P1 | `tq/pines-compatibility-ui` | compatibility UI |
+| W8 | `pines` | MVP 1 | P0 | `tq/pines-admission` | admission service |
+| W9 | `pines` | MVP 1 | P0 | `tq/pines-run-decision` | RunDecision ledger |
+| W10-skeleton | `pines` | MVP 1.5 | P1 | `tq/pines-evidence-store` | ProfileEvidenceStore schema skeleton |
+| W22-skeleton | `mlx-swift-lm`, `pines` | MVP 1.5 | P1 | `tq/quality-gates` | QualityGate type and suite IDs |
+| W23-skeleton | `pines` | MVP 1.5 | P1 | `tq/memory-calibration` | calibration sample schema |
+
+## Wave 2 - serialized integration
+
+| Worker | Repo | Phase | Priority | Branch | Task |
+| --- | --- | --- | --- | --- | --- |
 | INT-1 | `pines` | MVP 1 | P0 | `tq/integration-runtime-bridge` | runtime bridge integration |
 | INT-2A | `pines` | MVP 1 | P0 | `tq/integration-pin-mlx-validation` | compatibility-branch pin validation |
 
-## After MVP 1.5
+These workers are intentionally serialized. They should not run concurrently with unrelated bridge/pin edits.
+
+## Wave 3 - evidence activation
+
+| Worker | Repo | Phase | Priority | Branch | Task |
+| --- | --- | --- | --- | --- | --- |
+| W3 | `mlx-swift` | MVP 1.5 | P1 | `tq/core-benchmark-json` | benchmark JSON and hidden-copy audit |
+| W6 | `mlx-swift-lm` | MVP 1.5 | P1 | `tq/lm-profile-v2` | profile schema v2 |
+| W10-full | `pines` | MVP 1.5 | P1 | `tq/pines-evidence-store` | full ProfileEvidenceStore importer |
+| W22-full | `mlx-swift-lm`, `pines` | MVP 1.5 | P1 | `tq/quality-gates` | full quality gates and evidence levels |
+| W23-full | `pines` | MVP 1.5 | P1 | `tq/memory-calibration` | full memory calibration and p95 multiplier |
+| W12 | `pines` | MVP 1/1.5 | P1 | `tq/pines-compatibility-ui` | compatibility UI |
+| Real-device runner | `pines` | MVP 1.5 | P1 | `tq/pines-device-acceptance-runner` | one verified tuple |
+
+## Wave 3.5 - production pin promotion
+
+| Worker | Repo | Phase | Priority | Branch | Task |
+| --- | --- | --- | --- | --- | --- |
+| INT-2B | `pines` | MVP 1.5 | P0 | `tq/integration-pin-mlx-production` | production pin update |
+
+## Wave 4 - after MVP 1.5
 
 | Worker | Repo | Phase | Priority | Branch | Task |
 | --- | --- | --- | --- | --- | --- |
@@ -52,10 +91,16 @@ This document assigns repo lanes, worker cards, file ownership, merge dependenci
 | W14A | `mlx-swift-lm` | MVP 3 | P2 | `tq/lm-kv-snapshots` | KV snapshot export/import |
 | W14B | `pines` | MVP 3 | P2 | `tq/pines-kv-snapshots` | encrypted snapshot store |
 | W17 | `pines` | MVP 3 | P2 | `tq/snapshot-security` | snapshot security |
-| W13 | `mlx-swift` | MVP 4 | P2 | `tq/layout-v5-kernels` | layout V5/kernels |
-| INT-2B | `pines` | MVP 1.5 | P0 | `tq/integration-pin-mlx-production` | production pin update |
+| iOS lifecycle workers | `pines` | MVP 2/3 | P2 | varied | memory warning, thermal, suspend/resume, cancellation policy |
 
-## Later workers
+## Wave 5 - optimization
+
+| Worker | Repo | Phase | Priority | Branch | Task |
+| --- | --- | --- | --- | --- | --- |
+| W13 | `mlx-swift` | MVP 4 | P2 | `tq/layout-v5-kernels` | layout V5/kernels |
+| Optimization evidence update | all | MVP 4 | P2 | varied | before/after benchmark evidence |
+
+## Wave 6 - later workers
 
 | Worker | Repo | Phase | Priority | Branch | Task |
 | --- | --- | --- | --- | --- | --- |

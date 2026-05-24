@@ -167,6 +167,29 @@ Queued after the above:
 - device mesh;
 - personalization/adapters.
 
+## Executable wave schedule
+
+The release ladder defines product gates. The worker launch schedule defines executable order.
+
+Use [Worker Launch Schedule](14-worker-launch-schedule.md) as the primary launch document:
+
+| Wave | Can run in parallel | Serialized pieces | Gate produced |
+| --- | --- | --- | --- |
+| Wave 0 | W25, W0, W20, W21, W4, W1, W7, W24 | compatibility-pair promotion remains W0-owned | MVP 0 rails |
+| Wave 1 | W2, W5, W8, W9, W10 skeleton, W22 skeleton, W23 skeleton | none except file ownership rules | control-plane building blocks |
+| Wave 2 | none | INT-1, then INT-2A | bridge integration and branch validation |
+| Wave 3 | W3, W6, W10 full, W22 full, W23 full, W12, real-device runner | Verified UI activation waits for evidence | MVP 1.5 evidence |
+| Wave 3.5 | none | INT-2B | production pin promotion |
+| Wave 4 | W11, W14A, W14B, W17, iOS lifecycle work | snapshot restore activation waits for W14A/W17 | context and persistence |
+| Wave 5 | W13 plus evidence update | Layout V5 activation waits for benchmark/quality | optimization |
+| Wave 6 | W15A, W15B, W29+ | speculative activation waits for rollback proof | speed and platform |
+
+Rules:
+
+- A later-wave feature may be implemented behind a disabled flag, but it may not become product-active until its prerequisite wave gate passes.
+- Central bridge and pin-update work remain serialized even when surrounding worker lanes run in parallel.
+- The complete backlog remains in [Complete Task Inventory](13-complete-task-inventory.md); wave order decides launch timing.
+
 ## Strict integration sequence
 
 1. W4 removes zero/fatal.

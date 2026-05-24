@@ -25,18 +25,34 @@ The finished system should behave like this:
 
 1. [Current State](00-current-state.md)
 2. [Release Train](01-release-train.md)
-3. [Schema Registry](02-schema-registry.md)
-4. [Failure Matrix](03-failure-matrix.md)
-5. [Mode and Fallback Contract](04-mode-fallback-contract.md)
-6. [Memory Admission and Calibration](05-memory-admission-calibration.md)
-7. [Quality Gates](06-quality-gates.md)
-8. [Benchmark Evidence](07-benchmark-evidence.md)
-9. [Worker Ownership](08-worker-ownership.md)
-10. [Runtime Bridge Integration](09-runtime-bridge-integration.md)
-11. [Context Memory Planner](10-context-memory-planner.md)
-12. [KV Snapshot Security](11-kv-snapshot-security.md)
-13. [Validation and Release Gates](12-validation-and-release-gates.md)
-14. [Complete Task Inventory](13-complete-task-inventory.md)
+3. [Worker Launch Schedule](14-worker-launch-schedule.md)
+4. [Schema Registry](02-schema-registry.md)
+5. [Failure Matrix](03-failure-matrix.md)
+6. [Mode and Fallback Contract](04-mode-fallback-contract.md)
+7. [Memory Admission and Calibration](05-memory-admission-calibration.md)
+8. [Quality Gates](06-quality-gates.md)
+9. [Benchmark Evidence](07-benchmark-evidence.md)
+10. [Worker Ownership](08-worker-ownership.md)
+11. [Runtime Bridge Integration](09-runtime-bridge-integration.md)
+12. [Context Memory Planner](10-context-memory-planner.md)
+13. [KV Snapshot Security](11-kv-snapshot-security.md)
+14. [Validation and Release Gates](12-validation-and-release-gates.md)
+15. [Complete Task Inventory](13-complete-task-inventory.md)
+
+## How to execute the packet
+
+Use [Worker Launch Schedule](14-worker-launch-schedule.md) as the primary execution document. It restructures the complete worker set into waves:
+
+- Wave 0: docs, contracts, and safety can start immediately.
+- Wave 1: control-plane building blocks.
+- Wave 2: serialized runtime integration.
+- Wave 3: evidence activation and compatibility UI.
+- Wave 3.5: production pin promotion.
+- Wave 4: context and persistence.
+- Wave 5: optimization.
+- Wave 6: speculative decode and platform unlocks.
+
+Use [Worker Ownership](08-worker-ownership.md) for file ownership and PR rules, and [Complete Task Inventory](13-complete-task-inventory.md) for the full backlog. The schedule is the launch order; the inventory is the scope catalogue.
 
 Machine-readable compatibility-pair files:
 

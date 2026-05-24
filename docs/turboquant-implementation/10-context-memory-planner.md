@@ -2,6 +2,8 @@
 
 Context virtualization is the first product unlock after the control-plane runtime is safe. It replaces blunt truncation with an explicit memory hierarchy and a recorded context assembly decision.
 
+Launch wave: Minimal `ContextAssemblyPlan.v1` metadata is part of Wave 2 bridge integration; full context planner work is Wave 4 after MVP 1.5 evidence gate.
+
 ## Principle
 
 Users do not care about token counts. They care that the assistant remembers the document, project, task, and constraints.

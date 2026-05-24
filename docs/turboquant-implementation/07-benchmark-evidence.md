@@ -2,6 +2,8 @@
 
 Compatibility claims are evidence-backed. A profile may exist before evidence, but Pines must not say a model/context/mode is verified until a benchmark report proves memory, speed, correctness, and quality on a device class.
 
+Launch waves: W10 can create the evidence-store skeleton in Wave 1; benchmark import, evidence levels, revocation, and real-device verification activate in Wave 3.
+
 ## Evidence thesis
 
 One benchmark report certifies one tuple:
