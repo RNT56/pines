@@ -103,10 +103,10 @@ Vault retrieval stores both FP16 embeddings and compressed TurboQuant vector cod
 
 The app links MLX through exact fork pins in `project.yml`:
 
-- `https://github.com/RNT56/mlx-swift` at `dfa7eeb6655facc4916381e95a1deb83a6d8728a`
-- `https://github.com/RNT56/mlx-swift-lm` at `9f29a48654b546615f4b33059b52d27af931753e`
-- Nested `mlx` inside `RNT56/mlx-swift` at `8f13e02fa85252f2a569a43c6759f07490b816a5`
-- Nested `mlx-c` inside `RNT56/mlx-swift` at `fff19671eed2e556bdf4552328a1791a8f37b651`
+- `https://github.com/RNT56/mlx-swift` at `2cc1eecb4b45596dcc2ccf01cbff1af6ae057374`
+- `https://github.com/RNT56/mlx-swift-lm` at `25c2d56114c8778bc75dc03f667e3bac01221d79`
+- Nested `mlx` inside `RNT56/mlx-swift` at `3eb8ef074b911b00ecdbeb47f7bdafd91a123ad0`
+- Nested `mlx-c` inside `RNT56/mlx-swift` at `2abc34daff6ded246054d9e15b98870b5cd08b97`
 
 Compatibility implementations for model families not yet present in linked MLX packages are split into `MLXCompatibleModels+Llama4.swift` and `MLXCompatibleModels+DeepseekV4.swift`.
 
