@@ -709,7 +709,8 @@ enum ArtifactsWorkspaceDeriver {
             ]
         case .gemini:
             [
-                .init(id: "deep-research-pro-preview-12-2025", title: "Gemini Deep Research Pro", detail: "Gemini 3 Pro Deep Research agent", isFromProviderCapability: false),
+                .init(id: "deep-research-preview-04-2026", title: "Gemini Deep Research", detail: "Preview research agent optimized for streamed UI workflows", isFromProviderCapability: false),
+                .init(id: "deep-research-max-preview-04-2026", title: "Gemini Deep Research Max", detail: "Maximum-comprehensiveness Gemini research agent", isFromProviderCapability: false),
             ]
         default:
             []

@@ -479,6 +479,31 @@ struct PinesProviderDeepResearchRequest: Hashable, Sendable {
     let reportFormat: String
     let vectorStoreIDs: [String]
     let providerFileIDs: [String]
+    let metadata: [String: String]
+
+    init(
+        providerID: ProviderID,
+        providerKind: CloudProviderKind,
+        modelID: ModelID,
+        title: String,
+        prompt: String,
+        depth: String,
+        reportFormat: String,
+        vectorStoreIDs: [String],
+        providerFileIDs: [String],
+        metadata: [String: String] = [:]
+    ) {
+        self.providerID = providerID
+        self.providerKind = providerKind
+        self.modelID = modelID
+        self.title = title
+        self.prompt = prompt
+        self.depth = depth
+        self.reportFormat = reportFormat
+        self.vectorStoreIDs = vectorStoreIDs
+        self.providerFileIDs = providerFileIDs
+        self.metadata = metadata
+    }
 }
 
 struct PinesProviderRealtimeSessionRequest: Hashable, Sendable {

@@ -405,7 +405,7 @@ extension PinesAppModel {
             reportFormat: request.reportFormat,
             includeCodeInterpreter: true,
             serviceTier: "default",
-            metadata: ["provider_kind": request.providerKind.rawValue]
+            metadata: request.metadata.merging(["provider_kind": request.providerKind.rawValue]) { current, _ in current }
         )
         return try await startGeminiDeepResearch(geminiRequest, services: services, pollUntilTerminal: pollUntilTerminal)
     }
@@ -438,6 +438,7 @@ extension PinesAppModel {
         providerID: ProviderID,
         services: PinesAppServices,
         title: String? = nil,
+        metadata extraMetadata: [String: String] = [:],
         pollUntilTerminal: Bool = false
     ) async throws -> ProviderResearchRunRecord {
         do {
@@ -447,6 +448,7 @@ extension PinesAppModel {
             }
             var metadata = Self.geminiDeepResearchResumeMetadata(from: previousRun)
             metadata["gemini.follow_up_of"] = previousRun.id
+            metadata.merge(extraMetadata) { _, new in new }
             let request = GeminiDeepResearchRequest(
                 providerID: previousRun.providerID,
                 agentID: previousRun.modelID,

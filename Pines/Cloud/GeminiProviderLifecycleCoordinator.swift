@@ -601,8 +601,9 @@ struct GeminiDeepResearchRequest: Sendable {
 
         var agentConfig: [String: JSONValue] = [
             "type": .string("deep-research"),
-            "thinking_summaries": .string("none"),
-            "visualization": .string("off"),
+            "thinking_summaries": .string("auto"),
+            "visualization": .string("auto"),
+            "collaborative_planning": .bool(false),
             "depth": .string(depth),
             "report_format": .string(reportFormat),
             "source_policy": sourcePolicy,

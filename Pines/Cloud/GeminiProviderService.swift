@@ -2,6 +2,8 @@ import Foundation
 import PinesCore
 
 struct GeminiProviderService {
+    private static let interactionsHeaders = ["Api-Revision": "2026-05-20"]
+
     let configuration: CloudProviderConfiguration
     let secretStore: any SecretStore
     var urlSession: URLSession = .shared
@@ -11,7 +13,8 @@ struct GeminiProviderService {
         path: String,
         apiVersion: String = "v1beta",
         queryItems: [URLQueryItem] = [],
-        body: JSONValue? = nil
+        body: JSONValue? = nil,
+        extraHeaders: [String: String] = [:]
     ) async throws -> GeminiProviderResponse {
         try await send(
             method: method,
@@ -19,7 +22,8 @@ struct GeminiProviderService {
             apiVersion: apiVersion,
             queryItems: queryItems,
             body: body.map { try JSONEncoder().encode($0) },
-            contentType: body == nil ? nil : "application/json"
+            contentType: body == nil ? nil : "application/json",
+            extraHeaders: extraHeaders
         )
     }
 
@@ -158,15 +162,15 @@ struct GeminiProviderService {
 
     func createInteraction(body: JSONValue, stream: Bool = false) async throws -> GeminiProviderResponse {
         let queryItems = stream ? [URLQueryItem(name: "alt", value: "sse")] : []
-        return try await rawJSON(method: .post, path: "interactions", queryItems: queryItems, body: body)
+        return try await rawJSON(method: .post, path: "interactions", queryItems: queryItems, body: body, extraHeaders: Self.interactionsHeaders)
     }
 
     func getInteraction(_ name: String) async throws -> GeminiProviderResponse {
-        try await rawJSON(method: .get, path: normalizedResourcePath(name, defaultCollection: "interactions"))
+        try await rawJSON(method: .get, path: normalizedResourcePath(name, defaultCollection: "interactions"), extraHeaders: Self.interactionsHeaders)
     }
 
     func cancelInteraction(_ name: String) async throws -> GeminiProviderResponse {
-        try await rawJSON(method: .post, path: "\(normalizedResourcePath(name, defaultCollection: "interactions")):cancel")
+        try await rawJSON(method: .post, path: "\(normalizedResourcePath(name, defaultCollection: "interactions")):cancel", extraHeaders: Self.interactionsHeaders)
     }
 
     private func send(

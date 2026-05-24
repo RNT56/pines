@@ -883,6 +883,11 @@ private extension OpenAIDeepResearchRequest {
                     ]),
                 ]),
             ]),
+            "include": .array([
+                .string("web_search_call.action.sources"),
+                .string("file_search_call.results"),
+                .string("code_interpreter_call.outputs"),
+            ]),
             "tools": .array(toolConfigurations),
         ]
 
@@ -981,9 +986,7 @@ private extension OpenAIDeepResearchRequest {
         if !filters.isEmpty {
             tool["filters"] = .object(filters)
         }
-        if let budget = sourcePolicy.webSearchReturnTokenBudget {
-            tool["return_token_budget"] = .number(Double(budget))
-        } else if depth == .deep {
+        if sourcePolicy.webSearchReturnTokenBudget != nil || depth == .deep {
             tool["return_token_budget"] = .string("unlimited")
         }
         return tool
