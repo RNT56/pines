@@ -1432,9 +1432,8 @@ private actor MLXRuntimeState {
                             input = try await context.processor.prepare(input: userInput)
                         }
                         let prepareElapsedSeconds = Date().timeIntervalSince(prepareStartedAt)
-                        if let maxContextTokens = profile.quantization.maxKVSize,
-                           input.text.tokens.size + generationPlan.reservedCompletionTokens > maxContextTokens {
-                            if !generationPlan.constrainToContext(
+                        if let maxContextTokens = profile.quantization.maxKVSize {
+                            if !generationPlan.fitPreparedPrompt(
                                 promptTokenCount: input.text.tokens.size,
                                 maxContextTokens: maxContextTokens
                             ) {
@@ -1447,7 +1446,8 @@ private actor MLXRuntimeState {
                             from: request,
                             profile: profile,
                             install: install,
-                            maxTokensOverride: generationPlan.effectiveMaxTokens
+                            maxTokensOverride: generationPlan.effectiveMaxTokens,
+                            maxKVSizeOverride: generationPlan.effectiveMaxKVSize
                         )
                         var contextMetadata: [String: String] = [
                             ChatContextMetadataKeys.exactInputTokens: String(input.text.tokens.size),
@@ -1891,7 +1891,8 @@ private actor MLXRuntimeState {
         from request: ChatRequest,
         profile: RuntimeProfile,
         install: ModelInstall?,
-        maxTokensOverride: Int? = nil
+        maxTokensOverride: Int? = nil,
+        maxKVSizeOverride: Int? = nil
     ) -> GenerateParameters {
         let turboQuantSeed: UInt64? =
             profile.quantization.kvCacheStrategy == .turboQuant
@@ -1904,7 +1905,7 @@ private actor MLXRuntimeState {
 
         return GenerateParameters(
             maxTokens: maxTokensOverride ?? request.sampling.maxTokens,
-            maxKVSize: profile.quantization.maxKVSize,
+            maxKVSize: maxKVSizeOverride ?? profile.quantization.maxKVSize,
             kvBits: profile.quantization.kvCacheStrategy == .turboQuant ? nil : profile.quantization.kvBits,
             kvGroupSize: profile.quantization.kvGroupSize,
             quantizedKVStart: profile.quantization.quantizedKVStart,

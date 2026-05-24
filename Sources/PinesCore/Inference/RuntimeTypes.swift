@@ -1375,11 +1375,16 @@ public struct LocalRuntimeSafetyAssessment: Hashable, Codable, Sendable {
 }
 
 public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
+    public static let defaultKVCacheSizeFloorTokens = 256
+    public static let defaultKVCacheSizeAlignmentTokens = 256
+
     public var requestedCompletionTokens: Int?
     public var reservedCompletionTokens: Int
     public var effectiveMaxTokens: Int?
     public var maxTokensClamped: Bool
     public var pressureCompletionTokenLimit: Int?
+    public var effectiveMaxKVSize: Int?
+    public var maxKVSizeClamped: Bool
     public var initialAvailableMemoryBytes: Int64?
     public var pressureReason: RuntimePressureReason
     public var constrainedModeActive: Bool
@@ -1390,6 +1395,8 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
         effectiveMaxTokens: Int?,
         maxTokensClamped: Bool,
         pressureCompletionTokenLimit: Int?,
+        effectiveMaxKVSize: Int? = nil,
+        maxKVSizeClamped: Bool = false,
         initialAvailableMemoryBytes: Int64?,
         pressureReason: RuntimePressureReason,
         constrainedModeActive: Bool
@@ -1399,6 +1406,8 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
         self.effectiveMaxTokens = effectiveMaxTokens.map { max(1, $0) }
         self.maxTokensClamped = maxTokensClamped
         self.pressureCompletionTokenLimit = pressureCompletionTokenLimit.map { max(1, $0) }
+        self.effectiveMaxKVSize = effectiveMaxKVSize.map { max(1, $0) }
+        self.maxKVSizeClamped = maxKVSizeClamped
         self.initialAvailableMemoryBytes = initialAvailableMemoryBytes
         self.pressureReason = pressureReason
         self.constrainedModeActive = constrainedModeActive
@@ -1442,6 +1451,8 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
             effectiveMaxTokens: effective,
             maxTokensClamped: clamped,
             pressureCompletionTokenLimit: pressureLimit,
+            effectiveMaxKVSize: profile.quantization.maxKVSize,
+            maxKVSizeClamped: false,
             initialAvailableMemoryBytes: initialAvailableMemoryBytes,
             pressureReason: safety.pressureReason,
             constrainedModeActive: safety.constrainedModeActive
@@ -1452,7 +1463,26 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
         promptTokenCount: Int,
         maxContextTokens: Int
     ) -> Bool {
+        fitPreparedPrompt(
+            promptTokenCount: promptTokenCount,
+            maxContextTokens: maxContextTokens
+        )
+    }
+
+    public mutating func fitPreparedPrompt(
+        promptTokenCount: Int,
+        maxContextTokens: Int,
+        minKVCacheSizeTokens: Int = Self.defaultKVCacheSizeFloorTokens,
+        kvCacheSizeAlignmentTokens: Int = Self.defaultKVCacheSizeAlignmentTokens
+    ) -> Bool {
+        let promptTokenCount = max(0, promptTokenCount)
         guard promptTokenCount + reservedCompletionTokens > maxContextTokens else {
+            fitKVCacheToPreparedPrompt(
+                promptTokenCount: promptTokenCount,
+                maxContextTokens: maxContextTokens,
+                minKVCacheSizeTokens: minKVCacheSizeTokens,
+                kvCacheSizeAlignmentTokens: kvCacheSizeAlignmentTokens
+            )
             return true
         }
         let availableCompletionTokens = maxContextTokens - promptTokenCount
@@ -1463,6 +1493,12 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
         reservedCompletionTokens = min(reservedCompletionTokens, availableCompletionTokens)
         effectiveMaxTokens = reservedCompletionTokens
         maxTokensClamped = true
+        fitKVCacheToPreparedPrompt(
+            promptTokenCount: promptTokenCount,
+            maxContextTokens: maxContextTokens,
+            minKVCacheSizeTokens: minKVCacheSizeTokens,
+            kvCacheSizeAlignmentTokens: kvCacheSizeAlignmentTokens
+        )
         return true
     }
 
@@ -1475,6 +1511,9 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
             LocalProviderMetadataKeys.generationMaxTokensClamped: String(maxTokensClamped),
             LocalProviderMetadataKeys.generationPressureCompletionLimit: pressureCompletionTokenLimit
                 .map(String.init) ?? "none",
+            LocalProviderMetadataKeys.generationEffectiveMaxKVSize: effectiveMaxKVSize
+                .map(String.init) ?? "none",
+            LocalProviderMetadataKeys.generationMaxKVSizeClamped: String(maxKVSizeClamped),
             LocalProviderMetadataKeys.generationInitialAvailableMemoryBytes: initialAvailableMemoryBytes
                 .map(String.init) ?? "unknown",
         ]
@@ -1510,6 +1549,29 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
 
         guard let policyLimit else { return nil }
         return min(profile.quantization.maxKVSize ?? policyLimit, policyLimit)
+    }
+
+    private mutating func fitKVCacheToPreparedPrompt(
+        promptTokenCount: Int,
+        maxContextTokens: Int,
+        minKVCacheSizeTokens: Int,
+        kvCacheSizeAlignmentTokens: Int
+    ) {
+        guard effectiveMaxTokens != nil else {
+            effectiveMaxKVSize = maxContextTokens
+            maxKVSizeClamped = false
+            return
+        }
+
+        let requiredTokens = max(1, promptTokenCount + reservedCompletionTokens)
+        let floorTokens = min(max(1, minKVCacheSizeTokens), maxContextTokens)
+        let alignmentTokens = max(1, kvCacheSizeAlignmentTokens)
+        let flooredTokens = max(requiredTokens, floorTokens)
+        let alignedTokens = ((flooredTokens + alignmentTokens - 1) / alignmentTokens)
+            * alignmentTokens
+        let fittedTokens = min(maxContextTokens, max(requiredTokens, alignedTokens))
+        effectiveMaxKVSize = fittedTokens
+        maxKVSizeClamped = fittedTokens < maxContextTokens
     }
 }
 

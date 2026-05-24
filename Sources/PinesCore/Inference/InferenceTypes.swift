@@ -56,6 +56,8 @@ public enum LocalProviderMetadataKeys {
     public static let generationMaxTokensClamped = "local.generation.max_tokens_clamped"
     public static let generationPressureCompletionLimit = "local.generation.pressure_completion_limit"
     public static let generationInitialAvailableMemoryBytes = "local.generation.initial_available_memory_bytes"
+    public static let generationEffectiveMaxKVSize = "local.generation.effective_max_kv_size"
+    public static let generationMaxKVSizeClamped = "local.generation.max_kv_size_clamped"
     public static let generationLastTokenAt = "local.generation.last_token_at"
     public static let generationCancellationReason = "local.generation.cancellation_reason"
     public static let generationWatchdogCode = "local.generation.watchdog.code"

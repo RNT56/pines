@@ -3646,6 +3646,61 @@ struct CoreContractTests {
         #expect(plan.reservedCompletionTokens == 16)
         #expect(plan.effectiveMaxTokens == 16)
         #expect(plan.maxTokensClamped)
+        #expect(plan.effectiveMaxKVSize == 4_096)
+        #expect(!plan.maxKVSizeClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanRightSizesKVWindowAfterTokenization() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_800_000_000,
+                thermalState: "nominal"
+            )
+        )
+        var plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        let fitsContext = plan.fitPreparedPrompt(promptTokenCount: 47, maxContextTokens: 4_096)
+        #expect(fitsContext)
+        #expect(plan.reservedCompletionTokens == 32)
+        #expect(plan.effectiveMaxTokens == 32)
+        #expect(plan.effectiveMaxKVSize == 256)
+        #expect(plan.maxKVSizeClamped)
+        #expect(
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationEffectiveMaxKVSize] == "256"
+        )
+        #expect(
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationMaxKVSizeClamped] == "true"
+        )
+    }
+
+    @Test
+    func localGenerationPipelinePlanPreservesFullKVWindowForUnboundedCompletion() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyAssessment(
+            allowed: true,
+            recommendedMaxContextTokens: 4_096,
+            recommendedPrefillStepSize: 512
+        )
+        var plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: nil,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 3_000_000_000
+        )
+
+        let fitsContext = plan.fitPreparedPrompt(promptTokenCount: 47, maxContextTokens: 4_096)
+        #expect(fitsContext)
+        #expect(plan.effectiveMaxTokens == nil)
+        #expect(plan.effectiveMaxKVSize == 4_096)
+        #expect(!plan.maxKVSizeClamped)
     }
 
     @Test
