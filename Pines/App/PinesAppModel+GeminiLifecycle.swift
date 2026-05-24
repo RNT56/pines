@@ -615,18 +615,56 @@ extension PinesAppModel {
                 records = try await coordinator.createGeneratedMediaArtifacts(
                     modelID: modelID,
                     body: Self.geminiGeneratedMediaBody(prompt: prompt, responseModalities: ["AUDIO"]),
-                    method: .predict
+                    method: .generateContent
                 )
             default:
                 records = try await coordinator.createGeneratedMediaArtifacts(
                     modelID: modelID,
                     body: Self.geminiGeneratedMediaBody(prompt: prompt, responseModalities: ["IMAGE"]),
-                    method: .predict
+                    method: .generateContent
                 )
             }
             await refreshProviderLifecycleState(services: services)
             providerLifecycleError = nil
             return records
+        } catch {
+            providerLifecycleError = error.localizedDescription
+            throw error
+        }
+    }
+
+    @discardableResult
+    func remixGeminiImageArtifact(
+        providerID: ProviderID,
+        modelID: ModelID,
+        prompt: String,
+        reference: ProviderArtifactRecord,
+        services: PinesAppServices
+    ) async throws -> [ProviderArtifactRecord] {
+        do {
+            let referencePart = try await Self.geminiImageReferencePart(from: reference)
+            let records = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
+                .createGeneratedMediaArtifacts(
+                    modelID: modelID,
+                    body: Self.geminiGeneratedMediaBody(
+                        prompt: prompt,
+                        responseModalities: ["IMAGE"],
+                        referenceParts: [referencePart]
+                    ),
+                    method: .generateContent
+                )
+            let annotatedRecords = Self.annotatedGeminiRemixArtifacts(
+                records,
+                reference: reference,
+                prompt: prompt,
+                modelID: modelID
+            )
+            for record in annotatedRecords {
+                try await services.providerArtifactRepository?.upsertProviderArtifact(record)
+            }
+            await refreshProviderLifecycleState(services: services)
+            providerLifecycleError = nil
+            return annotatedRecords
         } catch {
             providerLifecycleError = error.localizedDescription
             throw error
@@ -647,6 +685,42 @@ extension PinesAppModel {
             await refreshProviderLifecycleState(services: services)
             providerLifecycleError = nil
             return records
+        } catch {
+            providerLifecycleError = error.localizedDescription
+            throw error
+        }
+    }
+
+    @discardableResult
+    func refreshGeminiGeneratedMediaOperation(
+        id: String,
+        providerID: ProviderID,
+        services: PinesAppServices
+    ) async throws -> ProviderArtifactRecord {
+        do {
+            let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
+                .refreshGeneratedMediaOperation(operationName: id)
+            await refreshProviderLifecycleState(services: services)
+            providerLifecycleError = nil
+            return record
+        } catch {
+            providerLifecycleError = error.localizedDescription
+            throw error
+        }
+    }
+
+    @discardableResult
+    func cancelGeminiGeneratedMediaOperation(
+        id: String,
+        providerID: ProviderID,
+        services: PinesAppServices
+    ) async throws -> ProviderArtifactRecord {
+        do {
+            let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
+                .cancelGeneratedMediaOperation(operationName: id)
+            await refreshProviderLifecycleState(services: services)
+            providerLifecycleError = nil
+            return record
         } catch {
             providerLifecycleError = error.localizedDescription
             throw error
@@ -830,18 +904,141 @@ extension PinesAppModel {
         return raw.hasPrefix("models/") ? raw : "models/\(raw)"
     }
 
-    private static func geminiGeneratedMediaBody(prompt: String, responseModalities: [String]) -> JSONValue {
-        .object([
+    private static func geminiImageReferencePart(from artifact: ProviderArtifactRecord) async throws -> JSONValue {
+        if let localURL = artifact.localURL,
+           localURL.isFileURL,
+           FileManager.default.fileExists(atPath: localURL.path) {
+            let data = try Data(contentsOf: localURL)
+            guard !data.isEmpty else {
+                throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) is empty.")
+            }
+            return GeminiProviderLifecycleCoordinator.inlineDataPart(
+                data: data,
+                mimeType: geminiImageContentType(for: artifact, fileName: localURL.lastPathComponent)
+            )
+        }
+
+        if let data = artifact.content.flatMap(Self.firstBase64ImageData(in:)) {
+            return GeminiProviderLifecycleCoordinator.inlineDataPart(
+                data: data,
+                mimeType: geminiImageContentType(for: artifact, fileName: artifact.fileName)
+            )
+        }
+
+        if let remoteURL = artifact.remoteURL {
+            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+            guard !data.isEmpty else {
+                throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) could not be downloaded.")
+            }
+            let mimeType = response.mimeType?.hasPrefix("image/") == true
+                ? response.mimeType
+                : geminiImageContentType(for: artifact, fileName: remoteURL.lastPathComponent)
+            return GeminiProviderLifecycleCoordinator.inlineDataPart(data: data, mimeType: mimeType ?? "image/png")
+        }
+
+        throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) has no local file, remote URL, or embedded image data.")
+    }
+
+    private static func annotatedGeminiRemixArtifacts(
+        _ records: [ProviderArtifactRecord],
+        reference: ProviderArtifactRecord,
+        prompt: String,
+        modelID: ModelID
+    ) -> [ProviderArtifactRecord] {
+        records.map { record in
+            var updated = record
+            var content = record.content?.objectValue ?? [:]
+            if content.isEmpty, let original = record.content {
+                content["provider_response"] = original
+            }
+            content["pines_remix"] = .object([
+                "source_artifact_id": .string(reference.id),
+                "prompt": .string(prompt),
+                "model": .string(modelID.rawValue),
+                "mode": .string("image_remix"),
+                "provider": .string("gemini"),
+            ])
+            updated.content = .object(content)
+            updated.text = record.text ?? prompt
+            return updated
+        }
+    }
+
+    private static func geminiImageContentType(for artifact: ProviderArtifactRecord, fileName: String?) -> String {
+        if let contentType = artifact.contentType?.lowercased(), contentType.hasPrefix("image/") {
+            return contentType
+        }
+        if let fileName,
+           let contentType = UTType(filenameExtension: URL(fileURLWithPath: fileName).pathExtension)?.preferredMIMEType,
+           contentType.hasPrefix("image/") {
+            return contentType
+        }
+        return "image/png"
+    }
+
+    private static func geminiGeneratedMediaBody(
+        prompt: String,
+        responseModalities: [String],
+        referenceParts: [JSONValue] = []
+    ) -> JSONValue {
+        let parts = [.object(["text": .string(prompt)])] + referenceParts
+        return .object([
             "contents": .array([
                 .object([
                     "role": .string("user"),
-                    "parts": .array([.object(["text": .string(prompt)])]),
+                    "parts": .array(parts),
                 ]),
             ]),
             "generationConfig": .object([
                 "responseModalities": .array(responseModalities.map(JSONValue.string)),
             ]),
         ])
+    }
+
+    private static func firstBase64ImageData(in value: JSONValue) -> Data? {
+        switch value {
+        case .object(let object):
+            for key in ["b64_json", "base64", "image_base64", "result"] {
+                if let data = object[key]?.stringValue.flatMap(decodedBase64ImageData(from:)) {
+                    return data
+                }
+            }
+            for nested in object.values {
+                if let data = firstBase64ImageData(in: nested) {
+                    return data
+                }
+            }
+            return nil
+        case .array(let values):
+            for nested in values {
+                if let data = firstBase64ImageData(in: nested) {
+                    return data
+                }
+            }
+            return nil
+        case .string(let raw):
+            return decodedBase64ImageData(from: raw)
+        case .number, .bool, .null:
+            return nil
+        }
+    }
+
+    private static func decodedBase64ImageData(from raw: String) -> Data? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base64: String
+        if let comma = trimmed.firstIndex(of: ","),
+           trimmed[..<comma].lowercased().contains("base64") {
+            base64 = String(trimmed[trimmed.index(after: comma)...])
+        } else {
+            base64 = trimmed
+        }
+        guard base64.count > 128,
+              let data = Data(base64Encoded: base64, options: [.ignoreUnknownCharacters]),
+              !data.isEmpty
+        else {
+            return nil
+        }
+        return data
     }
 }
 

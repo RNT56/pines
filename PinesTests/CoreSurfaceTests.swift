@@ -208,6 +208,59 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertFalse(rootView.contains("ProviderLifecycleDashboard"))
     }
 
+    func testArtifactsCreateAndLibraryUseDedicatedAssetStudioSurfaces() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let workspace = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Artifacts/ArtifactsWorkspaceView.swift"),
+            encoding: .utf8
+        )
+        let models = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Artifacts/ArtifactsModels.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(models.contains("enum ArtifactsAssetKindFilter"))
+        XCTAssertTrue(models.contains("static func assetViewModels"))
+        XCTAssertTrue(models.contains("isVisibleInArtifactsGallery"))
+        XCTAssertTrue(workspace.contains("ArtifactsAssetGrid"))
+        XCTAssertTrue(workspace.contains("ArtifactsAssetInspector"))
+        XCTAssertTrue(workspace.contains("ArtifactsCreateComposer"))
+        XCTAssertTrue(workspace.contains("ArtifactsCreateOutputRail"))
+        XCTAssertFalse(workspace.contains("PinesCardSection(\"Generate Media\""))
+        XCTAssertFalse(workspace.contains("PinesCardSection(\"Gallery\""))
+    }
+
+    func testArtifactsRemixWiringUsesProviderEditAndReferenceImagePayloads() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appArtifacts = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModel+Artifacts.swift"),
+            encoding: .utf8
+        )
+        let openAILifecycle = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Cloud/OpenAIProviderLifecycleCoordinator.swift"),
+            encoding: .utf8
+        )
+        let geminiLifecycle = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModel+GeminiLifecycle.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appArtifacts.contains("func remixOpenAIImageArtifact"))
+        XCTAssertTrue(openAILifecycle.contains("func createImageEditArtifacts"))
+        XCTAssertTrue(openAILifecycle.contains("createImageEdit("))
+        XCTAssertTrue(openAILifecycle.contains("pines_remix"))
+        XCTAssertTrue(geminiLifecycle.contains("func remixGeminiImageArtifact"))
+        XCTAssertTrue(geminiLifecycle.contains("geminiImageReferencePart"))
+        XCTAssertTrue(geminiLifecycle.contains("referenceParts"))
+        XCTAssertTrue(geminiLifecycle.contains("method: .generateContent"))
+        XCTAssertTrue(geminiLifecycle.contains("func refreshGeminiGeneratedMediaOperation"))
+        XCTAssertTrue(geminiLifecycle.contains("func cancelGeminiGeneratedMediaOperation"))
+    }
+
     func testMemoryWarningDoesNotDirectlyCancelActiveChatRun() throws {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

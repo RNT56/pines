@@ -1,5 +1,6 @@
 import Foundation
 import PinesCore
+import UniformTypeIdentifiers
 
 struct OpenAIProviderLifecycleRepositories: Sendable {
     var files: (any ProviderFileRepository)?
@@ -245,6 +246,36 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         return artifacts
     }
 
+    func createImageEditArtifacts(
+        prompt: String,
+        model: String? = nil,
+        reference: ProviderArtifactRecord,
+        fields: [String: JSONValue] = [:]
+    ) async throws -> [ProviderArtifactRecord] {
+        let imageFile = try await referenceImageFile(from: reference)
+        var multipartFields = Self.multipartFields(from: fields)
+        multipartFields["prompt"] = prompt
+        multipartFields["model"] = model ?? multipartFields["model"] ?? "gpt-image-2"
+
+        let response = try await service.createImageEdit(
+            multipart: OpenAIMultipartForm(fields: multipartFields, files: [imageFile])
+        )
+        let artifacts = try artifactRecords(fromImageResponse: response, prompt: prompt).map { artifact in
+            annotatedRemixArtifact(
+                artifact,
+                reference: reference,
+                prompt: prompt,
+                model: multipartFields["model"],
+                options: fields
+            )
+        }
+        for artifact in artifacts {
+            try await repositories.artifacts?.upsertProviderArtifact(artifact)
+        }
+        try await audit("Created \(artifacts.count) OpenAI image remix artifact(s)", modelID: multipartFields["model"].map(ModelID.init(rawValue:)))
+        return artifacts
+    }
+
     func createVideoJob(prompt: String, model: String? = nil, fields: [String: JSONValue] = [:]) async throws -> ProviderArtifactRecord {
         let response = try await service.createVideo(OpenAIVideoCreateRequest(prompt: prompt, model: model, rawFields: fields))
         let artifact = artifactRecord(
@@ -382,6 +413,79 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
                 remoteURL: remoteURL
             )
         }
+    }
+
+    private func referenceImageFile(from artifact: ProviderArtifactRecord) async throws -> OpenAIMultipartFile {
+        if let localURL = artifact.localURL,
+           localURL.isFileURL,
+           FileManager.default.fileExists(atPath: localURL.path) {
+            let data = try Data(contentsOf: localURL)
+            guard !data.isEmpty else {
+                throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) is empty.")
+            }
+            return OpenAIMultipartFile(
+                name: "image[]",
+                fileName: Self.safeMultipartFileName(artifact.fileName ?? localURL.lastPathComponent, fallbackExtension: localURL.pathExtension),
+                contentType: Self.imageContentType(for: artifact, fileName: localURL.lastPathComponent),
+                data: data
+            )
+        }
+
+        if let data = artifact.content.flatMap(Self.firstBase64ImageData(in:)) {
+            return OpenAIMultipartFile(
+                name: "image[]",
+                fileName: Self.safeMultipartFileName(artifact.fileName ?? "reference.png", fallbackExtension: "png"),
+                contentType: Self.imageContentType(for: artifact, fileName: artifact.fileName),
+                data: data
+            )
+        }
+
+        if let remoteURL = artifact.remoteURL {
+            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+            guard !data.isEmpty else {
+                throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) could not be downloaded.")
+            }
+            let responseContentType = response.mimeType?.hasPrefix("image/") == true ? response.mimeType : nil
+            return OpenAIMultipartFile(
+                name: "image[]",
+                fileName: Self.safeMultipartFileName(artifact.fileName ?? remoteURL.lastPathComponent, fallbackExtension: remoteURL.pathExtension),
+                contentType: responseContentType ?? Self.imageContentType(for: artifact, fileName: remoteURL.lastPathComponent),
+                data: data
+            )
+        }
+
+        throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) has no local file, remote URL, or embedded image data.")
+    }
+
+    private func annotatedRemixArtifact(
+        _ artifact: ProviderArtifactRecord,
+        reference: ProviderArtifactRecord,
+        prompt: String,
+        model: String?,
+        options: [String: JSONValue]
+    ) -> ProviderArtifactRecord {
+        var updated = artifact
+        var metadata: [String: JSONValue] = [
+            "source_artifact_id": .string(reference.id),
+            "prompt": .string(prompt),
+            "mode": .string("image_remix"),
+            "provider": .string("openai"),
+        ]
+        if let model, !model.isEmpty {
+            metadata["model"] = .string(model)
+        }
+        if !options.isEmpty {
+            metadata["options"] = .object(options)
+        }
+
+        var content = artifact.content?.objectValue ?? [:]
+        if content.isEmpty, let original = artifact.content {
+            content["provider_response"] = original
+        }
+        content["pines_remix"] = .object(metadata)
+        updated.content = .object(content)
+        updated.text = artifact.text ?? prompt
+        return updated
     }
 
     private func artifactRecords(fromResponseOutput json: JSONValue?, responseID: String?, runID: String?) -> [ProviderArtifactRecord] {
@@ -681,6 +785,91 @@ private extension OpenAIProviderLifecycleCoordinator {
             return ISO8601DateFormatter().date(from: string)
         }
         return nil
+    }
+
+    static func multipartFields(from fields: [String: JSONValue]) -> [String: String] {
+        fields.compactMapValues { value in
+            switch value {
+            case .string(let string):
+                string
+            case .number(let number):
+                number.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(number)) : String(number)
+            case .bool(let bool):
+                bool ? "true" : "false"
+            case .object, .array, .null:
+                nil
+            }
+        }
+    }
+
+    static func imageContentType(for artifact: ProviderArtifactRecord, fileName: String?) -> String {
+        if let contentType = artifact.contentType?.lowercased(), contentType.hasPrefix("image/") {
+            return contentType
+        }
+        if let fileName,
+           let contentType = UTType(filenameExtension: URL(fileURLWithPath: fileName).pathExtension)?.preferredMIMEType,
+           contentType.hasPrefix("image/") {
+            return contentType
+        }
+        return "image/png"
+    }
+
+    static func safeMultipartFileName(_ rawName: String, fallbackExtension: String?) -> String {
+        let sanitized = rawName
+            .replacingOccurrences(of: #"[^A-Za-z0-9._-]+"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
+        var fileName = sanitized.isEmpty ? "reference" : sanitized
+        if URL(fileURLWithPath: fileName).pathExtension.isEmpty {
+            let fallback = fallbackExtension?.trimmingCharacters(in: CharacterSet(charactersIn: ".")).nilIfEmpty ?? "png"
+            fileName += ".\(fallback)"
+        }
+        return fileName
+    }
+
+    static func firstBase64ImageData(in value: JSONValue) -> Data? {
+        switch value {
+        case .object(let object):
+            for key in ["b64_json", "base64", "image_base64", "result"] {
+                if let data = object[key]?.stringValue.flatMap(decodedBase64ImageData(from:)) {
+                    return data
+                }
+            }
+            for nested in object.values {
+                if let data = firstBase64ImageData(in: nested) {
+                    return data
+                }
+            }
+            return nil
+        case .array(let values):
+            for nested in values {
+                if let data = firstBase64ImageData(in: nested) {
+                    return data
+                }
+            }
+            return nil
+        case .string(let raw):
+            return decodedBase64ImageData(from: raw)
+        case .number, .bool, .null:
+            return nil
+        }
+    }
+
+    static func decodedBase64ImageData(from raw: String) -> Data? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base64: String
+        if let comma = trimmed.firstIndex(of: ","),
+           trimmed[..<comma].lowercased().contains("base64") {
+            base64 = String(trimmed[trimmed.index(after: comma)...])
+        } else {
+            base64 = trimmed
+        }
+        guard base64.count > 128,
+              let data = Data(base64Encoded: base64, options: [.ignoreUnknownCharacters]),
+              !data.isEmpty
+        else {
+            return nil
+        }
+        return data
     }
 }
 

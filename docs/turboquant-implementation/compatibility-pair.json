@@ -10,13 +10,13 @@
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "codex/turboquant-core-completion",
-    "commit": "76871538f17f997021ba5bda5456726376985143",
+    "commit": "44f8d89b98655d36f3f32918e51a9a189011880c",
     "dirtyAtValidation": true
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "codex/turboquant-completion-hardening",
-    "commit": "babfa5ef0bfb36d31bde85e39ba17d9b5ee923ee",
+    "commit": "73ec46dcf19c9c2c8f2dfb072073723d2b212378",
     "dirtyAtValidation": false
   },
   "schemaSet": {

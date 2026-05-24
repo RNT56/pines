@@ -20,9 +20,9 @@ Related Pines repo:
 
 | Repo | Branch | Observed HEAD | Dirty state |
 | --- | --- | --- | --- |
-| `pines` | `codex/local-runtime-hardening` | `78b210f5389e17479ecab2d2a0fbf161f5447b04` | modified files existed before/during this doc pass; latest observed external modifications are `Pines/App/PinesRootView.swift` and `docs/TURBOQUANT.md` |
-| `mlx-swift` | `codex/turboquant-core-completion` | `76871538f17f997021ba5bda5456726376985143` | nested `Source/Cmlx/mlx`, `Source/Cmlx/mlx-c` modified before this doc pass |
-| `mlx-swift-lm` | `codex/turboquant-completion-hardening` | `babfa5ef0bfb36d31bde85e39ba17d9b5ee923ee` | clean before this doc pass |
+| `pines` | `codex/local-runtime-hardening` | `3c21a2d2ae9d2062881990f9529a916bbfa85571` | unrelated artifact workspace files are modified locally and were not included in this pin promotion |
+| `mlx-swift` | `codex/turboquant-core-completion` | `44f8d89b98655d36f3f32918e51a9a189011880c` | nested `Source/Cmlx/mlx`, `Source/Cmlx/mlx-c` modified before this doc pass |
+| `mlx-swift-lm` | `codex/turboquant-completion-hardening` | `73ec46dcf19c9c2c8f2dfb072073723d2b212378` | clean before this doc pass |
 
 ## Observed Pines pins
 
@@ -30,17 +30,17 @@ Related Pines repo:
 
 | Package | Revision |
 | --- | --- |
-| `MLXSwift` | `76871538f17f997021ba5bda5456726376985143` |
-| `MLXSwiftLM` | `babfa5ef0bfb36d31bde85e39ba17d9b5ee923ee` |
+| `MLXSwift` | `44f8d89b98655d36f3f32918e51a9a189011880c` |
+| `MLXSwiftLM` | `73ec46dcf19c9c2c8f2dfb072073723d2b212378` |
 
-At the start of the doc pass, `pines/docs/TURBOQUANT.md` listed a different current-pin pair:
+`pines/docs/TURBOQUANT.md` now lists the same current-pin pair:
 
 | Package | Revision listed in `docs/TURBOQUANT.md` |
 | --- | --- |
-| `MLXSwift` | `2cc1eecb4b45596dcc2ccf01cbff1af6ae057374` |
-| `MLXSwiftLM` | `da3447fb53314df843761e77bce43a794fb136ca` |
+| `MLXSwift` | `44f8d89b98655d36f3f32918e51a9a189011880c` |
+| `MLXSwiftLM` | `73ec46dcf19c9c2c8f2dfb072073723d2b212378` |
 
-This mismatch was a release-train reconciliation item for the Pines compatibility branch. Keep `docs/TURBOQUANT.md`, `project.yml`, and the generated Xcode project synchronized whenever the compatibility pair changes. The dirty `docs/TURBOQUANT.md` change was present outside this documentation packet and should be reviewed separately before pin promotion.
+Keeping `docs/TURBOQUANT.md`, `project.yml`, and the generated Xcode project synchronized is part of the release-train gate whenever the compatibility pair changes.
 
 ## Observed LM attention safety state
 
