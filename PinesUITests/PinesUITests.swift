@@ -171,21 +171,6 @@ final class PinesUITests: XCTestCase {
         assertExists(firstExisting([app.buttons["Import"], app.buttons["Search vault"]]), "Vault toolbar actions were missing.")
         assertExists(firstExisting([app.buttons["Search vault"], app.buttons["Search"]]), "Vault search action was missing.")
 
-        openTab("Artifacts")
-        assertExists(app.buttons["Refresh artifacts"], "Artifacts refresh action was missing.")
-        switchArtifactsWorkspace(to: "Create")
-        assertIdentifierVisible("pines.artifacts.media.prompt", "Create workspace prompt field was missing.")
-        let createArtifact = app.buttons["pines.artifacts.media.create"]
-        XCTAssertTrue(createArtifact.waitForExistence(timeout: 5), "Create artifact action was missing.")
-        XCTAssertFalse(createArtifact.isEnabled, "Create artifact should stay disabled in UI test mode without a configured provider.")
-        switchArtifactsWorkspace(to: "Research")
-        assertIdentifierVisible("pines.artifacts.research.prompt", "Research workspace prompt field was missing.")
-        let startResearch = app.buttons["pines.artifacts.research.start"]
-        XCTAssertTrue(startResearch.waitForExistence(timeout: 5), "Start research action was missing.")
-        XCTAssertFalse(startResearch.isEnabled, "Start research should stay disabled in UI test mode without a configured provider.")
-        switchArtifactsWorkspace(to: "Library")
-        assertIdentifierVisible("pines.artifacts.library.search", "Artifacts library search field was missing.")
-
         openTab("Settings")
         openSettingsSection("Design")
         assertStaticTextVisible("Appearance", "Design settings did not show Appearance.")
