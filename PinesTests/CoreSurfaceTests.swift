@@ -410,10 +410,19 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(runtime.contains("validateLocalChatAssets"))
         XCTAssertTrue(runtime.contains("tokenizerSource: nil"))
         XCTAssertTrue(runtime.contains("mlx.memory_pressure.soft_recover"))
+        XCTAssertTrue(runtime.contains("mlx.memory_pressure.in_generation_soft_recover"))
         XCTAssertTrue(runtime.contains("maxSoftMemoryWarningsPerGeneration"))
+        XCTAssertTrue(runtime.contains("activeGenerationEmergencyMinimumAvailableBytes"))
+        XCTAssertTrue(runtime.contains("activeGenerationHasEmergencyHeadroom"))
         XCTAssertTrue(runtime.contains("pressureAwareCompletionTokenLimit"))
+        XCTAssertTrue(runtime.contains("initialGenerationAvailableMemoryBytes"))
+        XCTAssertTrue(runtime.contains("local.generation.initial_available_memory_bytes"))
+        XCTAssertTrue(runtime.contains("LocalRuntimeSafetyPolicy.constrainedAvailableMemoryBytes"))
+        XCTAssertTrue(runtime.contains("tokenLimit = 32"))
         XCTAssertTrue(runtime.contains("mlx.thermal_pressure.cancel_unload"))
         XCTAssertTrue(runtime.contains("Memory.cacheLimit = mlxCacheLimit(for: profile)"))
+        XCTAssertTrue(runtime.contains("profile.quantization.runtimePressureReason == .lowMemory"))
+        XCTAssertTrue(runtime.contains("Self.configureMLXMemoryPolicy(profile: profile)"))
         XCTAssertTrue(runtime.contains("Memory.clearCache()"))
         XCTAssertTrue(runtime.contains("applySoftMemoryPressureMLXPolicy"))
         XCTAssertTrue(runtime.contains("resetMLXPeakMemory()"))
@@ -483,6 +492,32 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(script.contains("app_process_alive"))
         XCTAssertTrue(script.contains("--signal 0"))
         XCTAssertTrue(script.contains("app process $pid exited"))
+    }
+
+    func testLocalRuntimeTreatsTokenCapCancellationAsLengthCompletion() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let runtime = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Runtime/MLXRuntimeBridge.swift"),
+            encoding: .utf8
+        )
+        let appModel = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModel.swift"),
+            encoding: .utf8
+        )
+        let stress = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModel+Stress.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(runtime.contains("generatedTokens: completionInfo.generationTokenCount"))
+        XCTAssertTrue(runtime.contains("emittedTokenCount: tokenCount"))
+        XCTAssertTrue(runtime.contains("maxTokens: effectiveMaxTokensOverride"))
+        XCTAssertTrue(runtime.contains("max(generatedTokens, emittedTokenCount) >= maxTokens"))
+        XCTAssertTrue(runtime.contains("return .length"))
+        XCTAssertTrue(appModel.contains("finish.reason == .cancelled ? .cancelled : .complete"))
+        XCTAssertTrue(stress.contains("if status != .complete"))
     }
 
     func testArtifactsWorkspaceDefinesFocusedModesAndConfirmations() throws {

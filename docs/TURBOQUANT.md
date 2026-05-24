@@ -7,11 +7,12 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 - Pine runtime profiles request `QuantizationAlgorithm.turboQuant` and use the bundled `mlx-swift-lm` TurboQuant profile registry where possible. Verified local generation defaults to `turbo4v2` for current-generation KV cache profiles, with `turbo3_5` retained as the conservative fallback.
 - Runtime profiles are adapted from `hw.machine`, memory, thermal state, Low Power Mode, Metal architecture, MLX working-set size, and the MLX TurboQuant self-test. Device names are diagnostic hints; verified MLX capabilities decide whether compressed Metal attention is active.
 - 6 GB A16-class devices use compact defaults. A17 Pro, A18, A18 Pro, A19, A19 Pro thin, A19 Pro sustained, and future verified devices get progressively larger prefill and context defaults, with conservative downshifts under thermal, Low Power Mode, or available-memory pressure.
-- iOS memory warnings stop the active local run and unload transient MLX containers through the runtime bridge.
+- Low-memory constrained generation clamps completion tokens from measured generation-start headroom so optimized TurboQuant can finish before crossing the emergency memory floor.
+- iOS memory warnings soft-recover through the runtime bridge while active generation still has emergency headroom; otherwise they stop the active local run and unload transient MLX containers.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `8f0718404a323698c7b5730f2de3af2b5e21f854`
-  - `RNT56/mlx-swift-lm`: `915a08dc8315b825b7f86109f12ba4d62d34f186`
+  - `RNT56/mlx-swift`: `6820f3c6b85bdd73a288f5796ba78c4cd40efd91`
+  - `RNT56/mlx-swift-lm`: `861a9bd0e581317ddfce7446d306cbbb7916a75f`
   - Nested `mlx` inside `RNT56/mlx-swift`: `8f13e02fa85252f2a569a43c6759f07490b816a5`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `fff19671eed2e556bdf4552328a1791a8f37b651`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, a tiled online fused decode path, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
@@ -49,5 +50,5 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 
 - Move the current RNT56 fork branches under a Schtack GitHub organization if/when that organization is available to the authenticated account.
 - Tune tiled decode thresholds after real A16/A17/A18/A19 profiling. Runtime probes now choose between portable, wide, sustained, and packed-fallback profiles, but checked-in defaults should remain conservative until device traces justify raising them.
-- Re-run the KV-memory acceptance matrix on device. The supported `.metalPolarQJL` rotating path is raw-free; raw/packed fallback allocation is lazy and diagnostic-visible, but final acceptance numbers still require real hardware measurement.
+- Re-run the KV-memory acceptance matrix on device. The supported `.metalPolarQJL` rotating path is raw-free; raw/packed fallback allocation is lazy and diagnostic-visible, and A17 Pro Qwen3.5 2B optimized inference has completed under low-memory pressure with the adaptive completion cap, but broader acceptance numbers still require real hardware measurement.
 - Validate the acceptance matrix on real A16, A17 Pro, A18, A18 Pro, A19, A19 Pro thin, and A19 Pro sustained devices with full Xcode and Instruments.

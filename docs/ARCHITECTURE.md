@@ -97,14 +97,14 @@ Normal chat, VLM prompts, embeddings, vault retrieval, and history are local-fir
 
 The router must never silently fall back to cloud. If local capability is missing, the UI should show a consent/configuration path. When local vault or MCP resource context would be included in a cloud request, the app asks for per-turn approval and can continue without that context.
 
-`DeviceRuntimeMonitor` adapts local runtime defaults from physical memory, available process memory, and thermal state. Compact 6 GB devices use lower prefill, embedding batch, and vector scan limits; iOS memory warnings stop the active run and unload transient MLX containers.
+`DeviceRuntimeMonitor` adapts local runtime defaults from physical memory, available process memory, and thermal state. Compact 6 GB devices use lower prefill, embedding batch, vector scan, and pressure-aware completion limits. iOS memory warnings soft-recover during active generation while emergency headroom remains; otherwise they stop the active run and unload transient MLX containers.
 
 Vault retrieval stores both FP16 embeddings and compressed TurboQuant vector codes. Search first uses the compressed code path, filters by embedding model where possible, reranks with FP16 cosine, and falls back to SQLite FTS when embeddings are missing.
 
 The app links MLX through exact fork pins in `project.yml`:
 
-- `https://github.com/RNT56/mlx-swift` at `8f0718404a323698c7b5730f2de3af2b5e21f854`
-- `https://github.com/RNT56/mlx-swift-lm` at `915a08dc8315b825b7f86109f12ba4d62d34f186`
+- `https://github.com/RNT56/mlx-swift` at `6820f3c6b85bdd73a288f5796ba78c4cd40efd91`
+- `https://github.com/RNT56/mlx-swift-lm` at `861a9bd0e581317ddfce7446d306cbbb7916a75f`
 - Nested `mlx` inside `RNT56/mlx-swift` at `8f13e02fa85252f2a569a43c6759f07490b816a5`
 - Nested `mlx-c` inside `RNT56/mlx-swift` at `fff19671eed2e556bdf4552328a1791a8f37b651`
 

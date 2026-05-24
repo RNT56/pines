@@ -190,9 +190,9 @@ Device profile defaults from `DeviceProfile`:
 Downshift rules:
 
 - Serious/critical thermal state or Low Power Mode caps context and small-model context at `4,096`, prefill at `256`, embedding batch at `4`, vector scan at `1,024`, disables vision defaults, and uses conservative TurboQuant policy.
-- Available memory below `750 MB` applies the same caps and prefers memory.
+- Available memory below `2 GB` enters low-memory constrained mode; below `900 MB` local generation is rejected before start. Constrained local generation uses the smaller context/prefill caps and also clamps completion tokens from measured generation-start headroom (`32` tokens below `2 GB`, `16` below `1.2 GB`).
 - A19 Pro thin devices downshift under fair thermal state to at most `16,384` context and `512` prefill.
-- iOS memory warnings must stop the active local run and unload transient MLX containers.
+- iOS memory warnings soft-recover a bounded number of times during active generation while emergency headroom remains; otherwise they stop the active run and unload transient MLX containers.
 
 Runtime development rules:
 
@@ -220,8 +220,8 @@ Current app-level limits and defaults:
 
 The iOS app links exact maintained MLX fork revisions through `project.yml` and the generated Xcode project:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `8f0718404a323698c7b5730f2de3af2b5e21f854`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `eb353f435fa34ccc5f91eaf1ac1de01e53571fcf`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `6820f3c6b85bdd73a288f5796ba78c4cd40efd91`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `861a9bd0e581317ddfce7446d306cbbb7916a75f`
 - Nested `mlx` inside `MLXSwift`: `8f13e02fa85252f2a569a43c6759f07490b816a5`
 - Nested `mlx-c` inside `MLXSwift`: `fff19671eed2e556bdf4552328a1791a8f37b651`
 

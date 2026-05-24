@@ -23,6 +23,8 @@ import MLXLMCommon
 import Tokenizers
 #endif
 
+private let activeGenerationEmergencyMinimumAvailableBytes: Int64 = 650_000_000
+
 private final class MLXGenerationCancellationBox: @unchecked Sendable {
     private let lock = NSLock()
     private var task: Task<Void, Never>?
@@ -1013,6 +1015,9 @@ private actor MLXRuntimeState {
         if profile.quantization.thermalDownshiftActive {
             return 64 * megabyte
         }
+        if profile.quantization.runtimePressureReason == .lowMemory {
+            return 32 * megabyte
+        }
         if contextTokens <= 4_096 {
             return 64 * megabyte
         }
@@ -1153,6 +1158,45 @@ private actor MLXRuntimeState {
         }
     }
 
+    private func enforceActiveGenerationSafety(
+        tokenCount: Int,
+        modelID: ModelID
+    ) async throws {
+        let safety = deviceMonitor.localGenerationSafety()
+        guard !safety.allowed else { return }
+        guard safety.pressureReason == .lowMemory else {
+            throw InferenceError.unsupportedCapability(
+                safety.reason ?? "Local MLX generation is paused by runtime safety policy."
+            )
+        }
+
+        #if canImport(MLX)
+        Self.applySoftMemoryPressureMLXPolicy()
+        #endif
+
+        let counters = deviceMonitor.memoryCounters()
+        if let availableMemoryBytes = counters.availableMemoryBytes,
+           availableMemoryBytes >= activeGenerationEmergencyMinimumAvailableBytes {
+            #if DEBUG
+            await FreezeBreadcrumbJournal.shared.record(
+                stage: "mlx.memory_pressure.in_generation_soft_recover",
+                metadata: runtimeMemoryMetadata(merging: [
+                    "model_id": modelID.rawValue,
+                    "token_count": String(tokenCount),
+                    "active_generation_memory_floor_bytes": String(
+                        activeGenerationEmergencyMinimumAvailableBytes
+                    ),
+                ])
+            )
+            #endif
+            return
+        }
+
+        throw InferenceError.unsupportedCapability(
+            safety.reason ?? "Local MLX generation is paused by runtime safety policy."
+        )
+    }
+
     func unload() async {
         activeInstall = nil
         activeGenerationSoftMemoryWarningCount = 0
@@ -1201,10 +1245,12 @@ private actor MLXRuntimeState {
             .map { $0 < LocalRuntimeSafetyPolicy.minimumAvailableMemoryBytes } ?? true
         let hasSoftRecoveryHeadroom = availableMemoryBytes
             .map { $0 >= Self.memoryPressureSoftRecoveryMinimumAvailableBytes } ?? false
+        let activeGenerationHasEmergencyHeadroom = availableMemoryBytes
+            .map { $0 >= activeGenerationEmergencyMinimumAvailableBytes } ?? false
         if allowsSoftRecovery,
            generationCancellation != nil,
-           !hasHardMemoryPressure,
-           hasSoftRecoveryHeadroom,
+           (!hasHardMemoryPressure || activeGenerationHasEmergencyHeadroom),
+           (hasSoftRecoveryHeadroom || activeGenerationHasEmergencyHeadroom),
            activeGenerationSoftMemoryWarningCount < Self.maxSoftMemoryWarningsPerGeneration {
             activeGenerationSoftMemoryWarningCount += 1
             return .softRecovered
@@ -1266,6 +1312,9 @@ private actor MLXRuntimeState {
 
         let generationSafety = try deviceMonitor.requireLocalGenerationSafety()
         let profile = generationSafety.constrainedRuntimeProfile(activeProfile)
+        #if canImport(MLX)
+        Self.configureMLXMemoryPolicy(profile: profile)
+        #endif
         guard let latestUserIndex = request.messages.lastIndex(where: { $0.role == .user }) else {
             throw InferenceError.invalidRequest("A local chat request requires a user message.")
         }
@@ -1325,9 +1374,11 @@ private actor MLXRuntimeState {
                         var reservedCompletionTokens = requestedCompletionTokens ?? 0
                         var effectiveMaxTokensOverride = requestedCompletionTokens
                         var clampedCompletionTokens = false
+                        let initialGenerationAvailableMemoryBytes = deviceMonitor.memoryCounters().availableMemoryBytes
                         if let pressureCompletionLimit = Self.pressureAwareCompletionTokenLimit(
                             profile: profile,
-                            safety: generationSafety
+                            safety: generationSafety,
+                            availableMemoryBytes: initialGenerationAvailableMemoryBytes
                         ) {
                             if let requestedCompletionTokens {
                                 if requestedCompletionTokens > pressureCompletionLimit {
@@ -1429,6 +1480,11 @@ private actor MLXRuntimeState {
                             "local.generation.effective_max_tokens": effectiveMaxTokensOverride.map(String.init) ?? "none",
                             "local.generation.max_tokens_clamped": String(clampedCompletionTokens),
                         ]
+                        Self.add(
+                            initialGenerationAvailableMemoryBytes,
+                            forKey: "local.generation.initial_available_memory_bytes",
+                            to: &contextMetadata
+                        )
                         if install?.turboQuantFamilySupport == .hybridFull,
                            profile.quantization.kvCacheStrategy == .turboQuant {
                             contextMetadata[LocalProviderMetadataKeys.hybridStateExplanation] = "Attention KV caches use TurboQuant; architecture-specific native state caches remain exact."
@@ -1522,7 +1578,10 @@ private actor MLXRuntimeState {
                             case let .chunk(text):
                                 tokenCount += 1
                                 if tokenCount == 1 || tokenCount.isMultiple(of: 16) {
-                                    _ = try deviceMonitor.requireLocalGenerationSafety()
+                                    try await enforceActiveGenerationSafety(
+                                        tokenCount: tokenCount,
+                                        modelID: request.modelID
+                                    )
                                 }
                                 let filtered = stopFilter.append(text)
                                 if !filtered.text.isEmpty {
@@ -1594,7 +1653,12 @@ private actor MLXRuntimeState {
                             )
                             providerMetadata.merge(contextMetadata) { _, new in new }
                             finish = InferenceFinish(
-                                reason: Self.finishReason(from: completionInfo.stopReason),
+                                reason: Self.finishReason(
+                                    from: completionInfo.stopReason,
+                                    generatedTokens: completionInfo.generationTokenCount,
+                                    emittedTokenCount: tokenCount,
+                                    maxTokens: effectiveMaxTokensOverride
+                                ),
                                 providerMetadata: providerMetadata
                             )
                         }
@@ -1880,12 +1944,25 @@ private actor MLXRuntimeState {
 
     private static func pressureAwareCompletionTokenLimit(
         profile: RuntimeProfile,
-        safety: LocalRuntimeSafetyAssessment
+        safety: LocalRuntimeSafetyAssessment,
+        availableMemoryBytes: Int64?
     ) -> Int? {
         guard safety.constrainedModeActive else { return nil }
         switch safety.pressureReason {
         case .lowMemory:
-            return min(profile.quantization.maxKVSize ?? 256, 256)
+            let tokenLimit: Int
+            if let availableMemoryBytes {
+                if availableMemoryBytes < 1_200_000_000 {
+                    tokenLimit = 16
+                } else if availableMemoryBytes < LocalRuntimeSafetyPolicy.constrainedAvailableMemoryBytes {
+                    tokenLimit = 32
+                } else {
+                    tokenLimit = 256
+                }
+            } else {
+                tokenLimit = 32
+            }
+            return min(profile.quantization.maxKVSize ?? tokenLimit, tokenLimit)
         case .thermalFair, .thermalSerious, .thinThermal:
             return min(profile.quantization.maxKVSize ?? 768, 768)
         case .lowPower:
@@ -2204,14 +2281,22 @@ private actor MLXRuntimeState {
         return String(content.suffix(maxCharacters))
     }
 
-    private static func finishReason(from reason: GenerateStopReason) -> InferenceFinishReason {
+    private static func finishReason(
+        from reason: GenerateStopReason,
+        generatedTokens: Int,
+        emittedTokenCount: Int,
+        maxTokens: Int?
+    ) -> InferenceFinishReason {
         switch reason {
         case .stop:
-            .stop
+            return .stop
         case .length:
-            .length
+            return .length
         case .cancelled:
-            .cancelled
+            if let maxTokens, max(generatedTokens, emittedTokenCount) >= maxTokens {
+                return .length
+            }
+            return .cancelled
         }
     }
     #endif

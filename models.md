@@ -1,6 +1,6 @@
 # Pines iOS MLX Model Notes
 
-Checked on 2026-05-23 against the Pines codebase, the pinned Schtack/RNT56 MLX forks, and current Hugging Face Hub metadata.
+Checked on 2026-05-24 against the Pines codebase, the pinned Schtack/RNT56 MLX forks, and current Hugging Face Hub metadata.
 
 This document is intentionally conservative. A Hugging Face model being tagged `mlx` is not enough for Pines. The local iOS runtime needs:
 
@@ -12,8 +12,8 @@ This document is intentionally conservative. A Hugging Face model being tagged `
 
 Pinned runtime:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `8f0718404a323698c7b5730f2de3af2b5e21f854`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `915a08dc8315b825b7f86109f12ba4d62d34f186`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `6820f3c6b85bdd73a288f5796ba78c4cd40efd91`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `861a9bd0e581317ddfce7446d306cbbb7916a75f`
 
 Pines status terms:
 
@@ -97,4 +97,4 @@ These are the specific instruction/chat-tuned models from the research pass. Pre
 - Qwen3 4B 4-bit: https://huggingface.co/mlx-community/Qwen3-4B-4bit
 - Qwen3 Embedding 0.6B 4-bit DWQ: https://huggingface.co/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
 - Qwen2.5 VL 3B Instruct 4-bit: https://huggingface.co/mlx-community/Qwen2.5-VL-3B-Instruct-4bit
-- Pinned MLX Swift LM compatibility docs: https://github.com/RNT56/mlx-swift-lm/blob/915a08dc8315b825b7f86109f12ba4d62d34f186/Libraries/MLXLMCommon/Documentation.docc/model-compatibility.md
+- Pinned MLX Swift LM compatibility docs: https://github.com/RNT56/mlx-swift-lm/blob/861a9bd0e581317ddfce7446d306cbbb7916a75f/Libraries/MLXLMCommon/Documentation.docc/model-compatibility.md
