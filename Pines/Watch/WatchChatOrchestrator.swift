@@ -365,7 +365,7 @@ struct WatchChatOrchestrator {
                                         tokenCount: tokenCount,
                                         providerMetadata: finalProviderMetadata
                                     )
-                                    let runStatus: ChatRunStatus
+                                    let runStatus: WatchChatRunStatus
                                     switch finish.reason {
                                     case .cancelled:
                                         runStatus = .cancelled

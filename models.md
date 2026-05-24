@@ -12,8 +12,8 @@ This document is intentionally conservative. A Hugging Face model being tagged `
 
 Pinned runtime:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `6820f3c6b85bdd73a288f5796ba78c4cd40efd91`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `861a9bd0e581317ddfce7446d306cbbb7916a75f`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `a68f3b1a4aab22d518bbd652b452ca632317b9a6`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `cad1cf9bceb01ae298453ef42bb4a6cef97ddefd`
 
 Pines status terms:
 
@@ -97,4 +97,4 @@ These are the specific instruction/chat-tuned models from the research pass. Pre
 - Qwen3 4B 4-bit: https://huggingface.co/mlx-community/Qwen3-4B-4bit
 - Qwen3 Embedding 0.6B 4-bit DWQ: https://huggingface.co/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
 - Qwen2.5 VL 3B Instruct 4-bit: https://huggingface.co/mlx-community/Qwen2.5-VL-3B-Instruct-4bit
-- Pinned MLX Swift LM compatibility docs: https://github.com/RNT56/mlx-swift-lm/blob/861a9bd0e581317ddfce7446d306cbbb7916a75f/Libraries/MLXLMCommon/Documentation.docc/model-compatibility.md
+- Pinned MLX Swift LM compatibility docs: https://github.com/RNT56/mlx-swift-lm/blob/cad1cf9bceb01ae298453ef42bb4a6cef97ddefd/Libraries/MLXLMCommon/Documentation.docc/model-compatibility.md

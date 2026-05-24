@@ -403,22 +403,7 @@ struct MLXRuntimeBridge: Sendable {
             )
         }
 
-        let parameterCount = install.parameterCount ?? Int64.max
-        let headDimension = install.keyHeadDimension
-        let valueHeadDimension = install.valueHeadDimension ?? headDimension
-        let smallDenseOrHybridModel = parameterCount <= 2_500_000_000
-        let hasLargeAttentionHeads = (headDimension ?? 0) > 128 || (valueHeadDimension ?? 0) > 128
-        if smallDenseOrHybridModel, hasLargeAttentionHeads {
-            let reason = "plain rotating KV selected because TurboQuant online-fused attention is not throughput-admitted for \(headDimension.map(String.init) ?? "unknown")-dimensional heads on small local models"
-            diagnostics.append(reason)
-            return KVCacheAdmission(
-                useTurboQuant: false,
-                maxKVSize: min(requestedMaxKVSize, 8192),
-                reason: reason,
-                diagnostics: diagnostics
-            )
-        }
-
+        let smallDenseOrHybridModel = (install.parameterCount ?? Int64.max) <= 2_500_000_000
         if backend.metalAttentionAvailable == false,
            smallDenseOrHybridModel {
             let reason = backend.fallbackReason
@@ -1127,6 +1112,18 @@ private actor MLXRuntimeState {
         #endif
     }
 
+    private static func settleMLXBuffersAfterGeneration(profile: RuntimeProfile) {
+        #if targetEnvironment(simulator)
+        return
+        #else
+        guard profile.quantization.runtimePressureReason == .lowMemory
+            || profile.quantization.thermalDownshiftActive
+        else { return }
+        Stream.gpu.synchronize()
+        Memory.clearCache()
+        #endif
+    }
+
     private static func applySoftMemoryPressureMLXPolicy() {
         #if targetEnvironment(simulator)
         return
@@ -1438,7 +1435,7 @@ private actor MLXRuntimeState {
                 defer {
                     generationCancellation.cancel()
                     #if canImport(MLX)
-                    Self.clearCachedMLXBuffers()
+                    Self.settleMLXBuffersAfterGeneration(profile: profile)
                     #endif
                     Task {
                         self.clearActiveGenerationCancellation(generationCancellation)
