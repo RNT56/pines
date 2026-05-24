@@ -3570,6 +3570,108 @@ struct CoreContractTests {
     }
 
     @Test
+    func localGenerationPipelinePlanClampsLowMemoryCompletionFromMeasuredHeadroom() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_800_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        #expect(safety.allowed)
+        #expect(safety.pressureReason == .lowMemory)
+        #expect(plan.pressureCompletionTokenLimit == 32)
+        #expect(plan.reservedCompletionTokens == 32)
+        #expect(plan.effectiveMaxTokens == 32)
+        #expect(plan.maxTokensClamped)
+        #expect(
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationEffectiveMaxTokens] == "32"
+        )
+        #expect(
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationInitialAvailableMemoryBytes]
+                == "1800000000"
+        )
+    }
+
+    @Test
+    func localGenerationPipelinePlanHonorsSmallerRequestedCompletionBudget() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_800_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 20,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        #expect(plan.pressureCompletionTokenLimit == 32)
+        #expect(plan.reservedCompletionTokens == 20)
+        #expect(plan.effectiveMaxTokens == 20)
+        #expect(!plan.maxTokensClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanFitsCompletionBudgetToContextAfterTokenization() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_800_000_000,
+                thermalState: "nominal"
+            )
+        )
+        var plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        let fitsContext = plan.constrainToContext(promptTokenCount: 4_080, maxContextTokens: 4_096)
+        #expect(fitsContext)
+        #expect(plan.reservedCompletionTokens == 16)
+        #expect(plan.effectiveMaxTokens == 16)
+        #expect(plan.maxTokensClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanUsesEmergencyLowMemoryCap() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_100_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: nil,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_100_000_000
+        )
+
+        #expect(plan.pressureCompletionTokenLimit == 16)
+        #expect(plan.reservedCompletionTokens == 16)
+        #expect(plan.effectiveMaxTokens == 16)
+        #expect(plan.maxTokensClamped)
+    }
+
+    @Test
     func lowPowerModeKeepsContextWindowButConservesPrefill() {
         let profile = DeviceProfile.recommended(
             for: RuntimeMemorySnapshot(

@@ -1374,6 +1374,145 @@ public struct LocalRuntimeSafetyAssessment: Hashable, Codable, Sendable {
     }
 }
 
+public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
+    public var requestedCompletionTokens: Int?
+    public var reservedCompletionTokens: Int
+    public var effectiveMaxTokens: Int?
+    public var maxTokensClamped: Bool
+    public var pressureCompletionTokenLimit: Int?
+    public var initialAvailableMemoryBytes: Int64?
+    public var pressureReason: RuntimePressureReason
+    public var constrainedModeActive: Bool
+
+    public init(
+        requestedCompletionTokens: Int?,
+        reservedCompletionTokens: Int,
+        effectiveMaxTokens: Int?,
+        maxTokensClamped: Bool,
+        pressureCompletionTokenLimit: Int?,
+        initialAvailableMemoryBytes: Int64?,
+        pressureReason: RuntimePressureReason,
+        constrainedModeActive: Bool
+    ) {
+        self.requestedCompletionTokens = requestedCompletionTokens
+        self.reservedCompletionTokens = max(0, reservedCompletionTokens)
+        self.effectiveMaxTokens = effectiveMaxTokens.map { max(1, $0) }
+        self.maxTokensClamped = maxTokensClamped
+        self.pressureCompletionTokenLimit = pressureCompletionTokenLimit.map { max(1, $0) }
+        self.initialAvailableMemoryBytes = initialAvailableMemoryBytes
+        self.pressureReason = pressureReason
+        self.constrainedModeActive = constrainedModeActive
+    }
+
+    public init(
+        requestedCompletionTokens: Int?,
+        profile: RuntimeProfile,
+        safety: LocalRuntimeSafetyAssessment,
+        initialAvailableMemoryBytes: Int64?
+    ) {
+        let pressureLimit = Self.pressureCompletionTokenLimit(
+            profile: profile,
+            safety: safety,
+            availableMemoryBytes: initialAvailableMemoryBytes
+        )
+        let requested = requestedCompletionTokens.map { max(1, $0) }
+        let reserved: Int
+        let effective: Int?
+        let clamped: Bool
+        if let pressureLimit {
+            if let requested {
+                let capped = min(requested, pressureLimit)
+                reserved = capped
+                effective = capped
+                clamped = capped != requested
+            } else {
+                reserved = pressureLimit
+                effective = pressureLimit
+                clamped = true
+            }
+        } else {
+            reserved = requested ?? 0
+            effective = requested
+            clamped = false
+        }
+
+        self.init(
+            requestedCompletionTokens: requested,
+            reservedCompletionTokens: reserved,
+            effectiveMaxTokens: effective,
+            maxTokensClamped: clamped,
+            pressureCompletionTokenLimit: pressureLimit,
+            initialAvailableMemoryBytes: initialAvailableMemoryBytes,
+            pressureReason: safety.pressureReason,
+            constrainedModeActive: safety.constrainedModeActive
+        )
+    }
+
+    public mutating func constrainToContext(
+        promptTokenCount: Int,
+        maxContextTokens: Int
+    ) -> Bool {
+        guard promptTokenCount + reservedCompletionTokens > maxContextTokens else {
+            return true
+        }
+        let availableCompletionTokens = maxContextTokens - promptTokenCount
+        guard availableCompletionTokens > 0 else {
+            return false
+        }
+
+        reservedCompletionTokens = min(reservedCompletionTokens, availableCompletionTokens)
+        effectiveMaxTokens = reservedCompletionTokens
+        maxTokensClamped = true
+        return true
+    }
+
+    public func providerMetadata() -> [String: String] {
+        [
+            LocalProviderMetadataKeys.generationRequestedMaxTokens: requestedCompletionTokens
+                .map(String.init) ?? "none",
+            LocalProviderMetadataKeys.generationEffectiveMaxTokens: effectiveMaxTokens
+                .map(String.init) ?? "none",
+            LocalProviderMetadataKeys.generationMaxTokensClamped: String(maxTokensClamped),
+            LocalProviderMetadataKeys.generationPressureCompletionLimit: pressureCompletionTokenLimit
+                .map(String.init) ?? "none",
+            LocalProviderMetadataKeys.generationInitialAvailableMemoryBytes: initialAvailableMemoryBytes
+                .map(String.init) ?? "unknown",
+        ]
+    }
+
+    public static func pressureCompletionTokenLimit(
+        profile: RuntimeProfile,
+        safety: LocalRuntimeSafetyAssessment,
+        availableMemoryBytes: Int64?
+    ) -> Int? {
+        guard safety.constrainedModeActive else { return nil }
+        let policyLimit: Int?
+        switch safety.pressureReason {
+        case .lowMemory:
+            if let availableMemoryBytes {
+                if availableMemoryBytes < 1_200_000_000 {
+                    policyLimit = 16
+                } else if availableMemoryBytes < LocalRuntimeSafetyPolicy.constrainedAvailableMemoryBytes {
+                    policyLimit = 32
+                } else {
+                    policyLimit = 256
+                }
+            } else {
+                policyLimit = 32
+            }
+        case .thermalFair, .thermalSerious, .thinThermal:
+            policyLimit = 768
+        case .lowPower:
+            policyLimit = 1_024
+        case .none, .thermalCritical:
+            policyLimit = nil
+        }
+
+        guard let policyLimit else { return nil }
+        return min(profile.quantization.maxKVSize ?? policyLimit, policyLimit)
+    }
+}
+
 public enum LocalRuntimeSafetyPolicy {
     public static let minimumAvailableMemoryBytes: Int64 = 900_000_000
     public static let constrainedAvailableMemoryBytes: Int64 = 2_000_000_000

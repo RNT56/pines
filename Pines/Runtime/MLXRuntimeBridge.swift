@@ -1370,28 +1370,13 @@ private actor MLXRuntimeState {
                         let initialHistoryCharacterBudget = Self.localHistoryCharacterBudget(
                             maxContextTokens: profile.quantization.maxKVSize
                         )
-                        let requestedCompletionTokens = request.sampling.maxTokens
-                        var reservedCompletionTokens = requestedCompletionTokens ?? 0
-                        var effectiveMaxTokensOverride = requestedCompletionTokens
-                        var clampedCompletionTokens = false
                         let initialGenerationAvailableMemoryBytes = deviceMonitor.memoryCounters().availableMemoryBytes
-                        if let pressureCompletionLimit = Self.pressureAwareCompletionTokenLimit(
+                        var generationPlan = LocalGenerationPipelinePlan(
+                            requestedCompletionTokens: request.sampling.maxTokens,
                             profile: profile,
                             safety: generationSafety,
-                            availableMemoryBytes: initialGenerationAvailableMemoryBytes
-                        ) {
-                            if let requestedCompletionTokens {
-                                if requestedCompletionTokens > pressureCompletionLimit {
-                                    reservedCompletionTokens = pressureCompletionLimit
-                                    effectiveMaxTokensOverride = pressureCompletionLimit
-                                    clampedCompletionTokens = true
-                                }
-                            } else {
-                                reservedCompletionTokens = pressureCompletionLimit
-                                effectiveMaxTokensOverride = pressureCompletionLimit
-                                clampedCompletionTokens = true
-                            }
-                        }
+                            initialAvailableMemoryBytes: initialGenerationAvailableMemoryBytes
+                        )
                         var historyCharacterBudget = initialHistoryCharacterBudget
                         var reducedHistoryForContext = false
 
@@ -1434,7 +1419,7 @@ private actor MLXRuntimeState {
                         )
                         var input = try await context.processor.prepare(input: userInput)
                         while let maxContextTokens = profile.quantization.maxKVSize,
-                              input.text.tokens.size + reservedCompletionTokens > maxContextTokens,
+                              input.text.tokens.size + generationPlan.reservedCompletionTokens > maxContextTokens,
                               historyCharacterBudget > 0 {
                             reducedHistoryForContext = true
                             preflightAttempts += 1
@@ -1448,15 +1433,13 @@ private actor MLXRuntimeState {
                         }
                         let prepareElapsedSeconds = Date().timeIntervalSince(prepareStartedAt)
                         if let maxContextTokens = profile.quantization.maxKVSize,
-                           input.text.tokens.size + reservedCompletionTokens > maxContextTokens {
-                            let availableCompletionTokens = maxContextTokens - input.text.tokens.size
-                            if requestedCompletionTokens != nil, availableCompletionTokens > 0 {
-                                reservedCompletionTokens = min(reservedCompletionTokens, availableCompletionTokens)
-                                effectiveMaxTokensOverride = reservedCompletionTokens
-                                clampedCompletionTokens = true
-                            } else {
+                           input.text.tokens.size + generationPlan.reservedCompletionTokens > maxContextTokens {
+                            if !generationPlan.constrainToContext(
+                                promptTokenCount: input.text.tokens.size,
+                                maxContextTokens: maxContextTokens
+                            ) {
                                 throw InferenceError.invalidRequest(
-                                    "This local request needs \(input.text.tokens.size + reservedCompletionTokens) tokens (\(input.text.tokens.size) prompt + \(reservedCompletionTokens) completion), but \(request.modelID.rawValue) is configured for \(maxContextTokens). Shorten the latest message or reduce local completion tokens."
+                                    "This local request needs \(input.text.tokens.size + generationPlan.reservedCompletionTokens) tokens (\(input.text.tokens.size) prompt + \(generationPlan.reservedCompletionTokens) completion), but \(request.modelID.rawValue) is configured for \(maxContextTokens). Shorten the latest message or reduce local completion tokens."
                                 )
                             }
                         }
@@ -1464,11 +1447,13 @@ private actor MLXRuntimeState {
                             from: request,
                             profile: profile,
                             install: install,
-                            maxTokensOverride: effectiveMaxTokensOverride
+                            maxTokensOverride: generationPlan.effectiveMaxTokens
                         )
                         var contextMetadata: [String: String] = [
                             ChatContextMetadataKeys.exactInputTokens: String(input.text.tokens.size),
-                            ChatContextMetadataKeys.reservedCompletionTokens: String(reservedCompletionTokens),
+                            ChatContextMetadataKeys.reservedCompletionTokens: String(
+                                generationPlan.reservedCompletionTokens
+                            ),
                             LocalProviderMetadataKeys.runtimePressureReason: profile.quantization.runtimePressureReason.rawValue,
                             LocalProviderMetadataKeys.runtimePrefillStepSize: String(profile.prefillStepSize),
                             LocalProviderMetadataKeys.turboQuantProfileSource: profile.quantization.turboQuantProfileSource ?? "none",
@@ -1476,15 +1461,8 @@ private actor MLXRuntimeState {
                             LocalProviderMetadataKeys.turboQuantFamilySupport: install?.turboQuantFamilySupport.rawValue ?? TurboQuantFamilySupport.none.rawValue,
                             LocalProviderMetadataKeys.generationPrepareElapsedSeconds: String(prepareElapsedSeconds),
                             LocalProviderMetadataKeys.generationPreflightAttempts: String(preflightAttempts),
-                            "local.generation.requested_max_tokens": requestedCompletionTokens.map(String.init) ?? "none",
-                            "local.generation.effective_max_tokens": effectiveMaxTokensOverride.map(String.init) ?? "none",
-                            "local.generation.max_tokens_clamped": String(clampedCompletionTokens),
                         ]
-                        Self.add(
-                            initialGenerationAvailableMemoryBytes,
-                            forKey: "local.generation.initial_available_memory_bytes",
-                            to: &contextMetadata
-                        )
+                        contextMetadata.merge(generationPlan.providerMetadata()) { _, new in new }
                         if install?.turboQuantFamilySupport == .hybridFull,
                            profile.quantization.kvCacheStrategy == .turboQuant {
                             contextMetadata[LocalProviderMetadataKeys.hybridStateExplanation] = "Attention KV caches use TurboQuant; architecture-specific native state caches remain exact."
@@ -1497,7 +1475,9 @@ private actor MLXRuntimeState {
                         }
                         if let maxContextTokens = profile.quantization.maxKVSize {
                             contextMetadata[ChatContextMetadataKeys.contextWindowTokens] = String(maxContextTokens)
-                            contextMetadata[ChatContextMetadataKeys.inputBudgetTokens] = String(max(0, maxContextTokens - reservedCompletionTokens))
+                            contextMetadata[ChatContextMetadataKeys.inputBudgetTokens] = String(
+                                max(0, maxContextTokens - generationPlan.reservedCompletionTokens)
+                            )
                             contextMetadata[LocalProviderMetadataKeys.runtimeMaxKVSize] = String(maxContextTokens)
                         }
                         if reducedHistoryForContext {
@@ -1516,7 +1496,9 @@ private actor MLXRuntimeState {
                             metadata: runtimeMemoryMetadata(merging: contextMetadata.merging([
                                 "model_id": request.modelID.rawValue,
                                 "prompt_tokens": String(input.text.tokens.size),
-                                "reserved_completion_tokens": String(reservedCompletionTokens),
+                                "reserved_completion_tokens": String(
+                                    generationPlan.reservedCompletionTokens
+                                ),
                                 "history_character_budget": String(historyCharacterBudget),
                                 "reduced_history_for_context": String(reducedHistoryForContext),
                                 "kv_cache_strategy": profile.quantization.kvCacheStrategy.rawValue,
@@ -1657,7 +1639,7 @@ private actor MLXRuntimeState {
                                     from: completionInfo.stopReason,
                                     generatedTokens: completionInfo.generationTokenCount,
                                     emittedTokenCount: tokenCount,
-                                    maxTokens: effectiveMaxTokensOverride
+                                    maxTokens: generationPlan.effectiveMaxTokens
                                 ),
                                 providerMetadata: providerMetadata
                             )
@@ -1940,36 +1922,6 @@ private actor MLXRuntimeState {
             repetitionContextSize: profile.repetitionContextSize,
             prefillStepSize: profile.prefillStepSize
         )
-    }
-
-    private static func pressureAwareCompletionTokenLimit(
-        profile: RuntimeProfile,
-        safety: LocalRuntimeSafetyAssessment,
-        availableMemoryBytes: Int64?
-    ) -> Int? {
-        guard safety.constrainedModeActive else { return nil }
-        switch safety.pressureReason {
-        case .lowMemory:
-            let tokenLimit: Int
-            if let availableMemoryBytes {
-                if availableMemoryBytes < 1_200_000_000 {
-                    tokenLimit = 16
-                } else if availableMemoryBytes < LocalRuntimeSafetyPolicy.constrainedAvailableMemoryBytes {
-                    tokenLimit = 32
-                } else {
-                    tokenLimit = 256
-                }
-            } else {
-                tokenLimit = 32
-            }
-            return min(profile.quantization.maxKVSize ?? tokenLimit, tokenLimit)
-        case .thermalFair, .thermalSerious, .thinThermal:
-            return min(profile.quantization.maxKVSize ?? 768, 768)
-        case .lowPower:
-            return min(profile.quantization.maxKVSize ?? 1_024, 1_024)
-        case .none, .thermalCritical:
-            return nil
-        }
     }
 
     private static func mlxKVCacheStrategy(
