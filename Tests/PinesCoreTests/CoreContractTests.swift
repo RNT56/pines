@@ -3570,7 +3570,7 @@ struct CoreContractTests {
     }
 
     @Test
-    func localGenerationPipelinePlanClampsLowMemoryCompletionFromMeasuredHeadroom() {
+    func localGenerationPipelinePlanDoesNotClampOrdinaryLoadedModelHeadroom() {
         let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
         let safety = LocalRuntimeSafetyPolicy.assess(
             snapshot: RuntimeMemorySnapshot(
@@ -3587,13 +3587,13 @@ struct CoreContractTests {
         )
 
         #expect(safety.allowed)
-        #expect(safety.pressureReason == .lowMemory)
-        #expect(plan.pressureCompletionTokenLimit == 32)
-        #expect(plan.reservedCompletionTokens == 32)
-        #expect(plan.effectiveMaxTokens == 32)
-        #expect(plan.maxTokensClamped)
+        #expect(safety.pressureReason == .none)
+        #expect(plan.pressureCompletionTokenLimit == nil)
+        #expect(plan.reservedCompletionTokens == 2_048)
+        #expect(plan.effectiveMaxTokens == 2_048)
+        #expect(!plan.maxTokensClamped)
         #expect(
-            plan.providerMetadata()[LocalProviderMetadataKeys.generationEffectiveMaxTokens] == "32"
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationEffectiveMaxTokens] == "2048"
         )
         #expect(
             plan.providerMetadata()[LocalProviderMetadataKeys.generationInitialAvailableMemoryBytes]
@@ -3618,7 +3618,7 @@ struct CoreContractTests {
             initialAvailableMemoryBytes: 1_800_000_000
         )
 
-        #expect(plan.pressureCompletionTokenLimit == 32)
+        #expect(plan.pressureCompletionTokenLimit == nil)
         #expect(plan.reservedCompletionTokens == 20)
         #expect(plan.effectiveMaxTokens == 20)
         #expect(!plan.maxTokensClamped)
@@ -3669,12 +3669,12 @@ struct CoreContractTests {
 
         let fitsContext = plan.fitPreparedPrompt(promptTokenCount: 47, maxContextTokens: 4_096)
         #expect(fitsContext)
-        #expect(plan.reservedCompletionTokens == 32)
-        #expect(plan.effectiveMaxTokens == 32)
-        #expect(plan.effectiveMaxKVSize == 256)
+        #expect(plan.reservedCompletionTokens == 2_048)
+        #expect(plan.effectiveMaxTokens == 2_048)
+        #expect(plan.effectiveMaxKVSize == 2_304)
         #expect(plan.maxKVSizeClamped)
         #expect(
-            plan.providerMetadata()[LocalProviderMetadataKeys.generationEffectiveMaxKVSize] == "256"
+            plan.providerMetadata()[LocalProviderMetadataKeys.generationEffectiveMaxKVSize] == "2304"
         )
         #expect(
             plan.providerMetadata()[LocalProviderMetadataKeys.generationMaxKVSizeClamped] == "true"
@@ -3720,9 +3720,9 @@ struct CoreContractTests {
             initialAvailableMemoryBytes: 1_100_000_000
         )
 
-        #expect(plan.pressureCompletionTokenLimit == 16)
-        #expect(plan.reservedCompletionTokens == 16)
-        #expect(plan.effectiveMaxTokens == 16)
+        #expect(plan.pressureCompletionTokenLimit == 256)
+        #expect(plan.reservedCompletionTokens == 256)
+        #expect(plan.effectiveMaxTokens == 256)
         #expect(plan.maxTokensClamped)
     }
 

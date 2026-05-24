@@ -1375,7 +1375,7 @@ public struct LocalRuntimeSafetyAssessment: Hashable, Codable, Sendable {
 }
 
 public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
-    public static let defaultKVCacheSizeFloorTokens = 256
+    public static let defaultKVCacheSizeFloorTokens = 1_024
     public static let defaultKVCacheSizeAlignmentTokens = 256
 
     public var requestedCompletionTokens: Int?
@@ -1529,15 +1529,17 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
         switch safety.pressureReason {
         case .lowMemory:
             if let availableMemoryBytes {
-                if availableMemoryBytes < 1_200_000_000 {
-                    policyLimit = 16
-                } else if availableMemoryBytes < LocalRuntimeSafetyPolicy.constrainedAvailableMemoryBytes {
-                    policyLimit = 32
-                } else {
+                if availableMemoryBytes < 1_000_000_000 {
+                    policyLimit = 128
+                } else if availableMemoryBytes < 1_200_000_000 {
                     policyLimit = 256
+                } else if availableMemoryBytes < LocalRuntimeSafetyPolicy.constrainedAvailableMemoryBytes {
+                    policyLimit = 512
+                } else {
+                    policyLimit = 1_024
                 }
             } else {
-                policyLimit = 32
+                policyLimit = 512
             }
         case .thermalFair, .thermalSerious, .thinThermal:
             policyLimit = 768
@@ -1577,7 +1579,7 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
 
 public enum LocalRuntimeSafetyPolicy {
     public static let minimumAvailableMemoryBytes: Int64 = 900_000_000
-    public static let constrainedAvailableMemoryBytes: Int64 = 2_000_000_000
+    public static let constrainedAvailableMemoryBytes: Int64 = 1_500_000_000
 
     public static func assess(snapshot: RuntimeMemorySnapshot) -> LocalRuntimeSafetyAssessment {
         let profile = DeviceProfile.recommended(for: snapshot)

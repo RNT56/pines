@@ -2942,7 +2942,17 @@ final class PinesAppModel: ObservableObject {
                             emitHaptic(.runFailed)
                             continue
                         }
-                        let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
+                        let status: MessageStatus
+                        switch finish.reason {
+                        case .cancelled:
+                            status = .cancelled
+                        case .length:
+                            status = .failed
+                        case .stop, .toolCall:
+                            status = .complete
+                        case .error:
+                            status = .failed
+                        }
                         if status == .complete && accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             let baseMessage = finish.message ?? emptyCloudOutputMessage(
                                 providerID: selectedProviderID,
@@ -2956,8 +2966,18 @@ final class PinesAppModel: ObservableObject {
                             emitHaptic(.runFailed)
                         } else {
                             try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata, toolCalls: completedToolCalls)
-                            clearChatError()
-                            emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
+                            if finish.reason == .length {
+                                let message = messageWithProviderDiagnostics(
+                                    finish.message ?? "Local generation stopped before the model emitted a stop sequence.",
+                                    metadata: finalProviderMetadata
+                                )
+                                failureMessage = message
+                                setChatError(message)
+                                emitHaptic(.runFailed)
+                            } else {
+                                clearChatError()
+                                emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
+                            }
                         }
                     }
                 case let .failure(failure):

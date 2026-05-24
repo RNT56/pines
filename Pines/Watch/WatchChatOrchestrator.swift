@@ -323,7 +323,15 @@ struct WatchChatOrchestrator {
                                     )
                                     continue
                                 }
-                                let status: MessageStatus = finish.reason == .cancelled ? .cancelled : .complete
+                                let status: MessageStatus
+                                switch finish.reason {
+                                case .cancelled:
+                                    status = .cancelled
+                                case .length, .error:
+                                    status = .failed
+                                case .stop, .toolCall:
+                                    status = .complete
+                                }
                                 let finalText = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if status == .complete && finalText.isEmpty {
                                     let message = Self.messageWithProviderDiagnostics(
@@ -357,14 +365,30 @@ struct WatchChatOrchestrator {
                                         tokenCount: tokenCount,
                                         providerMetadata: finalProviderMetadata
                                     )
+                                    let runStatus: ChatRunStatus
+                                    switch finish.reason {
+                                    case .cancelled:
+                                        runStatus = .cancelled
+                                    case .length, .error:
+                                        runStatus = .failed
+                                    case .stop, .toolCall:
+                                        runStatus = .completed
+                                    }
+                                    let errorMessage = finish.reason == .length
+                                        ? Self.messageWithProviderDiagnostics(
+                                            finish.message ?? "Local generation stopped before the model emitted a stop sequence.",
+                                            metadata: finalProviderMetadata
+                                        )
+                                        : nil
                                     continuation.yield(
                                         WatchChatRunUpdate(
                                             runID: runID,
                                             conversationID: conversationID,
                                             assistantMessageID: pendingAssistant.id,
-                                            status: finish.reason == .cancelled ? .cancelled : .completed,
+                                            status: runStatus,
                                             text: accumulated,
-                                            tokenCount: tokenCount
+                                            tokenCount: tokenCount,
+                                            errorMessage: errorMessage
                                         )
                                     )
                                 }
@@ -633,8 +657,11 @@ struct WatchChatOrchestrator {
             LocalProviderMetadataKeys.turboQuantAttentionPath,
             LocalProviderMetadataKeys.turboQuantKernelProfile,
             LocalProviderMetadataKeys.turboQuantSelfTestStatus,
+            LocalProviderMetadataKeys.turboQuantAdmissionDecision,
+            LocalProviderMetadataKeys.turboQuantAdmissionReason,
             LocalProviderMetadataKeys.turboQuantFallbackReason,
             LocalProviderMetadataKeys.turboQuantLastUnsupportedShape,
+            LocalProviderMetadataKeys.generationIncompleteReason,
         ]
         let diagnostics = diagnosticKeys.compactMap { key -> String? in
             guard let value = metadata[key], !value.isEmpty else { return nil }

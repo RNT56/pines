@@ -271,7 +271,7 @@ struct MLXRuntimeBridge: Sendable {
         let backend = turboQuantBackendSnapshot()
         let linked = isLinked
         let usesTurboQuant = Self.usesTurboQuantByDefault(for: install)
-        let maxKVSize = usesTurboQuant
+        let requestedMaxKVSize = usesTurboQuant
             ? recommendedMaxKVSize
             : min(recommendedMaxKVSize, 8192)
         let fallbackReason = usesTurboQuant
@@ -280,41 +280,48 @@ struct MLXRuntimeBridge: Sendable {
         let turboQuantDefaults = usesTurboQuant
             ? Self.turboQuantRuntimeDefaults(
                 for: install,
-                contextLength: maxKVSize,
+                contextLength: requestedMaxKVSize,
                 deviceOptimizationPolicy: deviceProfile.turboQuantOptimizationPolicy
             )
             : nil
+        let admission = Self.kvCacheAdmission(
+            for: install,
+            requestedTurboQuant: usesTurboQuant,
+            requestedMaxKVSize: requestedMaxKVSize,
+            backend: backend,
+            defaults: turboQuantDefaults
+        )
         let profile = RuntimeProfile(
             name: hasVision ? "Vision balanced" : "Local balanced",
             quantization: QuantizationProfile(
                 weightBits: install.repository.localizedCaseInsensitiveContains("4bit") ? 4 : nil,
                 kvBits: nil,
-                kvGroupSize: turboQuantDefaults?.groupSize ?? 64,
+                kvGroupSize: admission.useTurboQuant ? turboQuantDefaults?.groupSize ?? 64 : 64,
                 quantizedKVStart: 0,
-                maxKVSize: maxKVSize,
-                algorithm: usesTurboQuant ? .turboQuant : .none,
-                kvCacheStrategy: usesTurboQuant ? .turboQuant : .none,
-                preset: usesTurboQuant ? turboQuantDefaults?.preset : nil,
-                requestedBackend: usesTurboQuant ? (turboQuantDefaults?.requestedBackend ?? backend.requested) : nil,
-                activeBackend: usesTurboQuant && linked ? backend.active : nil,
-                metalCodecAvailable: usesTurboQuant && linked && backend.metalCodecAvailable,
-                metalAttentionAvailable: usesTurboQuant && linked && backend.metalAttentionAvailable,
-                activeAttentionPath: usesTurboQuant && linked ? backend.activeAttentionPath : .baseline,
-                metalKernelProfile: usesTurboQuant && linked ? backend.kernelProfile : nil,
-                metalSelfTestStatus: usesTurboQuant && linked ? backend.selfTestStatus : nil,
-                metalSelfTestFailureReason: usesTurboQuant ? backend.selfTestFailureReason : nil,
-                rawFallbackAllocated: usesTurboQuant ? backend.rawFallbackAllocated : false,
+                maxKVSize: admission.maxKVSize,
+                algorithm: admission.useTurboQuant ? .turboQuant : .none,
+                kvCacheStrategy: admission.useTurboQuant ? .turboQuant : .none,
+                preset: admission.useTurboQuant ? turboQuantDefaults?.preset : nil,
+                requestedBackend: admission.useTurboQuant ? (turboQuantDefaults?.requestedBackend ?? backend.requested) : nil,
+                activeBackend: admission.useTurboQuant && linked ? backend.active : nil,
+                metalCodecAvailable: admission.useTurboQuant && linked && backend.metalCodecAvailable,
+                metalAttentionAvailable: admission.useTurboQuant && linked && backend.metalAttentionAvailable,
+                activeAttentionPath: admission.useTurboQuant && linked ? backend.activeAttentionPath : .baseline,
+                metalKernelProfile: admission.useTurboQuant && linked ? backend.kernelProfile : nil,
+                metalSelfTestStatus: admission.useTurboQuant && linked ? backend.selfTestStatus : nil,
+                metalSelfTestFailureReason: admission.useTurboQuant ? backend.selfTestFailureReason : nil,
+                rawFallbackAllocated: admission.useTurboQuant ? backend.rawFallbackAllocated : false,
                 devicePerformanceClass: deviceProfile.performanceClass,
                 turboQuantOptimizationPolicy: turboQuantDefaults?.optimizationPolicy
                     ?? deviceProfile.turboQuantOptimizationPolicy,
-                turboQuantValueBits: turboQuantDefaults?.valueBits,
+                turboQuantValueBits: admission.useTurboQuant ? turboQuantDefaults?.valueBits : nil,
                 thermalDownshiftActive: deviceProfile.thermalDownshiftActive,
                 runtimePressureReason: deviceProfile.runtimePressureReason,
-                turboQuantProfileID: turboQuantDefaults?.profileID,
+                turboQuantProfileID: admission.useTurboQuant ? turboQuantDefaults?.profileID : nil,
                 turboQuantProfileSource: turboQuantDefaults?.profileSource,
-                turboQuantProfileDiagnostics: turboQuantDefaults?.profileDiagnostics ?? [],
-                lastUnsupportedAttentionShape: usesTurboQuant ? backend.lastUnsupportedAttentionShape : nil,
-                activeFallbackReason: linked ? fallbackReason : "MLX runtime packages are not linked in this build.",
+                turboQuantProfileDiagnostics: admission.diagnostics,
+                lastUnsupportedAttentionShape: admission.useTurboQuant ? backend.lastUnsupportedAttentionShape : nil,
+                activeFallbackReason: admission.reason ?? (linked ? fallbackReason : "MLX runtime packages are not linked in this build."),
                 memoryCounters: deviceMonitor.memoryCounters()
             ),
             streamExperts: false,
@@ -356,6 +363,82 @@ struct MLXRuntimeBridge: Sendable {
         var profileID: String?
         var profileSource: String
         var profileDiagnostics: [String]
+    }
+
+    private struct KVCacheAdmission {
+        var useTurboQuant: Bool
+        var maxKVSize: Int
+        var reason: String?
+        var diagnostics: [String]
+    }
+
+    private static func kvCacheAdmission(
+        for install: ModelInstall,
+        requestedTurboQuant: Bool,
+        requestedMaxKVSize: Int,
+        backend: (
+            requested: PinesCore.TurboQuantRuntimeBackend,
+            active: PinesCore.TurboQuantRuntimeBackend?,
+            metalCodecAvailable: Bool,
+            metalAttentionAvailable: Bool,
+            activeAttentionPath: PinesCore.TurboQuantAttentionPath,
+            kernelProfile: PinesCore.TurboQuantKernelProfile?,
+            selfTestStatus: PinesCore.TurboQuantSelfTestStatus?,
+            selfTestFailureReason: String?,
+            rawFallbackAllocated: Bool?,
+            lastUnsupportedAttentionShape: String?,
+            fallbackReason: String?
+        ),
+        defaults: TurboQuantRuntimeDefaults?
+    ) -> KVCacheAdmission {
+        var diagnostics = defaults?.profileDiagnostics ?? []
+        guard requestedTurboQuant else {
+            let reason = "plain KV selected because this install does not advertise TurboQuant-compatible attention KV support"
+            diagnostics.append(reason)
+            return KVCacheAdmission(
+                useTurboQuant: false,
+                maxKVSize: min(requestedMaxKVSize, 8192),
+                reason: reason,
+                diagnostics: diagnostics
+            )
+        }
+
+        let parameterCount = install.parameterCount ?? Int64.max
+        let headDimension = install.keyHeadDimension
+        let valueHeadDimension = install.valueHeadDimension ?? headDimension
+        let smallDenseOrHybridModel = parameterCount <= 2_500_000_000
+        let hasLargeAttentionHeads = (headDimension ?? 0) > 128 || (valueHeadDimension ?? 0) > 128
+        if smallDenseOrHybridModel, hasLargeAttentionHeads {
+            let reason = "plain rotating KV selected because TurboQuant online-fused attention is not throughput-admitted for \(headDimension.map(String.init) ?? "unknown")-dimensional heads on small local models"
+            diagnostics.append(reason)
+            return KVCacheAdmission(
+                useTurboQuant: false,
+                maxKVSize: min(requestedMaxKVSize, 8192),
+                reason: reason,
+                diagnostics: diagnostics
+            )
+        }
+
+        if backend.metalAttentionAvailable == false,
+           smallDenseOrHybridModel {
+            let reason = backend.fallbackReason
+                ?? "plain rotating KV selected because TurboQuant Metal attention is unavailable for this small local model"
+            diagnostics.append(reason)
+            return KVCacheAdmission(
+                useTurboQuant: false,
+                maxKVSize: min(requestedMaxKVSize, 8192),
+                reason: reason,
+                diagnostics: diagnostics
+            )
+        }
+
+        diagnostics.append("TurboQuant admitted for compressed attention KV")
+        return KVCacheAdmission(
+            useTurboQuant: true,
+            maxKVSize: requestedMaxKVSize,
+            reason: backend.fallbackReason,
+            diagnostics: diagnostics
+        )
     }
 
     private static func turboQuantRuntimeDefaults(
@@ -764,14 +847,16 @@ extension MLXRuntimeBridge: InferenceProvider {
                                 eventToYield = .finish(finish)
                             }
                             #if DEBUG
+                            var finishMetadata = finish.providerMetadata
+                            finishMetadata.merge([
+                                "model_id": modelID.rawValue,
+                                "reason": finish.reason.rawValue,
+                                "token_count": String(emittedTokenCount),
+                            ]) { _, new in new }
                             await FreezeBreadcrumbJournal.shared.record(
                                 stage: "mlx.stream.finish",
                                 detail: finish.message,
-                                metadata: runtimeMemoryMetadata(merging: [
-                                    "model_id": modelID.rawValue,
-                                    "reason": finish.reason.rawValue,
-                                    "token_count": String(emittedTokenCount),
-                                ])
+                                metadata: runtimeMemoryMetadata(merging: finishMetadata)
                             )
                             #endif
                         case let .failure(failure):
@@ -1016,7 +1101,7 @@ private actor MLXRuntimeState {
             return 64 * megabyte
         }
         if profile.quantization.runtimePressureReason == .lowMemory {
-            return 32 * megabyte
+            return 64 * megabyte
         }
         if contextTokens <= 4_096 {
             return 64 * megabyte
@@ -1048,7 +1133,7 @@ private actor MLXRuntimeState {
         #else
         Stream.gpu.synchronize()
         Memory.clearCache()
-        let softCacheLimit = 32 * 1_024 * 1_024
+        let softCacheLimit = 64 * 1_024 * 1_024
         if Memory.cacheLimit > softCacheLimit {
             Memory.cacheLimit = softCacheLimit
         }
@@ -1459,6 +1544,8 @@ private actor MLXRuntimeState {
                             LocalProviderMetadataKeys.turboQuantProfileSource: profile.quantization.turboQuantProfileSource ?? "none",
                             LocalProviderMetadataKeys.cacheTopology: install?.cacheTopology.rawValue ?? ModelCacheTopology.unsupported.rawValue,
                             LocalProviderMetadataKeys.turboQuantFamilySupport: install?.turboQuantFamilySupport.rawValue ?? TurboQuantFamilySupport.none.rawValue,
+                            LocalProviderMetadataKeys.turboQuantAdmissionDecision: profile.quantization.kvCacheStrategy == .turboQuant ? "turboQuant" : "plain_rotating_kv",
+                            LocalProviderMetadataKeys.turboQuantAdmissionReason: profile.quantization.activeFallbackReason ?? "TurboQuant admitted",
                             LocalProviderMetadataKeys.generationPrepareElapsedSeconds: String(prepareElapsedSeconds),
                             LocalProviderMetadataKeys.generationPreflightAttempts: String(preflightAttempts),
                         ]
@@ -1634,13 +1721,21 @@ private actor MLXRuntimeState {
                                 partitionSummary: partitionSummary
                             )
                             providerMetadata.merge(contextMetadata) { _, new in new }
+                            let resolvedFinishReason = Self.finishReason(
+                                from: completionInfo.stopReason,
+                                generatedTokens: completionInfo.generationTokenCount,
+                                emittedTokenCount: tokenCount,
+                                maxTokens: generationPlan.effectiveMaxTokens
+                            )
+                            if resolvedFinishReason == .length {
+                                providerMetadata[LocalProviderMetadataKeys.generationIncompleteReason] =
+                                    "max_tokens"
+                            }
                             finish = InferenceFinish(
-                                reason: Self.finishReason(
-                                    from: completionInfo.stopReason,
-                                    generatedTokens: completionInfo.generationTokenCount,
-                                    emittedTokenCount: tokenCount,
-                                    maxTokens: generationPlan.effectiveMaxTokens
-                                ),
+                                reason: resolvedFinishReason,
+                                message: resolvedFinishReason == .length
+                                    ? "Local generation stopped at the active max-token budget before the model emitted a stop sequence."
+                                    : nil,
                                 providerMetadata: providerMetadata
                             )
                         }
@@ -2015,6 +2110,8 @@ private actor MLXRuntimeState {
                 LocalProviderMetadataKeys.turboQuantKernelProfile: diagnostics.selectedKernelProfile.rawValue,
                 LocalProviderMetadataKeys.turboQuantSelfTestStatus: diagnostics.selfTestStatus.rawValue,
                 LocalProviderMetadataKeys.turboQuantRawFallbackAllocated: String(diagnostics.rawFallbackAllocated),
+                LocalProviderMetadataKeys.turboQuantAdmissionDecision: "turboQuant",
+                LocalProviderMetadataKeys.turboQuantAdmissionReason: profile.quantization.activeFallbackReason ?? "TurboQuant admitted",
                 LocalProviderMetadataKeys.runtimePressureReason: profile.quantization.runtimePressureReason.rawValue,
                 LocalProviderMetadataKeys.runtimeLowPowerMode: String(profile.quantization.memoryCounters.lowPowerModeEnabled ?? false),
                 LocalProviderMetadataKeys.runtimePrefillStepSize: String(profile.prefillStepSize),
@@ -2049,6 +2146,8 @@ private actor MLXRuntimeState {
         let quantization = profile.quantization
         var metadata: [String: String] = [
             LocalProviderMetadataKeys.turboQuantRawFallbackAllocated: String(quantization.rawFallbackAllocated ?? false),
+            LocalProviderMetadataKeys.turboQuantAdmissionDecision: quantization.kvCacheStrategy == .turboQuant ? "turboQuant" : "plain_rotating_kv",
+            LocalProviderMetadataKeys.turboQuantAdmissionReason: quantization.activeFallbackReason ?? "TurboQuant not active for this request",
             LocalProviderMetadataKeys.runtimePressureReason: quantization.runtimePressureReason.rawValue,
             LocalProviderMetadataKeys.runtimeLowPowerMode: String(quantization.memoryCounters.lowPowerModeEnabled ?? false),
             LocalProviderMetadataKeys.runtimePrefillStepSize: String(profile.prefillStepSize),

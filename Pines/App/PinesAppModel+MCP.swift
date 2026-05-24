@@ -287,8 +287,11 @@ extension PinesAppModel {
             LocalProviderMetadataKeys.turboQuantAttentionPath,
             LocalProviderMetadataKeys.turboQuantKernelProfile,
             LocalProviderMetadataKeys.turboQuantSelfTestStatus,
+            LocalProviderMetadataKeys.turboQuantAdmissionDecision,
+            LocalProviderMetadataKeys.turboQuantAdmissionReason,
             LocalProviderMetadataKeys.turboQuantFallbackReason,
             LocalProviderMetadataKeys.turboQuantLastUnsupportedShape,
+            LocalProviderMetadataKeys.generationIncompleteReason,
         ]
         let diagnostics = diagnosticKeys.compactMap { key -> String? in
             guard let value = metadata[key], !value.isEmpty else { return nil }
