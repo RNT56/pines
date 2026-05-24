@@ -141,6 +141,44 @@ struct VaultEmbeddingService {
             }
     }
 
+    func embedChunksInBatches(
+        chunks: [VaultChunk],
+        documentID: UUID,
+        profile: VaultEmbeddingProfile,
+        progress: (@Sendable (Int) async throws -> Void)? = nil,
+        persistBatch: @Sendable (VaultEmbeddingBatch, Int) async throws -> Void
+    ) async throws -> Int {
+        guard !chunks.isEmpty else { return 0 }
+        let batchSize = batchSize(for: profile)
+        var processed = 0
+        for startIndex in stride(from: 0, to: chunks.count, by: batchSize) {
+            try Task.checkCancellation()
+            let endIndex = min(startIndex + batchSize, chunks.count)
+            let batch = Array(chunks[startIndex..<endIndex])
+            let result = try await embedBatchWithRetry(batch.map(\.text), profile: profile, inputType: .document)
+            guard result.vectors.count == batch.count else {
+                throw InferenceError.invalidRequest(
+                    "Embedding provider returned \(result.vectors.count) vectors for \(batch.count) chunks."
+                )
+            }
+            let embeddings = zip(batch, result.vectors).map { chunk, vector in
+                VaultChunkEmbedding(
+                    chunkID: chunk.id,
+                    documentID: documentID,
+                    modelID: profile.modelID,
+                    vector: vector
+                )
+            }
+            processed += embeddings.count
+            try await persistBatch(
+                VaultEmbeddingBatch(modelID: profile.modelID, embeddings: embeddings),
+                processed
+            )
+            try await progress?(processed)
+        }
+        return processed
+    }
+
     func embedQuery(_ query: String, profile: VaultEmbeddingProfile) async throws -> [Float]? {
         try await embed(inputs: [query], profile: profile, inputType: .query).first
     }

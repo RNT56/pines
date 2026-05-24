@@ -756,6 +756,15 @@ struct ModelDetailView: View {
             .init("Metal attention", quantization.metalAttentionAvailable ? "Available" : "Unavailable", systemImage: "scope"),
             .init("Optimization", quantization.turboQuantOptimizationPolicy.displayName, systemImage: "gauge")
         ]
+        items.append(.init("Mode", quantization.turboQuantUserMode.displayName, systemImage: "speedometer"))
+        if let admission = quantization.turboQuantAdmission {
+            items.append(.init("Admitted context", "\(admission.admittedContextLength.formatted()) tokens", systemImage: "text.word.spacing"))
+            items.append(.init("Selected mode", admission.selectedMode.displayName, systemImage: "dial.medium"))
+            if let reason = admission.primaryDowngradeReason {
+                items.append(.init("Downgrade", reason.displayName, systemImage: "arrow.down.forward.circle"))
+            }
+            items.append(.init("Memory message", admission.userMessage, systemImage: "memorychip", copyable: true))
+        }
         if let preset = quantization.preset { items.append(.init("KV preset", preset.displayName)) }
         if let profileID = quantization.turboQuantProfileID { items.append(.init("Profile ID", profileID, copyable: true)) }
         if let profileSource = quantization.turboQuantProfileSource { items.append(.init("Profile source", profileSource)) }

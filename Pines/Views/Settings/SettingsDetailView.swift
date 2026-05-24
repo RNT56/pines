@@ -243,10 +243,21 @@ struct SettingsDetailView: View {
                 Task { await appModel.saveSettings(services: services) }
             }
 
+            Picker("Local mode", selection: $settingsState.localTurboQuantMode) {
+                ForEach(TurboQuantUserMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: settingsState.localTurboQuantMode) { _, _ in
+                Task { await appModel.saveSettings(services: services) }
+            }
+
             PinesKeyValueGrid(items: [
                 .init("Cloud completion", "\(settingsState.cloudMaxCompletionTokens.formatted()) tokens", systemImage: "cloud"),
                 .init("Local completion", "\(settingsState.localMaxCompletionTokens.formatted()) tokens", systemImage: "cpu"),
-                .init("Requested local context", "\(settingsState.localMaxContextTokens.formatted()) tokens", systemImage: "text.word.spacing")
+                .init("Requested local context", "\(settingsState.localMaxContextTokens.formatted()) tokens", systemImage: "text.word.spacing"),
+                .init("Local mode", settingsState.localTurboQuantMode.displayName, systemImage: "speedometer")
             ])
         }
         .id(SettingsDetailAnchor.generationLimits)

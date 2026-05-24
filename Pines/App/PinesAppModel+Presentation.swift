@@ -216,9 +216,16 @@ extension PinesAppModel {
                 ),
                 promptCacheIdentifier: install.repository
             )
-        let contextWindow = enrichRuntime
-            ? (runtime.capabilities.maxContextTokens.map { "\($0 / 1000)K" } ?? "Unknown")
-            : "Pending"
+        let contextWindow: String
+        if enrichRuntime,
+           let admittedContext = runtimeProfile.quantization.turboQuantAdmission?.admittedContextLength,
+           admittedContext > 0 {
+            contextWindow = "\(admittedContext.formatted()) tokens"
+        } else {
+            contextWindow = enrichRuntime
+                ? (runtime.capabilities.maxContextTokens.map { "\($0 / 1000)K" } ?? "Unknown")
+                : "Pending"
+        }
 
         return PinesModelPreview(
             install: install,

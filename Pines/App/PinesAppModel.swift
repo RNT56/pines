@@ -334,6 +334,11 @@ final class PinesAppModel: ObservableObject {
         set { settingsState.localMaxContextTokens = newValue }
     }
 
+    var localTurboQuantMode: TurboQuantUserMode {
+        get { settingsState.localTurboQuantMode }
+        set { settingsState.localTurboQuantMode = newValue }
+    }
+
     var openAIReasoningEffort: OpenAIReasoningEffort {
         get { settingsState.openAIReasoningEffort }
         set { settingsState.openAIReasoningEffort = newValue }
@@ -1718,6 +1723,7 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.cloudMaxCompletionTokens, settings.cloudMaxCompletionTokens)
         setIfChanged(\.localMaxCompletionTokens, settings.localMaxCompletionTokens)
         setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
+        setIfChanged(\.localTurboQuantMode, settings.localTurboQuantMode)
         setIfChanged(\.openAIReasoningEffort, settings.openAIReasoningEffort)
         setIfChanged(\.openAITextVerbosity, settings.openAITextVerbosity)
         setIfChanged(\.anthropicEffort, settings.anthropicEffort)
@@ -2558,9 +2564,14 @@ final class PinesAppModel: ObservableObject {
                         return
                     }
                     markCurrentRunUsesLocalRuntime(runToken)
+                    let runtimeProfile = localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                    if let admissionFailure = localAdmissionFailureMessage(for: runtimeProfile) {
+                        failPendingChatStart(admissionFailure, runToken: runToken)
+                        return
+                    }
                     try await services.mlxRuntime.load(
                         localInstall,
-                        profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                        profile: runtimeProfile
                     )
                     selectedProvider = services.mlxRuntime
                     selectedProviderID = services.mlxRuntime.localProviderID
@@ -2629,9 +2640,14 @@ final class PinesAppModel: ObservableObject {
                         return
                     }
                     markCurrentRunUsesLocalRuntime(runToken)
+                    let runtimeProfile = localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                    if let admissionFailure = localAdmissionFailureMessage(for: runtimeProfile) {
+                        failPendingChatStart(admissionFailure, runToken: runToken)
+                        return
+                    }
                     try await services.mlxRuntime.load(
                         localInstall,
-                        profile: localRuntimeProfile(for: localInstall, settings: settings, services: services)
+                        profile: runtimeProfile
                     )
                     selectedProvider = services.mlxRuntime
                     selectedProviderID = services.mlxRuntime.localProviderID
@@ -3537,6 +3553,7 @@ final class PinesAppModel: ObservableObject {
                 cloudMaxCompletionTokens: cloudMaxCompletionTokens,
                 localMaxCompletionTokens: localMaxCompletionTokens,
                 localMaxContextTokens: localMaxContextTokens,
+                localTurboQuantMode: localTurboQuantMode,
                 openAIReasoningEffort: openAIReasoningEffort,
                 openAITextVerbosity: openAITextVerbosity,
                 anthropicEffort: anthropicEffort,
@@ -3674,15 +3691,14 @@ final class PinesAppModel: ObservableObject {
         settings: AppSettingsSnapshot?,
         services: PinesAppServices
     ) -> RuntimeProfile {
-        var profile = services.mlxRuntime.defaultRuntimeProfile(for: install)
         let requestedContextTokens = AppSettingsSnapshot.normalizedLocalContextTokens(
             settings?.localMaxContextTokens ?? localMaxContextTokens
         )
-        if let recommendedContextTokens = profile.quantization.maxKVSize {
-            profile.quantization.maxKVSize = min(requestedContextTokens, recommendedContextTokens)
-        } else {
-            profile.quantization.maxKVSize = requestedContextTokens
-        }
+        var profile = services.mlxRuntime.defaultRuntimeProfile(
+            for: install,
+            userMode: settings?.localTurboQuantMode ?? localTurboQuantMode,
+            requestedContextLength: requestedContextTokens
+        )
         #if DEBUG
         if stressDisablesTurboQuant {
             profile.name = "\(profile.name) Stress Plain KV"
@@ -3699,6 +3715,15 @@ final class PinesAppModel: ObservableObject {
         }
         #endif
         return profile
+    }
+
+    private func localAdmissionFailureMessage(for profile: RuntimeProfile) -> String? {
+        guard let admission = profile.quantization.turboQuantAdmission,
+              !admission.admitted
+        else {
+            return nil
+        }
+        return admission.userMessage
     }
 
     func installModel(
@@ -5296,6 +5321,7 @@ final class PinesAppModel: ObservableObject {
                         self?.setIfChanged(\.cloudMaxCompletionTokens, settings.cloudMaxCompletionTokens)
                         self?.setIfChanged(\.localMaxCompletionTokens, settings.localMaxCompletionTokens)
                         self?.setIfChanged(\.localMaxContextTokens, settings.localMaxContextTokens)
+                        self?.setIfChanged(\.localTurboQuantMode, settings.localTurboQuantMode)
                         self?.setIfChanged(\.openAIReasoningEffort, settings.openAIReasoningEffort)
                         self?.setIfChanged(\.openAITextVerbosity, settings.openAITextVerbosity)
                         self?.setIfChanged(\.anthropicEffort, settings.anthropicEffort)

@@ -809,6 +809,7 @@ struct PinesCoreTestRunner {
             cloudMaxCompletionTokens: 32768,
             localMaxCompletionTokens: 2048,
             localMaxContextTokens: 32768,
+            localTurboQuantMode: .maxContext,
             anthropicTokenCountPreflightEnabled: true,
             requireToolApproval: true,
             braveSearchEnabled: true,
@@ -825,6 +826,7 @@ struct PinesCoreTestRunner {
         try expectEqual(decoded.cloudMaxCompletionTokens, 32768)
         try expectEqual(decoded.localMaxCompletionTokens, 2048)
         try expectEqual(decoded.localMaxContextTokens, 32768)
+        try expectEqual(decoded.localTurboQuantMode, .maxContext)
         try expectEqual(decoded.anthropicTokenCountPreflightEnabled, true)
 
         let runtimeProfile = RuntimeProfile()
@@ -834,7 +836,9 @@ struct PinesCoreTestRunner {
         try expectEqual(runtimeProfile.quantization.requestedBackend, .metalPolarQJL)
         try expectEqual(runtimeProfile.quantization.activeBackend, .mlxPacked)
         try expectEqual(runtimeProfile.quantization.metalCodecAvailable, false)
+        try expectEqual(runtimeProfile.quantization.turboQuantUserMode, .balanced)
         try expectEqual(TurboQuantPreset.allCases, [.turbo2_5, .turbo3_5, .turbo4, .turbo4v2])
+        try expectEqual(TurboQuantUserMode.allCases, [.fastest, .balanced, .maxContext, .batterySaver])
         try expectEqual(TurboQuantPreset.defaultGeneration, .turbo4v2)
         try expectEqual(TurboQuantPreset.conservativeFallback, .turbo3_5)
         try expectEqual(TurboQuantPreset.vaultVectorDefault, .turbo4v2)
@@ -1367,6 +1371,10 @@ struct PinesCoreTestRunner {
 
         let score = try codec.approximateCosineSimilarity(query: vector, code: encoded)
         try expect(score > 0.92, "TurboQuant approximation should preserve self-similarity")
+        var decodedScoreBuffer = [Float]()
+        let decodedScore = try codec.approximateCosineSimilarity(query: vector, code: encoded, decodeBuffer: &decodedScoreBuffer)
+        let streamingScore = try codec.approximateCosineSimilarityStreaming(query: vector, code: encoded)
+        try expect(abs(decodedScore - streamingScore) < 0.0001, "Streaming TurboQuant scoring should match decoded scoring")
 
         let binaryData = try codec.encodeToData(vector)
         try expect(Array(binaryData.prefix(6)) == Array("PNTQV2".utf8), "TurboQuant vector writes should use the binary v2 envelope")

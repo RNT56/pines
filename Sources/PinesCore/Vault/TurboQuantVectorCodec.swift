@@ -171,8 +171,7 @@ public struct TurboQuantVectorCodec: Sendable {
     }
 
     public func approximateCosineSimilarity(query: [Float], code: TurboQuantVectorCode) throws -> Double {
-        var decodeBuffer = [Float]()
-        return try approximateCosineSimilarity(query: query, code: code, decodeBuffer: &decodeBuffer)
+        try approximateCosineSimilarityStreaming(query: query, code: code)
     }
 
     public func approximateCosineSimilarity(
@@ -191,9 +190,49 @@ public struct TurboQuantVectorCodec: Sendable {
         return Double(dot / queryNorm)
     }
 
+    public func approximateCosineSimilarityStreaming(
+        query: [Float],
+        code: TurboQuantVectorCode
+    ) throws -> Double {
+        guard (code.codecVersion == Self.codecVersion || code.codecVersion == Self.legacyJSONCodecVersion),
+              code.dimensions > 0,
+              code.maxAbs.isFinite else {
+            throw TurboQuantVectorCodecError.malformedCode
+        }
+        guard query.count == code.dimensions else {
+            throw TurboQuantVectorCodecError.dimensionMismatch(expected: code.dimensions, actual: query.count)
+        }
+
+        let queryNorm = try validate(query)
+        let (stride, offset) = permutationParameters(dimension: code.dimensions, seed: code.seed)
+        let inverseStride = modularInverse(stride, modulo: code.dimensions)
+        var reader = BitReader(data: code.packedIndices)
+        var decodedSquaredMagnitude = Float(0)
+        var dot = Float(0)
+        for rotatedIndex in 0..<code.dimensions {
+            let highPrecision = Self.bitIsSet(in: code.highPrecisionMask, index: rotatedIndex)
+            let bits = bitWidth(forHighPrecision: highPrecision, preset: code.preset)
+            guard let raw = reader.read(bitCount: bits) else {
+                throw TurboQuantVectorCodecError.malformedCode
+            }
+            let levels = Float((1 << bits) - 1)
+            let rotatedValue = ((Float(raw) / levels) * 2 - 1) * code.maxAbs
+            let originalIndex = positiveModulo((rotatedIndex - offset) * inverseStride, code.dimensions)
+            let decoded = sign(index: originalIndex, seed: code.seed) * rotatedValue
+            decodedSquaredMagnitude += decoded * decoded
+            dot += query[originalIndex] * decoded
+        }
+
+        let decodedNorm = decodedSquaredMagnitude.squareRoot()
+        guard decodedNorm > 0 else {
+            throw TurboQuantVectorCodecError.zeroMagnitude
+        }
+        return Double((dot / decodedNorm) / queryNorm)
+    }
+
     public func approximateCosineSimilarity(query: [Float], codeData: Data) throws -> Double {
         let code = try Self.decodeCode(data: codeData)
-        return try approximateCosineSimilarity(query: query, code: code)
+        return try approximateCosineSimilarityStreaming(query: query, code: code)
     }
 
     private static func encodeBinary(_ code: TurboQuantVectorCode) throws -> Data {

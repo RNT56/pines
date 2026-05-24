@@ -31,8 +31,8 @@ struct VaultIngestionService {
     let chunker = VaultChunker()
     private let deviceMonitor = DeviceRuntimeMonitor()
     private static let logger = Logger(subsystem: "com.schtack.pines", category: "vault-ingestion")
-    private static let maximumSourceFileBytes: Int64 = 50 * 1024 * 1024
-    private static let maximumExtractedTextCharacters = 1_000_000
+    private static let defaultMaximumSourceFileBytes: Int64 = 50 * 1024 * 1024
+    private static let defaultMaximumExtractedTextCharacters = 1_000_000
     private static let supportedExtensions: Set<String> = [
         "csv",
         "heic",
@@ -57,12 +57,12 @@ struct VaultIngestionService {
             }
         }
 
-        try Self.validateSourceFile(sourceURL)
+        try validateSourceFile(sourceURL)
         try Task.checkCancellation()
-        let text = try await Self.extractText(from: sourceURL)
+        let text = try await extractText(from: sourceURL)
         try Task.checkCancellation()
         let encryptedMetadata = try await encryptedBlobStore.write(
-            try Self.readLimitedFileData(from: sourceURL),
+            try readLimitedFileData(from: sourceURL),
             contentType: Self.sourceType(for: sourceURL)
         )
         let encryptedURL = try encryptedBlobStore.fileURL(for: encryptedMetadata)
@@ -79,6 +79,7 @@ struct VaultIngestionService {
 
         let chunks = chunker.chunks(for: text, sourceID: document.id.uuidString)
         try Task.checkCancellation()
+        try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
         if let embeddingProfile = try await embeddingService?.activeUsableProfile(), !chunks.isEmpty {
             var job = VaultEmbeddingJob(
                 profileID: embeddingProfile.id,
@@ -95,11 +96,17 @@ struct VaultIngestionService {
                 let totalChunks = chunks.count
                 let jobID = job.id
                 let jobCreatedAt = job.createdAt
-                let chunkEmbeddings = try await embeddingService?.embed(
+                let processedChunks = try await embeddingService?.embedChunksInBatches(
                     chunks: chunks,
                     documentID: document.id,
                     profile: embeddingProfile,
-                    progress: { processed in
+                    progress: nil,
+                    persistBatch: { batch, processed in
+                        try await progressRepository.upsertEmbeddings(
+                            batch,
+                            documentID: progressDocumentID,
+                            embeddingProfile: embeddingProfile
+                        )
                         try await progressRepository.upsertEmbeddingJob(
                             VaultEmbeddingJob(
                                 id: jobID,
@@ -114,23 +121,16 @@ struct VaultIngestionService {
                             )
                         )
                     }
-                ) ?? []
-                if chunkEmbeddings.count == chunks.count {
-                    try await vaultRepository.replaceChunks(
-                        chunks,
-                        embeddings: VaultEmbeddingBatch(modelID: embeddingProfile.modelID, embeddings: chunkEmbeddings),
-                        documentID: document.id,
-                        embeddingProfile: embeddingProfile
-                    )
+                ) ?? 0
+                if processedChunks == chunks.count {
                     job.status = .complete
-                    job.processedChunks = chunkEmbeddings.count
+                    job.processedChunks = processedChunks
                     job.updatedAt = Date()
                     try await vaultRepository.upsertEmbeddingJob(job)
                 } else {
-                    try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
                     job.status = .failed
-                    job.processedChunks = chunkEmbeddings.count
-                    job.lastError = "Embedding provider returned \(chunkEmbeddings.count) vectors for \(chunks.count) chunks."
+                    job.processedChunks = processedChunks
+                    job.lastError = "Embedding provider returned \(processedChunks) vectors for \(chunks.count) chunks."
                     job.updatedAt = Date()
                     try await vaultRepository.upsertEmbeddingJob(job)
                 }
@@ -144,7 +144,6 @@ struct VaultIngestionService {
                 }
                 throw CancellationError()
             } catch {
-                try await vaultRepository.replaceChunks(chunks, documentID: document.id, embeddingModelID: nil)
                 job.status = .failed
                 job.lastError = Redactor().redact(error.localizedDescription)
                 job.updatedAt = Date()
@@ -223,15 +222,16 @@ struct VaultIngestionService {
         return allEmbeddings
     }
 
-    private static func validateSourceFile(_ url: URL) throws {
+    private func validateSourceFile(_ url: URL) throws {
+        let limits = importLimits()
         let values = try url.resourceValues(forKeys: [.contentTypeKey, .fileSizeKey, .isRegularFileKey])
         if values.isRegularFile == false {
             throw VaultIngestionError.unsupportedFileType(url.pathExtension)
         }
 
-        let extensionIsSupported = supportedExtensions.contains(url.pathExtension.lowercased())
+        let extensionIsSupported = Self.supportedExtensions.contains(url.pathExtension.lowercased())
         let typeIsSupported = values.contentType.map { type in
-            allowedContentTypes.contains { allowedType in
+            Self.allowedContentTypes.contains { allowedType in
                 type.conforms(to: allowedType)
             }
         } ?? false
@@ -243,12 +243,13 @@ struct VaultIngestionService {
             throw VaultIngestionError.unavailableFileSize
         }
         let byteCount = Int64(fileSize)
-        guard byteCount <= maximumSourceFileBytes else {
-            throw VaultIngestionError.fileTooLarge(actualBytes: byteCount, maximumBytes: maximumSourceFileBytes)
+        guard byteCount <= limits.maximumSourceFileBytes else {
+            throw VaultIngestionError.fileTooLarge(actualBytes: byteCount, maximumBytes: limits.maximumSourceFileBytes)
         }
     }
 
-    private static func readLimitedFileData(from url: URL) throws -> Data {
+    private func readLimitedFileData(from url: URL) throws -> Data {
+        let maximumSourceFileBytes = importLimits().maximumSourceFileBytes
         guard let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
             throw VaultIngestionError.unavailableFileSize
         }
@@ -259,25 +260,22 @@ struct VaultIngestionService {
         return try Data(contentsOf: url, options: [.mappedIfSafe])
     }
 
-    private static func extractText(from url: URL) async throws -> String {
+    private func extractText(from url: URL) async throws -> String {
+        let limits = importLimits()
         let text: String
         switch url.pathExtension.lowercased() {
         case "pdf":
-            text = try extractPDFText(from: url)
+            text = try extractPDFText(from: url, maximumCharacters: limits.maximumExtractedTextCharacters)
         case "png", "jpg", "jpeg", "heic", "tif", "tiff":
-            text = try await extractImageText(from: url)
+            text = try await Self.extractImageText(from: url)
         default:
-            let data = try readLimitedFileData(from: url)
-            guard let decoded = String(data: data, encoding: .utf8) else {
-                throw VaultIngestionError.unsupportedTextEncoding
-            }
-            text = decoded
+            text = try readLimitedText(from: url, maximumCharacters: limits.maximumExtractedTextCharacters)
         }
-        try validateExtractedText(text)
+        try validateExtractedText(text, maximumCharacters: limits.maximumExtractedTextCharacters)
         return text
     }
 
-    private static func extractPDFText(from url: URL) throws -> String {
+    private func extractPDFText(from url: URL, maximumCharacters: Int) throws -> String {
         #if canImport(PDFKit)
         guard let document = PDFDocument(url: url) else {
             let data = try readLimitedFileData(from: url)
@@ -289,7 +287,7 @@ struct VaultIngestionService {
         var extracted = ""
         for index in 0..<document.pageCount {
             if let page = document.page(at: index), let text = page.string {
-                try appendExtractedText(text, to: &extracted)
+                try appendExtractedText(text, to: &extracted, maximumCharacters: maximumCharacters)
             }
         }
         return extracted
@@ -340,19 +338,60 @@ struct VaultIngestionService {
         }
     }
 
-    private static func appendExtractedText(_ next: String, to extracted: inout String) throws {
+    private func readLimitedText(from url: URL, maximumCharacters: Int) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer {
+            try? handle.close()
+        }
+
+        var extracted = ""
+        while true {
+            guard let data = try handle.read(upToCount: 64 * 1024), !data.isEmpty else {
+                break
+            }
+            let decoded = String(decoding: data, as: UTF8.self)
+            try appendExtractedText(decoded, to: &extracted, maximumCharacters: maximumCharacters)
+        }
+        return extracted
+    }
+
+    private func appendExtractedText(_ next: String, to extracted: inout String, maximumCharacters: Int) throws {
         let separator = extracted.isEmpty ? "" : "\n\n"
-        guard extracted.count + separator.count + next.count <= maximumExtractedTextCharacters else {
-            throw VaultIngestionError.extractedTextTooLarge(maximumCharacters: maximumExtractedTextCharacters)
+        guard extracted.count + separator.count + next.count <= maximumCharacters else {
+            throw VaultIngestionError.extractedTextTooLarge(maximumCharacters: maximumCharacters)
         }
         extracted += separator
         extracted += next
     }
 
-    private static func validateExtractedText(_ text: String) throws {
-        guard text.count <= maximumExtractedTextCharacters else {
-            throw VaultIngestionError.extractedTextTooLarge(maximumCharacters: maximumExtractedTextCharacters)
+    private func validateExtractedText(_ text: String, maximumCharacters: Int) throws {
+        guard text.count <= maximumCharacters else {
+            throw VaultIngestionError.extractedTextTooLarge(maximumCharacters: maximumCharacters)
         }
+    }
+
+    private func importLimits() -> (maximumSourceFileBytes: Int64, maximumExtractedTextCharacters: Int) {
+        let profile = deviceMonitor.currentProfile()
+        let sourceLimit: Int64
+        let textLimit: Int
+        switch profile.memoryTier {
+        case .compact:
+            sourceLimit = 16 * 1024 * 1024
+            textLimit = 350_000
+        case .balanced:
+            sourceLimit = 32 * 1024 * 1024
+            textLimit = 700_000
+        case .pro:
+            sourceLimit = 64 * 1024 * 1024
+            textLimit = 1_250_000
+        case .max:
+            sourceLimit = 96 * 1024 * 1024
+            textLimit = 1_750_000
+        }
+        return (
+            max(8 * 1024 * 1024, min(sourceLimit, Self.defaultMaximumSourceFileBytes * 2)),
+            max(200_000, min(textLimit, Self.defaultMaximumExtractedTextCharacters * 2))
+        )
     }
 }
 

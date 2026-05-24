@@ -190,6 +190,7 @@ final class PinesSettingsState: ObservableObject {
     @Published var cloudMaxCompletionTokens: Int
     @Published var localMaxCompletionTokens: Int
     @Published var localMaxContextTokens: Int
+    @Published var localTurboQuantMode: TurboQuantUserMode
     @Published var openAIReasoningEffort: OpenAIReasoningEffort
     @Published var openAITextVerbosity: OpenAITextVerbosity
     @Published var anthropicEffort: AnthropicEffort
@@ -228,6 +229,7 @@ final class PinesSettingsState: ObservableObject {
         cloudMaxCompletionTokens: Int = AppSettingsSnapshot.defaultCloudMaxCompletionTokens,
         localMaxCompletionTokens: Int = AppSettingsSnapshot.defaultLocalMaxCompletionTokens,
         localMaxContextTokens: Int = AppSettingsSnapshot.defaultLocalMaxContextTokens,
+        localTurboQuantMode: TurboQuantUserMode = AppSettingsSnapshot.defaultLocalTurboQuantMode,
         openAIReasoningEffort: OpenAIReasoningEffort = AppSettingsSnapshot.defaultOpenAIReasoningEffort,
         openAITextVerbosity: OpenAITextVerbosity = AppSettingsSnapshot.defaultOpenAITextVerbosity,
         anthropicEffort: AnthropicEffort = AppSettingsSnapshot.defaultAnthropicEffort,
@@ -265,6 +267,7 @@ final class PinesSettingsState: ObservableObject {
         self.cloudMaxCompletionTokens = cloudMaxCompletionTokens
         self.localMaxCompletionTokens = localMaxCompletionTokens
         self.localMaxContextTokens = localMaxContextTokens
+        self.localTurboQuantMode = localTurboQuantMode
         self.openAIReasoningEffort = openAIReasoningEffort
         self.openAITextVerbosity = openAITextVerbosity
         self.anthropicEffort = anthropicEffort

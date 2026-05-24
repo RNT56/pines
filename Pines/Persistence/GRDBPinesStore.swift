@@ -1227,10 +1227,20 @@ actor GRDBPinesStore:
             let profileID = embeddingProfile.id
             let now = Date().timeIntervalSinceReferenceDate
             let embeddingByChunkID = Dictionary(uniqueKeysWithValues: embeddings.embeddings.map { ($0.chunkID, $0) })
-            try db.execute(
-                sql: "DELETE FROM vault_embeddings WHERE document_id = ? AND profile_id = ?",
-                arguments: [documentID.uuidString, profileID]
-            )
+            let chunkIDsForBatch = Array(embeddingByChunkID.keys).sorted()
+            if !chunkIDsForBatch.isEmpty {
+                var deleteArguments = StatementArguments(chunkIDsForBatch)
+                _ = deleteArguments.append(contentsOf: StatementArguments([documentID.uuidString, profileID]))
+                try db.execute(
+                    sql: """
+                    DELETE FROM vault_embeddings
+                    WHERE chunk_id IN (\(Array(repeating: "?", count: chunkIDsForBatch.count).joined(separator: ",")))
+                      AND document_id = ?
+                      AND profile_id = ?
+                    """,
+                    arguments: deleteArguments
+                )
+            }
 
             for chunk in chunks {
                 guard let embedding = embeddingByChunkID[chunk.id], !embedding.vector.isEmpty else {
@@ -1430,7 +1440,6 @@ actor GRDBPinesStore:
                 scannedRows += rows.count
                 offset += rows.count
 
-                var decodeBuffer = [Float]()
                 topCandidates.append(
                     contentsOf: rows.compactMap { row -> Candidate? in
                         let codeData: Data = row["turboquant_code"]
@@ -1444,10 +1453,9 @@ actor GRDBPinesStore:
                         let codec = TurboQuantVectorCodec(preset: code.preset, seed: code.seed)
                         let score: Double
                         do {
-                            score = try codec.approximateCosineSimilarity(
+                            score = try codec.approximateCosineSimilarityStreaming(
                                 query: embedding,
-                                code: code,
-                                decodeBuffer: &decodeBuffer
+                                code: code
                             )
                         } catch {
                             scoringFailureCount += 1

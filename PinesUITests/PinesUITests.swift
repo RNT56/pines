@@ -329,6 +329,14 @@ final class PinesUITests: XCTestCase {
     private func switchArtifactsWorkspace(to title: String) {
         dismissKeyboardIfNeeded()
         let mode = app.buttons["pines.artifacts.workspace.mode"]
+        if !mode.waitForExistence(timeout: 2) {
+            let backToArtifacts = app.buttons["Back to artifacts"]
+            if backToArtifacts.waitForExistence(timeout: 2) {
+                backToArtifacts.tap()
+            } else {
+                app.swipeDown()
+            }
+        }
         XCTAssertTrue(mode.waitForExistence(timeout: 10), "Artifacts workspace mode menu was not visible.")
         mode.tap()
 
@@ -340,7 +348,17 @@ final class PinesUITests: XCTestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 5), "Artifacts workspace mode \(title) was not visible.")
         item.tap()
 
-        XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 10), "Artifacts workspace \(title) did not become visible.")
+        let visibleWorkspace: XCUIElement = switch title {
+        case "Create":
+            app.descendants(matching: .any)["pines.artifacts.media.prompt"]
+        case "Research":
+            app.descendants(matching: .any)["pines.artifacts.research.prompt"]
+        case "Library":
+            app.descendants(matching: .any)["pines.artifacts.library.search"]
+        default:
+            app.staticTexts[title]
+        }
+        XCTAssertTrue(visibleWorkspace.waitForExistence(timeout: 10), "Artifacts workspace \(title) did not become visible.")
     }
 
     @MainActor

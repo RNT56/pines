@@ -244,6 +244,306 @@ public enum TurboQuantOptimizationPolicy: String, Codable, Sendable, CaseIterabl
     }
 }
 
+public enum TurboQuantUserMode: String, Codable, Sendable, CaseIterable {
+    case fastest
+    case balanced
+    case maxContext
+    case batterySaver
+
+    public var displayName: String {
+        switch self {
+        case .fastest:
+            "Fast"
+        case .balanced:
+            "Balanced"
+        case .maxContext:
+            "Max Context"
+        case .batterySaver:
+            "Battery Saver"
+        }
+    }
+}
+
+public enum TurboQuantFallbackPolicy: String, Codable, Sendable, CaseIterable {
+    case exactRequired
+    case packedAllowed
+    case compressedDecodeAllowed
+    case fatalOnFailure
+
+    public var displayName: String {
+        switch self {
+        case .exactRequired:
+            "Exact required"
+        case .packedAllowed:
+            "Packed allowed"
+        case .compressedDecodeAllowed:
+            "Compressed decode allowed"
+        case .fatalOnFailure:
+            "Fatal on failure"
+        }
+    }
+}
+
+public enum TurboQuantAdmissionDowngradeReason: String, Codable, Sendable, CaseIterable {
+    case releasedRawShadow
+    case disabledPackedFallback
+    case loweredValueBits
+    case movedBalancedToMaxContext
+    case reducedContext
+    case rollingSummaryMemory
+    case thermalOrBatterySaver
+    case refusedInsufficientMemory
+
+    public var displayName: String {
+        switch self {
+        case .releasedRawShadow:
+            "Released raw prefill shadow"
+        case .disabledPackedFallback:
+            "Disabled packed fallback"
+        case .loweredValueBits:
+            "Lowered value bits"
+        case .movedBalancedToMaxContext:
+            "Balanced moved to Max Context"
+        case .reducedContext:
+            "Reduced context"
+        case .rollingSummaryMemory:
+            "Rolling summary memory"
+        case .thermalOrBatterySaver:
+            "Thermal or battery saver"
+        case .refusedInsufficientMemory:
+            "Insufficient memory"
+        }
+    }
+}
+
+public struct TurboQuantAdmissionDowngrade: Hashable, Codable, Sendable {
+    public var reason: TurboQuantAdmissionDowngradeReason
+    public var message: String
+
+    public init(reason: TurboQuantAdmissionDowngradeReason, message: String) {
+        self.reason = reason
+        self.message = message
+    }
+}
+
+public struct RejectedPath: Hashable, Codable, Sendable {
+    public var path: String
+    public var reason: String
+
+    public init(path: String, reason: String) {
+        self.path = path
+        self.reason = reason
+    }
+}
+
+public struct TurboQuantLayerCacheFootprint: Hashable, Codable, Sendable {
+    public var layerCount: Int
+    public var kvHeadCount: Int
+    public var headDimension: Int
+    public var groupSize: Int
+    public var preset: TurboQuantPreset
+    public var valueBits: Int
+    public var groupsPerVector: Int
+    public var bitsetWordsPerGroup: Int
+    public var keyMagnitudeWordsPerGroup: Int
+    public var valueMagnitudeWordsPerGroup: Int
+    public var keyBytesPerTokenPerLayer: Int
+    public var valueBytesPerTokenPerLayer: Int
+    public var bytesPerTokenPerLayer: Int
+    public var bytesPerTokenAllLayers: Int
+    public var actualBitsPerValue: Double
+
+    public init(
+        layerCount: Int,
+        kvHeadCount: Int,
+        headDimension: Int,
+        groupSize: Int,
+        preset: TurboQuantPreset,
+        valueBits: Int,
+        groupsPerVector: Int,
+        bitsetWordsPerGroup: Int,
+        keyMagnitudeWordsPerGroup: Int,
+        valueMagnitudeWordsPerGroup: Int,
+        keyBytesPerTokenPerLayer: Int,
+        valueBytesPerTokenPerLayer: Int,
+        bytesPerTokenPerLayer: Int,
+        bytesPerTokenAllLayers: Int,
+        actualBitsPerValue: Double
+    ) {
+        self.layerCount = layerCount
+        self.kvHeadCount = kvHeadCount
+        self.headDimension = headDimension
+        self.groupSize = groupSize
+        self.preset = preset
+        self.valueBits = valueBits
+        self.groupsPerVector = groupsPerVector
+        self.bitsetWordsPerGroup = bitsetWordsPerGroup
+        self.keyMagnitudeWordsPerGroup = keyMagnitudeWordsPerGroup
+        self.valueMagnitudeWordsPerGroup = valueMagnitudeWordsPerGroup
+        self.keyBytesPerTokenPerLayer = keyBytesPerTokenPerLayer
+        self.valueBytesPerTokenPerLayer = valueBytesPerTokenPerLayer
+        self.bytesPerTokenPerLayer = bytesPerTokenPerLayer
+        self.bytesPerTokenAllLayers = bytesPerTokenAllLayers
+        self.actualBitsPerValue = actualBitsPerValue
+    }
+}
+
+public struct TurboQuantRuntimeMemoryZones: Hashable, Codable, Sendable {
+    public var availableAppMemoryBytes: Int
+    public var runtimeBudgetBytes: Int
+    public var mlxActiveBytes: Int
+    public var mlxCacheBytes: Int
+    public var modelResidentBytes: Int
+    public var compressedKVBytes: Int
+    public var rawShadowBytes: Int
+    public var fallbackReserveBytes: Int
+    public var scratchBytes: Int
+    public var promptAndTokenizerBytes: Int
+    public var uiReserveBytes: Int
+    public var safetyReserveBytes: Int
+    public var rollingSummaryBytes: Int
+    public var totalRuntimeBytes: Int
+    public var headroomBytes: Int
+
+    public init(
+        availableAppMemoryBytes: Int,
+        runtimeBudgetBytes: Int,
+        mlxActiveBytes: Int,
+        mlxCacheBytes: Int,
+        modelResidentBytes: Int,
+        compressedKVBytes: Int,
+        rawShadowBytes: Int,
+        fallbackReserveBytes: Int,
+        scratchBytes: Int,
+        promptAndTokenizerBytes: Int,
+        uiReserveBytes: Int,
+        safetyReserveBytes: Int,
+        rollingSummaryBytes: Int = 0,
+        totalRuntimeBytes: Int? = nil,
+        headroomBytes: Int? = nil
+    ) {
+        self.availableAppMemoryBytes = max(0, availableAppMemoryBytes)
+        self.runtimeBudgetBytes = max(0, runtimeBudgetBytes)
+        self.mlxActiveBytes = max(0, mlxActiveBytes)
+        self.mlxCacheBytes = max(0, mlxCacheBytes)
+        self.modelResidentBytes = max(0, modelResidentBytes)
+        self.compressedKVBytes = max(0, compressedKVBytes)
+        self.rawShadowBytes = max(0, rawShadowBytes)
+        self.fallbackReserveBytes = max(0, fallbackReserveBytes)
+        self.scratchBytes = max(0, scratchBytes)
+        self.promptAndTokenizerBytes = max(0, promptAndTokenizerBytes)
+        self.uiReserveBytes = max(0, uiReserveBytes)
+        self.safetyReserveBytes = max(0, safetyReserveBytes)
+        self.rollingSummaryBytes = max(0, rollingSummaryBytes)
+        let computedTotal =
+            self.mlxCacheBytes
+            + self.modelResidentBytes
+            + self.compressedKVBytes
+            + self.rawShadowBytes
+            + self.fallbackReserveBytes
+            + self.scratchBytes
+            + self.promptAndTokenizerBytes
+            + self.uiReserveBytes
+            + self.safetyReserveBytes
+            + self.rollingSummaryBytes
+        self.totalRuntimeBytes = max(0, totalRuntimeBytes ?? computedTotal)
+        self.headroomBytes = headroomBytes ?? (self.availableAppMemoryBytes - self.totalRuntimeBytes)
+    }
+}
+
+public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
+    public var requestedContextLength: Int
+    public var admittedContextLength: Int
+    public var requestedMode: TurboQuantUserMode
+    public var effectiveMode: TurboQuantUserMode
+    public var preset: TurboQuantPreset
+    public var valueBits: Int
+    public var groupSize: Int
+    public var fallbackPolicy: TurboQuantFallbackPolicy
+    public var rawBytesPerToken: Int
+    public var packedFallbackBytesPerToken: Int
+    public var compressedBytesPerToken: Int
+    public var layerFootprint: TurboQuantLayerCacheFootprint?
+    public var usesRawShadow: Bool
+    public var packedFallbackEnabled: Bool
+    public var usesRollingSummaryMemory: Bool
+    public var runtimeZones: TurboQuantRuntimeMemoryZones
+
+    public init(
+        requestedContextLength: Int,
+        admittedContextLength: Int,
+        requestedMode: TurboQuantUserMode,
+        effectiveMode: TurboQuantUserMode,
+        preset: TurboQuantPreset,
+        valueBits: Int,
+        groupSize: Int,
+        fallbackPolicy: TurboQuantFallbackPolicy,
+        rawBytesPerToken: Int,
+        packedFallbackBytesPerToken: Int,
+        compressedBytesPerToken: Int,
+        layerFootprint: TurboQuantLayerCacheFootprint? = nil,
+        usesRawShadow: Bool,
+        packedFallbackEnabled: Bool,
+        usesRollingSummaryMemory: Bool,
+        runtimeZones: TurboQuantRuntimeMemoryZones
+    ) {
+        self.requestedContextLength = requestedContextLength
+        self.admittedContextLength = admittedContextLength
+        self.requestedMode = requestedMode
+        self.effectiveMode = effectiveMode
+        self.preset = preset
+        self.valueBits = valueBits
+        self.groupSize = groupSize
+        self.fallbackPolicy = fallbackPolicy
+        self.rawBytesPerToken = rawBytesPerToken
+        self.packedFallbackBytesPerToken = packedFallbackBytesPerToken
+        self.compressedBytesPerToken = compressedBytesPerToken
+        self.layerFootprint = layerFootprint
+        self.usesRawShadow = usesRawShadow
+        self.packedFallbackEnabled = packedFallbackEnabled
+        self.usesRollingSummaryMemory = usesRollingSummaryMemory
+        self.runtimeZones = runtimeZones
+    }
+}
+
+public struct TurboQuantAdmission: Hashable, Codable, Sendable {
+    public var admitted: Bool
+    public var requestedContextLength: Int
+    public var admittedContextLength: Int
+    public var requestedMode: TurboQuantUserMode
+    public var selectedMode: TurboQuantUserMode
+    public var memoryPlan: TurboQuantMemoryPlan?
+    public var downgradeReasons: [TurboQuantAdmissionDowngrade]
+    public var rejectedPaths: [RejectedPath]
+    public var userMessage: String
+
+    public var primaryDowngradeReason: TurboQuantAdmissionDowngradeReason? {
+        downgradeReasons.first?.reason
+    }
+
+    public init(
+        admitted: Bool,
+        requestedContextLength: Int,
+        admittedContextLength: Int,
+        requestedMode: TurboQuantUserMode,
+        selectedMode: TurboQuantUserMode,
+        memoryPlan: TurboQuantMemoryPlan? = nil,
+        downgradeReasons: [TurboQuantAdmissionDowngrade] = [],
+        rejectedPaths: [RejectedPath] = [],
+        userMessage: String
+    ) {
+        self.admitted = admitted
+        self.requestedContextLength = requestedContextLength
+        self.admittedContextLength = admittedContextLength
+        self.requestedMode = requestedMode
+        self.selectedMode = selectedMode
+        self.memoryPlan = memoryPlan
+        self.downgradeReasons = downgradeReasons
+        self.rejectedPaths = rejectedPaths
+        self.userMessage = userMessage
+    }
+}
+
 public enum KVCacheStrategy: String, Codable, Sendable, CaseIterable {
     case none
     case mlxAffine
@@ -542,6 +842,8 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var lastUnsupportedAttentionShape: String?
     public var activeFallbackReason: String?
     public var memoryCounters: RuntimeMemoryCounters
+    public var turboQuantUserMode: TurboQuantUserMode
+    public var turboQuantAdmission: TurboQuantAdmission?
 
     private enum CodingKeys: String, CodingKey {
         case weightBits
@@ -572,6 +874,8 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case lastUnsupportedAttentionShape
         case activeFallbackReason
         case memoryCounters
+        case turboQuantUserMode
+        case turboQuantAdmission
     }
 
     public init(
@@ -602,7 +906,9 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         turboQuantProfileDiagnostics: [String] = [],
         lastUnsupportedAttentionShape: String? = nil,
         activeFallbackReason: String? = nil,
-        memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters()
+        memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters(),
+        turboQuantUserMode: TurboQuantUserMode = .balanced,
+        turboQuantAdmission: TurboQuantAdmission? = nil
     ) {
         self.weightBits = weightBits
         self.kvBits = kvBits
@@ -632,6 +938,8 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.lastUnsupportedAttentionShape = lastUnsupportedAttentionShape
         self.activeFallbackReason = activeFallbackReason
         self.memoryCounters = memoryCounters
+        self.turboQuantUserMode = turboQuantUserMode
+        self.turboQuantAdmission = turboQuantAdmission
     }
 
     public init(from decoder: Decoder) throws {
@@ -664,6 +972,8 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         lastUnsupportedAttentionShape = try container.decodeIfPresent(String.self, forKey: .lastUnsupportedAttentionShape)
         activeFallbackReason = try container.decodeIfPresent(String.self, forKey: .activeFallbackReason)
         memoryCounters = try container.decodeIfPresent(RuntimeMemoryCounters.self, forKey: .memoryCounters) ?? RuntimeMemoryCounters()
+        turboQuantUserMode = try container.decodeIfPresent(TurboQuantUserMode.self, forKey: .turboQuantUserMode) ?? .balanced
+        turboQuantAdmission = try container.decodeIfPresent(TurboQuantAdmission.self, forKey: .turboQuantAdmission)
     }
 }
 

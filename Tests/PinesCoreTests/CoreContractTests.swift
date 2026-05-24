@@ -1817,6 +1817,7 @@ struct CoreContractTests {
         #expect(decoded.cloudMaxCompletionTokens == AppSettingsSnapshot.defaultCloudMaxCompletionTokens)
         #expect(decoded.localMaxCompletionTokens == AppSettingsSnapshot.defaultLocalMaxCompletionTokens)
         #expect(decoded.localMaxContextTokens == AppSettingsSnapshot.defaultLocalMaxContextTokens)
+        #expect(decoded.localTurboQuantMode == .balanced)
         #expect(decoded.openAIReasoningEffort == .low)
         #expect(decoded.openAITextVerbosity == .low)
         #expect(decoded.anthropicEffort == .medium)
@@ -1834,6 +1835,7 @@ struct CoreContractTests {
             cloudMaxCompletionTokens: 1,
             localMaxCompletionTokens: 1_000_000,
             localMaxContextTokens: 1,
+            localTurboQuantMode: .batterySaver,
             openAIReasoningEffort: .high,
             openAITextVerbosity: .medium,
             anthropicEffort: .xhigh,
@@ -1844,6 +1846,7 @@ struct CoreContractTests {
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
         #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
         #expect(clamped.localMaxContextTokens == AppSettingsSnapshot.minLocalContextTokens)
+        #expect(clamped.localTurboQuantMode == .batterySaver)
         #expect(clamped.openAIReasoningEffort == .high)
         #expect(clamped.openAITextVerbosity == .medium)
         #expect(clamped.anthropicEffort == .xhigh)

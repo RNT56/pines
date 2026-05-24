@@ -615,16 +615,14 @@ struct WatchChatOrchestrator {
     }
 
     private func localRuntimeProfile(for install: ModelInstall, settings: AppSettingsSnapshot?) -> RuntimeProfile {
-        var profile = services.mlxRuntime.defaultRuntimeProfile(for: install)
         let requestedContextTokens = AppSettingsSnapshot.normalizedLocalContextTokens(
             settings?.localMaxContextTokens ?? AppSettingsSnapshot.defaultLocalMaxContextTokens
         )
-        if let recommendedContextTokens = profile.quantization.maxKVSize {
-            profile.quantization.maxKVSize = min(requestedContextTokens, recommendedContextTokens)
-        } else {
-            profile.quantization.maxKVSize = requestedContextTokens
-        }
-        return profile
+        return services.mlxRuntime.defaultRuntimeProfile(
+            for: install,
+            userMode: settings?.localTurboQuantMode ?? AppSettingsSnapshot.defaultLocalTurboQuantMode,
+            requestedContextLength: requestedContextTokens
+        )
     }
 
     private func localRoutingCandidate(for install: ModelInstall?) -> (id: ProviderID, capabilities: ProviderCapabilities)? {
