@@ -1,0 +1,241 @@
+# Validation and Release Gates
+
+This document lists validation commands, release-gate checks, and definition of done for each release milestone.
+
+## Validation commands
+
+Pines:
+
+```bash
+swift build --disable-automatic-resolution
+swift test --disable-automatic-resolution
+swift run --disable-automatic-resolution PinesCoreTestRunner
+bash scripts/ci/xcodegen.sh generate
+bash scripts/ci/run-xcode-validation.sh
+```
+
+MLX forks:
+
+```bash
+swift build
+swift test
+```
+
+Benchmarks:
+
+```bash
+swift run TurboQuantBenchmark --json
+swift run TurboQuantModelBenchmark --json
+```
+
+Full iOS verification:
+
+```bash
+xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform=iOS' build
+```
+
+## MVP 0 gate
+
+Required:
+
+- W25 current-state doc updated;
+- W0 release train doc updated;
+- W20 schema registry exists;
+- W21 failure matrix exists;
+- W4 removes or isolates product fatal/zero behavior;
+- W1 core public contracts exist;
+- W7 Pines local shims build;
+- W24 mode/fallback contract exists;
+- compatibility-pair JSON is present and pending or green.
+
+Validation:
+
+- MLX Swift build/test for contracts;
+- MLX LM build/test for typed errors;
+- PinesCore build/test for shims.
+
+Exit:
+
+- no product-facing zero output;
+- no product-facing fatal path;
+- schemas and failure matrix are reviewable;
+- no production pin update unless green.
+
+## MVP 1 gate
+
+Required:
+
+- admission service;
+- memory zones;
+- mode fallback policy;
+- typed failure mapping;
+- RunDecision metadata;
+- bridge integration;
+- compatibility UI basic states;
+- no silent cloud fallback.
+
+Validation:
+
+- unsafe context rejects before generation;
+- typed MLX failure reaches stream failure;
+- successful local run emits RunDecision;
+- failure local run emits partial RunDecision;
+- route policy test proves local failure does not silently cloud fallback.
+
+Exit:
+
+- Pines can show admitted context before generation;
+- local generation uses admitted context;
+- fallback policy is mode-specific;
+- memory zones are recorded.
+
+## MVP 1.5 gate
+
+Required:
+
+- BenchmarkReport.v1 import;
+- ProfileEvidenceStore;
+- QualityGate;
+- MemoryCalibration;
+- compatibility UI uses evidence levels;
+- INT-2A green compatibility pair;
+- at least one real-device tuple verified.
+
+Validation:
+
+- benchmark JSON imports;
+- failed quality does not verify;
+- memory calibration sample persists;
+- verified evidence includes fallback contract hash;
+- evidence revocation prevents product claim.
+
+Exit:
+
+- one real iPhone model/device/mode tuple is verified;
+- UI shows evidence date and mode-specific context;
+- no jetsam in admitted run.
+
+## MVP 2 gate
+
+Required:
+
+- ContextAssemblyPlan.v1 full planner;
+- pinned/recent/retrieved/summary/dropped segments;
+- vault retrieval budget;
+- context provenance UI;
+- semantic vs KV distinction enforced.
+
+Validation:
+
+- pinned prompt cannot be dropped;
+- cloud route excludes vault content without approval;
+- compressed KV pages require exact prefix validity;
+- deterministic plan for same inputs.
+
+Exit:
+
+- user can inspect what was included, summarized, and dropped.
+
+## MVP 3 gate
+
+Required:
+
+- LM snapshot export/import;
+- Pines encrypted snapshot store;
+- snapshot security policy;
+- restore flow;
+- invalidation flow.
+
+Validation:
+
+- app restart restore works;
+- invalid snapshot fails closed;
+- partial writes quarantine;
+- data erasure deletes snapshots;
+- model deletion deletes snapshots.
+
+Exit:
+
+- close app -> reopen -> continue from valid local snapshot.
+
+## MVP 4 gate
+
+Required:
+
+- hidden-copy audit passes;
+- kernel warmup registry;
+- Layout V5 behind flag;
+- popcount offset path;
+- fused dim specializations;
+- benchmark before/after;
+- quality gates remain green.
+
+Validation:
+
+- no hidden full-cache copy in hot path;
+- V4 compatibility;
+- V5 improves bytes or speed;
+- unsupported dims fallback safely.
+
+Exit:
+
+- optimization release is evidence-backed.
+
+## MVP 5 gate
+
+Required:
+
+- LM speculative verifier;
+- tentative append;
+- rollback rejected tokens;
+- Pines draft pairing;
+- acceptance telemetry;
+- auto-disable poor speculation.
+
+Validation:
+
+- accepted sequence matches target;
+- rejected tokens do not corrupt cache;
+- Fast mode improves p50 decode when acceptance is high;
+- poor acceptance degrades cleanly.
+
+## Final release definition of done
+
+First shippable control-plane milestone:
+
+- admitted context shown before generation;
+- unsafe contexts rejected before generation;
+- no MLX-LM product zero/fatal path;
+- TurboQuant failures are typed;
+- memory zones recorded;
+- fallback policy mode-specific;
+- RunDecision attached;
+- compatibility UI shows conservative/unverified/verified states;
+- compatibility pair proven;
+- no silent cloud fallback.
+
+First evidence-backed release:
+
+- one real iPhone model/device/mode tuple verified;
+- benchmark JSON imports into Pines;
+- QualityGate passes;
+- memory calibration sample exists;
+- estimated-vs-actual memory recorded;
+- no jetsam in admitted run;
+- UI shows evidence date and mode-specific context.
+
+First persistent-workspace release:
+
+- KV snapshots export/import;
+- snapshots encrypted and local;
+- invalid restore fails closed;
+- close app -> reopen -> continue;
+- data deletion removes snapshots.
+
+First optimization release:
+
+- hidden-copy audit passes;
+- kernel warmup reduces cold start;
+- Layout V5 improves bytes or speed;
+- fused specializations improve decode;
+- QualityGate remains green.

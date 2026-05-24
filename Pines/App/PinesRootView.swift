@@ -66,6 +66,10 @@ struct PinesRootView: View {
         )
     }
 
+    private var canShowPrivacyLock: Bool {
+        !PinesUITestLaunchConfiguration.isEnabled
+    }
+
     var body: some View {
         ZStack {
             if isMainUIReady, let services {
@@ -94,7 +98,7 @@ struct PinesRootView: View {
                     .zIndex(1)
             }
 
-            if isPrivacyCoverVisible || isPrivacyLocked {
+            if canShowPrivacyLock, isPrivacyCoverVisible || isPrivacyLocked {
                 privacyCover
                     .zIndex(2)
             }
@@ -185,7 +189,7 @@ struct PinesRootView: View {
             handleScenePhase(phase)
         }
         .onChange(of: settingsState.securityConfiguration.appLockEnabled) { _, enabled in
-            guard enabled else {
+            guard canShowPrivacyLock, enabled else {
                 isPrivacyLocked = false
                 isPrivacyCoverVisible = false
                 appUnlockError = nil
@@ -331,6 +335,7 @@ struct PinesRootView: View {
     }
 
     private func handleScenePhase(_ phase: ScenePhase) {
+        let appLockEnabled = canShowPrivacyLock && settingsState.securityConfiguration.appLockEnabled
         switch phase {
         case .active:
             if let services {
@@ -338,29 +343,34 @@ struct PinesRootView: View {
                     await services.mlxRuntime.setForegroundActive(true)
                 }
             }
-            if settingsState.securityConfiguration.appLockEnabled, isPrivacyLocked {
+            if appLockEnabled, isPrivacyLocked {
                 Task { await authenticateAppUnlock() }
-            } else if !settingsState.securityConfiguration.appLockEnabled {
+            } else if !appLockEnabled {
                 isPrivacyCoverVisible = false
+                isPrivacyLocked = false
+                appUnlockError = nil
             }
         case .inactive, .background:
-            isPrivacyCoverVisible = true
+            isPrivacyCoverVisible = canShowPrivacyLock
             if let services {
                 Task {
                     await appModel.stopLocalRuntimeForBackground(services: services)
                 }
             }
-            if settingsState.securityConfiguration.appLockEnabled {
+            if appLockEnabled {
                 isPrivacyLocked = true
+            } else {
+                isPrivacyLocked = false
+                appUnlockError = nil
             }
         @unknown default:
-            isPrivacyCoverVisible = true
+            isPrivacyCoverVisible = canShowPrivacyLock
         }
     }
 
     @MainActor
     private func authenticateAppUnlock() async {
-        guard settingsState.securityConfiguration.appLockEnabled else {
+        guard canShowPrivacyLock, settingsState.securityConfiguration.appLockEnabled else {
             isPrivacyLocked = false
             isPrivacyCoverVisible = false
             appUnlockError = nil

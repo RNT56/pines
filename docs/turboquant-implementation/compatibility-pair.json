@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "status": "pending",
+  "pines": {
+    "repo": "pines",
+    "branch": "codex/local-runtime-hardening",
+    "commit": "78b210f5389e17479ecab2d2a0fbf161f5447b04",
+    "dirtyAtValidation": true
+  },
+  "mlxSwift": {
+    "repo": "mlx-swift",
+    "branch": "codex/turboquant-core-completion",
+    "commit": "76871538f17f997021ba5bda5456726376985143",
+    "dirtyAtValidation": true
+  },
+  "mlxSwiftLM": {
+    "repo": "mlx-swift-lm",
+    "branch": "codex/turboquant-completion-hardening",
+    "commit": "babfa5ef0bfb36d31bde85e39ba17d9b5ee923ee",
+    "dirtyAtValidation": false
+  },
+  "schemaSet": {
+    "AdmissionPlan": 1,
+    "RunDecision": 1,
+    "FailureEvent": 1,
+    "BenchmarkReport": 1,
+    "ProfileEvidence": 1,
+    "QualityGate": 1,
+    "MemoryCalibration": 1,
+    "ContextAssemblyPlan": 1,
+    "KVSnapshotManifest": 1,
+    "SnapshotSecurityPolicy": 1,
+    "ModelProfile": 2,
+    "TurboQuantLayout": 4,
+    "TurboQuantLayoutNext": 5,
+    "AdaptivePrecisionPolicy": 1
+  },
+  "validatedAt": null,
+  "validationCommands": [
+    {
+      "repo": "pines",
+      "command": "swift build --disable-automatic-resolution",
+      "result": "pending",
+      "notes": ""
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --disable-automatic-resolution",
+      "result": "passed",
+      "notes": ""
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": ""
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/xcodegen.sh generate",
+      "result": "pending",
+      "notes": ""
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh",
+      "result": "pending",
+      "notes": ""
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift build",
+      "result": "pending",
+      "notes": ""
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift test",
+      "result": "pending",
+      "notes": ""
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift build",
+      "result": "pending",
+      "notes": ""
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test",
+      "result": "pending",
+      "notes": ""
+    }
+  ],
+  "signoffs": {
+    "mlxCoreContracts": {
+      "required": true,
+      "approvedBy": null,
+      "approvedAt": null,
+      "notes": ""
+    },
+    "lmTypedErrors": {
+      "required": true,
+      "approvedBy": null,
+      "approvedAt": null,
+      "notes": ""
+    },
+    "pinesBridgeIntegration": {
+      "required": true,
+      "approvedBy": null,
+      "approvedAt": null,
+      "notes": ""
+    }
+  },
+  "notes": [
+    "Pending validation. Do not use this file as production evidence until status is green.",
+    "Pines project pins and docs/TURBOQUANT.md name the same MLX pair on the compatibility branch."
+  ]
+}
