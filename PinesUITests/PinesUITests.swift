@@ -234,11 +234,15 @@ final class PinesUITests: XCTestCase {
         XCTAssertTrue(tapFirstExisting([
             app.tabBars.buttons[title],
             app.buttons[title],
-        ], timeout: 10), "Could not tap \(title) tab.")
+        ], timeout: 10) || tapTabBarSlot(title), "Could not tap \(title) tab.")
 
         var screenMarkers = [app.staticTexts[title]]
         if let identifier = screenIdentifier(for: title) {
             screenMarkers.insert(app.descendants(matching: .any)[identifier], at: 0)
+        }
+        if !waitForAny(screenMarkers, timeout: 10) {
+            closeTransientControlsIfNeeded()
+            _ = tapTabBarSlot(title)
         }
         XCTAssertTrue(waitForAny(screenMarkers, timeout: 10), "\(title) screen did not become visible.")
     }
@@ -510,6 +514,30 @@ final class PinesUITests: XCTestCase {
         }
         return false
     }
+
+    @MainActor
+    private func tapTabBarSlot(_ title: String) -> Bool {
+        guard let index = tabIndex(for: title) else { return false }
+        let tabBar = app.tabBars.firstMatch
+        guard tabBar.waitForExistence(timeout: 2) else { return false }
+
+        let button = tabBar.buttons.element(boundBy: index)
+        if button.exists && button.isHittable {
+            button.tap()
+            return true
+        }
+
+        let tabCount = CGFloat(PinesUITests.tabTitles.count)
+        let normalizedX = (CGFloat(index) + 0.5) / tabCount
+        tabBar.coordinate(withNormalizedOffset: CGVector(dx: normalizedX, dy: 0.5)).tap()
+        return true
+    }
+
+    private func tabIndex(for title: String) -> Int? {
+        Self.tabTitles.firstIndex(of: title)
+    }
+
+    private static let tabTitles = ["Chats", "Models", "Vault", "Artifacts", "Settings"]
 }
 
 private extension String {
