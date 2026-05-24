@@ -614,7 +614,7 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(workspace.contains("Report saved. Open the full report"))
         XCTAssertTrue(workspace.contains("derivedResearchTitle"))
         XCTAssertFalse(workspace.contains("LazyVGrid(columns: [GridItem(.adaptive(minimum: 148)"))
-        XCTAssertTrue(workspace.contains("ArtifactsArtifactGallery"))
+        XCTAssertTrue(workspace.contains("ArtifactsAssetGrid"))
         XCTAssertTrue(workspace.contains("ArtifactsMenuPill"))
         XCTAssertTrue(workspace.contains("This removes only Pines' local lifecycle record"))
         XCTAssertTrue(models.contains("enum ArtifactsWorkspaceMode"))

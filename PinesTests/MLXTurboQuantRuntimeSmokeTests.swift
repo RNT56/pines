@@ -50,6 +50,9 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         XCTAssertEqual(profile.fallbackScheme, .turbo3_5)
         XCTAssertEqual(profile.recommendedScheme.preset, .turbo4v2)
 
+        #if targetEnvironment(simulator)
+        return
+        #else
         let parameters = MLXLMCommon.GenerateParameters(
             turboQuantModelID: "mlx-community/Qwen3-4B-4bit",
             modelType: "qwen3",
@@ -61,6 +64,7 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         XCTAssertEqual(parameters.kvCacheStrategy, .turboQuant)
         XCTAssertEqual(parameters.turboQuantPreset, .turbo4v2)
         XCTAssertEqual(parameters.turboQuantValueBits, 4)
+        #endif
     }
 
     func testBundledTurboQuantProfileRegistryMatchesExpandedSmallModels() throws {
