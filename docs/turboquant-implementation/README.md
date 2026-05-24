@@ -38,6 +38,7 @@ The finished system should behave like this:
 13. [KV Snapshot Security](11-kv-snapshot-security.md)
 14. [Validation and Release Gates](12-validation-and-release-gates.md)
 15. [Complete Task Inventory](13-complete-task-inventory.md)
+16. [PR and Merge Plan](15-pr-merge-plan.md)
 
 ## How to execute the packet
 
@@ -53,6 +54,8 @@ Use [Worker Launch Schedule](14-worker-launch-schedule.md) as the primary execut
 - Wave 6: speculative decode and platform unlocks.
 
 Use [Worker Ownership](08-worker-ownership.md) for file ownership and PR rules, and [Complete Task Inventory](13-complete-task-inventory.md) for the full backlog. The schedule is the launch order; the inventory is the scope catalogue.
+
+Use [PR and Merge Plan](15-pr-merge-plan.md) for branch targets, worker PR sequencing, wave promotion, compatibility pin validation, and final default-branch merge gates.
 
 Machine-readable compatibility-pair files:
 

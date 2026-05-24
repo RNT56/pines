@@ -4,6 +4,8 @@ This document assigns repo lanes, worker cards, file ownership, merge dependenci
 
 Use [Worker Launch Schedule](14-worker-launch-schedule.md) for executable order. This file is the ownership and dependency reference that keeps each wave safe.
 
+Use [PR and Merge Plan](15-pr-merge-plan.md) for target branches, worker PR order, wave promotion, and final default-branch merge gates.
+
 ## Primary executable structure
 
 | Wave | Workers | Parallelism |

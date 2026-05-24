@@ -189,6 +189,7 @@ Rules:
 - A later-wave feature may be implemented behind a disabled flag, but it may not become product-active until its prerequisite wave gate passes.
 - Central bridge and pin-update work remain serialized even when surrounding worker lanes run in parallel.
 - The complete backlog remains in [Complete Task Inventory](13-complete-task-inventory.md); wave order decides launch timing.
+- PR sequencing, wave promotion, compatibility pin validation, and final default-branch merges are defined in [PR and Merge Plan](15-pr-merge-plan.md).
 
 ## Strict integration sequence
 
