@@ -458,7 +458,11 @@ private extension View {
     @ViewBuilder
     func pinesAdaptiveTabViewStyle() -> some View {
         if PinesUITestLaunchConfiguration.isEnabled {
-            self
+            if #available(iOS 18.0, *) {
+                tabViewStyle(.tabBarOnly)
+            } else {
+                self
+            }
         } else if #available(iOS 18.0, *) {
             tabViewStyle(.sidebarAdaptable)
         } else {

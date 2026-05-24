@@ -44,7 +44,7 @@ struct PinesUITestInferenceProvider: InferenceProvider {
                         for event in Self.responseEvents(for: request) {
                             try Task.checkCancellation()
                             continuation.yield(event)
-                            try await Task.sleep(nanoseconds: 2_000_000_000)
+                            try await Task.sleep(nanoseconds: 10_000_000_000)
                         }
                         continuation.yield(
                             .metrics(
