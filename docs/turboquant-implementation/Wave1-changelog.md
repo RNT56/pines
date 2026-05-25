@@ -53,6 +53,8 @@ Workers were assigned disjoint write scopes. Shared central bridge and pin files
   - Added validation/router tests.
   - Public APIs now include `validateTurboQuantAttentionCode(...)` and
     `selectTurboQuantAttentionPath(...)`.
+  - Wired `validateTurboQuantAttentionCode(...)` into the public attention dispatch path before
+    Metal kernel selection.
 - W5 LM:
   - Added `TurboQuantCacheRuntimeSnapshot`.
   - Added `runtimeSnapshot()` to TurboQuant compressed cache protocol and concrete cache types.
@@ -71,7 +73,7 @@ Workers were assigned disjoint write scopes. Shared central bridge and pin files
 ### Validation
 
 - `mlx-swift`: `swift test --filter 'TurboQuant(Contracts|Validation|AttentionRouter)Tests'`
-  passed 13 tests.
+  passed 14 tests.
 - `mlx-swift`: `swift build` passed.
 - `mlx-swift-lm`: `swift test --filter 'TurboQuant(CacheRuntimeSnapshot|RuntimeFailure)Tests|KVCacheTests'`
   passed 48 Swift Testing tests.
@@ -90,7 +92,12 @@ Workers were assigned disjoint write scopes. Shared central bridge and pin files
 - Fixed the LM snapshot implementation to report raw and packed fallback allocation from resident
   array bytes. This keeps `TurboQuantCacheRuntimeSnapshot` aligned with the memory accounting contract
   Pines will consume in INT-1.
-- Re-ran the Wave 1 validation commands after the fix; the `mlx-swift`, `mlx-swift-lm`, and Pines
+- Rerun validation later caught one core validator issue: key `residualSigns` was expected as full
+  bitset storage even though encoder output, empty-cache construction, and the pre-existing private
+  dispatch validator use compact unused storage `[1]`.
+- Fixed the public validator and added a regression for compact unused key residual signs, then wired
+  the public validator into `turboQuantMetalScaledDotProductAttention(...)` before dispatch.
+- Re-ran the Wave 1 validation commands after the fixes; the `mlx-swift`, `mlx-swift-lm`, and Pines
   suites listed above passed.
 
 ### Remaining Wave 1 Boundaries
