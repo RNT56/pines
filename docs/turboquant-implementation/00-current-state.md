@@ -22,9 +22,9 @@ Updated during W25 Wave 0 reconciliation on 2026-05-25.
 
 | Repo | Branch | Observed HEAD | Dirty state |
 | --- | --- | --- | --- |
-| `pines` | `codex/local-runtime-hardening` | `a198517b9a41634368b4af5bbb362941ec1eac6f` | clean in the W25 worker worktree |
-| `mlx-swift` | `codex/turboquant-core-completion` | `bd98906c0cea1974f0095824d37e541b77b0f1eb` | clean in the W1 worker worktree |
-| `mlx-swift-lm` | `codex/turboquant-completion-hardening` | `9f831caeccfe5e80858e0377e86d784e08821137` | clean in the W4 worker worktree |
+| `pines` | `codex/local-runtime-hardening` | `2956939fdcf584f4988dd7dc3bd67f8e5bc0cddf` | clean before this blocker-resolution doc update |
+| `mlx-swift` | `codex/turboquant-core-completion` | `f3fe58109faf2b0a74405df321a8474df8803da8` | pushed to origin |
+| `mlx-swift-lm` | `codex/turboquant-completion-hardening` | `a1628c8a64b3258b122fa05fd4007e6dfd54cc3d` | pushed to origin |
 
 ## Observed Pines pins
 
@@ -50,21 +50,22 @@ This is documentation drift only in Wave 0. W25 records it; W0/INT-2A/INT-2B own
 compatibility-pair or pin-state promotion, and production pin movement must wait for
 the later compatibility validation gates.
 
-## Observed LM attention safety state
+## Resolved Wave 0 blocker state
 
-`mlx-swift-lm/Libraries/MLXLMCommon/AttentionUtils.swift` currently has:
+The Wave 0 blocker pass resolved the four pre-Wave-1 ambiguity points:
 
-- a throwing attention path;
-- typed-ish TurboQuant attention errors;
-- no obvious all-zero fallback in the inspected path;
-- deprecated non-throwing wrappers that still call `fatalError` when failures cannot be represented semantically.
+1. `mlx-swift` now has explicit storage-estimate symbols in `Source/MLX/TurboQuantStorageEstimate.swift`.
+2. `mlx-swift` now has the public contract surface in `Source/MLX/TurboQuantContracts.swift`, with compatibility aliases for `RejectedTurboQuantPath` and the path-specific capability names used by Wave 1 docs.
+3. `mlx-swift-lm` now has `TurboQuantRuntimeFailure.swift` and a regression proving TurboQuant generation rejects non-throwing models before `prepare`, `newCache`, or runtime attention can run.
+4. Pines reuses the existing `TurboQuantUserMode`, `TurboQuantAttentionPath`, `RuntimeQuantizationDiagnostics`, and `RuntimeTypes.swift` DTOs rather than introducing duplicate `Local*` packet types.
+5. Pines has `TurboQuantFallbackContract` with canonical SHA-256 `contractHash` and `policyHash`.
 
-The P0 safety target remains:
+`mlx-swift-lm/Libraries/MLXLMCommon/AttentionUtils.swift` still retains deprecated non-throwing compatibility wrappers. Those wrappers are not the TurboQuant product-generation path. The production gate is:
 
-1. no Pines-facing product call site uses non-throwing wrappers;
-2. no product path can fatal on TurboQuant failure;
-3. failure maps to typed runtime errors;
-4. no product path returns zero or guessed tensors.
+1. `GenerateParameters.kvCacheStrategy == .turboQuant` requires `ThrowingLanguageModel`.
+2. Non-throwing models fail with `TurboQuantGenerationError.modelRequiresThrowingAttention`.
+3. Typed throwing model paths propagate `TurboQuantRuntimeFailure`.
+4. No product path returns zero or guessed tensors as a substitute for failed TurboQuant attention.
 
 ## Implemented Pines foundation
 
@@ -104,15 +105,20 @@ The following are not complete and remain release blockers for the long-context 
 
 ## Immediate implementation blockers
 
-P0 blockers:
+Closed Wave 0 blockers:
 
-1. Product-path fatal removal or product-path avoidance in `mlx-swift-lm`.
-2. `TurboQuantStorageEstimate` or an explicitly declared replacement storage-estimate contract in `mlx-swift`.
-3. Mode/fallback contract, including fallback-contract hashing.
-4. Admission service.
-5. RunDecision ledger.
-6. Runtime bridge integration.
-7. Compatibility-pair validation and pin/document synchronization.
+1. Product-path fatal avoidance in `mlx-swift-lm`.
+2. Explicit `TurboQuantStorageEstimate` in `mlx-swift`.
+3. Explicit `TurboQuantContracts.swift` in `mlx-swift`.
+4. Pines type-family decision: reuse existing `TurboQuant*` DTOs.
+5. Mode/fallback contract hashing in Pines.
+
+Remaining Wave 1+ implementation work:
+
+1. Admission service.
+2. RunDecision ledger integration.
+3. Runtime bridge integration.
+4. Full compatibility-pair validation and pin/document synchronization.
 
 ## Current-state update procedure
 

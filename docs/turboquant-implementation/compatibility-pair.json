@@ -4,19 +4,19 @@
   "pines": {
     "repo": "pines",
     "branch": "codex/local-runtime-hardening",
-    "commit": "a198517b9a41634368b4af5bbb362941ec1eac6f",
+    "commit": "2956939fdcf584f4988dd7dc3bd67f8e5bc0cddf",
     "dirtyAtValidation": false
   },
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "codex/turboquant-core-completion",
-    "commit": "bd98906c0cea1974f0095824d37e541b77b0f1eb",
+    "commit": "f3fe58109faf2b0a74405df321a8474df8803da8",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "codex/turboquant-completion-hardening",
-    "commit": "9f831caeccfe5e80858e0377e86d784e08821137",
+    "commit": "a1628c8a64b3258b122fa05fd4007e6dfd54cc3d",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -37,6 +37,30 @@
   },
   "validatedAt": null,
   "validationCommands": [
+    {
+      "repo": "pines",
+      "command": "swift test --filter 'turboQuant|localInference|versionedEnvelope'",
+      "result": "passed",
+      "notes": "Wave 0 targeted schema/failure tests passed after blocker-resolution docs."
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuantFallbackContractTests",
+      "result": "passed",
+      "notes": "Wave 0 targeted fallback-contract tests passed after blocker-resolution docs."
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift test --filter TurboQuantContractsTests",
+      "result": "passed",
+      "notes": "Wave 0 targeted contract tests passed after explicit TurboQuantContracts.swift split."
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuantRuntimeFailureTests",
+      "result": "passed",
+      "notes": "Wave 0 targeted runtime-failure tests passed, including non-throwing model rejection before runtime attention."
+    },
     {
       "repo": "pines",
       "command": "swift build --disable-automatic-resolution",
@@ -95,15 +119,15 @@
   "signoffs": {
     "mlxCoreContracts": {
       "required": true,
-      "approvedBy": null,
-      "approvedAt": null,
-      "notes": ""
+      "approvedBy": "Codex",
+      "approvedAt": "2026-05-25T06:14:08Z",
+      "notes": "Explicit TurboQuantContracts.swift, TurboQuantStorageEstimate.swift, Codable tests, and compatibility aliases are present."
     },
     "lmTypedErrors": {
       "required": true,
-      "approvedBy": null,
-      "approvedAt": null,
-      "notes": ""
+      "approvedBy": "Codex",
+      "approvedAt": "2026-05-25T06:14:02Z",
+      "notes": "TurboQuantRuntimeFailure is present and product TurboQuant generation rejects non-throwing models before runtime attention."
     },
     "pinesBridgeIntegration": {
       "required": true,
@@ -115,6 +139,7 @@
   "notes": [
     "Pending validation. Do not use this file as production evidence until status is green.",
     "Wave 0 reconciliation updated this manifest to the current integration branch heads.",
+    "Wave 0 blockers resolved: core contracts are in explicit files, LM typed errors are present, product TurboQuant generation requires throwing models, Pines reuses existing TurboQuant DTOs, and fallback-contract hashes are implemented.",
     "This manifest is not a production pin promotion.",
     "Pines project pins and docs/TURBOQUANT.md require later W0/INT-2A reconciliation before this pair can turn green."
   ]

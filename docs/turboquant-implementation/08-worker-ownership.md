@@ -128,9 +128,9 @@ These workers are intentionally serialized. They should not run concurrently wit
 | `Libraries/MLXLMCommon/AttentionUtils.swift` | W4 |
 | `Libraries/MLXLMCommon/TurboQuantKVCache.swift` | W5 / W14A |
 | LM profile JSON | W6 |
-| `LocalTurboQuantTypes.swift` | W7 |
-| `LocalAIUserMode.swift` | W24 |
-| `LocalFallbackContract.swift` | W24 |
+| existing `RuntimeTypes.swift` TurboQuant DTOs | W7 |
+| existing `RuntimeTypes.swift` `TurboQuantUserMode` | W24 |
+| `TurboQuantFallbackContract.swift` | W24 |
 | `LocalRuntimeAdmissionService.swift` | W8 |
 | `RuntimeMemoryZones.swift` | W8 |
 | `TurboQuantRunDecision.swift` | W9 |

@@ -64,13 +64,13 @@ Runtime:
 
 ```swift
 public struct TurboQuantBenchmarkRuntime: Codable, Sendable {
-    public var userMode: LocalAIUserMode
+    public var userMode: TurboQuantUserMode
     public var fallbackContractHash: String
     public var preset: String?
     public var valueBits: Int?
     public var groupSize: Int?
     public var layoutVersion: Int?
-    public var attentionPath: LocalTurboQuantAttentionPath?
+    public var attentionPath: TurboQuantAttentionPath?
     public var kernelProfile: String?
     public var admittedContextTokens: Int
     public var reservedCompletionTokens: Int

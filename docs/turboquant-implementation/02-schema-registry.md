@@ -98,10 +98,10 @@ public struct LocalRuntimeAdmissionPlan: Codable, Sendable {
     public var requestedContextTokens: Int
     public var admittedContextTokens: Int
     public var reservedCompletionTokens: Int
-    public var selectedMode: LocalAIUserMode
+    public var selectedMode: TurboQuantUserMode
     public var selectedKVStrategy: KVCacheStrategy
-    public var selectedAttentionPath: LocalTurboQuantAttentionPath?
-    public var fallbackContract: LocalFallbackContract
+    public var selectedAttentionPath: TurboQuantAttentionPath?
+    public var fallbackContract: TurboQuantFallbackContract
     public var memoryZones: RuntimeMemoryZones
     public var memoryCushionBytes: Int64
     public var calibrationApplied: RuntimeMemoryCalibrationSummary?
@@ -155,8 +155,8 @@ public struct TurboQuantRunDecision: Codable, Sendable {
     public var schemaVersion: Int
     public var compatibilityPairID: String?
     public var admission: LocalRuntimeAdmissionPlan?
-    public var selectedAttentionPath: LocalTurboQuantAttentionPath?
-    public var rejectedPaths: [LocalRejectedTurboQuantPath]
+    public var selectedAttentionPath: TurboQuantAttentionPath?
+    public var rejectedPaths: [String]
     public var cacheLifecycle: String?
     public var actualKeyBitsPerValue: Double?
     public var actualValueBitsPerValue: Double?
@@ -282,12 +282,12 @@ public struct RuntimeProfileEvidence: Codable, Sendable, Identifiable {
     public var deviceClass: DevicePerformanceClass
     public var hardwareModel: String?
     public var osBuild: String
-    public var userMode: LocalAIUserMode
+    public var userMode: TurboQuantUserMode
     public var turboQuantPreset: String?
     public var valueBits: Int?
     public var groupSize: Int?
     public var layoutVersion: Int?
-    public var activeAttentionPath: LocalTurboQuantAttentionPath?
+    public var activeAttentionPath: TurboQuantAttentionPath?
     public var admittedContextTokens: Int
     public var peakMemoryBytes: Int64
     public var promptTokensPerSecond: Double?
