@@ -67,6 +67,11 @@ This file tracks Wave 2 implementation progress after the completed Wave 1 hando
   `docs/TURBOQUANT.md` pin documentation.
 - Updated `compatibility-pair.json` with the Wave 2 validation results. It remains `pending`
   because full local Xcode app validation could not complete in this environment.
+- Double-check pass tightened the INT-1 bridge:
+  - final request-scoped admission now reuses the same admission memory snapshot and is rechecked
+    after completion-token fitting;
+  - typed `FailureEvent` metadata no longer places a context assembly plan ID in `admissionPlanID`
+    because `LocalRuntimeAdmissionPlan.v1` has no standalone plan ID field.
 
 ### Validation
 
@@ -85,6 +90,10 @@ This file tracks Wave 2 implementation progress after the completed Wave 1 hando
 - Final closeout checks passed:
   - `git diff --check`;
   - `compatibility-pair.json` JSON parse validation.
+- Post-double-check focused validation passed:
+  - `xcrun swiftc -parse -I .build/debug/Modules Pines/Runtime/MLXRuntimeBridge.swift`;
+  - `swift test --filter TurboQuantWave1ControlPlaneTests`;
+  - `git diff --check`.
 
 ### Validation Blocker
 
@@ -113,3 +122,6 @@ This file tracks Wave 2 implementation progress after the completed Wave 1 hando
   `a1cdcb4798047c9847a4532730b4b7f59c16fe86`.
 - Updated `compatibility-pair.json` to point at the committed Wave 2 integration while preserving
   `status: pending` because full local Xcode app validation is still blocked.
+- Committed the post-audit admission metadata hardening as
+  `5266cd7e958891ff889019c8f9762e233f62017a` and updated `compatibility-pair.json` to use this
+  code-bearing Wave 2 integration commit.

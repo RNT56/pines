@@ -4,7 +4,7 @@
   "pines": {
     "repo": "pines",
     "branch": "tq/integration-runtime-bridge",
-    "commit": "a1cdcb4798047c9847a4532730b4b7f59c16fe86",
+    "commit": "5266cd7e958891ff889019c8f9762e233f62017a",
     "dirtyAtValidation": false
   },
   "mlxSwift": {
@@ -101,7 +101,13 @@
       "repo": "pines",
       "command": "xcrun swiftc -parse -I .build/debug/Modules Pines/Runtime/MLXRuntimeBridge.swift",
       "result": "passed",
-      "notes": "Syntax parse of the INT-1 bridge file passed outside Xcode."
+      "notes": "Syntax parse of the INT-1 bridge file passed outside Xcode, including the post-audit final admission recheck."
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuantWave1ControlPlaneTests",
+      "result": "passed",
+      "notes": "Focused Wave 2 control-plane metadata tests passed after the post-audit bridge tightening."
     },
     {
       "repo": "pines",
@@ -163,13 +169,13 @@
       "required": true,
       "approvedBy": "Codex",
       "approvedAt": "2026-05-25T08:59:32Z",
-      "notes": "INT-1 bridge implementation adds request-scoped admission, minimal ContextAssemblyPlan metadata, RunDecision metadata, calibration sample metadata, typed failure event metadata, and explicit no-cloud fallback markers. Full Xcode app validation is still blocked by local xcodebuild idle behavior, so this compatibility pair remains pending rather than green."
+      "notes": "INT-1 bridge implementation adds request-scoped admission, final admission recheck after completion-token fitting, minimal ContextAssemblyPlan metadata, RunDecision metadata, calibration sample metadata, typed failure event metadata, and explicit no-cloud fallback markers. Full Xcode app validation is still blocked by local xcodebuild idle behavior, so this compatibility pair remains pending rather than green."
     }
   },
   "notes": [
     "Pending validation. Do not use this file as production evidence until status is green.",
     "Wave 2 INT-2A updated project.yml, generated Xcode project pins, Xcode Package.resolved, and docs/TURBOQUANT.md to the validated Wave 1 MLX pair.",
-    "The Pines commit recorded here is the committed Wave 2 runtime-bridge integration. The compatibility pair remains pending because full local Xcode app validation could not complete in this workspace.",
+    "The Pines commit recorded here is the committed Wave 2 runtime-bridge integration including the post-audit admission metadata hardening. The compatibility pair remains pending because full local Xcode app validation could not complete in this workspace.",
     "Wave 0 blockers resolved: core contracts are in explicit files, LM typed errors are present, product TurboQuant generation requires throwing models, Pines reuses existing TurboQuant DTOs, and fallback-contract hashes are implemented.",
     "Wave 1 prerequisites validated: core contracts/router, LM runtime failures/cache snapshots/admission planner, and PinesCore control-plane tests passed.",
     "This manifest is not a production pin promotion.",
