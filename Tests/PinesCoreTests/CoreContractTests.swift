@@ -5,6 +5,162 @@ import Testing
 @Suite("Core contracts")
 struct CoreContractTests {
     @Test
+    func turboQuantSchemaRegistryExposesCanonicalWave0Names() {
+        #expect(TurboQuantSchemaRegistry.versionsByName[.admissionPlan] == 1)
+        #expect(TurboQuantSchemaRegistry.versionsByName[.runtimeMemoryZones] == 1)
+        #expect(TurboQuantSchemaRegistry.versionsByName[.runDecision] == 1)
+        #expect(TurboQuantSchemaRegistry.versionsByName[.failureEvent] == 1)
+        #expect(TurboQuantSchemaRegistry.versionsByName[.modelProfile] == 2)
+        #expect(TurboQuantSchemaRegistry.versionsByName[.turboQuantLayout] == 4)
+        #expect(TurboQuantSchemaRegistry.versionsByName[.turboQuantLayoutNext] == 5)
+        #expect(TurboQuantSchemaRegistry.allDefinitions.count == TurboQuantSchemaName.allCases.count)
+    }
+
+    @Test
+    func versionedEnvelopeCarriesProducerAndCompatibilityMetadata() throws {
+        let envelope = VersionedEnvelope(
+            schemaName: TurboQuantSchemaName.failureEvent.rawValue,
+            schemaVersion: TurboQuantSchemaRegistry.failureEvent.version,
+            producer: SchemaProducer(repo: "pines", commit: "abc123"),
+            compatibility: SchemaCompatibility(
+                minReaderVersion: 1,
+                maxTestedReaderVersion: 1,
+                failClosedIfNewer: true
+            ),
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            payload: ["kind": "memoryAdmissionFailed"]
+        )
+
+        let encoded = try JSONEncoder().encode(envelope)
+        let decoded = try JSONDecoder().decode(VersionedEnvelope<[String: String]>.self, from: encoded)
+
+        #expect(decoded.schemaName == "FailureEvent")
+        #expect(decoded.schemaVersion == 1)
+        #expect(decoded.producer.repo == "pines")
+        #expect(decoded.compatibility.failClosedIfNewer)
+        #expect(decoded.payload["kind"] == "memoryAdmissionFailed")
+    }
+
+    @Test
+    func localInferenceFailureKindsMatchCanonicalFailureMatrixNames() {
+        let expected: [LocalInferenceFailureKind] = [
+            .memoryAdmissionFailed,
+            .turboQuantPathUnavailable,
+            .turboQuantFallbackUnavailable,
+            .fallbackBudgetExceeded,
+            .modelProfileUnverified,
+            .modelProfileMismatch,
+            .unsupportedAttentionShape,
+            .unsupportedAttentionMask,
+            .unsupportedTensorDType,
+            .cacheLayoutInvalid,
+            .cacheLifecycleInvalid,
+            .contextWindowExceeded,
+            .snapshotInvalid,
+            .snapshotCorrupt,
+            .schemaIncompatible,
+            .mlxRuntimeFailure,
+            .cloudRouteDisallowed,
+        ]
+
+        #expect(LocalInferenceFailureKind.allCases == expected)
+        #expect(LocalInferenceFailureMatrix.canonicalRules.count == expected.count)
+        #expect(Set(LocalInferenceFailureMatrix.rulesByKind.keys) == Set(expected))
+    }
+
+    @Test
+    func localInferenceFailureEventEncodesSchemaVersionAndKind() throws {
+        let event = LocalInferenceFailureEvent(
+            kind: .unsupportedAttentionMask,
+            sourceRepo: "mlx-swift-lm",
+            sourceType: "AttentionMaskError",
+            message: "Mask rank is unsupported.",
+            recoverable: true,
+            recommendedAction: "Retry with an exact fallback path.",
+            admissionPlanID: "admission-1",
+            runDecisionID: "run-1"
+        )
+
+        let encoded = try JSONEncoder().encode(event)
+        let decoded = try JSONDecoder().decode(LocalInferenceFailureEvent.self, from: encoded)
+
+        #expect(decoded.schemaVersion == 1)
+        #expect(decoded.kind == .unsupportedAttentionMask)
+        #expect(decoded.sourceRepo == "mlx-swift-lm")
+        #expect(decoded.recoverable)
+        #expect(decoded.admissionPlanID == "admission-1")
+        #expect(decoded.runDecisionID == "run-1")
+    }
+
+    @Test
+    func localInferenceFailureMatrixKeepsProductMessagesTyped() throws {
+        let rule = try #require(LocalInferenceFailureMatrix.rulesByKind[.fallbackBudgetExceeded])
+
+        #expect(rule.behaviors.contains(.typedError))
+        #expect(rule.productMessage == "Fallback would exceed memory budget.")
+    }
+
+    @Test
+    func turboQuantProductDTOsRemainMLXIndependentAndCodable() throws {
+        let zones = TurboQuantRuntimeMemoryZones(
+            availableAppMemoryBytes: 6_000_000_000,
+            runtimeBudgetBytes: 4_000_000_000,
+            mlxActiveBytes: 128_000_000,
+            mlxCacheBytes: 64_000_000,
+            modelResidentBytes: 2_500_000_000,
+            compressedKVBytes: 512_000_000,
+            rawShadowBytes: 0,
+            fallbackReserveBytes: 256_000_000,
+            scratchBytes: 128_000_000,
+            promptAndTokenizerBytes: 64_000_000,
+            uiReserveBytes: 256_000_000,
+            safetyReserveBytes: 512_000_000
+        )
+        let plan = TurboQuantMemoryPlan(
+            requestedContextLength: 128_000,
+            admittedContextLength: 96_000,
+            requestedMode: .maxContext,
+            effectiveMode: .balanced,
+            preset: .turbo3_5,
+            valueBits: 4,
+            groupSize: 64,
+            fallbackPolicy: .packedAllowed,
+            rawBytesPerToken: 1_024,
+            packedFallbackBytesPerToken: 256,
+            compressedBytesPerToken: 128,
+            usesRawShadow: false,
+            packedFallbackEnabled: true,
+            usesRollingSummaryMemory: true,
+            runtimeZones: zones
+        )
+        let admission = TurboQuantAdmission(
+            admitted: true,
+            requestedContextLength: 128_000,
+            admittedContextLength: 96_000,
+            requestedMode: .maxContext,
+            selectedMode: .balanced,
+            memoryPlan: plan,
+            downgradeReasons: [
+                TurboQuantAdmissionDowngrade(
+                    reason: .reducedContext,
+                    message: "Reduced context to preserve memory headroom."
+                )
+            ],
+            rejectedPaths: [
+                RejectedPath(path: "onlineFused", reason: "unsupported head dimension")
+            ],
+            userMessage: "96K tokens are available for this local run."
+        )
+
+        let encoded = try JSONEncoder().encode(admission)
+        let decoded = try JSONDecoder().decode(TurboQuantAdmission.self, from: encoded)
+
+        #expect(decoded == admission)
+        #expect(decoded.memoryPlan?.runtimeZones.totalRuntimeBytes == zones.totalRuntimeBytes)
+        #expect(decoded.selectedMode == .balanced)
+    }
+
+    @Test
     func chatContextPackerAnchorsCurrentUserAndDropsStaleFutureTurns() {
         let anchorID = UUID()
         let staleID = UUID()

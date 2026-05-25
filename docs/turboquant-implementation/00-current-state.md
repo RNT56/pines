@@ -18,11 +18,13 @@ Related Pines repo:
 
 ## Observed branches and commits
 
+Updated during W25 Wave 0 reconciliation on 2026-05-25.
+
 | Repo | Branch | Observed HEAD | Dirty state |
 | --- | --- | --- | --- |
-| `pines` | `codex/local-runtime-hardening` | `3c21a2d2ae9d2062881990f9529a916bbfa85571` | unrelated artifact workspace files are modified locally and were not included in this pin promotion |
-| `mlx-swift` | `codex/turboquant-core-completion` | `a90b1097df45e4e70b6e0bb367624f8f5857970b` | nested `Source/Cmlx/mlx`, `Source/Cmlx/mlx-c` modified before this doc pass |
-| `mlx-swift-lm` | `codex/turboquant-completion-hardening` | `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c` | clean before this doc pass |
+| `pines` | `codex/local-runtime-hardening` | `a198517b9a41634368b4af5bbb362941ec1eac6f` | clean in the W25 worker worktree |
+| `mlx-swift` | `codex/turboquant-core-completion` | `bd98906c0cea1974f0095824d37e541b77b0f1eb` | clean in the W1 worker worktree |
+| `mlx-swift-lm` | `codex/turboquant-completion-hardening` | `9f831caeccfe5e80858e0377e86d784e08821137` | clean in the W4 worker worktree |
 
 ## Observed Pines pins
 
@@ -30,17 +32,23 @@ Related Pines repo:
 
 | Package | Revision |
 | --- | --- |
-| `MLXSwift` | `a90b1097df45e4e70b6e0bb367624f8f5857970b` |
-| `MLXSwiftLM` | `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c` |
+| `MLXSwift` | `cbea339ac81d701ea24df1bdc8b3008bcb99945a` |
+| `MLXSwiftLM` | `86b5d6bb1c0192f3b229a8b2c08fab59a918957b` |
 
-`pines/docs/TURBOQUANT.md` now lists the same current-pin pair:
+The generated Xcode package resolution at
+`Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`
+lists the same `MLXSwift` and `MLXSwiftLM` revisions as `project.yml`.
+
+`pines/docs/TURBOQUANT.md` currently lists a different older pair:
 
 | Package | Revision listed in `docs/TURBOQUANT.md` |
 | --- | --- |
 | `MLXSwift` | `a90b1097df45e4e70b6e0bb367624f8f5857970b` |
 | `MLXSwiftLM` | `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c` |
 
-Keeping `docs/TURBOQUANT.md`, `project.yml`, and the generated Xcode project synchronized is part of the release-train gate whenever the compatibility pair changes.
+This is documentation drift only in Wave 0. W25 records it; W0/INT-2A/INT-2B own any
+compatibility-pair or pin-state promotion, and production pin movement must wait for
+the later compatibility validation gates.
 
 ## Observed LM attention safety state
 
@@ -99,12 +107,12 @@ The following are not complete and remain release blockers for the long-context 
 P0 blockers:
 
 1. Product-path fatal removal or product-path avoidance in `mlx-swift-lm`.
-2. Cross-repo contracts and Pines shims.
-3. Mode/fallback contract.
+2. `TurboQuantStorageEstimate` or an explicitly declared replacement storage-estimate contract in `mlx-swift`.
+3. Mode/fallback contract, including fallback-contract hashing.
 4. Admission service.
 5. RunDecision ledger.
 6. Runtime bridge integration.
-7. Compatibility-pair validation.
+7. Compatibility-pair validation and pin/document synchronization.
 
 ## Current-state update procedure
 

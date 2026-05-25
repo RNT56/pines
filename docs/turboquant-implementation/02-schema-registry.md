@@ -211,9 +211,14 @@ public enum LocalInferenceFailureKind: String, Codable, Sendable {
     case modelProfileUnverified
     case modelProfileMismatch
     case unsupportedAttentionShape
+    case unsupportedAttentionMask
+    case unsupportedTensorDType
+    case cacheLayoutInvalid
+    case cacheLifecycleInvalid
     case contextWindowExceeded
     case snapshotInvalid
     case snapshotCorrupt
+    case schemaIncompatible
     case mlxRuntimeFailure
     case cloudRouteDisallowed
 }

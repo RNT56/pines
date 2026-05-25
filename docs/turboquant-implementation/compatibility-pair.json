@@ -4,19 +4,19 @@
   "pines": {
     "repo": "pines",
     "branch": "codex/local-runtime-hardening",
-    "commit": "78b210f5389e17479ecab2d2a0fbf161f5447b04",
-    "dirtyAtValidation": true
+    "commit": "a198517b9a41634368b4af5bbb362941ec1eac6f",
+    "dirtyAtValidation": false
   },
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "codex/turboquant-core-completion",
-    "commit": "a90b1097df45e4e70b6e0bb367624f8f5857970b",
-    "dirtyAtValidation": true
+    "commit": "bd98906c0cea1974f0095824d37e541b77b0f1eb",
+    "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "codex/turboquant-completion-hardening",
-    "commit": "af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c",
+    "commit": "9f831caeccfe5e80858e0377e86d784e08821137",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -46,14 +46,14 @@
     {
       "repo": "pines",
       "command": "swift test --disable-automatic-resolution",
-      "result": "passed",
-      "notes": ""
+      "result": "pending",
+      "notes": "Reset during Wave 0 reconciliation for the updated pending pair."
     },
     {
       "repo": "pines",
       "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
-      "result": "passed",
-      "notes": ""
+      "result": "pending",
+      "notes": "Reset during Wave 0 reconciliation for the updated pending pair."
     },
     {
       "repo": "pines",
@@ -114,6 +114,8 @@
   },
   "notes": [
     "Pending validation. Do not use this file as production evidence until status is green.",
-    "Pines project pins and docs/TURBOQUANT.md name the same MLX pair on the compatibility branch."
+    "Wave 0 reconciliation updated this manifest to the current integration branch heads.",
+    "This manifest is not a production pin promotion.",
+    "Pines project pins and docs/TURBOQUANT.md require later W0/INT-2A reconciliation before this pair can turn green."
   ]
 }
