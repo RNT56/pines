@@ -15,6 +15,9 @@ struct CoreContractTests {
         #expect(TurboQuantSchemaRegistry.versionsByName[.turboQuantLayoutNext] == 5)
         #expect(TurboQuantSchemaRegistry.versionsByName[.speculativeDecode] == 1)
         #expect(TurboQuantSchemaRegistry.versionsByName[.platformFeatureGate] == 1)
+    #expect(TurboQuantSchemaRegistry.versionsByName[.platformUnlockPolicy] == 1)
+    #expect(TurboQuantSchemaRegistry.versionsByName[.openKVFormat] == 1)
+    #expect(TurboQuantSchemaRegistry.versionsByName[.platformEvidenceDimensions] == 1)
         #expect(TurboQuantSchemaRegistry.allDefinitions.count == TurboQuantSchemaName.allCases.count)
     }
 
@@ -171,7 +174,8 @@ struct CoreContractTests {
             ChatMessage(role: .user, content: "Earlier question"),
             ChatMessage(role: .assistant, content: "Earlier answer"),
             ChatMessage(id: anchorID, role: .user, content: "Current question"),
-            ChatMessage(id: staleID, role: .assistant, content: "Stale answer after the regenerated turn"),
+      ChatMessage(
+        id: staleID, role: .assistant, content: "Stale answer after the regenerated turn"),
         ]
 
         let result = ChatContextPacker.pack(
@@ -219,8 +223,14 @@ struct CoreContractTests {
         let anchorID = UUID()
         var messages = [ChatMessage(role: .system, content: "System instruction")]
         for index in 0..<18 {
-            messages.append(ChatMessage(role: .user, content: "Earlier user decision \(index): " + String(repeating: "context ", count: 40)))
-            messages.append(ChatMessage(role: .assistant, content: "Earlier assistant result \(index): " + String(repeating: "detail ", count: 40)))
+      messages.append(
+        ChatMessage(
+          role: .user,
+          content: "Earlier user decision \(index): " + String(repeating: "context ", count: 40)))
+      messages.append(
+        ChatMessage(
+          role: .assistant,
+          content: "Earlier assistant result \(index): " + String(repeating: "detail ", count: 40)))
         }
         messages.append(ChatMessage(id: anchorID, role: .user, content: "Current question"))
 
@@ -237,10 +247,14 @@ struct CoreContractTests {
         )
 
         #expect(result.messages.contains { $0.id == anchorID })
-        #expect(result.messages.contains { $0.role == .system && $0.content.contains("Earlier conversation handoff summary") })
+    #expect(
+      result.messages.contains {
+        $0.role == .system && $0.content.contains("Earlier conversation handoff summary")
+      })
         #expect(result.summary.rollingSummaryApplied)
         #expect(result.summary.rollingSummaryMessageCount > 0)
-        #expect(result.summary.providerMetadata[ChatContextMetadataKeys.rollingSummaryApplied] == "true")
+    #expect(
+      result.summary.providerMetadata[ChatContextMetadataKeys.rollingSummaryApplied] == "true")
         #expect(result.summary.estimatedInputTokens <= result.summary.inputBudgetTokens)
     }
 
@@ -249,10 +263,13 @@ struct CoreContractTests {
         let latestUserID = UUID()
         let messages = [
             ChatMessage(role: .user, content: "Earlier question").withPersistedMessageStatus(.complete),
-            ChatMessage(role: .assistant, content: "Earlier answer").withPersistedMessageStatus(.complete),
+      ChatMessage(role: .assistant, content: "Earlier answer").withPersistedMessageStatus(
+        .complete),
             ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(.streaming),
-            ChatMessage(role: .assistant, content: "The previous run failed.").withPersistedMessageStatus(.failed),
-            ChatMessage(id: latestUserID, role: .user, content: "Continue from here").withPersistedMessageStatus(.complete),
+      ChatMessage(role: .assistant, content: "The previous run failed.").withPersistedMessageStatus(
+        .failed),
+      ChatMessage(id: latestUserID, role: .user, content: "Continue from here")
+        .withPersistedMessageStatus(.complete),
         ]
 
         let result = ChatTranscriptSanitizer.messagesForProviderRequest(
@@ -261,7 +278,10 @@ struct CoreContractTests {
         )
 
         #expect(result.messages.map(\.role) == [.user, .assistant, .user])
-        #expect(result.messages.map(\.content) == ["Earlier question", "Earlier answer", "Continue from here"])
+    #expect(
+      result.messages.map(\.content) == [
+        "Earlier question", "Earlier answer", "Continue from here",
+      ])
         #expect(result.summary.droppedIncompleteAssistantCount == 2)
         #expect(result.summary.droppedMessageCount == 2)
         #expect(result.summary.providerMetadata[ChatTranscriptMetadataKeys.droppedMessageCount] == "2")
@@ -269,14 +289,17 @@ struct CoreContractTests {
 
     @Test
     func chatTranscriptSanitizerStripsInternalStatusMetadataBeforeProviderRequest() {
-        var assistant = ChatMessage(role: .assistant, content: "Ready.").withPersistedMessageStatus(.complete)
+    var assistant = ChatMessage(role: .assistant, content: "Ready.").withPersistedMessageStatus(
+      .complete)
         assistant.providerMetadata[CloudProviderMetadataKeys.openAIResponseID] = "resp_123"
 
         let result = ChatTranscriptSanitizer.messagesForProviderRequest([assistant])
 
         #expect(result.messages.count == 1)
-        #expect(result.messages[0].providerMetadata[ChatTranscriptMetadataKeys.persistedMessageStatus] == nil)
-        #expect(result.messages[0].providerMetadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_123")
+    #expect(
+      result.messages[0].providerMetadata[ChatTranscriptMetadataKeys.persistedMessageStatus] == nil)
+    #expect(
+      result.messages[0].providerMetadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_123")
     }
 
     @Test
@@ -290,7 +313,8 @@ struct CoreContractTests {
         )
         let messages = [
             ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(.complete),
-            ChatMessage(id: latestUserID, role: .user, content: "", attachments: [attachment]).withPersistedMessageStatus(.complete),
+      ChatMessage(id: latestUserID, role: .user, content: "", attachments: [attachment])
+        .withPersistedMessageStatus(.complete),
         ]
 
         let result = ChatTranscriptSanitizer.messagesForProviderRequest(
@@ -307,8 +331,11 @@ struct CoreContractTests {
     @Test
     func freezeBreadcrumbJournalIsExplicitlyEnabledForStressRuns() {
         #expect(FreezeBreadcrumbJournal.isEnabled(environment: ["PINES_FREEZE_BREADCRUMBS": "1"]))
-        #expect(FreezeBreadcrumbJournal.isEnabled(environment: ["PINES_STRESS_MODE": "local-generation"]))
-        #expect(FreezeBreadcrumbJournal.isEnabled(arguments: ["pines", "--pines-stress-local-generation"], environment: [:]))
+    #expect(
+      FreezeBreadcrumbJournal.isEnabled(environment: ["PINES_STRESS_MODE": "local-generation"]))
+    #expect(
+      FreezeBreadcrumbJournal.isEnabled(
+        arguments: ["pines", "--pines-stress-local-generation"], environment: [:]))
         #expect(!FreezeBreadcrumbJournal.isEnabled(arguments: ["pines"], environment: [:]))
     }
 
@@ -336,14 +363,16 @@ struct CoreContractTests {
 
     @Test
     func interruptedChatRunRepairMarksStaleStreamingAssistantMessagesFailed() {
-        let streaming = ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(.streaming)
+    let streaming = ChatMessage(role: .assistant, content: "").withPersistedMessageStatus(
+      .streaming)
         let pendingTool = ChatMessage(
             role: .tool,
             content: "partial",
             toolCallID: "tool_1",
             toolName: "search"
         ).withPersistedMessageStatus(.pending)
-        let complete = ChatMessage(role: .assistant, content: "done").withPersistedMessageStatus(.complete)
+    let complete = ChatMessage(role: .assistant, content: "done").withPersistedMessageStatus(
+      .complete)
 
         let repairs = InterruptedChatRunRepair.repairs(
             for: [streaming, pendingTool, complete],
@@ -355,10 +384,14 @@ struct CoreContractTests {
         #expect(repairs[0].status == .failed)
         #expect(repairs[0].content == InterruptedChatRunRepair.defaultInterruptedAssistantMessage)
         #expect(repairs[0].providerMetadata[ChatTranscriptMetadataKeys.persistedMessageStatus] == nil)
-        #expect(repairs[0].providerMetadata[ChatTranscriptMetadataKeys.interruptedRunOriginalStatus] == MessageStatus.streaming.rawValue)
+    #expect(
+      repairs[0].providerMetadata[ChatTranscriptMetadataKeys.interruptedRunOriginalStatus]
+        == MessageStatus.streaming.rawValue)
         #expect(repairs[1].toolName == "search")
         #expect(repairs[1].content == "partial")
-        #expect(repairs[1].providerMetadata[ChatTranscriptMetadataKeys.interruptedRunOriginalStatus] == MessageStatus.pending.rawValue)
+    #expect(
+      repairs[1].providerMetadata[ChatTranscriptMetadataKeys.interruptedRunOriginalStatus]
+        == MessageStatus.pending.rawValue)
     }
 
     @Test
@@ -389,12 +422,14 @@ struct CoreContractTests {
             events.append(event)
         }
 
-        guard case let .finish(finish)? = events.last else {
+    guard case .finish(let finish)? = events.last else {
             Issue.record("Expected watchdog finish event.")
             return
         }
         #expect(finish.reason == .error)
-        #expect(finish.providerMetadata[LocalProviderMetadataKeys.generationWatchdogStage] == InferenceStreamWatchdogTimeoutStage.firstEvent.rawValue)
+    #expect(
+      finish.providerMetadata[LocalProviderMetadataKeys.generationWatchdogStage]
+        == InferenceStreamWatchdogTimeoutStage.firstEvent.rawValue)
     }
 
     @Test
@@ -427,12 +462,14 @@ struct CoreContractTests {
         }
 
         #expect(events.contains(.token(TokenDelta(text: "hello", tokenCount: 1))))
-        guard case let .finish(finish)? = events.last else {
+    guard case .finish(let finish)? = events.last else {
             Issue.record("Expected watchdog finish event.")
             return
         }
         #expect(finish.reason == .error)
-        #expect(finish.providerMetadata[LocalProviderMetadataKeys.generationWatchdogStage] == InferenceStreamWatchdogTimeoutStage.progress.rawValue)
+    #expect(
+      finish.providerMetadata[LocalProviderMetadataKeys.generationWatchdogStage]
+        == InferenceStreamWatchdogTimeoutStage.progress.rawValue)
     }
 
     @Test
@@ -456,7 +493,8 @@ struct CoreContractTests {
             events.append(event)
         }
 
-        #expect(events == [
+    #expect(
+      events == [
             .token(TokenDelta(text: "ok", tokenCount: 1)),
             .finish(InferenceFinish(reason: .stop)),
         ])
@@ -474,7 +512,9 @@ struct CoreContractTests {
         )
     }
 
-    private static func vaultSearchItem(documentID: UUID, title: String, text: String) -> VaultSearchItem {
+  private static func vaultSearchItem(documentID: UUID, title: String, text: String)
+    -> VaultSearchItem
+  {
         VaultSearchItem(
             documentID: documentID.uuidString,
             documentTitle: title,
@@ -499,7 +539,9 @@ struct CoreContractTests {
             requiresTools: true
         )
 
-        #expect(decision.destination == .denied(reason: .unsupportedCapability("No local model satisfies this request.")))
+    #expect(
+      decision.destination
+        == .denied(reason: .unsupportedCapability("No local model satisfies this request.")))
     }
 
     @Test
@@ -509,11 +551,13 @@ struct CoreContractTests {
             mode: .preferLocal,
             local: (
                 localID,
-                ProviderCapabilities(local: true, textGeneration: true, vision: true, imageInputs: true, toolCalling: true)
+        ProviderCapabilities(
+          local: true, textGeneration: true, vision: true, imageInputs: true, toolCalling: true)
             ),
             cloud: (
                 ProviderID(rawValue: "cloud"),
-                ProviderCapabilities(local: false, textGeneration: true, vision: true, imageInputs: true, toolCalling: true)
+        ProviderCapabilities(
+          local: false, textGeneration: true, vision: true, imageInputs: true, toolCalling: true)
             ),
             requiredInputs: .init(requiresImages: true),
             requiresTools: true
@@ -531,7 +575,9 @@ struct CoreContractTests {
             cloudAccessMode: .managedPro,
             local: nil,
             managedCloud: (managedID, ManagedCloudPolicy.defaultCapabilities),
-            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+      byokCloud: (
+        byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)
+      ),
             requiredInputs: .init(),
             requiresTools: true
         )
@@ -547,12 +593,17 @@ struct CoreContractTests {
             cloudAccessMode: .managedProWithBYOKOverride,
             local: nil,
             managedCloud: nil,
-            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+      byokCloud: (
+        byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)
+      ),
             requiredInputs: .init(),
             requiresTools: true
         )
 
-        #expect(decision.destination == .denied(reason: .unsupportedCapability("No configured cloud provider satisfies this request.")))
+    #expect(
+      decision.destination
+        == .denied(
+          reason: .unsupportedCapability("No configured cloud provider satisfies this request.")))
     }
 
     @Test
@@ -564,7 +615,9 @@ struct CoreContractTests {
             cloudAccessMode: .managedProWithBYOKOverride,
             local: nil,
             managedCloud: (managedID, ManagedCloudPolicy.defaultCapabilities),
-            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+      byokCloud: (
+        byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)
+      ),
             requiredInputs: .init(),
             requiresTools: true,
             prefersBYOKOverride: true
@@ -582,7 +635,9 @@ struct CoreContractTests {
             cloudAccessMode: .byok,
             local: nil,
             managedCloud: (managedID, ManagedCloudPolicy.defaultCapabilities),
-            byokCloud: (byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)),
+      byokCloud: (
+        byokID, ProviderCapabilities(local: false, textGeneration: true, toolCalling: true)
+      ),
             requiredInputs: .init(),
             requiresTools: true
         )
@@ -597,8 +652,10 @@ struct CoreContractTests {
                 ChatMessage(
                     role: .user,
                     content: "describe",
-                    attachments: [ChatAttachment(kind: .image, fileName: "image.png", contentType: "image/png")]
-                ),
+          attachments: [
+            ChatAttachment(kind: .image, fileName: "image.png", contentType: "image/png")
+          ]
+        )
             ]
         )
         #expect(imageRequirements.requiresImages)
@@ -608,13 +665,19 @@ struct CoreContractTests {
                 ChatMessage(
                     role: .user,
                     content: "describe",
-                    attachments: [ChatAttachment(kind: .image, fileName: "photo.heic", contentType: "image/heic")]
-                ),
+          attachments: [
+            ChatAttachment(kind: .image, fileName: "photo.heic", contentType: "image/heic")
+          ]
+        )
             ]
         )
         #expect(heicRequirements.requiresImages)
-        #expect(ChatAttachment(kind: .image, fileName: "photo.heif", contentType: "").cloudInputKind == .image)
-        #expect(ChatAttachment(kind: .image, fileName: "sequence.heics", contentType: "").normalizedContentType == "image/heic-sequence")
+    #expect(
+      ChatAttachment(kind: .image, fileName: "photo.heif", contentType: "").cloudInputKind == .image
+    )
+    #expect(
+      ChatAttachment(kind: .image, fileName: "sequence.heics", contentType: "")
+        .normalizedContentType == "image/heic-sequence")
 
         let mediaRequirements = ProviderInputRequirements(
             messages: [
@@ -625,23 +688,32 @@ struct CoreContractTests {
                         ChatAttachment(kind: .audio, fileName: "clip.mp3", contentType: ""),
                         ChatAttachment(kind: .video, fileName: "scene.mov", contentType: ""),
                     ]
-                ),
+        )
             ]
         )
-        #expect(ChatAttachment(kind: .audio, fileName: "clip.wav", contentType: "").cloudMediaInputKind == .audio)
-        #expect(ChatAttachment(kind: .video, fileName: "scene.webm", contentType: "").cloudMediaInputKind == .video)
+    #expect(
+      ChatAttachment(kind: .audio, fileName: "clip.wav", contentType: "").cloudMediaInputKind
+        == .audio)
+    #expect(
+      ChatAttachment(kind: .video, fileName: "scene.webm", contentType: "").cloudMediaInputKind
+        == .video)
         #expect(mediaRequirements.requiresAudio)
         #expect(mediaRequirements.requiresVideo)
-        #expect(!mediaRequirements.isSatisfied(by: ProviderCapabilities(local: false, audioInputs: true)))
-        #expect(mediaRequirements.isSatisfied(by: ProviderCapabilities(local: false, audioInputs: true, videoInputs: true)))
+    #expect(
+      !mediaRequirements.isSatisfied(by: ProviderCapabilities(local: false, audioInputs: true)))
+    #expect(
+      mediaRequirements.isSatisfied(
+        by: ProviderCapabilities(local: false, audioInputs: true, videoInputs: true)))
 
         let pdfRequirements = ProviderInputRequirements(
             messages: [
                 ChatMessage(
                     role: .user,
                     content: "summarize",
-                    attachments: [ChatAttachment(kind: .document, fileName: "doc.pdf", contentType: "application/pdf")]
-                ),
+          attachments: [
+            ChatAttachment(kind: .document, fileName: "doc.pdf", contentType: "application/pdf")
+          ]
+        )
             ]
         )
         let noPDFDecision = ExecutionRouter().routeChat(
@@ -673,11 +745,15 @@ struct CoreContractTests {
                 ChatMessage(
                     role: .user,
                     content: "summarize",
-                    attachments: [ChatAttachment(kind: .document, fileName: "notes.md", contentType: "text/markdown")]
-                ),
+          attachments: [
+            ChatAttachment(kind: .document, fileName: "notes.md", contentType: "text/markdown")
+          ]
+        )
             ]
         )
-        #expect(!textRequirements.isSatisfied(by: ProviderCapabilities(local: false, imageInputs: true, pdfInputs: true)))
+    #expect(
+      !textRequirements.isSatisfied(
+        by: ProviderCapabilities(local: false, imageInputs: true, pdfInputs: true)))
     }
 
     @Test
@@ -686,7 +762,8 @@ struct CoreContractTests {
             ChatMessage(role: .assistant, content: "Sure."),
             ChatMessage(
                 role: .user,
-                content: "Can we properly derive chat titles from chat conversation content? So chats are not just new chat."
+        content:
+          "Can we properly derive chat titles from chat conversation content? So chats are not just new chat."
             ),
         ]
 
@@ -713,9 +790,10 @@ struct CoreContractTests {
                     role: .user,
                     content: "Analyze the attached file.",
                     attachments: [
-                        ChatAttachment(kind: .document, fileName: "meeting_notes.md", contentType: "text/markdown"),
+            ChatAttachment(
+              kind: .document, fileName: "meeting_notes.md", contentType: "text/markdown")
                     ]
-                ),
+        )
             ]
         )
 
@@ -745,7 +823,8 @@ struct CoreContractTests {
         #expect(anthropic.capabilities.modelCapabilities.contains(.tokenCounting))
         #expect(!anthropic.capabilities.embeddings)
 
-        let gemini = cloudConfiguration(kind: .gemini, baseURL: "https://generativelanguage.googleapis.com")
+    let gemini = cloudConfiguration(
+      kind: .gemini, baseURL: "https://generativelanguage.googleapis.com")
         #expect(gemini.capabilities.imageInputs)
         #expect(gemini.capabilities.audioInputs)
         #expect(gemini.capabilities.videoInputs)
@@ -771,7 +850,8 @@ struct CoreContractTests {
         #expect(!voyage.capabilities.textGeneration)
         #expect(voyage.capabilities.embeddings)
 
-        let compatible = cloudConfiguration(kind: .openAICompatible, baseURL: "https://llm.example.test/v1")
+    let compatible = cloudConfiguration(
+      kind: .openAICompatible, baseURL: "https://llm.example.test/v1")
         #expect(!compatible.capabilities.imageInputs)
         #expect(!compatible.capabilities.pdfInputs)
         #expect(!compatible.capabilities.textDocumentInputs)
@@ -814,7 +894,8 @@ struct CoreContractTests {
         #expect(openAIProfile?.dimensions == 1536)
         #expect(openAIProfile?.kind == .openAI)
 
-        let gemini = cloudConfiguration(kind: .gemini, baseURL: "https://generativelanguage.googleapis.com")
+    let gemini = cloudConfiguration(
+      kind: .gemini, baseURL: "https://generativelanguage.googleapis.com")
         let geminiProfile = VaultEmbeddingProfile.cloud(provider: gemini)
         #expect(geminiProfile?.modelID == ModelID(rawValue: "gemini-embedding-2"))
         #expect(geminiProfile?.dimensions == 768)
@@ -861,11 +942,11 @@ struct CoreContractTests {
         #expect(gemini.modelName == "models/gemini-embedding-2")
         let geminiObject = try #require(gemini.body.objectValue)
         let geminiRequests = try #require(geminiObject["requests"])
-        guard case let .array(requestArray) = geminiRequests,
-              case let .object(firstRequest) = requestArray.first,
-              case let .object(content) = firstRequest["content"],
-              case let .array(parts) = content["parts"],
-              case let .object(firstPart) = parts.first
+    guard case .array(let requestArray) = geminiRequests,
+      case .object(let firstRequest) = requestArray.first,
+      case .object(let content) = firstRequest["content"],
+      case .array(let parts) = content["parts"],
+      case .object(let firstPart) = parts.first
         else {
             Issue.record("Gemini embedding request body did not have the expected shape.")
             return
@@ -890,7 +971,8 @@ struct CoreContractTests {
         let openAIKey = "sk-" + "1234567890abcdef"
         let huggingFaceKey = "hf_" + "1234567890abcdef"
         let bearerToken = "Bearer " + "abcdefghijklmnop"
-        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwZW5lcyJ9.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"
+    let jwt =
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwZW5lcyJ9.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"
         let cookie = "Cookie: session=abcdef1234567890"
         let pemKind = "PRIVATE KEY"
         let pem = """
@@ -899,7 +981,8 @@ struct CoreContractTests {
         -----END \(pemKind)-----
         """
         let generic = String(repeating: "a", count: 48)
-        let text = "openai=\(openAIKey) hf=\(huggingFaceKey) bearer=\(bearerToken) jwt=\(jwt) \(cookie) \(pem) generic=\(generic)"
+    let text =
+      "openai=\(openAIKey) hf=\(huggingFaceKey) bearer=\(bearerToken) jwt=\(jwt) \(cookie) \(pem) generic=\(generic)"
         let redacted = Redactor().redact(text)
 
         #expect(!redacted.contains(openAIKey))
@@ -963,15 +1046,24 @@ struct CoreContractTests {
         #expect(CloudProviderHeader.isSecretLikeName("Cookie"))
         #expect(!CloudProviderHeader.isSecretLikeName("X-Trace-ID"))
 
-        #expect(CloudProviderHeader(name: "Authorization", kind: .publicValue, value: "Bearer test").storesSecretInPlaintext)
-        #expect(!CloudProviderHeader(name: "X-Trace-ID", kind: .publicValue, value: "trace").storesSecretInPlaintext)
-        #expect(!CloudProviderHeader(name: "Authorization", kind: .secretReference, keychainService: "svc", keychainAccount: "acct").storesSecretInPlaintext)
+    #expect(
+      CloudProviderHeader(name: "Authorization", kind: .publicValue, value: "Bearer test")
+        .storesSecretInPlaintext)
+    #expect(
+      !CloudProviderHeader(name: "X-Trace-ID", kind: .publicValue, value: "trace")
+        .storesSecretInPlaintext)
+    #expect(
+      !CloudProviderHeader(
+        name: "Authorization", kind: .secretReference, keychainService: "svc",
+        keychainAccount: "acct"
+      ).storesSecretInPlaintext)
     }
 
     @Test
     func installBoundSecretEnvelopeRequiresSameInstallKeyAndContext() throws {
         let installKey = Data(repeating: 0x11, count: InstallBoundSecretEnvelope.installKeyByteCount)
-        let otherInstallKey = Data(repeating: 0x22, count: InstallBoundSecretEnvelope.installKeyByteCount)
+    let otherInstallKey = Data(
+      repeating: 0x22, count: InstallBoundSecretEnvelope.installKeyByteCount)
         let plaintext = Data("sk-test-secret".utf8)
         let sealed = try InstallBoundSecretEnvelope.seal(
             plaintext,
@@ -980,7 +1072,8 @@ struct CoreContractTests {
         )
 
         #expect(InstallBoundSecretEnvelope.isEnvelope(sealed))
-        #expect(try InstallBoundSecretEnvelope.open(
+    #expect(
+      try InstallBoundSecretEnvelope.open(
             sealed,
             installKey: installKey,
             context: "com.schtack.pines.cloud::openai"
@@ -1006,7 +1099,8 @@ struct CoreContractTests {
         let configuration = SecurityConfiguration()
 
         #expect(!configuration.appLockEnabled)
-        #expect(configuration.encryptedStoreVersion == SecurityConfiguration.currentEncryptedStoreVersion)
+    #expect(
+      configuration.encryptedStoreVersion == SecurityConfiguration.currentEncryptedStoreVersion)
         #expect(configuration.cloudKitE2EEnabled)
         #expect(configuration.securityResetCompletedAt == nil)
     }
@@ -1016,7 +1110,9 @@ struct CoreContractTests {
         let request = ChatRequest(
             modelID: "gpt-5.5",
             messages: [ChatMessage(role: .user, content: "Hello")],
-            sampling: ChatSampling(maxTokens: 256, temperature: 0.6, topP: 1, openAIReasoningEffort: .high, openAITextVerbosity: .medium)
+      sampling: ChatSampling(
+        maxTokens: 256, temperature: 0.6, topP: 1, openAIReasoningEffort: .high,
+        openAITextVerbosity: .medium)
         )
 
         let urlRequest = try OpenAICompatibleRequestBuilder().chatRequest(
@@ -1039,22 +1135,41 @@ struct CoreContractTests {
 
     @Test
     func openAIReasoningEffortNormalizesModelSpecificValues() {
-        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.5", requested: .xhigh) == .xhigh)
-        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.5-pro", requested: .low) == .high)
-        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5", requested: .none) == .low)
-        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5", requested: .xhigh) == .low)
-        #expect(CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.1", requested: .none) == .none)
-        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.5") == [.none, .minimal, .low, .medium, .high, .xhigh])
-        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.4") == [.none, .minimal, .low, .medium, .high, .xhigh])
-        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5") == [.minimal, .low, .medium, .high])
-        #expect(CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.5-pro") == [.high])
+    #expect(
+      CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.5", requested: .xhigh)
+        == .xhigh)
+    #expect(
+      CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.5-pro", requested: .low)
+        == .high)
+    #expect(
+      CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5", requested: .none) == .low)
+    #expect(
+      CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5", requested: .xhigh) == .low)
+    #expect(
+      CloudProviderModelEligibility.openAIReasoningEffort(for: "gpt-5.1", requested: .none) == .none
+    )
+    #expect(
+      CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.5") == [
+        .none, .minimal, .low, .medium, .high, .xhigh,
+      ])
+    #expect(
+      CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.4") == [
+        .none, .minimal, .low, .medium, .high, .xhigh,
+      ])
+    #expect(
+      CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5") == [
+        .minimal, .low, .medium, .high,
+      ])
+    #expect(
+      CloudProviderModelEligibility.openAIReasoningEffortOptions(for: "gpt-5.5-pro") == [.high])
         #expect(!CloudProviderModelEligibility.supportsOpenAITextVerbosity(modelID: "gpt-4o"))
     }
 
     @Test
     func openAIChatCompletionsParserPreservesMetadataAndUsage() {
         var parser = CloudProviderStreamParser()
-        parser.recordRequestMetadata(providerKind: .openAI, serverRequestID: "req_header", clientRequestID: "client_1")
+    parser.recordRequestMetadata(
+      providerKind: .openAI, serverRequestID: "req_header", clientRequestID: "client_1")
         let payloads = [
             #"{"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-4.1","system_fingerprint":"fp_123","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}"#,
             #"{"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-4.1","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"#,
@@ -1064,7 +1179,8 @@ struct CoreContractTests {
         var events = [InferenceStreamEvent]()
         var finish: InferenceFinish?
         for payload in payloads {
-            let output = parser.parse(data: Data(payload.utf8), format: .chatCompletions, providerKind: .openAI)
+      let output = parser.parse(
+        data: Data(payload.utf8), format: .chatCompletions, providerKind: .openAI)
             events.append(contentsOf: output.events)
             finish = output.finish ?? finish
         }
@@ -1074,7 +1190,8 @@ struct CoreContractTests {
         #expect(finish?.reason == .stop)
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIRequestID] == "req_header")
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIClientRequestID] == "client_1")
-        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIChatCompletionID] == "chatcmpl_1")
+    #expect(
+      finish?.providerMetadata[CloudProviderMetadataKeys.openAIChatCompletionID] == "chatcmpl_1")
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIModel] == "gpt-4.1")
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAISystemFingerprint] == "fp_123")
     }
@@ -1083,28 +1200,60 @@ struct CoreContractTests {
     func cloudProviderModelControlsMatchAnthropicAndGeminiCapabilities() {
         #expect(CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-opus-4-7"))
         #expect(CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-opus-4-6"))
-        #expect(CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-sonnet-4-6"))
-        #expect(!CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-opus-4-5"))
-        #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-7") == [.low, .medium, .high, .xhigh, .max])
-        #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-6") == [.low, .medium, .high, .max])
-        #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-sonnet-4-6") == [.low, .medium, .high, .max])
-        #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-5") == [.low, .medium, .high])
+    #expect(
+      CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-sonnet-4-6"))
+    #expect(
+      !CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-opus-4-5"))
+    #expect(
+      CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-7") == [
+        .low, .medium, .high, .xhigh, .max,
+      ])
+    #expect(
+      CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-6") == [
+        .low, .medium, .high, .max,
+      ])
+    #expect(
+      CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-sonnet-4-6") == [
+        .low, .medium, .high, .max,
+      ])
+    #expect(
+      CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-opus-4-5") == [
+        .low, .medium, .high,
+      ])
         #expect(CloudProviderModelEligibility.anthropicEffortOptions(for: "claude-sonnet-4-5").isEmpty)
-        #expect(CloudProviderModelEligibility.anthropicEffort(for: "claude-sonnet-4-6", requested: .xhigh) == .high)
-        #expect(CloudProviderModelEligibility.anthropicThinkingModes(for: "claude-sonnet-4-6") == [.off, .adaptive, .budgeted, .effort])
-        #expect(CloudProviderModelEligibility.anthropicThinkingModes(for: "claude-opus-4-5") == [.off, .budgeted, .effort])
+    #expect(
+      CloudProviderModelEligibility.anthropicEffort(for: "claude-sonnet-4-6", requested: .xhigh)
+        == .high)
+    #expect(
+      CloudProviderModelEligibility.anthropicThinkingModes(for: "claude-sonnet-4-6") == [
+        .off, .adaptive, .budgeted, .effort,
+      ])
+    #expect(
+      CloudProviderModelEligibility.anthropicThinkingModes(for: "claude-opus-4-5") == [
+        .off, .budgeted, .effort,
+      ])
         let clampedAnthropicThinking = CloudProviderModelEligibility.anthropicThinkingOptions(
             for: "claude-sonnet-4-6",
             requested: AnthropicThinkingOptions(mode: .effort, effort: .xhigh)
         )
         #expect(clampedAnthropicThinking.effort == .high)
 
-        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-pro-preview") == [.low, .medium, .high])
-        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-flash-lite") == [.minimal, .low, .medium, .high])
-        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-3-flash-preview") == [.minimal, .low, .medium, .high])
+    #expect(
+      CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-pro-preview")
+        == [.low, .medium, .high])
+    #expect(
+      CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "models/gemini-3.1-flash-lite")
+        == [.minimal, .low, .medium, .high])
+    #expect(
+      CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-3-flash-preview") == [
+        .minimal, .low, .medium, .high,
+      ])
         #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-2.5-pro").isEmpty)
-        #expect(CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-2.0-flash").isEmpty)
-        #expect(CloudProviderModelEligibility.geminiThinkingLevel(for: "gemini-3.1-pro-preview", requested: .minimal) == .low)
+    #expect(
+      CloudProviderModelEligibility.geminiThinkingLevelOptions(for: "gemini-2.0-flash").isEmpty)
+    #expect(
+      CloudProviderModelEligibility.geminiThinkingLevel(
+        for: "gemini-3.1-pro-preview", requested: .minimal) == .low)
     }
 
     @Test
@@ -1120,9 +1269,11 @@ struct CoreContractTests {
                     role: .user,
                     content: "Describe",
                     attachments: [
-                        ChatAttachment(kind: .image, fileName: "pines-test-image.png", contentType: "image/png", localURL: imageURL),
+            ChatAttachment(
+              kind: .image, fileName: "pines-test-image.png", contentType: "image/png",
+              localURL: imageURL)
                     ]
-                ),
+        )
             ]
         )
         let urlRequest = try OpenAICompatibleRequestBuilder().chatRequest(
@@ -1147,9 +1298,11 @@ struct CoreContractTests {
                     role: .user,
                     content: "Summarize",
                     attachments: [
-                        ChatAttachment(kind: .document, fileName: "doc.pdf", contentType: "application/pdf", localURL: imageURL),
+            ChatAttachment(
+              kind: .document, fileName: "doc.pdf", contentType: "application/pdf",
+              localURL: imageURL)
                     ]
-                ),
+        )
             ]
         )
         #expect(throws: InferenceError.self) {
@@ -1164,70 +1317,119 @@ struct CoreContractTests {
     @Test
     func cloudModelEligibilityEnforcesCuratedAgentModelPolicy() {
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5-pro", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5-2026-04-23", providerKind: .openAI))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.5-pro", providerKind: .openAI))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
+        id: "gpt-5.5-2026-04-23", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-2026-03-05", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-mini", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-nano-2026-03-17", providerKind: .openAI))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.6-mini", providerKind: .openAI))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
+        id: "gpt-5.4-2026-03-05", providerKind: .openAI))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.4-mini", providerKind: .openAI))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
+        id: "gpt-5.4-nano-2026-03-17", providerKind: .openAI))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5.6-mini", providerKind: .openAI))
         #expect(CloudProviderModelEligibility.isTextOutputModel(id: "gpt-6", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-mini", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4.1-mini", providerKind: .openAI))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(id: "gpt-5-mini", providerKind: .openAI))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4.1-mini", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-4o", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "chatgpt-4o-latest", providerKind: .openAI))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
+        id: "chatgpt-4o-latest", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o1", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o3", providerKind: .openAI))
         #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "o4-mini", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "openai/o3-mini", providerKind: .openRouter))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-4.1", providerKind: .openRouter))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-6", providerKind: .openRouter))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "meta/llama-4-maverick", providerKind: .openRouter))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "text-embedding-3-large", providerKind: .openAI))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "gpt-image-2", providerKind: .openAI))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
+        id: "openai/o3-mini", providerKind: .openRouter))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
+        id: "openai/gpt-4.1", providerKind: .openRouter))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(id: "openai/gpt-6", providerKind: .openRouter)
+    )
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
+        id: "meta/llama-4-maverick", providerKind: .openRouter))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
+        id: "text-embedding-3-large", providerKind: .openAI))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(id: "gpt-image-2", providerKind: .openAI))
 
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-4-7", providerKind: .anthropic))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-sonnet-4-6", providerKind: .anthropic))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-haiku-4-5-20251001", providerKind: .anthropic))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-5", providerKind: .anthropic))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-4-6", providerKind: .anthropic))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "claude-sonnet-4-5", providerKind: .anthropic))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "claude-3-7-sonnet-20250219", providerKind: .anthropic))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "anthropic/claude-sonnet-4-5", providerKind: .openRouter))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
+        id: "claude-opus-4-7", providerKind: .anthropic))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
+        id: "claude-sonnet-4-6", providerKind: .anthropic))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
+        id: "claude-haiku-4-5-20251001", providerKind: .anthropic))
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(id: "claude-opus-5", providerKind: .anthropic)
+    )
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
+        id: "claude-opus-4-6", providerKind: .anthropic))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
+        id: "claude-sonnet-4-5", providerKind: .anthropic))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
+        id: "claude-3-7-sonnet-20250219", providerKind: .anthropic))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
+        id: "anthropic/claude-sonnet-4-5", providerKind: .openRouter))
 
-        #expect(CloudProviderModelEligibility.isTextOutputModel(
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-3.1-pro-preview",
             providerKind: .gemini,
             supportedGenerationMethods: ["createInteraction"]
         ))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-3-flash-preview",
             providerKind: .gemini,
             supportedGenerationMethods: ["createInteraction"]
         ))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-3.1-flash-lite",
             providerKind: .gemini,
             supportedGenerationMethods: ["generateContent"]
         ))
-        #expect(CloudProviderModelEligibility.isTextOutputModel(
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-4-pro",
             providerKind: .gemini,
             supportedGenerationMethods: ["generateContent"]
         ))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-3-pro-preview",
             providerKind: .gemini,
             supportedGenerationMethods: ["generateContent"]
         ))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-2.5-pro",
             providerKind: .gemini,
             supportedGenerationMethods: ["generateContent"]
         ))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(id: "google/gemini-2.5-pro", providerKind: .openRouter))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
+        id: "google/gemini-2.5-pro", providerKind: .openRouter))
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
             id: "models/text-embedding-004",
             providerKind: .gemini,
             supportedGenerationMethods: ["embedContent"]
@@ -1236,12 +1438,14 @@ struct CoreContractTests {
 
     @Test
     func geminiModelEligibilityAcceptsInteractionsModels() {
-        #expect(CloudProviderModelEligibility.isTextOutputModel(
+    #expect(
+      CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-3-flash-preview",
             providerKind: .gemini,
             supportedGenerationMethods: ["createInteraction"]
         ))
-        #expect(!CloudProviderModelEligibility.isTextOutputModel(
+    #expect(
+      !CloudProviderModelEligibility.isTextOutputModel(
             id: "models/gemini-3-flash-preview",
             providerKind: .gemini,
             supportedGenerationMethods: []
@@ -1284,7 +1488,8 @@ struct CoreContractTests {
     @Test
     func anthropicStreamParserEmitsTextToolMetricsAndThinkingMetadata() throws {
         var parser = CloudProviderStreamParser()
-        parser.recordRequestMetadata(providerKind: .anthropic, serverRequestID: "req_123", clientRequestID: nil)
+    parser.recordRequestMetadata(
+      providerKind: .anthropic, serverRequestID: "req_123", clientRequestID: nil)
 
         var allEvents = [InferenceStreamEvent]()
         var finish: InferenceFinish?
@@ -1304,7 +1509,8 @@ struct CoreContractTests {
             #"{"type":"content_block_stop","index":2}"#,
             #"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":3}}"#,
         ] {
-            let output = parser.parse(data: Data(payload.utf8), format: .anthropicMessages, providerKind: .anthropic)
+      let output = parser.parse(
+        data: Data(payload.utf8), format: .anthropicMessages, providerKind: .anthropic)
             allEvents.append(contentsOf: output.events)
             finish = output.finish ?? finish
         }
@@ -1312,16 +1518,30 @@ struct CoreContractTests {
         #expect(allEvents.contains(.token(TokenDelta(kind: .token, text: "hello", tokenCount: 1))))
         #expect(allEvents.contains(.metrics(InferenceMetrics(promptTokens: 16, completionTokens: 0))))
         #expect(allEvents.contains(.metrics(InferenceMetrics(promptTokens: 0, completionTokens: 3))))
-        #expect(allEvents.contains(.toolCall(ToolCallDelta(id: "tool_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
+    #expect(
+      allEvents.contains(
+        .toolCall(
+          ToolCallDelta(
+            id: "tool_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
         #expect(finish?.reason == .toolCall)
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicRequestID] == "req_123")
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicMessageID] == "msg_123")
-        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicThinkingContentJSON]?.contains("sig_123") == true)
-        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicCacheReadInputTokens] == "4")
-        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicCacheCreationInputTokens] == "2")
-        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.anthropicHostedToolCallsJSON]?.contains("srv_1") == true)
-        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.providerCitationsJSON]?.contains("file_pdf") == true)
-        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.webSearchCitationsJSON]?.contains("example.com") == true)
+    #expect(
+      finish?.providerMetadata[CloudProviderMetadataKeys.anthropicThinkingContentJSON]?.contains(
+        "sig_123") == true)
+    #expect(
+      finish?.providerMetadata[CloudProviderMetadataKeys.anthropicCacheReadInputTokens] == "4")
+    #expect(
+      finish?.providerMetadata[CloudProviderMetadataKeys.anthropicCacheCreationInputTokens] == "2")
+    #expect(
+      finish?.providerMetadata[CloudProviderMetadataKeys.anthropicHostedToolCallsJSON]?.contains(
+        "srv_1") == true)
+    #expect(
+      finish?.providerMetadata[CloudProviderMetadataKeys.providerCitationsJSON]?.contains(
+        "file_pdf") == true)
+    #expect(
+      finish?.providerMetadata[CloudProviderMetadataKeys.webSearchCitationsJSON]?.contains(
+        "example.com") == true)
     }
 
     @Test
@@ -1346,14 +1566,23 @@ struct CoreContractTests {
         }
         """
 
-        let output = parser.parse(data: Data(payload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
 
-        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "visible", tokenCount: 1))))
-        #expect(output.events.contains(.metrics(InferenceMetrics(promptTokens: 7, completionTokens: 5))))
-        #expect(output.events.contains(.toolCall(ToolCallDelta(id: "call_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
+    #expect(
+      output.events.contains(.token(TokenDelta(kind: .token, text: "visible", tokenCount: 1))))
+    #expect(
+      output.events.contains(.metrics(InferenceMetrics(promptTokens: 7, completionTokens: 5))))
+    #expect(
+      output.events.contains(
+        .toolCall(
+          ToolCallDelta(
+            id: "call_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
         #expect(output.finish?.reason == .toolCall)
         #expect(output.finish?.providerMetadata[CloudProviderMetadataKeys.geminiResponseID] == "resp_1")
-        #expect(parser.state.geminiProviderMetadata[CloudProviderMetadataKeys.geminiModelContentJSON]?.contains("thought_sig") == true)
+    #expect(
+      parser.state.geminiProviderMetadata[CloudProviderMetadataKeys.geminiModelContentJSON]?
+        .contains("thought_sig") == true)
     }
 
     @Test
@@ -1370,13 +1599,18 @@ struct CoreContractTests {
         var events = [InferenceStreamEvent]()
         var finish: InferenceFinish?
         for payload in payloads {
-            let output = parser.parse(data: Data(payload.utf8), format: .geminiInteractions, providerKind: .gemini)
+      let output = parser.parse(
+        data: Data(payload.utf8), format: .geminiInteractions, providerKind: .gemini)
             events.append(contentsOf: output.events)
             finish = output.finish ?? finish
         }
 
         #expect(events.contains(.token(TokenDelta(kind: .token, text: "hello", tokenCount: 1))))
-        #expect(events.contains(.toolCall(ToolCallDelta(id: "fn_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
+    #expect(
+      events.contains(
+        .toolCall(
+          ToolCallDelta(
+            id: "fn_1", name: "lookup", argumentsFragment: #"{"q":"pines"}"#, isComplete: true))))
         #expect(events.contains(.metrics(InferenceMetrics(promptTokens: 11, completionTokens: 4))))
         #expect(finish?.reason == .toolCall)
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.geminiInteractionID] == "ia_1")
@@ -1394,7 +1628,8 @@ struct CoreContractTests {
         var events = [InferenceStreamEvent]()
         var finish: InferenceFinish?
         for payload in payloads {
-            let output = parser.parse(data: Data(payload.utf8), format: .geminiInteractions, providerKind: .gemini)
+      let output = parser.parse(
+        data: Data(payload.utf8), format: .geminiInteractions, providerKind: .gemini)
             events.append(contentsOf: output.events)
             finish = output.finish ?? finish
         }
@@ -1432,12 +1667,17 @@ struct CoreContractTests {
         }
         """
 
-        let output = parser.parse(data: Data(payload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
         let metadata = output.finish?.providerMetadata ?? parser.state.geminiProviderMetadata
 
-        #expect(metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON]?.contains("cachedContentTokenCount") == true)
-        #expect(metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]?.contains("OUTCOME_OK") == true)
-        #expect(metadata[CloudProviderMetadataKeys.geminiURLContextJSON]?.contains("example.com") == true)
+    #expect(
+      metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON]?.contains("cachedContentTokenCount")
+        == true)
+    #expect(
+      metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]?.contains("OUTCOME_OK") == true)
+    #expect(
+      metadata[CloudProviderMetadataKeys.geminiURLContextJSON]?.contains("example.com") == true)
         #expect(metadata[CloudProviderMetadataKeys.geminiFileReferencesJSON]?.contains("audio") == true)
         #expect(metadata[CloudProviderMetadataKeys.geminiArtifactsJSON]?.contains("image") == true)
     }
@@ -1499,7 +1739,7 @@ struct CoreContractTests {
                 "fileData": .object([
                     "fileUri": .string("files/generated_image"),
                     "mimeType": .string("image/png"),
-                ]),
+        ])
             ]),
             providerID: providerID,
             responseID: "resp_gemini",
@@ -1510,7 +1750,7 @@ struct CoreContractTests {
                 "inlineData": .object([
                     "mimeType": .string("image/png"),
                     "data": .string("aW1n"),
-                ]),
+        ])
             ]),
             providerID: providerID,
             responseID: "resp_gemini",
@@ -1526,7 +1766,8 @@ struct CoreContractTests {
             status: "completed",
             providerMetadata: [
                 CloudProviderMetadataKeys.geminiResponseID: "resp_gemini",
-                CloudProviderMetadataKeys.webSearchCitationsJSON: #"[{"title":"Gemini lifecycle","url":"https://example.com/gemini","source":"Gemini"}]"#,
+        CloudProviderMetadataKeys.webSearchCitationsJSON:
+          #"[{"title":"Gemini lifecycle","url":"https://example.com/gemini","source":"Gemini"}]"#,
                 CloudProviderMetadataKeys.webSearchQueriesJSON: #"["gemini lifecycle"]"#,
             ]
         )
@@ -1534,21 +1775,31 @@ struct CoreContractTests {
             providerID: providerID,
             providerKind: .gemini,
             modelID: modelID,
-            capabilities: cloudConfiguration(kind: .gemini, baseURL: "https://generativelanguage.googleapis.com").capabilities,
+      capabilities: cloudConfiguration(
+        kind: .gemini, baseURL: "https://generativelanguage.googleapis.com"
+      ).capabilities,
             contextWindowTokens: 1_048_576,
             inputModalities: ["text", "image", "audio", "video", "pdf"],
             outputModalities: ["text", "image", "video"],
             metadata: ["publisher": "google"]
         )
 
-        let decodedFile = try JSONDecoder().decode(ProviderFileRecord.self, from: JSONEncoder().encode(try #require(file)))
-        let decodedCache = try JSONDecoder().decode(ProviderCacheRecord.self, from: JSONEncoder().encode(try #require(cache)))
-        let decodedBatch = try JSONDecoder().decode(ProviderBatchRecord.self, from: JSONEncoder().encode(try #require(batch)))
-        let decodedLive = try JSONDecoder().decode(ProviderLiveSessionRecord.self, from: JSONEncoder().encode(try #require(live)))
-        let decodedFileArtifact = try JSONDecoder().decode(ProviderArtifactRecord.self, from: JSONEncoder().encode(try #require(fileArtifact)))
-        let decodedInlineArtifact = try JSONDecoder().decode(ProviderArtifactRecord.self, from: JSONEncoder().encode(try #require(inlineArtifact)))
-        let decodedResearchRun = try JSONDecoder().decode(ProviderResearchRunRecord.self, from: JSONEncoder().encode(researchRun))
-        let decodedCapability = try JSONDecoder().decode(ProviderModelCapabilityRecord.self, from: JSONEncoder().encode(capability))
+    let decodedFile = try JSONDecoder().decode(
+      ProviderFileRecord.self, from: JSONEncoder().encode(try #require(file)))
+    let decodedCache = try JSONDecoder().decode(
+      ProviderCacheRecord.self, from: JSONEncoder().encode(try #require(cache)))
+    let decodedBatch = try JSONDecoder().decode(
+      ProviderBatchRecord.self, from: JSONEncoder().encode(try #require(batch)))
+    let decodedLive = try JSONDecoder().decode(
+      ProviderLiveSessionRecord.self, from: JSONEncoder().encode(try #require(live)))
+    let decodedFileArtifact = try JSONDecoder().decode(
+      ProviderArtifactRecord.self, from: JSONEncoder().encode(try #require(fileArtifact)))
+    let decodedInlineArtifact = try JSONDecoder().decode(
+      ProviderArtifactRecord.self, from: JSONEncoder().encode(try #require(inlineArtifact)))
+    let decodedResearchRun = try JSONDecoder().decode(
+      ProviderResearchRunRecord.self, from: JSONEncoder().encode(researchRun))
+    let decodedCapability = try JSONDecoder().decode(
+      ProviderModelCapabilityRecord.self, from: JSONEncoder().encode(capability))
 
         #expect(decodedFile.id == "files/audio_123")
         #expect(decodedFile.providerKind == .gemini)
@@ -1566,7 +1817,9 @@ struct CoreContractTests {
         #expect(decodedInlineArtifact.byteCount == 3)
         #expect(decodedResearchRun.providerKind == .gemini)
         #expect(decodedResearchRun.citationCount == 1)
-        #expect(decodedResearchRun.providerMetadata[CloudProviderMetadataKeys.geminiResponseID] == "resp_gemini")
+    #expect(
+      decodedResearchRun.providerMetadata[CloudProviderMetadataKeys.geminiResponseID]
+        == "resp_gemini")
         #expect(decodedCapability.capabilities.modelCapabilities.contains(.contextCache))
         #expect(decodedCapability.capabilities.modelCapabilities.contains(.live))
         #expect(decodedCapability.capabilities.modelCapabilities.contains(.batch))
@@ -1576,7 +1829,8 @@ struct CoreContractTests {
     @Test
     func geminiParserMetadataFeedsProviderLifecycleRecordFixture() throws {
         var parser = CloudProviderStreamParser()
-        parser.recordRequestMetadata(providerKind: .gemini, serverRequestID: "req_gemini", clientRequestID: "client_gemini")
+    parser.recordRequestMetadata(
+      providerKind: .gemini, serverRequestID: "req_gemini", clientRequestID: "client_gemini")
         let payload = """
         {
           "responseId": "resp_lifecycle",
@@ -1606,7 +1860,8 @@ struct CoreContractTests {
         }
         """
 
-        let output = parser.parse(data: Data(payload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
         let metadata = try #require(output.finish?.providerMetadata)
         let artifacts = GeminiProviderLifecycleRecordMapperFixture.providerArtifacts(
             fromGeminiMetadata: metadata,
@@ -1632,10 +1887,18 @@ struct CoreContractTests {
         #expect(metadata[CloudProviderMetadataKeys.geminiRequestID] == "req_gemini")
         #expect(metadata[CloudProviderMetadataKeys.geminiResponseID] == "resp_lifecycle")
         #expect(metadata[CloudProviderMetadataKeys.geminiModelVersion] == "gemini-3.1-pro-preview")
-        #expect(metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON]?.contains("cachedContentTokenCount") == true)
-        #expect(metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]?.contains("OUTCOME_OK") == true)
-        #expect(metadata[CloudProviderMetadataKeys.webSearchCitationsJSON]?.contains("Gemini lifecycle") == true)
-        #expect(artifacts.contains { $0.providerFileID == "files/source_pdf" && $0.contentType == "application/pdf" })
+    #expect(
+      metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON]?.contains("cachedContentTokenCount")
+        == true)
+    #expect(
+      metadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]?.contains("OUTCOME_OK") == true)
+    #expect(
+      metadata[CloudProviderMetadataKeys.webSearchCitationsJSON]?.contains("Gemini lifecycle")
+        == true)
+    #expect(
+      artifacts.contains {
+        $0.providerFileID == "files/source_pdf" && $0.contentType == "application/pdf"
+      })
         #expect(artifacts.contains { $0.kind == "inline_data" && $0.byteCount == 4 })
         #expect(cache.usageBytes == 12)
         #expect(cache.itemCounts?.objectValue?["cachedContentTokenCount"]?.intValue == 12)
@@ -1648,7 +1911,10 @@ struct CoreContractTests {
         var decoder = CloudProviderSSEStreamDecoder()
         #expect(decoder.ingest("id: evt_1") == nil)
         #expect(decoder.ingest("event: interaction.completed") == nil)
-        #expect(decoder.ingest(#"data: {"interaction":{"id":"ia_1","usage":{"total_input_tokens":1,"total_output_tokens":1}}}"#) == nil)
+    #expect(
+      decoder.ingest(
+        #"data: {"interaction":{"id":"ia_1","usage":{"total_input_tokens":1,"total_output_tokens":1}}}"#
+      ) == nil)
         let maybeEvent = decoder.ingest("")
         let event = try #require(maybeEvent)
         #expect(event.eventID == "evt_1")
@@ -1662,8 +1928,10 @@ struct CoreContractTests {
     @Test
     func openAIResponsesParserReportsEmptyCompletions() {
         var parser = CloudProviderStreamParser()
-        let payload = #"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}"#
-        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+    let payload =
+      #"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}"#
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
 
         #expect(output.events.isEmpty)
         #expect(output.finish?.reason == .stop)
@@ -1674,10 +1942,13 @@ struct CoreContractTests {
     @Test
     func openAIResponsesParserReportsEmptyCompletionsEvenWithUsage() {
         var parser = CloudProviderStreamParser()
-        let payload = #"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":4,"output_tokens":1}}}"#
-        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+    let payload =
+      #"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":4,"output_tokens":1}}}"#
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
 
-        #expect(output.events.contains(.metrics(InferenceMetrics(promptTokens: 4, completionTokens: 1))))
+    #expect(
+      output.events.contains(.metrics(InferenceMetrics(promptTokens: 4, completionTokens: 1))))
         #expect(output.finish?.reason == .stop)
         #expect(output.finish?.message?.contains("without visible output text") == true)
         #expect(output.finish?.message?.contains("output items: 0") == true)
@@ -1686,15 +1957,21 @@ struct CoreContractTests {
     @Test
     func openAIResponsesParserSurfacesStreamErrors() {
         var parser = CloudProviderStreamParser()
-        parser.recordRequestMetadata(providerKind: .openAI, serverRequestID: "req_header", clientRequestID: "client_1")
-        let payload = #"{"type":"error","error":{"message":"The requested model is unavailable.","code":"model_not_found"}}"#
-        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+    parser.recordRequestMetadata(
+      providerKind: .openAI, serverRequestID: "req_header", clientRequestID: "client_1")
+    let payload =
+      #"{"type":"error","error":{"message":"The requested model is unavailable.","code":"model_not_found"}}"#
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
 
         #expect(output.events.isEmpty)
         #expect(output.finish?.reason == .error)
         #expect(output.finish?.message == "The requested model is unavailable.")
-        #expect(output.finish?.providerMetadata[CloudProviderMetadataKeys.openAIRequestID] == "req_header")
-        #expect(output.finish?.providerMetadata[CloudProviderMetadataKeys.openAIClientRequestID] == "client_1")
+    #expect(
+      output.finish?.providerMetadata[CloudProviderMetadataKeys.openAIRequestID] == "req_header")
+    #expect(
+      output.finish?.providerMetadata[CloudProviderMetadataKeys.openAIClientRequestID] == "client_1"
+    )
     }
 
     @Test
@@ -1709,7 +1986,8 @@ struct CoreContractTests {
         var events = [InferenceStreamEvent]()
         var finish: InferenceFinish?
         for payload in payloads {
-            let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+      let output = parser.parse(
+        data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
             events.append(contentsOf: output.events)
             finish = output.finish ?? finish
         }
@@ -1780,7 +2058,8 @@ struct CoreContractTests {
         #expect(events.contains(.metrics(InferenceMetrics(promptTokens: 3, completionTokens: 1))))
         #expect(finish?.reason == .stop)
         #expect(finish?.message == nil)
-        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_missing_blanks")
+    #expect(
+      finish?.providerMetadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_missing_blanks")
     }
 
     @Test
@@ -1825,10 +2104,13 @@ struct CoreContractTests {
     @Test
     func openAIResponsesParserReadsNestedTextEventVariants() {
         var parser = CloudProviderStreamParser()
-        let payload = #"{"type":"response.output_text.done","content":[{"type":"output_text","text":{"value":"late text"}}]}"#
-        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+    let payload =
+      #"{"type":"response.output_text.done","content":[{"type":"output_text","text":{"value":"late text"}}]}"#
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
 
-        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "late text", tokenCount: 1))))
+    #expect(
+      output.events.contains(.token(TokenDelta(kind: .token, text: "late text", tokenCount: 1))))
     }
 
     @Test
@@ -1852,9 +2134,11 @@ struct CoreContractTests {
           }
         }
         """#
-        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
 
-        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "top level", tokenCount: 1))))
+    #expect(
+      output.events.contains(.token(TokenDelta(kind: .token, text: "top level", tokenCount: 1))))
         #expect(output.finish?.reason == .stop)
         #expect(output.finish?.message == nil)
     }
@@ -1877,9 +2161,12 @@ struct CoreContractTests {
           }
         }
         """#
-        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
 
-        #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "object content", tokenCount: 1))))
+    #expect(
+      output.events.contains(
+        .token(TokenDelta(kind: .token, text: "object content", tokenCount: 1))))
         #expect(output.finish?.reason == .stop)
         #expect(output.finish?.message == nil)
     }
@@ -1895,13 +2182,14 @@ struct CoreContractTests {
         var events = [InferenceStreamEvent]()
         var finish: InferenceFinish?
         for payload in payloads {
-            let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+      let output = parser.parse(
+        data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
             events.append(contentsOf: output.events)
             finish = output.finish ?? finish
         }
 
         let toolCall = events.compactMap { event -> ToolCallDelta? in
-            if case let .toolCall(toolCall) = event { return toolCall }
+      if case .toolCall(let toolCall) = event { return toolCall }
             return nil
         }.first
         #expect(toolCall?.id == "call_1")
@@ -1909,14 +2197,18 @@ struct CoreContractTests {
         #expect(toolCall?.argumentsFragment == #"{"query":"pines"}"#)
         #expect(finish?.reason == .toolCall)
         #expect(finish?.message == nil)
-        #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIOutputItemsJSON]?.contains(#""function_call""#) == true)
+    #expect(
+      finish?.providerMetadata[CloudProviderMetadataKeys.openAIOutputItemsJSON]?.contains(
+        #""function_call""#) == true)
     }
 
     @Test
     func openAIResponsesFallbackPreservesCompletedToolCall() {
         var parser = CloudProviderStreamParser()
-        let payload = #"{"type":"response.function_call_arguments.done","output_index":0,"item":{"id":"fc_1","call_id":"call_1","type":"function_call","name":"lookup","arguments":"{\"query\":\"pines\"}"}}"#
-        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+    let payload =
+      #"{"type":"response.function_call_arguments.done","output_index":0,"item":{"id":"fc_1","call_id":"call_1","type":"function_call","name":"lookup","arguments":"{\"query\":\"pines\"}"}}"#
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
         let finish = parser.fallbackFinish(
             format: .openAIResponses,
             providerKind: .openAI,
@@ -1924,7 +2216,12 @@ struct CoreContractTests {
             usesOfficialOpenAIReasoningChat: false
         )
 
-        #expect(output.events.contains(.toolCall(ToolCallDelta(id: "call_1", name: "lookup", argumentsFragment: #"{"query":"pines"}"#, isComplete: true))))
+    #expect(
+      output.events.contains(
+        .toolCall(
+          ToolCallDelta(
+            id: "call_1", name: "lookup", argumentsFragment: #"{"query":"pines"}"#, isComplete: true
+          ))))
         #expect(finish.reason == .toolCall)
         #expect(finish.message == nil)
     }
@@ -1938,38 +2235,58 @@ struct CoreContractTests {
           {"type":"message","content":[{"type":"output_text","text":"Pines supports native search.","annotations":[{"type":"url_citation","url":"https://example.com/openai","title":"OpenAI source"}]}]}
         ]}}
         """#
-        let openAIOutput = openAIParser.parse(data: Data(openAIPayload.utf8), format: .openAIResponses, providerKind: .openAI)
+    let openAIOutput = openAIParser.parse(
+      data: Data(openAIPayload.utf8), format: .openAIResponses, providerKind: .openAI)
         let openAIFinish = try #require(openAIOutput.finish)
         let openAICitations = try decodedCitations(openAIFinish.providerMetadata)
         let openAIQueries = try decodedQueries(openAIFinish.providerMetadata)
-        #expect(openAICitations == [WebSearchCitation(title: "OpenAI source", url: "https://example.com/openai", source: "OpenAI")])
+    #expect(
+      openAICitations == [
+        WebSearchCitation(
+          title: "OpenAI source", url: "https://example.com/openai", source: "OpenAI")
+      ])
         #expect(openAIQueries == ["pines native search"])
 
         var anthropicParser = CloudProviderStreamParser()
         let anthropicPayload = #"""
         {"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","title":"Anthropic source","url":"https://example.com/anthropic"}]}}
         """#
-        _ = anthropicParser.parse(data: Data(anthropicPayload.utf8), format: .anthropicMessages, providerKind: .anthropic)
-        let anthropicFinish = anthropicParser.fallbackFinish(format: .anthropicMessages, providerKind: .anthropic, modelID: "claude-sonnet-4-6", usesOfficialOpenAIReasoningChat: false)
+    _ = anthropicParser.parse(
+      data: Data(anthropicPayload.utf8), format: .anthropicMessages, providerKind: .anthropic)
+    let anthropicFinish = anthropicParser.fallbackFinish(
+      format: .anthropicMessages, providerKind: .anthropic, modelID: "claude-sonnet-4-6",
+      usesOfficialOpenAIReasoningChat: false)
         let anthropicCitations = try decodedCitations(anthropicFinish.providerMetadata)
-        #expect(anthropicCitations == [WebSearchCitation(title: "Anthropic source", url: "https://example.com/anthropic", source: "Anthropic")])
+    #expect(
+      anthropicCitations == [
+        WebSearchCitation(
+          title: "Anthropic source", url: "https://example.com/anthropic", source: "Anthropic")
+      ])
 
         var geminiParser = CloudProviderStreamParser()
         let geminiPayload = #"""
         {"candidates":[{"content":{"parts":[{"text":"Gemini grounded response."}],"role":"model"},"groundingMetadata":{"webSearchQueries":["pines gemini search"],"searchEntryPoint":{"renderedContent":"<div>Search suggestions</div>"},"groundingChunks":[{"web":{"uri":"https://example.com/gemini","title":"Gemini source"}}]},"finishReason":"STOP"}]}
         """#
-        let geminiOutput = geminiParser.parse(data: Data(geminiPayload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
+    let geminiOutput = geminiParser.parse(
+      data: Data(geminiPayload.utf8), format: .geminiGenerateContent, providerKind: .gemini)
         let geminiFinish = try #require(geminiOutput.finish)
         let geminiCitations = try decodedCitations(geminiFinish.providerMetadata)
         let geminiQueries = try decodedQueries(geminiFinish.providerMetadata)
-        #expect(geminiCitations == [WebSearchCitation(title: "Gemini source", url: "https://example.com/gemini", source: "Gemini")])
+    #expect(
+      geminiCitations == [
+        WebSearchCitation(
+          title: "Gemini source", url: "https://example.com/gemini", source: "Gemini")
+      ])
         #expect(geminiQueries == ["pines gemini search"])
-        #expect(geminiFinish.providerMetadata[CloudProviderMetadataKeys.webSearchSuggestionsHTML] == "<div>Search suggestions</div>")
+    #expect(
+      geminiFinish.providerMetadata[CloudProviderMetadataKeys.webSearchSuggestionsHTML]
+        == "<div>Search suggestions</div>")
     }
 
     @Test
     func appSettingsDecodesGenerationDefaultsAndClampsLimits() throws {
-        let legacyJSON = #"{"executionMode":"cloudAllowed","themeTemplate":"graphite","interfaceMode":"dark"}"#
+    let legacyJSON =
+      #"{"executionMode":"cloudAllowed","themeTemplate":"graphite","interfaceMode":"dark"}"#
         let decoded = try JSONDecoder().decode(AppSettingsSnapshot.self, from: Data(legacyJSON.utf8))
 
         #expect(decoded.cloudMaxCompletionTokens == AppSettingsSnapshot.defaultCloudMaxCompletionTokens)
@@ -2015,7 +2332,8 @@ struct CoreContractTests {
         #expect(clamped.proEntitlementStatus == .active)
         #expect(clamped.managedCloudConsent == .optedIn)
 
-        let legacySampling = try JSONDecoder().decode(ChatSampling.self, from: Data(#"{"maxTokens":256,"temperature":0.2}"#.utf8))
+    let legacySampling = try JSONDecoder().decode(
+      ChatSampling.self, from: Data(#"{"maxTokens":256,"temperature":0.2}"#.utf8))
         #expect(legacySampling.maxTokens == 256)
         #expect(legacySampling.temperature == 0.2)
         #expect(legacySampling.openAIReasoningEffort == .low)
@@ -2030,13 +2348,15 @@ struct CoreContractTests {
             messages: [ChatMessage(role: .user, content: "search")],
             webSearchOptions: CloudWebSearchOptions(
                 contextSize: .high,
-                userLocation: CloudWebSearchUserLocation(city: "Berlin", region: "Berlin", country: "DE", timezone: "Europe/Berlin"),
+        userLocation: CloudWebSearchUserLocation(
+          city: "Berlin", region: "Berlin", country: "DE", timezone: "Europe/Berlin"),
                 allowedDomains: ["example.com"],
                 blockedDomains: ["blocked.example"],
                 externalWebAccess: true
             )
         )
-        let decodedWebSearchRequest = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(webSearchRequest))
+    let decodedWebSearchRequest = try JSONDecoder().decode(
+      ChatRequest.self, from: JSONEncoder().encode(webSearchRequest))
         #expect(decodedWebSearchRequest.webSearchOptions?.contextSize == .high)
         #expect(decodedWebSearchRequest.webSearchOptions?.userLocation?.city == "Berlin")
         #expect(decodedWebSearchRequest.webSearchOptions?.allowedDomains == ["example.com"])
@@ -2047,7 +2367,8 @@ struct CoreContractTests {
         let legacyRequestJSON = """
         {"modelID":"claude-sonnet-4-6","messages":[{"id":"00000000-0000-0000-0000-000000000001","role":"user","content":"hi"}],"sampling":{"anthropicEffort":"xhigh"}}
         """
-        let legacyRequest = try JSONDecoder().decode(ChatRequest.self, from: Data(legacyRequestJSON.utf8))
+    let legacyRequest = try JSONDecoder().decode(
+      ChatRequest.self, from: Data(legacyRequestJSON.utf8))
         #expect(legacyRequest.anthropicOptions == nil)
         #expect(legacyRequest.resolvedAnthropicOptions.thinking.effort == .xhigh)
         #expect(legacyRequest.resolvedAnthropicOptions.thinking.mode == .adaptive)
@@ -2057,9 +2378,12 @@ struct CoreContractTests {
             messages: [ChatMessage(role: .user, content: "Use Anthropic files")],
             anthropicOptions: AnthropicRequestOptions(
                 promptCache: AnthropicPromptCacheOptions(enabled: true, ttl: .oneHour, breakpointLimit: 8),
-                thinking: AnthropicThinkingOptions(mode: .budgeted, budgetTokens: 4_096, effort: .high, showSummaries: false),
+        thinking: AnthropicThinkingOptions(
+          mode: .budgeted, budgetTokens: 4_096, effort: .high, showSummaries: false),
                 citations: AnthropicCitationOptions(enabled: true),
-                hostedTools: [.webFetch(allowedDomains: ["docs.anthropic.com"], blockedDomains: [], maxUses: 2)],
+        hostedTools: [
+          .webFetch(allowedDomains: ["docs.anthropic.com"], blockedDomains: [], maxUses: 2)
+        ],
                 providerFileIDs: ["file_abc"],
                 batch: AnthropicBatchRequestOptions(customID: "job-1", metadata: ["trace": "anthropic"]),
                 countTokensBeforeSend: true,
@@ -2074,12 +2398,18 @@ struct CoreContractTests {
         #expect(decoded.anthropicOptions?.thinking.mode == .budgeted)
         #expect(decoded.anthropicOptions?.thinking.budgetTokens == 4_096)
         #expect(decoded.anthropicOptions?.citations.enabled == true)
-        #expect(decoded.anthropicOptions?.hostedTools == [.webFetch(allowedDomains: ["docs.anthropic.com"], blockedDomains: [], maxUses: 2)])
+    #expect(
+      decoded.anthropicOptions?.hostedTools == [
+        .webFetch(allowedDomains: ["docs.anthropic.com"], blockedDomains: [], maxUses: 2)
+      ])
         #expect(decoded.anthropicOptions?.providerFileIDs == ["file_abc"])
         #expect(decoded.anthropicOptions?.batch?.customID == "job-1")
         #expect(decoded.anthropicOptions?.countTokensBeforeSend == true)
-        #expect(decoded.anthropicOptions?.requiredBetaHeaders.contains(AnthropicBetaHeaders.extendedCacheTTL) == true)
-        #expect(decoded.anthropicOptions?.requiredBetaHeaders.contains(AnthropicBetaHeaders.filesAPI) == true)
+    #expect(
+      decoded.anthropicOptions?.requiredBetaHeaders.contains(AnthropicBetaHeaders.extendedCacheTTL)
+        == true)
+    #expect(
+      decoded.anthropicOptions?.requiredBetaHeaders.contains(AnthropicBetaHeaders.filesAPI) == true)
         #expect(decoded.anthropicOptions?.requiredBetaHeaders.contains("custom-beta") == true)
     }
 
@@ -2099,10 +2429,12 @@ struct CoreContractTests {
                 endOffset: 42,
                 citedText: "Grounded answer.",
                 source: "Anthropic"
-            ),
+      )
         ]
         let data = try JSONEncoder().encode(citations)
-        let metadata = [CloudProviderMetadataKeys.providerCitationsJSON: String(decoding: data, as: UTF8.self)]
+    let metadata = [
+      CloudProviderMetadataKeys.providerCitationsJSON: String(decoding: data, as: UTF8.self)
+    ]
 
         #expect(metadata.providerCitations == citations)
     }
@@ -2140,7 +2472,8 @@ struct CoreContractTests {
                 metadata: ["trace": "test"]
             )
         )
-        let decodedRequest = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(request))
+    let decodedRequest = try JSONDecoder().decode(
+      ChatRequest.self, from: JSONEncoder().encode(request))
         #expect(decodedRequest.openAIResponseOptions?.background == true)
         #expect(decodedRequest.openAIResponseOptions?.structuredOutput?.name == "answer")
         #expect(decodedRequest.openAIResponseOptions?.hostedTools.first?.vectorStoreIDs == ["vs_1"])
@@ -2184,10 +2517,18 @@ struct CoreContractTests {
         let providerBackgroundRun: ProviderBackgroundRun = background
         let providerStructured: StructuredOutputResult = structured
 
-        #expect(try JSONDecoder().decode(OpenAIVectorStore.self, from: JSONEncoder().encode(vectorStore)) == vectorStore)
-        #expect(try JSONDecoder().decode(OpenAIBackgroundResponse.self, from: JSONEncoder().encode(background)) == background)
-        #expect(try JSONDecoder().decode(OpenAIStructuredOutputResult.self, from: JSONEncoder().encode(structured)) == structured)
-        #expect(try JSONDecoder().decode(ProviderContextCache.self, from: JSONEncoder().encode(cache)) == cache)
+    #expect(
+      try JSONDecoder().decode(OpenAIVectorStore.self, from: JSONEncoder().encode(vectorStore))
+        == vectorStore)
+    #expect(
+      try JSONDecoder().decode(
+        OpenAIBackgroundResponse.self, from: JSONEncoder().encode(background)) == background)
+    #expect(
+      try JSONDecoder().decode(
+        OpenAIStructuredOutputResult.self, from: JSONEncoder().encode(structured)) == structured)
+    #expect(
+      try JSONDecoder().decode(ProviderContextCache.self, from: JSONEncoder().encode(cache))
+        == cache)
         #expect(providerFile.id == "file_1")
         #expect(providerDataStore.id == "vs_1")
         #expect(providerBackgroundRun.id == "resp_1")
@@ -2246,7 +2587,7 @@ struct CoreContractTests {
             "required": .array([.string("answer")]),
             "additionalProperties": .bool(false),
             "properties": .object([
-                "answer": .object(["type": .string("string")]),
+        "answer": .object(["type": .string("string")])
             ]),
         ])
         let invalid = OpenAIStructuredOutputResult(
@@ -2278,11 +2619,14 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 22)
+    #expect(PinesDatabaseSchema.currentVersion == 23)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
-        let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
-        let projectSpacesMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 16 })
-        let runtimeMetadataMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 17 })
+    let genericProviderMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 15 })
+    let projectSpacesMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 16 })
+    let runtimeMetadataMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 17 })
         let sql = openAIMigration.sql.joined(separator: "\n")
 
         for table in [
@@ -2337,18 +2681,26 @@ struct CoreContractTests {
         let runtimeMetadataSQL = runtimeMetadataMigration.sql.joined(separator: "\n")
         #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN parameter_count"))
         #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN key_head_dimension"))
-        #expect(runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN value_head_dimension"))
+    #expect(
+      runtimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN value_head_dimension"))
 
-        let nestedRuntimeMetadataMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 18 })
+    let nestedRuntimeMetadataMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 18 })
         let nestedRuntimeMetadataSQL = nestedRuntimeMetadataMigration.sql.joined(separator: "\n")
-        #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN text_config_model_type"))
-        #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN routed_experts"))
-        #expect(nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN experts_per_token"))
+    #expect(
+      nestedRuntimeMetadataSQL.contains(
+        "ALTER TABLE model_installs ADD COLUMN text_config_model_type"))
+    #expect(
+      nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN routed_experts"))
+    #expect(
+      nestedRuntimeMetadataSQL.contains("ALTER TABLE model_installs ADD COLUMN experts_per_token"))
 
-        let cacheTopologyMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 19 })
+    let cacheTopologyMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 19 })
         let cacheTopologySQL = cacheTopologyMigration.sql.joined(separator: "\n")
         #expect(cacheTopologySQL.contains("ALTER TABLE model_installs ADD COLUMN cache_topology"))
-        #expect(cacheTopologySQL.contains("ALTER TABLE model_installs ADD COLUMN turbo_quant_family_support"))
+    #expect(
+      cacheTopologySQL.contains("ALTER TABLE model_installs ADD COLUMN turbo_quant_family_support"))
 
         let snapshotMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 21 })
         let snapshotSQL = snapshotMigration.sql.joined(separator: "\n")
@@ -2365,11 +2717,24 @@ struct CoreContractTests {
         #expect(snapshotSQL.contains("excluded_from_backup INTEGER NOT NULL DEFAULT 1"))
         #expect(snapshotSQL.contains("REFERENCES model_installs(repository) ON DELETE CASCADE"))
 
-        let speculativeMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 22 })
+    let speculativeMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 22 })
         let speculativeSQL = speculativeMigration.sql.joined(separator: "\n")
-        #expect(speculativeSQL.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_dimensions_json"))
-        #expect(speculativeSQL.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_telemetry_json"))
-        #expect(speculativeSQL.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json"))
+    #expect(
+      speculativeSQL.contains(
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_dimensions_json"))
+    #expect(
+      speculativeSQL.contains(
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_telemetry_json"))
+    #expect(
+      speculativeSQL.contains(
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json"))
+
+    let platformMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 23 })
+    let platformSQL = platformMigration.sql.joined(separator: "\n")
+    #expect(
+      platformSQL.contains(
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN platform_evidence_dimensions_json"))
     }
 
     @Test
@@ -2408,7 +2773,8 @@ struct CoreContractTests {
             depth: request.depth.rawValue,
             sourcePolicy: .object([
                 "scope": .string(request.sourcePolicy.scope.rawValue),
-                "vector_store_ids": .array(request.sourcePolicy.vectorStoreIDs.map { .string($0.rawValue) }),
+        "vector_store_ids": .array(
+          request.sourcePolicy.vectorStoreIDs.map { .string($0.rawValue) }),
             ]),
             reportFormat: request.reportFormat.rawValue,
             includeCodeInterpreter: request.includeCodeInterpreter,
@@ -2420,9 +2786,12 @@ struct CoreContractTests {
             providerMetadata: run.providerMetadata
         )
 
-        let decodedRequest = try JSONDecoder().decode(OpenAIDeepResearchRequest.self, from: JSONEncoder().encode(request))
-        let decodedRun = try JSONDecoder().decode(OpenAIDeepResearchRun.self, from: JSONEncoder().encode(run))
-        let decodedProviderRun = try JSONDecoder().decode(ProviderResearchRunRecord.self, from: JSONEncoder().encode(providerRun))
+    let decodedRequest = try JSONDecoder().decode(
+      OpenAIDeepResearchRequest.self, from: JSONEncoder().encode(request))
+    let decodedRun = try JSONDecoder().decode(
+      OpenAIDeepResearchRun.self, from: JSONEncoder().encode(run))
+    let decodedProviderRun = try JSONDecoder().decode(
+      ProviderResearchRunRecord.self, from: JSONEncoder().encode(providerRun))
 
         #expect(decodedRequest == request)
         #expect(decodedRun == run)
@@ -2459,7 +2828,8 @@ struct CoreContractTests {
             responseOutputTokenBudget: 24_000
         )
 
-        let decodedRequest = try JSONDecoder().decode(OpenAIDeepResearchRequest.self, from: JSONEncoder().encode(request))
+    let decodedRequest = try JSONDecoder().decode(
+      OpenAIDeepResearchRequest.self, from: JSONEncoder().encode(request))
         let providerRun = ProviderResearchRunRecord(
             id: "run_1",
             providerID: "openai",
@@ -2489,7 +2859,8 @@ struct CoreContractTests {
         #expect(webAndMCP.mcpServerLabel == "docs")
         #expect(webAndMCP.mcpServerURL == mcpURL)
         #expect(decodedRequest.responseOutputTokenBudget == 24_000)
-        #expect(providerRun.sourcePolicy.objectValue?["web_search_return_token_budget"]?.intValue == 12_000)
+    #expect(
+      providerRun.sourcePolicy.objectValue?["web_search_return_token_budget"]?.intValue == 12_000)
     }
 
     @Test
@@ -2573,9 +2944,9 @@ struct CoreContractTests {
                             .object([
                                 "type": .string("output_text"),
                                 "annotations": .array([
-                                    .object(["type": .string("url_citation"), "url": .string("https://example.com")]),
-                                ]),
+                  .object(["type": .string("url_citation"), "url": .string("https://example.com")])
                             ]),
+              ])
                         ]),
                     ]),
                 ]),
@@ -2598,7 +2969,7 @@ struct CoreContractTests {
                                     .object(["type": .string("url_citation"), "url": .string("https://example.org")]),
                                     .object(["type": .string("url_citation"), "url": .string("https://example.net")]),
                                 ]),
-                            ]),
+              ])
                         ]),
                     ]),
                 ]),
@@ -2632,7 +3003,8 @@ struct CoreContractTests {
         let anthropic = ProviderID(rawValue: "anthropic")
         let structuredID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
 
-        try await repository.upsertProviderFile(ProviderFileRecord(
+    try await repository.upsertProviderFile(
+      ProviderFileRecord(
             id: "file_1",
             providerID: openAI,
             providerKind: .openAI,
@@ -2640,7 +3012,8 @@ struct CoreContractTests {
             fileName: "brief.pdf",
             status: "processed"
         ))
-        try await repository.upsertProviderFile(ProviderFileRecord(
+    try await repository.upsertProviderFile(
+      ProviderFileRecord(
             id: "file_2",
             providerID: anthropic,
             providerKind: .anthropic,
@@ -2648,7 +3021,8 @@ struct CoreContractTests {
             fileName: "notes.txt",
             status: "processed"
         ))
-        try await repository.upsertProviderArtifact(ProviderArtifactRecord(
+    try await repository.upsertProviderArtifact(
+      ProviderArtifactRecord(
             id: "artifact_1",
             providerID: openAI,
             providerKind: .openAI,
@@ -2656,14 +3030,16 @@ struct CoreContractTests {
             kind: "image",
             fileName: "chart.png"
         ))
-        try await repository.upsertProviderArtifact(ProviderArtifactRecord(
+    try await repository.upsertProviderArtifact(
+      ProviderArtifactRecord(
             id: "artifact_2",
             providerID: openAI,
             providerKind: .openAI,
             responseID: "resp_2",
             kind: "code_interpreter"
         ))
-        try await repository.upsertProviderCache(ProviderCacheRecord(
+    try await repository.upsertProviderCache(
+      ProviderCacheRecord(
             id: "vs_1",
             providerID: openAI,
             providerKind: .openAI,
@@ -2672,7 +3048,8 @@ struct CoreContractTests {
             status: "completed",
             usageBytes: 128
         ))
-        try await repository.upsertProviderBatch(ProviderBatchRecord(
+    try await repository.upsertProviderBatch(
+      ProviderBatchRecord(
             id: "batch_1",
             providerID: openAI,
             providerKind: .openAI,
@@ -2680,7 +3057,8 @@ struct CoreContractTests {
             status: "in_progress",
             inputFileID: "file_1"
         ))
-        try await repository.upsertProviderLiveSession(ProviderLiveSessionRecord(
+    try await repository.upsertProviderLiveSession(
+      ProviderLiveSessionRecord(
             id: "sess_1",
             providerID: openAI,
             providerKind: .openAI,
@@ -2688,7 +3066,8 @@ struct CoreContractTests {
             status: "created",
             modalities: ["audio", "text"]
         ))
-        try await repository.upsertProviderStructuredOutput(ProviderStructuredOutputRecord(
+    try await repository.upsertProviderStructuredOutput(
+      ProviderStructuredOutputRecord(
             id: structuredID,
             providerID: openAI,
             providerKind: .openAI,
@@ -2697,17 +3076,20 @@ struct CoreContractTests {
             content: .object(["ok": .bool(true)]),
             status: "parsed"
         ))
-        try await repository.upsertProviderModelCapability(ProviderModelCapabilityRecord(
+    try await repository.upsertProviderModelCapability(
+      ProviderModelCapabilityRecord(
             providerID: openAI,
             providerKind: .openAI,
             modelID: "gpt-5.5",
-            capabilities: ProviderCapabilities(local: false, files: true, hostedTools: true, structuredOutputs: true),
+        capabilities: ProviderCapabilities(
+          local: false, files: true, hostedTools: true, structuredOutputs: true),
             contextWindowTokens: 128_000,
             inputModalities: ["text", "image"],
             outputModalities: ["text"],
             metadata: ["source": "test"]
         ))
-        try await repository.upsertProviderResearchRun(ProviderResearchRunRecord(
+    try await repository.upsertProviderResearchRun(
+      ProviderResearchRunRecord(
             id: "research_1",
             providerID: openAI,
             providerKind: .openAI,
@@ -2725,13 +3107,25 @@ struct CoreContractTests {
         ))
 
         #expect(try await repository.listProviderFiles(providerID: openAI).map(\.id) == ["file_1"])
-        #expect(try await repository.listProviderArtifacts(responseID: "resp_1").map(\.id) == ["artifact_1"])
-        #expect(try await repository.listProviderCaches(providerID: openAI, kind: "vector_store").map(\.id) == ["vs_1"])
+    #expect(
+      try await repository.listProviderArtifacts(responseID: "resp_1").map(\.id) == ["artifact_1"])
+    #expect(
+      try await repository.listProviderCaches(providerID: openAI, kind: "vector_store").map(\.id)
+        == ["vs_1"])
         #expect(try await repository.listProviderBatches(providerID: openAI).map(\.id) == ["batch_1"])
-        #expect(try await repository.listProviderLiveSessions(providerID: openAI).map(\.id) == ["sess_1"])
-        #expect(try await repository.listProviderStructuredOutputs(responseID: "resp_1").map(\.id) == [structuredID])
-        #expect(try await repository.listProviderModelCapabilities(providerID: openAI).map(\.id) == ["openai::gpt-5.5"])
-        #expect(try await repository.listProviderResearchRuns(providerID: openAI, status: "in_progress").map(\.id) == ["research_1"])
+    #expect(
+      try await repository.listProviderLiveSessions(providerID: openAI).map(\.id) == ["sess_1"])
+    #expect(
+      try await repository.listProviderStructuredOutputs(responseID: "resp_1").map(\.id) == [
+        structuredID
+      ])
+    #expect(
+      try await repository.listProviderModelCapabilities(providerID: openAI).map(\.id) == [
+        "openai::gpt-5.5"
+      ])
+    #expect(
+      try await repository.listProviderResearchRuns(providerID: openAI, status: "in_progress").map(
+        \.id) == ["research_1"])
 
         try await repository.deleteProviderArtifact(id: "artifact_1")
         try await repository.deleteProviderStructuredOutput(id: structuredID)
@@ -2747,7 +3141,8 @@ struct CoreContractTests {
     @Test
     func openAIResponsesParserCapturesHostedArtifactsBackgroundAndUsageMetadata() throws {
         var parser = CloudProviderStreamParser()
-        parser.recordRequestMetadata(providerKind: .openAI, serverRequestID: "req_header", clientRequestID: "client_1")
+    parser.recordRequestMetadata(
+      providerKind: .openAI, serverRequestID: "req_header", clientRequestID: "client_1")
         let payload = #"""
         {
           "type": "response.completed",
@@ -2803,15 +3198,19 @@ struct CoreContractTests {
           }
         }
         """#
-        let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+    let output = parser.parse(
+      data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
         let finish = try #require(output.finish)
         let metadata = finish.providerMetadata
-        let hostedToolCalls = try decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON])
+    let hostedToolCalls = try decodedJSONArray(
+      metadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON])
         let artifacts = try decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIArtifactsJSON])
-        let fileSearchResults = try decodedJSONArray(metadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON])
+    let fileSearchResults = try decodedJSONArray(
+      metadata[CloudProviderMetadataKeys.openAIFileSearchResultsJSON])
 
         #expect(output.events.contains(.token(TokenDelta(kind: .token, text: "Done", tokenCount: 1))))
-        #expect(output.events.contains(.metrics(InferenceMetrics(promptTokens: 20, completionTokens: 7))))
+    #expect(
+      output.events.contains(.metrics(InferenceMetrics(promptTokens: 20, completionTokens: 7))))
         #expect(metadata[CloudProviderMetadataKeys.openAIRequestID] == "req_body")
         #expect(metadata[CloudProviderMetadataKeys.openAIClientRequestID] == "client_1")
         #expect(metadata[CloudProviderMetadataKeys.openAIResponseID] == "resp_background")
@@ -2825,7 +3224,10 @@ struct CoreContractTests {
         #expect(hostedToolCalls.contains { $0["type"] as? String == "file_search_call" })
         #expect(hostedToolCalls.contains { $0["type"] as? String == "code_interpreter_call" })
         #expect(artifacts.contains { $0["type"] as? String == "image" && $0["byte_hint"] as? Int == 8 })
-        #expect(artifacts.contains { $0["type"] as? String == "container_file" && $0["file_id"] as? String == "file_out" })
+    #expect(
+      artifacts.contains {
+        $0["type"] as? String == "container_file" && $0["file_id"] as? String == "file_out"
+      })
         #expect(fileSearchResults.first?["file_id"] as? String == "file_1")
     }
 
@@ -2841,7 +3243,8 @@ struct CoreContractTests {
 
         var finish: InferenceFinish?
         for payload in payloads {
-            let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+      let output = parser.parse(
+        data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
             finish = output.finish ?? finish
         }
 
@@ -2849,9 +3252,14 @@ struct CoreContractTests {
         let audit = metadata.hostedToolAuditEntries
         let artifacts = metadata.providerArtifactMaterializations
 
-        #expect(audit.contains { $0.id == "ci_stream" && $0.kind == .codeInterpreter && $0.status == .completed })
-        #expect(artifacts.contains { $0.kind == .toolOutput && $0.text?.contains("created report") == true })
-        #expect(artifacts.contains { $0.providerFileID == "file_generated" && $0.fileName == "report.csv" })
+    #expect(
+      audit.contains {
+        $0.id == "ci_stream" && $0.kind == .codeInterpreter && $0.status == .completed
+      })
+    #expect(
+      artifacts.contains { $0.kind == .toolOutput && $0.text?.contains("created report") == true })
+    #expect(
+      artifacts.contains { $0.providerFileID == "file_generated" && $0.fileName == "report.csv" })
     }
 
     @Test
@@ -2867,7 +3275,8 @@ struct CoreContractTests {
 
         var finish: InferenceFinish?
         for payload in payloads {
-            let output = parser.parse(data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
+      let output = parser.parse(
+        data: Data(payload.utf8), format: .openAIResponses, providerKind: .openAI)
             finish = output.finish ?? finish
         }
 
@@ -2876,9 +3285,19 @@ struct CoreContractTests {
         let artifacts = metadata.providerArtifactMaterializations
 
         #expect(artifacts.contains { $0.type == "partial_image" && $0.byteCount == 4 })
-        #expect(audit.contains { $0.id == "mcp_tools" && $0.kind == .mcp && $0.requiresAgentExecution && $0.requiresApproval })
-        #expect(audit.contains { $0.id == "tool_search_1" && $0.kind == .toolSearch && $0.status == .completed })
-        #expect(audit.contains { $0.id == "computer_1" && $0.kind == .computerUse && $0.status == .requiresAction && $0.requiresApproval })
+    #expect(
+      audit.contains {
+        $0.id == "mcp_tools" && $0.kind == .mcp && $0.requiresAgentExecution && $0.requiresApproval
+      })
+    #expect(
+      audit.contains {
+        $0.id == "tool_search_1" && $0.kind == .toolSearch && $0.status == .completed
+      })
+    #expect(
+      audit.contains {
+        $0.id == "computer_1" && $0.kind == .computerUse && $0.status == .requiresAction
+          && $0.requiresApproval
+      })
     }
 
     @Test
@@ -2889,7 +3308,8 @@ struct CoreContractTests {
             hostedTools: [
                 .webFetch(allowedDomains: ["example.com"], blockedDomains: [], maxUses: 1),
                 .computerUse(displayWidth: 1280, displayHeight: 720),
-                .remoteMCP(serverLabel: "docs", serverURL: "https://mcp.example.test", requireApproval: "always"),
+        .remoteMCP(
+          serverLabel: "docs", serverURL: "https://mcp.example.test", requireApproval: "always"),
                 .textEditor,
                 .bash,
             ],
@@ -2904,14 +3324,16 @@ struct CoreContractTests {
         )
         let legacyRemoteMCP = try JSONDecoder().decode(
             HostedToolConfiguration.self,
-            from: Data(#"{"type":"remoteMCP","serverLabel":"docs","serverURL":"https://mcp.example.test"}"#.utf8)
+      from: Data(
+        #"{"type":"remoteMCP","serverLabel":"docs","serverURL":"https://mcp.example.test"}"#.utf8)
         )
         let webFetch = try JSONDecoder().decode(
             HostedToolConfiguration.self,
             from: Data(#"{"type":"webFetch","allowedDomains":["example.com"],"maxUses":1}"#.utf8)
         )
         let metadata = [
-            CloudProviderMetadataKeys.openAIHostedToolCallsJSON: #"[{"id":"fetch_1","type":"web_fetch_tool_result","status":"completed"},{"id":"bash_1","type":"bash_call","status":"requires_action"}]"#,
+      CloudProviderMetadataKeys.openAIHostedToolCallsJSON:
+        #"[{"id":"fetch_1","type":"web_fetch_tool_result","status":"completed"},{"id":"bash_1","type":"bash_call","status":"requires_action"}]"#
         ]
         let audit = metadata.hostedToolAuditEntries
 
@@ -2929,8 +3351,12 @@ struct CoreContractTests {
         #expect(HostedToolConfiguration.bash.requiresApproval)
         #expect(anthropicAgentToolRequest.hasAgentOnlyHostedTools)
         #expect(!anthropicAgentToolRequest.hostedToolsAreAllowedForExecutionContext())
-        #expect(audit.contains { $0.id == "fetch_1" && $0.kind == .webFetch && !$0.requiresAgentExecution })
-        #expect(audit.contains { $0.id == "bash_1" && $0.kind == .bash && $0.requiresAgentExecution && $0.requiresApproval })
+    #expect(
+      audit.contains { $0.id == "fetch_1" && $0.kind == .webFetch && !$0.requiresAgentExecution })
+    #expect(
+      audit.contains {
+        $0.id == "bash_1" && $0.kind == .bash && $0.requiresAgentExecution && $0.requiresApproval
+      })
     }
 
     @Test
@@ -2967,8 +3393,10 @@ struct CoreContractTests {
             createdAt: result.createdAt
         )
 
-        let decodedResult = try JSONDecoder().decode(OpenAIStructuredOutputResult.self, from: JSONEncoder().encode(result))
-        let decodedRecord = try JSONDecoder().decode(ProviderStructuredOutputRecord.self, from: JSONEncoder().encode(providerRecord))
+    let decodedResult = try JSONDecoder().decode(
+      OpenAIStructuredOutputResult.self, from: JSONEncoder().encode(result))
+    let decodedRecord = try JSONDecoder().decode(
+      ProviderStructuredOutputRecord.self, from: JSONEncoder().encode(providerRecord))
 
         #expect(decodedResult == result)
         #expect(decodedRecord == providerRecord)
@@ -2998,7 +3426,8 @@ struct CoreContractTests {
             hostedTools: [
                 .fileSearch(vectorStoreIDs: ["vs_surface"], maxResults: 5),
                 .codeInterpreter(containerID: "cntr_surface", memoryLimit: "2g"),
-                .remoteMCP(serverLabel: "docs", serverURL: "https://mcp.example.test", requireApproval: "always"),
+        .remoteMCP(
+          serverLabel: "docs", serverURL: "https://mcp.example.test", requireApproval: "always"),
             ],
             openAIOptions: OpenAIResponsesRequestOptions(
                 store: .statelessEncrypted,
@@ -3027,7 +3456,7 @@ struct CoreContractTests {
                         kind: .fileSearch,
                         vectorStoreIDs: ["vs_surface"],
                         configuration: .object(["max_num_results": .number(5)])
-                    ),
+          )
                 ],
                 providerFileIDs: ["file_surface"],
                 vectorStoreIDs: ["vs_surface"],
@@ -3035,7 +3464,8 @@ struct CoreContractTests {
             )
         )
 
-        let roundTripped = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(request))
+    let roundTripped = try JSONDecoder().decode(
+      ChatRequest.self, from: JSONEncoder().encode(request))
 
         #expect(roundTripped.sampling.openAIResponseStorage == .statelessEncrypted)
         #expect(roundTripped.sampling.cloudWebSearchMode == .required)
@@ -3045,7 +3475,9 @@ struct CoreContractTests {
         #expect(roundTripped.openAIResponseOptions == request.openAIResponseOptions)
         #expect(roundTripped.openAIResponseOptions?.structuredOutput?.strictness == .disabled)
         #expect(roundTripped.openAIResponseOptions?.providerFileIDs == ["file_surface"])
-        #expect(roundTripped.openAIResponseOptions?.hostedTools.first?.configuration?.objectValue?["max_num_results"]?.intValue == 5)
+    #expect(
+      roundTripped.openAIResponseOptions?.hostedTools.first?.configuration?.objectValue?[
+        "max_num_results"]?.intValue == 5)
     }
 
     private func decodedCitations(_ metadata: [String: String]) throws -> [WebSearchCitation] {
@@ -3129,7 +3561,8 @@ struct CoreContractTests {
     func qwenTurboQuantResourcePolicyKeepsLargeModelsBehindDownloadGates() throws {
         let compactPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 3_800_000_000)
         let proPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 5_500_000_000)
-        let specsByRepository = Dictionary(uniqueKeysWithValues: qwenTurboQuantProfileCases.map { ($0.repository, $0) })
+    let specsByRepository = Dictionary(
+      uniqueKeysWithValues: qwenTurboQuantProfileCases.map { ($0.repository, $0) })
 
         for repository in [
             "mlx-community/Qwen3.5-0.8B-MLX-4bit",
@@ -3145,7 +3578,8 @@ struct CoreContractTests {
         }
 
         let qwen4B = try #require(specsByRepository["mlx-community/Qwen3.5-4B-MLX-4bit"])
-        let qwen4BDecision = compactPolicy.evaluate(qwen4B.preflightInput, modalities: qwen4B.modalities)
+    let qwen4BDecision = compactPolicy.evaluate(
+      qwen4B.preflightInput, modalities: qwen4B.modalities)
         #expect(qwen4BDecision.isRejected)
         #expect(qwen4BDecision.knownDownloadBytes == qwen4B.expectedDownloadBytes)
 
@@ -3179,11 +3613,14 @@ struct CoreContractTests {
 
         for spec in gemmaTurboQuantProfileCases {
             let result = classifier.classify(spec.preflightInput)
-            let isPromotedFamily = ["gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant"]
+      let isPromotedFamily = [
+        "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant",
+      ]
                 .contains(spec.modelType)
 
             #expect(result.repository == spec.repository)
-            let expectedVerification: ModelVerificationState = spec.modelType == "gemma4_assistant"
+      let expectedVerification: ModelVerificationState =
+        spec.modelType == "gemma4_assistant"
                 ? .experimental
                 : (isPromotedFamily ? .verified : .installable)
             #expect(result.verification == expectedVerification)
@@ -3247,7 +3684,8 @@ struct CoreContractTests {
         let compactPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 3_800_000_000)
         let proPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 5_500_000_000)
         let maxPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 8_000_000_000)
-        let specsByRepository = Dictionary(uniqueKeysWithValues: gemmaTurboQuantProfileCases.map { ($0.repository, $0) })
+    let specsByRepository = Dictionary(
+      uniqueKeysWithValues: gemmaTurboQuantProfileCases.map { ($0.repository, $0) })
 
         for repository in [
             "mlx-community/gemma-3-270m-it-qat-4bit",
@@ -3264,12 +3702,14 @@ struct CoreContractTests {
         }
 
         let gemma4E2B = try #require(specsByRepository["mlx-community/gemma-4-e2b-it-OptiQ-4bit"])
-        let gemma4E2BDecision = proPolicy.evaluate(gemma4E2B.preflightInput, modalities: gemma4E2B.modalities)
+    let gemma4E2BDecision = proPolicy.evaluate(
+      gemma4E2B.preflightInput, modalities: gemma4E2B.modalities)
         #expect(!gemma4E2BDecision.isRejected)
         #expect(gemma4E2BDecision.knownDownloadBytes == gemma4E2B.expectedDownloadBytes)
 
         let gemma4E4B = try #require(specsByRepository["mlx-community/gemma-4-e4b-it-OptiQ-4bit"])
-        let gemma4E4BDecision = proPolicy.evaluate(gemma4E4B.preflightInput, modalities: gemma4E4B.modalities)
+    let gemma4E4BDecision = proPolicy.evaluate(
+      gemma4E4B.preflightInput, modalities: gemma4E4B.modalities)
         #expect(gemma4E4BDecision.isRejected)
         #expect(gemma4E4BDecision.knownDownloadBytes == gemma4E4B.expectedDownloadBytes)
         #expect(gemma4E4BDecision.reason?.contains("on-device discovery limit") == true)
@@ -3304,7 +3744,8 @@ struct CoreContractTests {
         let llama = classifier.classify(
             ModelPreflightInput(
                 repository: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
-                configJSON: #"{"model_type":"llama","hidden_size":4096,"num_attention_heads":32}"#.data(using: .utf8),
+        configJSON: #"{"model_type":"llama","hidden_size":4096,"num_attention_heads":32}"#.data(
+          using: .utf8),
                 files: [
                     ModelFileInfo(path: "config.json", size: 10_000),
                     ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
@@ -3316,7 +3757,9 @@ struct CoreContractTests {
         let mistralSmall4 = classifier.classify(
             ModelPreflightInput(
                 repository: "mlx-community/Mistral-Small-4-119B-A6B-Instruct-4bit",
-                configJSON: #"{"model_type":"mistral3","text_config":{"model_type":"mistral4","qk_nope_head_dim":64,"qk_rope_head_dim":64,"v_head_dim":128,"n_routed_experts":128,"num_experts_per_tok":4}}"#.data(using: .utf8),
+        configJSON:
+          #"{"model_type":"mistral3","text_config":{"model_type":"mistral4","qk_nope_head_dim":64,"qk_rope_head_dim":64,"v_head_dim":128,"n_routed_experts":128,"num_experts_per_tok":4}}"#
+          .data(using: .utf8),
                 files: [
                     ModelFileInfo(path: "config.json", size: 10_000),
                     ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
@@ -3328,7 +3771,9 @@ struct CoreContractTests {
         let pixtral = classifier.classify(
             ModelPreflightInput(
                 repository: "mlx-community/Pixtral-12B-2409-4bit",
-                configJSON: #"{"model_type":"pixtral","text_config":{"model_type":"mistral","head_dim":128}}"#.data(using: .utf8),
+        configJSON:
+          #"{"model_type":"pixtral","text_config":{"model_type":"mistral","head_dim":128}}"#.data(
+            using: .utf8),
                 processorConfigJSON: #"{"processor_class":"PixtralProcessor"}"#.data(using: .utf8),
                 files: [
                     ModelFileInfo(path: "config.json", size: 10_000),
@@ -3342,7 +3787,9 @@ struct CoreContractTests {
         let llama4 = classifier.classify(
             ModelPreflightInput(
                 repository: "mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit",
-                configJSON: #"{"model_type":"llama4","text_config":{"model_type":"llama4_text","head_dim":128}}"#.data(using: .utf8),
+        configJSON:
+          #"{"model_type":"llama4","text_config":{"model_type":"llama4_text","head_dim":128}}"#
+          .data(using: .utf8),
                 processorConfigJSON: #"{"processor_class":"Llama4Processor"}"#.data(using: .utf8),
                 files: [
                     ModelFileInfo(path: "config.json", size: 10_000),
@@ -3356,7 +3803,8 @@ struct CoreContractTests {
         let mllama = classifier.classify(
             ModelPreflightInput(
                 repository: "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
-                configJSON: #"{"model_type":"mllama","text_config":{"model_type":"llama","head_dim":128}}"#.data(using: .utf8),
+        configJSON: #"{"model_type":"mllama","text_config":{"model_type":"llama","head_dim":128}}"#
+          .data(using: .utf8),
                 processorConfigJSON: #"{"processor_class":"MllamaProcessor"}"#.data(using: .utf8),
                 files: [
                     ModelFileInfo(path: "config.json", size: 10_000),
@@ -3395,13 +3843,17 @@ struct CoreContractTests {
         #expect(llama4.modalities.isEmpty)
         #expect(llama4.cacheTopology == .unsupported)
         #expect(llama4.turboQuantFamilySupport == .unsupportedTopology)
-        #expect(llama4.reasons.contains("model_type llama4 is not registered in the linked MLX runtime."))
+    #expect(
+      llama4.reasons.contains("model_type llama4 is not registered in the linked MLX runtime."))
 
         #expect(mllama.verification == .unsupported)
         #expect(mllama.modalities.isEmpty)
         #expect(mllama.cacheTopology == .unsupported)
         #expect(mllama.turboQuantFamilySupport == .unsupportedTopology)
-        #expect(mllama.reasons.contains("model_type mllama requires an MLX Swift LM fork with Llama 3.2 Vision registry, processor, cache topology, and TurboQuant profile support."))
+    #expect(
+      mllama.reasons.contains(
+        "model_type mllama requires an MLX Swift LM fork with Llama 3.2 Vision registry, processor, cache topology, and TurboQuant profile support."
+      ))
     }
 
     @Test
@@ -3427,7 +3879,9 @@ struct CoreContractTests {
     func preflightPrefersExplicitHeadDimensionMetadata() throws {
         let explicit = ModelPreflightInput(
             repository: "mlx-community/Qwen3-0.6B-4bit",
-            configJSON: #"{"model_type":"qwen3","head_dim":128,"hidden_size":2048,"num_attention_heads":32}"#.data(using: .utf8),
+      configJSON:
+        #"{"model_type":"qwen3","head_dim":128,"hidden_size":2048,"num_attention_heads":32}"#.data(
+          using: .utf8),
             files: [
                 ModelFileInfo(path: "model.safetensors"),
                 ModelFileInfo(path: "tokenizer.json"),
@@ -3435,7 +3889,9 @@ struct CoreContractTests {
         )
         let nested = ModelPreflightInput(
             repository: "mlx-community/Phi-4-mini-instruct-4bit",
-            configJSON: #"{"model_type":"phi3","text_config":{"head_dim":96,"hidden_size":3072,"num_attention_heads":32}}"#.data(using: .utf8),
+      configJSON:
+        #"{"model_type":"phi3","text_config":{"head_dim":96,"hidden_size":3072,"num_attention_heads":32}}"#
+        .data(using: .utf8),
             files: [
                 ModelFileInfo(path: "model.safetensors"),
                 ModelFileInfo(path: "tokenizer.json"),
@@ -3443,7 +3899,8 @@ struct CoreContractTests {
         )
         let inferred = ModelPreflightInput(
             repository: "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
-            configJSON: #"{"model_type":"qwen2","hidden_size":2048,"num_attention_heads":16}"#.data(using: .utf8),
+      configJSON: #"{"model_type":"qwen2","hidden_size":2048,"num_attention_heads":16}"#.data(
+        using: .utf8),
             files: [
                 ModelFileInfo(path: "model.safetensors"),
                 ModelFileInfo(path: "tokenizer.json"),
@@ -4063,17 +4520,18 @@ struct CoreContractTests {
             messages: [ChatMessage(role: .user, content: "search")],
             executionContext: .agent
         )
-        let roundTripped = try JSONDecoder().decode(ChatRequest.self, from: JSONEncoder().encode(request))
+    let roundTripped = try JSONDecoder().decode(
+      ChatRequest.self, from: JSONEncoder().encode(request))
         #expect(roundTripped.executionContext == .agent)
     }
 
     @Test
     func agentEvidenceFormatterProducesReadableWebEvidence() throws {
         let resultsData = try JSONSerialization.data(withJSONObject: [
-            ["title": "Pines Source", "url": "https://example.com/pines", "snippet": "Useful context."],
+      ["title": "Pines Source", "url": "https://example.com/pines", "snippet": "Useful context."]
         ])
         let rawData = try JSONSerialization.data(withJSONObject: [
-            "resultsJSON": String(decoding: resultsData, as: UTF8.self),
+      "resultsJSON": String(decoding: resultsData, as: UTF8.self)
         ])
         let evidence = AgentEvidenceFormatter.modelVisibleOutput(
             toolName: "web.search",
@@ -4088,7 +4546,8 @@ struct CoreContractTests {
 
     @Test
     func agentEvidenceFormatterTruncatesLargeFetches() throws {
-        let rawData = try JSONSerialization.data(withJSONObject: [
+    let rawData = try JSONSerialization.data(
+      withJSONObject: [
             "url": "https://example.com",
             "finalURL": "https://example.com/final",
             "statusCode": 200,
@@ -4115,7 +4574,7 @@ struct CoreContractTests {
                 "title": "Fallback Title",
                 "url": "https://example.com/fallback",
                 "snippet": "Readable fallback field.",
-            ],
+      ]
         ])
         let evidence = AgentEvidenceFormatter.modelVisibleOutput(
             toolName: "web.search",
@@ -4133,10 +4592,12 @@ struct CoreContractTests {
     @Test
     func privateLocalToolsAreMarkedAsCloudContext() throws {
         let attachmentSpec = try AnyToolSpec(AttachmentReadTool.spec { _ in nil })
-        let vaultSpec = try AnyToolSpec(VaultSearchTool.spec { query, _ in
+    let vaultSpec = try AnyToolSpec(
+      VaultSearchTool.spec { query, _ in
             VaultSearchOutput(query: query, searchMode: "lexical", results: [])
         })
-        let conversationSpec = try AnyToolSpec(ConversationSearchTool.spec(repository: EmptyConversationRepository()))
+    let conversationSpec = try AnyToolSpec(
+      ConversationSearchTool.spec(repository: EmptyConversationRepository()))
 
         #expect(attachmentSpec.permissions.contains(.cloudContext))
         #expect(vaultSpec.permissions.contains(.cloudContext))
@@ -4170,8 +4631,10 @@ struct CoreContractTests {
     func vaultSearchFiltersResultsToAllowedCloudContextDocuments() async throws {
         let approvedID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let secretID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
-        let approved = Self.vaultSearchItem(documentID: approvedID, title: "Approved", text: "approved context")
-        let secret = Self.vaultSearchItem(documentID: secretID, title: "Secret", text: "TOP_SECRET_TOKEN")
+    let approved = Self.vaultSearchItem(
+      documentID: approvedID, title: "Approved", text: "approved context")
+    let secret = Self.vaultSearchItem(
+      documentID: secretID, title: "Secret", text: "TOP_SECRET_TOKEN")
         let registry = ToolRegistry()
         let spec = try VaultSearchTool.spec(allowedDocumentIDs: { [approvedID] }) { query, _ in
             VaultSearchOutput(query: query, searchMode: "lexical", results: [approved, secret])
@@ -4197,7 +4660,9 @@ struct CoreContractTests {
                 VaultDocumentRecord(id: secretID, title: "Secret", sourceType: "text", chunkCount: 1),
             ],
             chunksByDocument: [
-                approvedID: [Self.vaultChunk(id: "approved-0", documentID: approvedID, text: "approved context")],
+        approvedID: [
+          Self.vaultChunk(id: "approved-0", documentID: approvedID, text: "approved context")
+        ],
                 secretID: [Self.vaultChunk(id: "secret-0", documentID: secretID, text: "TOP_SECRET_TOKEN")],
             ]
         )
@@ -4239,7 +4704,8 @@ struct CoreContractTests {
     func conversationSearchCanBeDisabledForSelectedCloudContextRuns() async throws {
         let registry = ToolRegistry()
         try await registry.register(
-            try ConversationSearchTool.spec(repository: EmptyConversationRepository(), allowsSearch: { false })
+      try ConversationSearchTool.spec(
+        repository: EmptyConversationRepository(), allowsSearch: { false })
         )
 
         do {
@@ -4260,8 +4726,11 @@ struct CoreContractTests {
         let spec = try ToolSpec<CalculatorInput, CalculatorOutput>(
             name: "calculator.slow",
             description: "Slow calculator used to verify timeout behavior.",
-            inputSchema: ToolIOSchema(properties: ["expression": .init(type: .string)], required: ["expression"]),
-            outputSchema: ToolIOSchema(properties: ["value": .init(type: .number), "formatted": .init(type: .string)]),
+      inputSchema: ToolIOSchema(
+        properties: ["expression": .init(type: .string)], required: ["expression"]),
+      outputSchema: ToolIOSchema(properties: [
+        "value": .init(type: .number), "formatted": .init(type: .string),
+      ]),
             permissions: [.localComputation],
             sideEffect: .none,
             networkPolicy: .noNetwork,
@@ -4336,7 +4805,9 @@ struct CoreContractTests {
         #expect(manifest.file(path: "config.json")?.status == .pending)
     }
 
-    private func cloudConfiguration(kind: CloudProviderKind, baseURL: String) -> CloudProviderConfiguration {
+  private func cloudConfiguration(kind: CloudProviderKind, baseURL: String)
+    -> CloudProviderConfiguration
+  {
         CloudProviderConfiguration(
             id: ProviderID(rawValue: kind.rawValue),
             kind: kind,
@@ -4393,8 +4864,11 @@ private actor InMemoryProviderLifecycleRepository:
         artifacts[id] = nil
     }
 
-    func listProviderCaches(providerID: ProviderID?, kind: String?) async throws -> [ProviderCacheRecord] {
-        sorted(caches.values.filter { cache in
+  func listProviderCaches(providerID: ProviderID?, kind: String?) async throws
+    -> [ProviderCacheRecord]
+  {
+    sorted(
+      caches.values.filter { cache in
             (providerID == nil || cache.providerID == providerID) && (kind == nil || cache.kind == kind)
         })
     }
@@ -4419,7 +4893,8 @@ private actor InMemoryProviderLifecycleRepository:
         batches[id] = nil
     }
 
-    func listProviderLiveSessions(providerID: ProviderID?) async throws -> [ProviderLiveSessionRecord] {
+  func listProviderLiveSessions(providerID: ProviderID?) async throws -> [ProviderLiveSessionRecord]
+  {
         sorted(liveSessions.values.filter { providerID == nil || $0.providerID == providerID })
     }
 
@@ -4431,7 +4906,9 @@ private actor InMemoryProviderLifecycleRepository:
         liveSessions[id] = nil
     }
 
-    func listProviderStructuredOutputs(responseID: String?) async throws -> [ProviderStructuredOutputRecord] {
+  func listProviderStructuredOutputs(responseID: String?) async throws
+    -> [ProviderStructuredOutputRecord]
+  {
         structuredOutputs.values
             .filter { responseID == nil || $0.responseID == responseID }
             .sorted { $0.id.uuidString < $1.id.uuidString }
@@ -4445,7 +4922,9 @@ private actor InMemoryProviderLifecycleRepository:
         structuredOutputs[id] = nil
     }
 
-    func listProviderModelCapabilities(providerID: ProviderID?) async throws -> [ProviderModelCapabilityRecord] {
+  func listProviderModelCapabilities(providerID: ProviderID?) async throws
+    -> [ProviderModelCapabilityRecord]
+  {
         sorted(modelCapabilities.values.filter { providerID == nil || $0.providerID == providerID })
     }
 
@@ -4457,9 +4936,13 @@ private actor InMemoryProviderLifecycleRepository:
         modelCapabilities["\(providerID.rawValue)::\(modelID.rawValue)"] = nil
     }
 
-    func listProviderResearchRuns(providerID: ProviderID?, status: String?) async throws -> [ProviderResearchRunRecord] {
-        sorted(researchRuns.values.filter { run in
-            (providerID == nil || run.providerID == providerID) && (status == nil || run.status == status)
+  func listProviderResearchRuns(providerID: ProviderID?, status: String?) async throws
+    -> [ProviderResearchRunRecord]
+  {
+    sorted(
+      researchRuns.values.filter { run in
+        (providerID == nil || run.providerID == providerID)
+          && (status == nil || run.status == status)
         })
     }
 
@@ -4496,7 +4979,8 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
         )
     }
 
-    static func providerCache(from object: JSONValue, providerID: ProviderID) -> ProviderCacheRecord? {
+  static func providerCache(from object: JSONValue, providerID: ProviderID) -> ProviderCacheRecord?
+  {
         guard let fields = object.objectValue,
               let id = fields.string("name")
         else { return nil }
@@ -4509,7 +4993,9 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
             name: fields.string("displayName") ?? id,
             modelID: normalizedModelID(fields.string("model")),
             status: normalizedStatus(fields.string("state") ?? fields.string("status") ?? "ACTIVE"),
-            usageBytes: Int64(usage?.objectValue?.int("cachedContentTokenCount") ?? usage?.objectValue?.int("totalTokenCount") ?? 0),
+      usageBytes: Int64(
+        usage?.objectValue?.int("cachedContentTokenCount") ?? usage?.objectValue?.int(
+          "totalTokenCount") ?? 0),
             itemCounts: usage,
             configuration: fields["configuration"],
             metadata: metadata(from: fields["metadata"])
@@ -4522,7 +5008,8 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
         modelID: ModelID,
         metadata: [String: String]
     ) -> ProviderCacheRecord {
-        let cacheUsage = jsonValue(fromJSONString: metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON])
+    let cacheUsage = jsonValue(
+      fromJSONString: metadata[CloudProviderMetadataKeys.geminiCacheUsageJSON])
         let cachedTokens = cacheUsage?.objectValue?.int("cachedContentTokenCount") ?? 0
         return ProviderCacheRecord(
             id: name,
@@ -4538,7 +5025,8 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
         )
     }
 
-    static func providerBatch(from object: JSONValue, providerID: ProviderID) -> ProviderBatchRecord? {
+  static func providerBatch(from object: JSONValue, providerID: ProviderID) -> ProviderBatchRecord?
+  {
         guard let fields = object.objectValue,
               let id = fields.string("name")
         else { return nil }
@@ -4556,7 +5044,9 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
         )
     }
 
-    static func providerLiveSession(from object: JSONValue, providerID: ProviderID) -> ProviderLiveSessionRecord? {
+  static func providerLiveSession(from object: JSONValue, providerID: ProviderID)
+    -> ProviderLiveSessionRecord?
+  {
         guard let fields = object.objectValue,
               let id = fields.string("name")
         else { return nil }
@@ -4580,7 +5070,8 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
     ) -> ProviderArtifactRecord? {
         guard let fields = part.objectValue else { return nil }
         if let fileData = fields["fileData"]?.objectValue,
-           let fileURI = fileData.string("fileUri") {
+      let fileURI = fileData.string("fileUri")
+    {
             return ProviderArtifactRecord(
                 id: fileURI,
                 providerID: providerID,
@@ -4593,7 +5084,8 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
             )
         }
         if let inlineData = fields["inlineData"]?.objectValue,
-           let data = inlineData.string("data") {
+      let data = inlineData.string("data")
+    {
             return ProviderArtifactRecord(
                 id: "gemini-inline-\(responseID ?? UUID().uuidString)-\(toolCallID ?? "model")",
                 providerID: providerID,
@@ -4613,7 +5105,8 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
         providerID: ProviderID,
         responseID: String?
     ) -> [ProviderArtifactRecord] {
-        let fileReferences = jsonArray(fromJSONString: metadata[CloudProviderMetadataKeys.geminiFileReferencesJSON])
+    let fileReferences = jsonArray(
+      fromJSONString: metadata[CloudProviderMetadataKeys.geminiFileReferencesJSON])
         let fileArtifacts = fileReferences.map { object in
             ProviderArtifactRecord(
                 id: object.string("fileUri") ?? UUID().uuidString,
@@ -4625,7 +5118,9 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
                 contentType: object.string("mimeType")
             )
         }
-        let inlineArtifacts = jsonArray(fromJSONString: metadata[CloudProviderMetadataKeys.geminiArtifactsJSON]).map { object in
+    let inlineArtifacts = jsonArray(
+      fromJSONString: metadata[CloudProviderMetadataKeys.geminiArtifactsJSON]
+    ).map { object in
             ProviderArtifactRecord(
                 id: object.string("id") ?? object.string("fileUri") ?? UUID().uuidString,
                 providerID: providerID,
@@ -4659,7 +5154,8 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
             depth: "standard",
             sourcePolicy: sourcePolicy,
             reportFormat: "citation_first",
-            includeCodeInterpreter: providerMetadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON] != nil,
+      includeCodeInterpreter: providerMetadata[CloudProviderMetadataKeys.geminiCodeExecutionJSON]
+        != nil,
             serviceTier: "default",
             responseID: responseID,
             status: status,
@@ -4671,7 +5167,8 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
 
     private static func normalizedStatus(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "unknown" }
-        return value
+    return
+      value
             .replacingOccurrences(of: "JOB_STATE_", with: "")
             .lowercased()
     }
@@ -4700,7 +5197,7 @@ private enum GeminiProviderLifecycleRecordMapperFixture {
     }
 
     private static func jsonArray(fromJSONString raw: String?) -> [[String: JSONValue]] {
-        guard case let .array(values) = jsonValue(fromJSONString: raw) else { return [] }
+    guard case .array(let values) = jsonValue(fromJSONString: raw) else { return [] }
         return values.compactMap(\.objectValue)
     }
 
@@ -4828,15 +5325,20 @@ private struct QwenTurboQuantProfileCase {
         }
 
         var expectedDownloadBytes: Int64 {
-            modelBytes + Self.configBytes + Self.tokenizerBytes + (processorClass == nil ? 0 : Self.processorBytes)
+    modelBytes + Self.configBytes + Self.tokenizerBytes
+      + (processorClass == nil ? 0 : Self.processorBytes)
         }
 
         var configJSON: Data {
-            Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension),"full_attention_interval":4,"linear_num_value_heads":8,"linear_conv_kernel_dim":4}"#.utf8)
+    Data(
+      #"{"model_type":"\#(modelType)","head_dim":\#(headDimension),"full_attention_interval":4,"linear_num_value_heads":8,"linear_conv_kernel_dim":4}"#
+        .utf8)
         }
 
         var tokenizerConfigJSON: Data {
-            Data(#"{"chat_template":"<|im_start|>user\n{{ content }}<|im_end|>\n<|im_start|>assistant\n","additional_special_tokens":["<|im_start|>","<|im_end|>"]}"#.utf8)
+    Data(
+      #"{"chat_template":"<|im_start|>user\n{{ content }}<|im_end|>\n<|im_start|>assistant\n","additional_special_tokens":["<|im_start|>","<|im_end|>"]}"#
+        .utf8)
         }
 
         var processorConfigJSON: Data? {
@@ -4929,7 +5431,9 @@ private var gemmaTurboQuantProfileCases: [GemmaTurboQuantProfileCase] {
                 parameterCount: 4_000_000_000,
                 headDimension: 256,
                 modelBytes: 2_900_000_000,
-                configJSONOverride: Data(#"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":2560,"num_attention_heads":8,"num_key_value_heads":4}}"#.utf8),
+      configJSONOverride: Data(
+        #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":2560,"num_attention_heads":8,"num_key_value_heads":4}}"#
+          .utf8),
                 modalities: [.text, .vision],
                 processorClass: "Gemma3Processor"
             ),
@@ -4950,7 +5454,9 @@ private var gemmaTurboQuantProfileCases: [GemmaTurboQuantProfileCase] {
                 parameterCount: 12_000_000_000,
                 headDimension: 256,
                 modelBytes: 7_800_000_000,
-                configJSONOverride: Data(#"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":3840,"num_attention_heads":16,"num_key_value_heads":8}}"#.utf8),
+      configJSONOverride: Data(
+        #"{"model_type":"gemma3","text_config":{"model_type":"gemma3_text","hidden_size":3840,"num_attention_heads":16,"num_key_value_heads":8}}"#
+          .utf8),
                 modalities: [.text, .vision],
                 processorClass: "Gemma3Processor"
             ),
@@ -5048,7 +5554,8 @@ private struct GemmaTurboQuantProfileCase {
         }
 
         var expectedDownloadBytes: Int64 {
-            modelBytes + Self.configBytes + Self.tokenizerBytes + (processorClass == nil ? 0 : Self.processorBytes)
+    modelBytes + Self.configBytes + Self.tokenizerBytes
+      + (processorClass == nil ? 0 : Self.processorBytes)
         }
 
         var configJSON: Data {
@@ -5056,13 +5563,17 @@ private struct GemmaTurboQuantProfileCase {
                 return configJSONOverride
             }
             if modelType == "gemma3n" {
-                return Data(#"{"model_type":"gemma3n","head_dim":\#(headDimension),"layer_types":["sliding_attention","full_attention"],"sliding_window":2048,"num_kv_shared_layers":4}"#.utf8)
+      return Data(
+        #"{"model_type":"gemma3n","head_dim":\#(headDimension),"layer_types":["sliding_attention","full_attention"],"sliding_window":2048,"num_kv_shared_layers":4}"#
+          .utf8)
             }
             return Data(#"{"model_type":"\#(modelType)","head_dim":\#(headDimension)}"#.utf8)
         }
 
         var tokenizerConfigJSON: Data {
-            Data(#"{"chat_template":"<start_of_turn>user\n{{ content }}<end_of_turn>\n<start_of_turn>model\n","additional_special_tokens":["<start_of_turn>","<end_of_turn>","<turn|>"]}"#.utf8)
+    Data(
+      #"{"chat_template":"<start_of_turn>user\n{{ content }}<end_of_turn>\n<start_of_turn>model\n","additional_special_tokens":["<start_of_turn>","<end_of_turn>","<turn|>"]}"#
+        .utf8)
         }
 
         var processorConfigJSON: Data? {
@@ -5092,12 +5603,12 @@ private func iso8601Date(_ raw: String) -> Date? {
     ISO8601DateFormatter().date(from: raw)
 }
 
-private extension Dictionary where Key == String, Value == JSONValue {
-    func string(_ key: String) -> String? {
+extension Dictionary where Key == String, Value == JSONValue {
+  fileprivate func string(_ key: String) -> String? {
         self[key]?.stringValue
     }
 
-    func int(_ key: String) -> Int? {
+  fileprivate func int(_ key: String) -> Int? {
         if let int = self[key]?.intValue {
             return int
         }
@@ -5107,8 +5618,8 @@ private extension Dictionary where Key == String, Value == JSONValue {
         return nil
     }
 
-    func arrayStrings(_ key: String) -> [String] {
-        guard case let .array(values) = self[key] else { return [] }
+  fileprivate func arrayStrings(_ key: String) -> [String] {
+    guard case .array(let values) = self[key] else { return [] }
         return values.compactMap(\.stringValue)
     }
 }
@@ -5125,10 +5636,14 @@ private struct FixtureVaultRepository: VaultRepository {
         }
     }
 
-    func upsertDocument(_ document: VaultDocumentRecord, localURL: URL?, checksum: String?) async throws {}
+  func upsertDocument(_ document: VaultDocumentRecord, localURL: URL?, checksum: String?)
+    async throws
+  {}
     func deleteDocument(id: UUID) async throws {}
     func chunks(documentID: UUID) async throws -> [VaultChunk] { chunksByDocument[documentID] ?? [] }
-    func replaceChunks(_ chunks: [VaultChunk], documentID: UUID, embeddingModelID: ModelID?) async throws {}
+  func replaceChunks(_ chunks: [VaultChunk], documentID: UUID, embeddingModelID: ModelID?)
+    async throws
+  {}
 
     func search(query: String, embedding: [Float]?, limit: Int) async throws -> [VaultSearchResult] {
         documents.prefix(max(1, limit)).compactMap { document in
@@ -5142,18 +5657,30 @@ private struct EmptyConversationRepository: ConversationRepository {
     func listConversations() async throws -> [ConversationRecord] { [] }
     func listConversationPreviews() async throws -> [ConversationPreviewRecord] { [] }
     func observeConversations() -> AsyncStream<[ConversationRecord]> { AsyncStream { $0.finish() } }
-    func observeConversationPreviews() -> AsyncStream<[ConversationPreviewRecord]> { AsyncStream { $0.finish() } }
-    func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?) async throws -> ConversationRecord {
-        ConversationRecord(title: title, defaultModelID: defaultModelID, defaultProviderID: defaultProviderID)
+  func observeConversationPreviews() -> AsyncStream<[ConversationPreviewRecord]> {
+    AsyncStream { $0.finish() }
+  }
+  func createConversation(title: String, defaultModelID: ModelID?, defaultProviderID: ProviderID?)
+    async throws -> ConversationRecord
+  {
+    ConversationRecord(
+      title: title, defaultModelID: defaultModelID, defaultProviderID: defaultProviderID)
     }
     func updateConversationTitle(_ title: String, conversationID: UUID) async throws {}
-    func updateConversationModel(modelID: ModelID?, providerID: ProviderID?, conversationID: UUID) async throws {}
+  func updateConversationModel(modelID: ModelID?, providerID: ProviderID?, conversationID: UUID)
+    async throws
+  {}
     func setConversationArchived(_ archived: Bool, conversationID: UUID) async throws {}
     func setConversationPinned(_ pinned: Bool, conversationID: UUID) async throws {}
     func deleteConversation(id: UUID) async throws {}
     func messages(in conversationID: UUID) async throws -> [ChatMessage] { [] }
-    func observeMessages(in conversationID: UUID) -> AsyncStream<[ChatMessage]> { AsyncStream { $0.finish() } }
-    func appendMessage(_ message: ChatMessage, status: MessageStatus, conversationID: UUID, modelID: ModelID?, providerID: ProviderID?) async throws {}
+  func observeMessages(in conversationID: UUID) -> AsyncStream<[ChatMessage]> {
+    AsyncStream { $0.finish() }
+  }
+  func appendMessage(
+    _ message: ChatMessage, status: MessageStatus, conversationID: UUID, modelID: ModelID?,
+    providerID: ProviderID?
+  ) async throws {}
     func deleteMessages(after messageID: UUID, in conversationID: UUID) async throws {}
     func updateMessage(
         id: UUID,

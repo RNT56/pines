@@ -67,6 +67,9 @@ public struct SchemaCompatibility: Codable, Sendable {
 | `TurboQuantLayout` | 4 | MLX Swift | current compressed layout |
 | `TurboQuantLayoutNext` | 5 | MLX Swift | gated future layout |
 | `AdaptivePrecisionPolicy` | 1 | all | future adaptive precision |
+| `PlatformUnlockPolicy` | 1 | Pines | W29+ platform gates and release kill switches |
+| `OpenKVFormat` | 1 | all | open KV format descriptors and export/import metadata |
+| `PlatformEvidenceDimensions` | 1 | Pines | evidence tuple matching for W29+ platform features |
 
 ## Schema rules
 
@@ -334,6 +337,25 @@ Defined in [Context Memory Planner](10-context-memory-planner.md).
 ## KVSnapshotManifest.v1
 
 Defined in [KV Snapshot Security](11-kv-snapshot-security.md).
+
+## Wave 7 platform schemas
+
+Wave 7 adds W29+/MVP 6 platform-unlock schemas. They are contract and evidence
+surfaces only by default. Product activation remains disabled unless the
+feature-specific policy is active, kill switches are clear, a green
+compatibility pair is present, and verified evidence explicitly allows the
+feature tuple.
+
+Required fail-closed defaults:
+
+- `AdaptivePrecisionPolicy.v1` defaults disabled, kill-switched, and
+  evidence-required;
+- `PlatformUnlockPolicy.v1` aggregates adaptive precision, memory-plane,
+  open-KV, device-mesh, personalization, and feature-gate state;
+- `OpenKVFormat.v1` requires exact identity, local-only defaults, encryption,
+  and support-export blob exclusion;
+- `PlatformEvidenceDimensions.v1` is part of benchmark/evidence tuple matching
+  and must match exactly for product claims.
 
 ## ModelProfile.v2
 

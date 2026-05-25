@@ -159,6 +159,7 @@ extension GRDBPinesStore {
             speculativeDimensions: decodeJSON(row["speculative_dimensions_json"] as String?),
             speculativeTelemetry: decodeJSON(row["speculative_telemetry_json"] as String?),
             speculativeAutoDisableDecision: decodeJSON(row["speculative_auto_disable_json"] as String?),
+            platformEvidenceDimensions: decodeJSON(row["platform_evidence_dimensions_json"] as String?),
             admittedContextTokens: row["admitted_context_tokens"],
             peakMemoryBytes: row["peak_memory_bytes"],
             promptTokensPerSecond: row["prompt_tokens_per_second"] as Double?,

@@ -22,6 +22,8 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
     public var outputTokens: Int?
     public var speculativeTelemetry: TurboQuantSpeculativeTelemetry?
     public var speculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision?
+  public var platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions?
+  public var platformUnlockPolicy: TurboQuantPlatformUnlockPolicy?
     public var contextAssemblyPlanID: String?
     public var memoryCalibrationSampleID: String?
 
@@ -45,6 +47,8 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
         outputTokens: Int? = nil,
         speculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
         speculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil,
+    platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions? = nil,
+    platformUnlockPolicy: TurboQuantPlatformUnlockPolicy? = nil,
         contextAssemblyPlanID: String? = nil,
         memoryCalibrationSampleID: String? = nil
     ) {
@@ -67,6 +71,8 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
         self.outputTokens = outputTokens.map { max(0, $0) }
         self.speculativeTelemetry = speculativeTelemetry
         self.speculativeAutoDisableDecision = speculativeAutoDisableDecision
+    self.platformEvidenceDimensions = platformEvidenceDimensions
+    self.platformUnlockPolicy = platformUnlockPolicy
         self.contextAssemblyPlanID = contextAssemblyPlanID
         self.memoryCalibrationSampleID = memoryCalibrationSampleID
     }
@@ -80,9 +86,13 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
             errors.append("rejected paths require reasons")
         }
         if speculativeTelemetry?.targetSequenceMatched == false,
-           speculativeAutoDisableDecision?.shouldDisable != true {
+      speculativeAutoDisableDecision?.shouldDisable != true
+    {
             errors.append("target mismatch requires speculative auto-disable decision")
         }
+    if let platformUnlockPolicy {
+      errors.append(contentsOf: platformUnlockPolicy.validationErrors)
+    }
         return errors
     }
 }

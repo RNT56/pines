@@ -18,6 +18,7 @@ Use [PR and Merge Plan](15-pr-merge-plan.md) for target branches, worker PR orde
 | Wave 4 | W11, W14A, W14B, W17, iOS lifecycle policy | parallel after evidence gate |
 | Wave 5 | W13, optimization evidence update | gated optimization after measurement exists |
 | Wave 6 | W15A, W15B, W29+ | speculative and platform work after rollback/cache proof |
+| Wave 7 | W29-core, W29-lm, W29-pines | platform-unlock contracts after Wave 6 |
 
 The tables below preserve worker ownership and scope. They are grouped by earliest legal launch window.
 
@@ -110,6 +111,14 @@ These workers are intentionally serialized. They should not run concurrently wit
 | W15B | `pines` | MVP 5 | P3 | `tq/pines-speculative` | speculative UX |
 | W29+ | all | MVP 6 | P3 | varied | adaptive precision, memory, agents, open format, mesh |
 
+## Wave 7 - platform unlock contracts
+
+| Worker | Repo | Phase | Priority | Branch | Task |
+| --- | --- | --- | --- | --- | --- |
+| W29-core | `mlx-swift` | MVP 6 | P3 | `tq/wave7-core-platform` | adaptive precision/open-KV capability contracts |
+| W29-lm | `mlx-swift-lm` | MVP 6 | P3 | `tq/wave7-lm-platform` | LM platform policy/open-KV identity contracts |
+| W29-pines | `pines` | MVP 6 | P3 | `tq/wave7-platform-unlocks` | platform gates, admission reserves, evidence dimensions |
+
 ## File ownership map
 
 | File/area | Owner |
@@ -142,6 +151,7 @@ These workers are intentionally serialized. They should not run concurrently wit
 | Context memory planner | W11 |
 | KV snapshot store | W14B/W17 |
 | TurboQuant kernels/Layout V5 | W13 only |
+| W29+ platform contracts | W29-core / W29-lm / W29-pines by repo |
 
 ## Merge dependency graph
 

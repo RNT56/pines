@@ -932,7 +932,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         turboQuantSpeculativeSettings: TurboQuantSpeculativeSettings? = nil,
         turboQuantSpeculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
         turboQuantSpeculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil,
-        turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate] = TurboQuantPlatformFeatureGate.wave6DisabledDefaults
+        turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate] = TurboQuantPlatformFeatureGate.wave7DisabledDefaults
     ) {
         self.weightBits = weightBits
         self.kvBits = kvBits
@@ -1013,7 +1013,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         turboQuantPlatformFeatureGates = try container.decodeIfPresent(
             [TurboQuantPlatformFeatureGate].self,
             forKey: .turboQuantPlatformFeatureGates
-        ) ?? TurboQuantPlatformFeatureGate.wave6DisabledDefaults
+        ) ?? TurboQuantPlatformFeatureGate.wave7DisabledDefaults
     }
 }
 

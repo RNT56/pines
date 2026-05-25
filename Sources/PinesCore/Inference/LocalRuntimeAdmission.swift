@@ -29,6 +29,7 @@ public struct LocalRuntimeAdmissionRequest: Hashable, Codable, Sendable {
     public var uiReserveBytes: Int64
     public var contextAssemblyPlanID: String?
     public var speculativeBudget: TurboQuantSpeculativeAdmissionBudget?
+  public var platformUnlockBudget: TurboQuantPlatformUnlockAdmissionBudget?
 
     public init(
         schemaVersion: Int = Self.schemaVersion,
@@ -56,7 +57,8 @@ public struct LocalRuntimeAdmissionRequest: Hashable, Codable, Sendable {
         metalScratchReserveBytes: Int64 = 0,
         uiReserveBytes: Int64 = 0,
         contextAssemblyPlanID: String? = nil,
-        speculativeBudget: TurboQuantSpeculativeAdmissionBudget? = nil
+    speculativeBudget: TurboQuantSpeculativeAdmissionBudget? = nil,
+    platformUnlockBudget: TurboQuantPlatformUnlockAdmissionBudget? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.modelID = modelID
@@ -84,6 +86,7 @@ public struct LocalRuntimeAdmissionRequest: Hashable, Codable, Sendable {
         self.uiReserveBytes = max(0, uiReserveBytes)
         self.contextAssemblyPlanID = contextAssemblyPlanID
         self.speculativeBudget = speculativeBudget
+    self.platformUnlockBudget = platformUnlockBudget
     }
 }
 
@@ -105,6 +108,7 @@ public struct LocalRuntimeAdmissionPlan: Hashable, Codable, Sendable {
     public var downgradeReason: String?
     public var rejectionReason: String?
     public var speculativeBudget: TurboQuantSpeculativeAdmissionBudget?
+  public var platformUnlockBudget: TurboQuantPlatformUnlockAdmissionBudget?
     public var userFacingMessage: String
 
     public init(
@@ -123,6 +127,7 @@ public struct LocalRuntimeAdmissionPlan: Hashable, Codable, Sendable {
         downgradeReason: String? = nil,
         rejectionReason: String? = nil,
         speculativeBudget: TurboQuantSpeculativeAdmissionBudget? = nil,
+    platformUnlockBudget: TurboQuantPlatformUnlockAdmissionBudget? = nil,
         userFacingMessage: String
     ) {
         self.schemaVersion = schemaVersion
@@ -140,6 +145,7 @@ public struct LocalRuntimeAdmissionPlan: Hashable, Codable, Sendable {
         self.downgradeReason = downgradeReason
         self.rejectionReason = rejectionReason
         self.speculativeBudget = speculativeBudget
+    self.platformUnlockBudget = platformUnlockBudget
         self.userFacingMessage = userFacingMessage
     }
 
@@ -230,7 +236,8 @@ public struct LocalRuntimeAdmissionService: Sendable {
             calibrationSummary: calibrationSummary
         )
         let plannedWithoutSafety = max(0, zones.totalPlannedBytes - zones.safetyReserveBytes)
-        let required = Int64((Double(plannedWithoutSafety) * calibrationMultiplier).rounded(.up))
+    let required =
+      Int64((Double(plannedWithoutSafety) * calibrationMultiplier).rounded(.up))
             + zones.safetyReserveBytes
         let cushion = availableMemory - required
         let admitted = availableMemory > 0 && cushion >= 0
@@ -254,6 +261,7 @@ public struct LocalRuntimeAdmissionService: Sendable {
             downgradeReason: admitted ? downgradeReason : nil,
             rejectionReason: rejectionReason,
             speculativeBudget: request.speculativeBudget,
+      platformUnlockBudget: request.platformUnlockBudget,
             userFacingMessage: admitted
                 ? "Local context admitted for \(mode.displayName)."
                 : LocalInferenceFailureMatrix.rulesByKind[.memoryAdmissionFailed]?.productMessage
@@ -269,18 +277,24 @@ public struct LocalRuntimeAdmissionService: Sendable {
         calibrationSummary: RuntimeMemoryCalibrationSummary?
     ) -> RuntimeMemoryZones {
         let safetyReserve = max(512 * 1_024 * 1_024, availableMemory / 5)
-        let modelWeights = request.estimatedModelWeightsBytes
+    let modelWeights =
+      request.estimatedModelWeightsBytes
             ?? request.memoryCounters.processResidentMemoryBytes
             ?? request.memoryCounters.processPhysicalFootprintBytes
             ?? 0
         let compressedKV = Int64(contextTokens) * request.compressedKVBytesPerToken
         let packedFallback =
             fallbackContract.allowPackedFallback
-            ? max(fallbackContract.reserveBytes, Int64(contextTokens) * request.packedFallbackBytesPerToken)
+      ? max(
+        fallbackContract.reserveBytes, Int64(contextTokens) * request.packedFallbackBytesPerToken)
             : 0
         let decodedScratch =
             (fallbackContract.allowDecodedLayerLocalFallback || fallbackContract.allowFullDecodedFallback)
-            ? max(request.decodedFallbackScratchBytes, Int64(Double(request.decodedFallbackScratchBytes) * (calibrationSummary?.scratchMultiplier ?? 1)))
+      ? max(
+        request.decodedFallbackScratchBytes,
+        Int64(
+          Double(request.decodedFallbackScratchBytes) * (calibrationSummary?.scratchMultiplier ?? 1)
+        ))
             : 0
 
         return RuntimeMemoryZones(
@@ -300,6 +314,27 @@ public struct LocalRuntimeAdmissionService: Sendable {
             speculativeRollbackReserveBytes: request.speculativeBudget?.enabled == true
                 ? request.speculativeBudget?.rollbackReserveBytes
                 : nil,
+      adaptivePrecisionMetadataBytes: request.platformUnlockBudget?.enabled == true
+        ? request.platformUnlockBudget?.adaptivePrecisionMetadataBytes
+        : nil,
+      semanticMemoryBytes: request.platformUnlockBudget?.enabled == true
+        ? request.platformUnlockBudget?.semanticMemoryBytes
+        : nil,
+      multimodalMemoryBytes: request.platformUnlockBudget?.enabled == true
+        ? request.platformUnlockBudget?.multimodalMemoryBytes
+        : nil,
+      agentWorkingMemoryBytes: request.platformUnlockBudget?.enabled == true
+        ? request.platformUnlockBudget?.agentWorkingMemoryBytes
+        : nil,
+      openKVFormatMetadataBytes: request.platformUnlockBudget?.enabled == true
+        ? request.platformUnlockBudget?.openKVFormatMetadataBytes
+        : nil,
+      deviceMeshSyncBytes: request.platformUnlockBudget?.enabled == true
+        ? request.platformUnlockBudget?.deviceMeshSyncBytes
+        : nil,
+      personalizationAdapterBytes: request.platformUnlockBudget?.enabled == true
+        ? request.platformUnlockBudget?.personalizationAdapterBytes
+        : nil,
             metalScratchReserveBytes: request.metalScratchReserveBytes,
             uiReserveBytes: request.uiReserveBytes,
             safetyReserveBytes: safetyReserve

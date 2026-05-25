@@ -52,6 +52,7 @@ Use [Worker Launch Schedule](14-worker-launch-schedule.md) as the primary execut
 - Wave 4: context and persistence.
 - Wave 5: optimization.
 - Wave 6: speculative decode and platform unlocks.
+- Wave 7: W29+/MVP 6 platform-unlock contracts and fail-closed gates.
 
 Use [Worker Ownership](08-worker-ownership.md) for file ownership and PR rules, and [Complete Task Inventory](13-complete-task-inventory.md) for the full backlog. The schedule is the launch order; the inventory is the scope catalogue.
 
@@ -87,6 +88,10 @@ These apply to all repos and all branches.
 | MVP 4 | Kernel/storage optimization | hidden-copy audit passes; kernel warmup exists; Layout V5 is gated; popcount offset path and fused specializations are benchmarked; quality gates remain green |
 | MVP 5 | Speculative TurboQuant | tentative cache append is rollback-safe; accepted tokens match target; poor acceptance disables speculation; Fast mode improves p50 decode speed |
 | MVP 6 | Platform unlocks | adaptive precision, semantic memory, multimodal memory, agents, open format, device mesh, and personalization/adapters |
+
+Wave 7 progress is tracked in [Wave 7 Changelog](Wave7-changelog.md). Wave 7
+implements W29+/MVP 6 platform contracts end to end while keeping every platform
+feature disabled by default, kill-switched, and evidence-required.
 
 ## Implementation principle
 

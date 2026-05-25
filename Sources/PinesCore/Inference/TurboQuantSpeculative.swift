@@ -142,12 +142,15 @@ public struct TurboQuantSpeculativeAutoDisablePolicy: Hashable, Codable, Sendabl
 
     public static let productDefault = Self()
 
-    public func evaluate(_ telemetry: TurboQuantSpeculativeTelemetry) -> TurboQuantSpeculativeAutoDisableDecision {
+  public func evaluate(_ telemetry: TurboQuantSpeculativeTelemetry)
+    -> TurboQuantSpeculativeAutoDisableDecision
+  {
         guard telemetry.state == .active || telemetry.state == .eligible else {
             return .keepEnabled
         }
         if requireTokenizerCompatibility, telemetry.tokenizerCompatible == false {
-            return disable(.tokenizerMismatch, telemetry, "Draft and target tokenizers are not compatible.")
+      return disable(
+        .tokenizerMismatch, telemetry, "Draft and target tokenizers are not compatible.")
         }
         if requireTargetSequenceMatch, telemetry.targetSequenceMatched == false {
             return TurboQuantSpeculativeAutoDisableDecision(
@@ -173,10 +176,12 @@ public struct TurboQuantSpeculativeAutoDisablePolicy: Hashable, Codable, Sendabl
             return .keepEnabled
         }
         if let acceptanceRate = telemetry.acceptanceRate, acceptanceRate < minimumAcceptanceRate {
-            return disable(.lowAcceptance, telemetry, "Speculative acceptance fell below the policy threshold.")
+      return disable(
+        .lowAcceptance, telemetry, "Speculative acceptance fell below the policy threshold.")
         }
         if let speedup = telemetry.p50DecodeSpeedup, speedup < minimumP50DecodeSpeedup {
-            return disable(.noDecodeSpeedup, telemetry, "Speculative decode did not improve p50 decode throughput.")
+      return disable(
+        .noDecodeSpeedup, telemetry, "Speculative decode did not improve p50 decode throughput.")
         }
         return .keepEnabled
     }
@@ -403,30 +408,63 @@ public struct TurboQuantSpeculativeAdmissionBudget: Hashable, Codable, Sendable 
 
 public enum TurboQuantPlatformFeatureID: String, Codable, Sendable, CaseIterable {
     case adaptivePrecision
+  case segmentPrecision
+  case layerSensitivity
+  case headSensitivity
     case semanticMemory
+  case userFactStore
     case multimodalMemory
+  case audioTranscriptMemory
+  case imageMemory
     case agentWorkingMemory
+  case toolStatePinning
     case openKVFormat
+  case safetensorsLayout
+  case externalConverter
     case deviceMesh
+  case encryptedLANSync
     case personalizationAdapters
+  case localAdapters
     case platformKillSwitches
 
     public var displayName: String {
         switch self {
         case .adaptivePrecision:
             "Adaptive precision"
+    case .segmentPrecision:
+      "Segment precision"
+    case .layerSensitivity:
+      "Layer sensitivity"
+    case .headSensitivity:
+      "Head sensitivity"
         case .semanticMemory:
             "Semantic memory"
+    case .userFactStore:
+      "User fact store"
         case .multimodalMemory:
             "Multimodal memory"
+    case .audioTranscriptMemory:
+      "Audio transcript memory"
+    case .imageMemory:
+      "Image memory"
         case .agentWorkingMemory:
             "Agent working memory"
+    case .toolStatePinning:
+      "Tool-state pinning"
         case .openKVFormat:
             "Open KV format"
+    case .safetensorsLayout:
+      "Safetensors layout"
+    case .externalConverter:
+      "External converter"
         case .deviceMesh:
             "Device mesh"
+    case .encryptedLANSync:
+      "Encrypted LAN sync"
         case .personalizationAdapters:
             "Personalization adapters"
+    case .localAdapters:
+      "Local adapters"
         case .platformKillSwitches:
             "Platform kill switches"
         }
@@ -475,4 +513,12 @@ public struct TurboQuantPlatformFeatureGate: Hashable, Codable, Sendable {
             notes: "Wave 6 design/schema gate only; product activation requires explicit evidence gates."
         )
     }
+
+  public static let wave7DisabledDefaults: [Self] = TurboQuantPlatformFeatureID.allCases.map {
+    Self(
+      featureID: $0,
+      notes:
+        "Wave 7 platform gate only; product activation requires green compatibility and explicit evidence gates."
+    )
+  }
 }

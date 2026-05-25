@@ -1103,11 +1103,12 @@ actor GRDBPinesStore:
                      device_class, hardware_model, os_build, user_mode, turboquant_preset,
                      value_bits, group_size, layout_version, active_attention_path,
                      speculative_dimensions_json, speculative_telemetry_json, speculative_auto_disable_json,
+                     platform_evidence_dimensions_json,
                      admitted_context_tokens, peak_memory_bytes, prompt_tokens_per_second,
                      decode_tokens_per_second_p50, decode_tokens_per_second_p95,
                      first_token_latency_ms, quality_gate_json, memory_calibration_sample_id,
                      revoked_reason, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     evidence_level = excluded.evidence_level,
                     compatibility_pair_id = excluded.compatibility_pair_id,
@@ -1128,6 +1129,7 @@ actor GRDBPinesStore:
                     speculative_dimensions_json = excluded.speculative_dimensions_json,
                     speculative_telemetry_json = excluded.speculative_telemetry_json,
                     speculative_auto_disable_json = excluded.speculative_auto_disable_json,
+                    platform_evidence_dimensions_json = excluded.platform_evidence_dimensions_json,
                     admitted_context_tokens = excluded.admitted_context_tokens,
                     peak_memory_bytes = excluded.peak_memory_bytes,
                     prompt_tokens_per_second = excluded.prompt_tokens_per_second,
@@ -1161,6 +1163,7 @@ actor GRDBPinesStore:
                     Self.encodeJSON(evidence.speculativeDimensions),
                     Self.encodeJSON(evidence.speculativeTelemetry),
                     Self.encodeJSON(evidence.speculativeAutoDisableDecision),
+                    Self.encodeJSON(evidence.platformEvidenceDimensions),
                     evidence.admittedContextTokens,
                     evidence.peakMemoryBytes,
                     evidence.promptTokensPerSecond,
@@ -1189,6 +1192,7 @@ actor GRDBPinesStore:
         fallbackContractHash: String? = nil,
         layoutVersion: Int? = nil,
         speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions? = nil,
+        platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions? = nil,
         minimumContextTokens: Int = 0
     ) async throws -> RuntimeProfileEvidence? {
         try await database.read { db in
@@ -1242,6 +1246,13 @@ actor GRDBPinesStore:
             } else {
                 conditions.append("(speculative_dimensions_json IS NULL OR speculative_dimensions_json = ?)")
                 _ = arguments.append(contentsOf: StatementArguments([Self.encodeJSON(TurboQuantSpeculativeEvidenceDimensions.disabled) ?? "null"]))
+            }
+            if let platformEvidenceDimensions {
+                conditions.append("platform_evidence_dimensions_json = ?")
+                _ = arguments.append(contentsOf: StatementArguments([Self.encodeJSON(platformEvidenceDimensions) ?? "null"]))
+            } else {
+                conditions.append("(platform_evidence_dimensions_json IS NULL OR platform_evidence_dimensions_json = ?)")
+                _ = arguments.append(contentsOf: StatementArguments([Self.encodeJSON(TurboQuantPlatformEvidenceDimensions.disabled) ?? "null"]))
             }
 
             return try Row.fetchOne(

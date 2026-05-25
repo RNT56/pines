@@ -33,7 +33,12 @@
     "ModelProfile": 2,
     "TurboQuantLayout": 4,
     "TurboQuantLayoutNext": 5,
-    "AdaptivePrecisionPolicy": 1
+    "AdaptivePrecisionPolicy": 1,
+    "SpeculativeDecode": 1,
+    "PlatformFeatureGate": 1,
+    "PlatformUnlockPolicy": 1,
+    "OpenKVFormat": 1,
+    "PlatformEvidenceDimensions": 1
   },
   "validatedAt": null,
   "validationCommands": [

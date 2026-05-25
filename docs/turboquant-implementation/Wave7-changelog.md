@@ -1,0 +1,137 @@
+# Wave 7 Changelog
+
+Read this alongside:
+
+- `14-worker-launch-schedule.md`
+- `15-pr-merge-plan.md`
+- `08-worker-ownership.md`
+- `12-validation-and-release-gates.md`
+- `13-complete-task-inventory.md`
+
+Wave 7 is the post-Wave-6 W29+/MVP 6 platform-unlock implementation lane. The
+central schedule does not define a named Wave 7, so this changelog scopes Wave 7
+to the remaining W29+ platform backlog while preserving all Wave 6 release gates.
+
+## 2026-05-25
+
+### Start State
+
+- Pines Wave 7 branch: `tq/wave7-platform-unlocks`.
+- Pines branch base: `d35e685` from `tq/pines-speculative`.
+- `mlx-swift-lm` Wave 7 branch: `tq/wave7-lm-platform`.
+- `mlx-swift-lm` branch base: `bb993db` from `tq/lm-speculative`.
+- `mlx-swift` Wave 7 branch: `tq/wave7-core-platform`.
+- `mlx-swift` branch base: `741fa31` from `tq/layout-v5-kernels`.
+- `compatibility-pair.json` remains `pending`; Wave 7 must not promote Verified,
+  Certified, Fast, adaptive precision, open-format, mesh, memory, or agent
+  product claims without a green compatibility pair and evidence.
+- Full local Xcode package/app validation remains blocked by the known
+  `xcodebuild -resolvePackageDependencies` stall.
+- Pines retains the pre-existing generated scheme drift in:
+  - `Pines.xcodeproj/xcshareddata/xcschemes/Pines.xcscheme`
+  - `Pines.xcodeproj/xcshareddata/xcschemes/PinesWatch.xcscheme`
+
+### Wave 7 Scope
+
+- W29+ platform unlock contracts:
+  - adaptive precision;
+  - segment precision;
+  - layer and head sensitivity metadata;
+  - semantic memory and user fact store policy;
+  - multimodal memory policy;
+  - local agent memory and tool-state pinning policy;
+  - open KV format and safetensors/export metadata;
+  - device mesh and encrypted LAN sync policy;
+  - personalization/adapters policy;
+  - release kill-switch hardening.
+- All features remain disabled by default, kill-switched, and evidence-required.
+- Product activation is out of scope until release gates are explicitly green.
+
+### Constraints
+
+- Do not edit production pins, `project.yml`, `Package.resolved`, or generated
+  Xcode project files for Wave 7.
+- Do not edit `Pines/Runtime/MLXRuntimeBridge.swift` unless Wave 7 explicitly
+  creates a serialized INT owner.
+- Keep semantic memory and KV snapshots distinct.
+- Keep open KV format local/export metadata fail-closed until identity,
+  encryption, and evidence policies are satisfied.
+- Do not change speculative DTO compatibility unless all evidence and importer
+  dimensions are migrated together.
+
+### Progress
+
+- Created this Wave 7 progress log before implementation edits.
+- Created Wave 7 branches for Pines, `mlx-swift-lm`, and `mlx-swift`.
+- Launched parallel implementation workers for:
+  - Core MLX Wave 7 platform/adaptive/open-format contracts;
+  - LM Wave 7 platform/adaptive/open-format contracts.
+- Pines owns the central Wave 7 platform gates, admission/evidence shims, schema
+  registry, persistence-facing DTOs, and tests.
+
+### Completed Implementation
+
+- Pines:
+  - Added fail-closed Wave 7 platform-unlock DTOs for adaptive precision,
+    precision segments, sensitivity metadata, semantic/multimodal/agent memory,
+    open KV format, device mesh, personalization/adapters, platform evidence,
+    and admission budget accounting.
+  - Expanded platform feature IDs to cover the W29+/MVP 6 backlog and made the
+    runtime default set the Wave 7 disabled-default matrix.
+  - Threaded optional platform-unlock budget into local runtime admission memory
+    zones without enabling any product behavior by default.
+  - Added platform evidence dimensions to run decisions, benchmark runtime
+    imports, profile evidence lookup/conflict checks, and GRDB evidence
+    persistence.
+  - Added database migration 23, schema-registry entries, compatibility-pair
+    schema names, and Wave 7 contract tests.
+  - Updated central docs, worker ownership, launch/merge plan, inventory, and
+    schema-registry documentation for Wave 7.
+- `mlx-swift`:
+  - Added core-only platform policy contracts for Wave 7 feature gates,
+    adaptive precision policy, precision segments, open KV descriptors, and
+    evidence-gated activation.
+  - Added focused Wave 7 core platform tests and updated core worker docs.
+- `mlx-swift-lm`:
+  - Added LM-only Wave 7 platform policy contracts for adaptive precision,
+    semantic memory, agent memory, open KV, personalization/adapters, and
+    evidence-gated activation.
+  - Added focused LM Wave 7 platform tests.
+
+### Validation
+
+- Pines:
+  - `swift test --filter TurboQuantWave7PlatformTests` passed.
+  - `swift test --filter 'TurboQuantWave7PlatformTests|CoreContractTests/turboQuantSchemaRegistryExposesCanonicalWave0Names|CoreContractTests/openAIParityMigrationAddsTablesAndRunProvenance'` passed.
+  - `swift test --filter 'TurboQuantWave6SpeculativeTests|TurboQuantWave7PlatformTests'` passed.
+  - `swift build` passed.
+  - `swift test --disable-automatic-resolution` passed.
+  - `swift run --disable-automatic-resolution PinesCoreTestRunner` passed.
+  - `git diff --check` passed.
+- `mlx-swift-lm`:
+  - `swift test --filter TurboQuantWave7PlatformTests` passed.
+  - Full `swift test` passed.
+  - `swift build --target MLXLMCommon` passed.
+  - `git diff --check` passed.
+- `mlx-swift`:
+  - `swift test --filter TurboQuantWave7PlatformPolicyTests` passed.
+  - `swift test --filter 'TurboQuantContractsTests|TurboQuantValidationTests|TurboQuantAttentionRouterTests|TurboQuantBenchmarkReportTests'` passed.
+  - `swift build` passed.
+  - `git diff --check` passed.
+  - Full `swift test` remains blocked by the pre-existing Metal library compile
+    failure in `MLXArrayIndexingTests.testFullIndexReadArray`:
+    `general_reduce_looped` is undeclared while compiling
+    `mlx/backend/metal/kernels/reduce.h`.
+
+### Exit State
+
+- Wave 7 platform contracts are implemented across Pines, `mlx-swift`, and
+  `mlx-swift-lm`.
+- All Wave 7 features remain disabled by default, kill-switched, and
+  evidence-required.
+- No Wave 7 product claim is promoted while `compatibility-pair.json` remains
+  pending.
+- Full local Xcode package/app validation remains blocked by the known
+  `xcodebuild -resolvePackageDependencies` stall.
+- The pre-existing Pines generated scheme drift remains uncommitted and outside
+  Wave 7 implementation scope.

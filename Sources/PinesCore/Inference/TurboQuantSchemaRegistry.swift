@@ -18,6 +18,9 @@ public enum TurboQuantSchemaName: String, Codable, Sendable, CaseIterable {
     case adaptivePrecisionPolicy = "AdaptivePrecisionPolicy"
     case speculativeDecode = "SpeculativeDecode"
     case platformFeatureGate = "PlatformFeatureGate"
+  case platformUnlockPolicy = "PlatformUnlockPolicy"
+  case openKVFormat = "OpenKVFormat"
+  case platformEvidenceDimensions = "PlatformEvidenceDimensions"
 }
 
 public struct TurboQuantSchemaDefinition: Hashable, Codable, Sendable {
@@ -32,22 +35,37 @@ public struct TurboQuantSchemaDefinition: Hashable, Codable, Sendable {
 
 public enum TurboQuantSchemaRegistry {
     public static let admissionPlan = TurboQuantSchemaDefinition(name: .admissionPlan, version: 1)
-    public static let runtimeMemoryZones = TurboQuantSchemaDefinition(name: .runtimeMemoryZones, version: 1)
+  public static let runtimeMemoryZones = TurboQuantSchemaDefinition(
+    name: .runtimeMemoryZones, version: 1)
     public static let runDecision = TurboQuantSchemaDefinition(name: .runDecision, version: 1)
     public static let failureEvent = TurboQuantSchemaDefinition(name: .failureEvent, version: 1)
     public static let benchmarkReport = TurboQuantSchemaDefinition(name: .benchmarkReport, version: 1)
     public static let profileEvidence = TurboQuantSchemaDefinition(name: .profileEvidence, version: 1)
     public static let qualityGate = TurboQuantSchemaDefinition(name: .qualityGate, version: 1)
-    public static let memoryCalibration = TurboQuantSchemaDefinition(name: .memoryCalibration, version: 1)
-    public static let contextAssemblyPlan = TurboQuantSchemaDefinition(name: .contextAssemblyPlan, version: 1)
-    public static let kvSnapshotManifest = TurboQuantSchemaDefinition(name: .kvSnapshotManifest, version: 1)
-    public static let snapshotSecurityPolicy = TurboQuantSchemaDefinition(name: .snapshotSecurityPolicy, version: 1)
+  public static let memoryCalibration = TurboQuantSchemaDefinition(
+    name: .memoryCalibration, version: 1)
+  public static let contextAssemblyPlan = TurboQuantSchemaDefinition(
+    name: .contextAssemblyPlan, version: 1)
+  public static let kvSnapshotManifest = TurboQuantSchemaDefinition(
+    name: .kvSnapshotManifest, version: 1)
+  public static let snapshotSecurityPolicy = TurboQuantSchemaDefinition(
+    name: .snapshotSecurityPolicy, version: 1)
     public static let modelProfile = TurboQuantSchemaDefinition(name: .modelProfile, version: 2)
-    public static let turboQuantLayout = TurboQuantSchemaDefinition(name: .turboQuantLayout, version: 4)
-    public static let turboQuantLayoutNext = TurboQuantSchemaDefinition(name: .turboQuantLayoutNext, version: 5)
-    public static let adaptivePrecisionPolicy = TurboQuantSchemaDefinition(name: .adaptivePrecisionPolicy, version: 1)
-    public static let speculativeDecode = TurboQuantSchemaDefinition(name: .speculativeDecode, version: 1)
-    public static let platformFeatureGate = TurboQuantSchemaDefinition(name: .platformFeatureGate, version: 1)
+  public static let turboQuantLayout = TurboQuantSchemaDefinition(
+    name: .turboQuantLayout, version: 4)
+  public static let turboQuantLayoutNext = TurboQuantSchemaDefinition(
+    name: .turboQuantLayoutNext, version: 5)
+  public static let adaptivePrecisionPolicy = TurboQuantSchemaDefinition(
+    name: .adaptivePrecisionPolicy, version: 1)
+  public static let speculativeDecode = TurboQuantSchemaDefinition(
+    name: .speculativeDecode, version: 1)
+  public static let platformFeatureGate = TurboQuantSchemaDefinition(
+    name: .platformFeatureGate, version: 1)
+  public static let platformUnlockPolicy = TurboQuantSchemaDefinition(
+    name: .platformUnlockPolicy, version: 1)
+  public static let openKVFormat = TurboQuantSchemaDefinition(name: .openKVFormat, version: 1)
+  public static let platformEvidenceDimensions = TurboQuantSchemaDefinition(
+    name: .platformEvidenceDimensions, version: 1)
 
     public static let allDefinitions: [TurboQuantSchemaDefinition] = [
         admissionPlan,
@@ -67,6 +85,9 @@ public enum TurboQuantSchemaRegistry {
         adaptivePrecisionPolicy,
         speculativeDecode,
         platformFeatureGate,
+    platformUnlockPolicy,
+    openKVFormat,
+    platformEvidenceDimensions,
     ]
 
     public static let versionsByName: [TurboQuantSchemaName: Int] = Dictionary(

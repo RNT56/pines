@@ -36,6 +36,7 @@ public struct RuntimeProfileEvidence: Hashable, Codable, Sendable, Identifiable 
     public var speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions?
     public var speculativeTelemetry: TurboQuantSpeculativeTelemetry?
     public var speculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision?
+  public var platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions?
     public var admittedContextTokens: Int
     public var peakMemoryBytes: Int64
     public var promptTokensPerSecond: Double?
@@ -69,6 +70,7 @@ public struct RuntimeProfileEvidence: Hashable, Codable, Sendable, Identifiable 
         speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions? = nil,
         speculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
         speculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil,
+    platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions? = nil,
         admittedContextTokens: Int,
         peakMemoryBytes: Int64,
         promptTokensPerSecond: Double? = nil,
@@ -101,6 +103,7 @@ public struct RuntimeProfileEvidence: Hashable, Codable, Sendable, Identifiable 
         self.speculativeDimensions = speculativeDimensions
         self.speculativeTelemetry = speculativeTelemetry
         self.speculativeAutoDisableDecision = speculativeAutoDisableDecision
+    self.platformEvidenceDimensions = platformEvidenceDimensions
         self.admittedContextTokens = max(0, admittedContextTokens)
         self.peakMemoryBytes = max(0, peakMemoryBytes)
         self.promptTokensPerSecond = promptTokensPerSecond
@@ -184,6 +187,7 @@ public actor ProfileEvidenceStore {
         fallbackContractHash: String,
         layoutVersion: Int?,
         speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions? = nil,
+    platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions? = nil,
         minimumContextTokens: Int
     ) -> RuntimeProfileEvidence? {
         records.values
@@ -200,6 +204,7 @@ public actor ProfileEvidenceStore {
                     && $0.fallbackContractHash == fallbackContractHash
                     && $0.layoutVersion == layoutVersion
                     && ($0.speculativeDimensions ?? .disabled).matches(speculativeDimensions)
+          && ($0.platformEvidenceDimensions ?? .disabled).matches(platformEvidenceDimensions)
                     && $0.admittedContextTokens >= minimumContextTokens
                     && $0.evidenceLevel.canMakeProductCompatibilityClaim
                     && $0.revokedReason == nil
@@ -250,9 +255,12 @@ public actor ProfileEvidenceStore {
         revocations.sorted { $0.revokedAt > $1.revokedAt }
     }
 
-    private func revokeConflictingEvidence(replacedBy replacement: RuntimeProfileEvidence) -> [RuntimeEvidenceRevocation] {
+  private func revokeConflictingEvidence(replacedBy replacement: RuntimeProfileEvidence)
+    -> [RuntimeEvidenceRevocation]
+  {
         var revoked: [RuntimeEvidenceRevocation] = []
-        for record in records.values where conflicts(record, replacement) && record.evidenceLevel != .revoked {
+    for record in records.values
+    where conflicts(record, replacement) && record.evidenceLevel != .revoked {
             if let revocation = revoke(
                 id: record.id,
                 reason: "superseded by newer benchmark evidence",
@@ -278,6 +286,7 @@ public actor ProfileEvidenceStore {
             && lhs.layoutVersion == rhs.layoutVersion
             && lhs.activeAttentionPath == rhs.activeAttentionPath
             && (lhs.speculativeDimensions ?? .disabled).matches(rhs.speculativeDimensions)
+      && (lhs.platformEvidenceDimensions ?? .disabled).matches(rhs.platformEvidenceDimensions)
             && lhs.admittedContextTokens == rhs.admittedContextTokens
             && lhs.id != rhs.id
     }
@@ -298,6 +307,7 @@ public protocol TurboQuantEvidenceRepository: Sendable {
         fallbackContractHash: String?,
         layoutVersion: Int?,
         speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions?,
+    platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions?,
         minimumContextTokens: Int
     ) async throws -> RuntimeProfileEvidence?
     func listTurboQuantProfileEvidence(modelID: String?) async throws -> [RuntimeProfileEvidence]

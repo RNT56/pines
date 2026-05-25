@@ -14,6 +14,13 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
     public var speculativeDraftModelBytes: Int64?
     public var speculativeDraftKVBytes: Int64?
     public var speculativeRollbackReserveBytes: Int64?
+  public var adaptivePrecisionMetadataBytes: Int64?
+  public var semanticMemoryBytes: Int64?
+  public var multimodalMemoryBytes: Int64?
+  public var agentWorkingMemoryBytes: Int64?
+  public var openKVFormatMetadataBytes: Int64?
+  public var deviceMeshSyncBytes: Int64?
+  public var personalizationAdapterBytes: Int64?
     public var metalScratchReserveBytes: Int64
     public var uiReserveBytes: Int64
     public var safetyReserveBytes: Int64
@@ -30,6 +37,13 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
             + (speculativeDraftModelBytes ?? 0)
             + (speculativeDraftKVBytes ?? 0)
             + (speculativeRollbackReserveBytes ?? 0)
+      + (adaptivePrecisionMetadataBytes ?? 0)
+      + (semanticMemoryBytes ?? 0)
+      + (multimodalMemoryBytes ?? 0)
+      + (agentWorkingMemoryBytes ?? 0)
+      + (openKVFormatMetadataBytes ?? 0)
+      + (deviceMeshSyncBytes ?? 0)
+      + (personalizationAdapterBytes ?? 0)
             + metalScratchReserveBytes
             + uiReserveBytes
             + safetyReserveBytes
@@ -51,6 +65,13 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
             speculativeDraftModelBytes ?? 0,
             speculativeDraftKVBytes ?? 0,
             speculativeRollbackReserveBytes ?? 0,
+      adaptivePrecisionMetadataBytes ?? 0,
+      semanticMemoryBytes ?? 0,
+      multimodalMemoryBytes ?? 0,
+      agentWorkingMemoryBytes ?? 0,
+      openKVFormatMetadataBytes ?? 0,
+      deviceMeshSyncBytes ?? 0,
+      personalizationAdapterBytes ?? 0,
             metalScratchReserveBytes,
             uiReserveBytes,
             safetyReserveBytes,
@@ -70,6 +91,13 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
         speculativeDraftModelBytes: Int64? = nil,
         speculativeDraftKVBytes: Int64? = nil,
         speculativeRollbackReserveBytes: Int64? = nil,
+    adaptivePrecisionMetadataBytes: Int64? = nil,
+    semanticMemoryBytes: Int64? = nil,
+    multimodalMemoryBytes: Int64? = nil,
+    agentWorkingMemoryBytes: Int64? = nil,
+    openKVFormatMetadataBytes: Int64? = nil,
+    deviceMeshSyncBytes: Int64? = nil,
+    personalizationAdapterBytes: Int64? = nil,
         metalScratchReserveBytes: Int64,
         uiReserveBytes: Int64,
         safetyReserveBytes: Int64,
@@ -86,6 +114,13 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
         self.speculativeDraftModelBytes = speculativeDraftModelBytes.map { max(0, $0) }
         self.speculativeDraftKVBytes = speculativeDraftKVBytes.map { max(0, $0) }
         self.speculativeRollbackReserveBytes = speculativeRollbackReserveBytes.map { max(0, $0) }
+    self.adaptivePrecisionMetadataBytes = adaptivePrecisionMetadataBytes.map { max(0, $0) }
+    self.semanticMemoryBytes = semanticMemoryBytes.map { max(0, $0) }
+    self.multimodalMemoryBytes = multimodalMemoryBytes.map { max(0, $0) }
+    self.agentWorkingMemoryBytes = agentWorkingMemoryBytes.map { max(0, $0) }
+    self.openKVFormatMetadataBytes = openKVFormatMetadataBytes.map { max(0, $0) }
+    self.deviceMeshSyncBytes = deviceMeshSyncBytes.map { max(0, $0) }
+    self.personalizationAdapterBytes = personalizationAdapterBytes.map { max(0, $0) }
         self.metalScratchReserveBytes = max(0, metalScratchReserveBytes)
         self.uiReserveBytes = max(0, uiReserveBytes)
         self.safetyReserveBytes = max(0, safetyReserveBytes)
@@ -101,6 +136,13 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
             + (self.speculativeDraftModelBytes ?? 0)
             + (self.speculativeDraftKVBytes ?? 0)
             + (self.speculativeRollbackReserveBytes ?? 0)
+      + (self.adaptivePrecisionMetadataBytes ?? 0)
+      + (self.semanticMemoryBytes ?? 0)
+      + (self.multimodalMemoryBytes ?? 0)
+      + (self.agentWorkingMemoryBytes ?? 0)
+      + (self.openKVFormatMetadataBytes ?? 0)
+      + (self.deviceMeshSyncBytes ?? 0)
+      + (self.personalizationAdapterBytes ?? 0)
             + self.metalScratchReserveBytes
             + self.uiReserveBytes
             + self.safetyReserveBytes

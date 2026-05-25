@@ -569,7 +569,7 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_dimensions_json"), "missing speculative evidence dimensions column")
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_telemetry_json"), "missing speculative telemetry column")
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json"), "missing speculative auto-disable column")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 22)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 23)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")

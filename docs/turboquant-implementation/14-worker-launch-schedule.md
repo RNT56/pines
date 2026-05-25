@@ -293,6 +293,33 @@ Wave 6 exit criteria:
 - poor acceptance disables speculation;
 - Fast mode improvement is evidence-backed.
 
+## Wave 7 - Platform unlock contracts
+
+Purpose:
+
+Complete the W29+/MVP 6 platform contract surface after Wave 6 speculative
+decode. Wave 7 adds fail-closed contracts, evidence dimensions, and admission
+budgeting for platform unlocks, but does not product-activate them.
+
+Workers:
+
+| Worker | Repo | Branch | Prerequisites | Output |
+| --- | --- | --- | --- | --- |
+| W29-core | `mlx-swift` | `tq/wave7-core-platform` | Wave 5/6 heads | adaptive precision/open-KV capability contracts |
+| W29-lm | `mlx-swift-lm` | `tq/wave7-lm-platform` | W14A, W15A | LM platform policy and open-KV identity contracts |
+| W29-pines | `pines` | `tq/wave7-platform-unlocks` | W15B | Pines platform gates, admission/evidence dimensions, persistence, tests |
+
+Wave 7 exit criteria:
+
+- adaptive precision, memory-plane, open-KV, mesh, and adapter policies encode
+  and validate;
+- all platform features remain disabled by default, kill-switched, and
+  evidence-required;
+- admission budgets platform reserves when requested;
+- benchmark evidence records platform dimensions and matches them exactly;
+- persistence can store and query platform evidence dimensions;
+- no production pins, generated project files, or runtime bridge ownership move.
+
 ## Quick start recommendation
 
 If starting implementation now, launch these in parallel:
