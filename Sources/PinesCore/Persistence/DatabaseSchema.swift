@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 20
+    public static let currentVersion = 21
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -1163,6 +1163,91 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_tuple ON turboquant_profile_evidence(model_id, model_revision, tokenizer_hash, profile_hash, layout_version, created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_turboquant_memory_samples_lookup ON turboquant_memory_calibration_samples(model_id, device_class, user_mode, attention_path, created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_turboquant_memory_calibrations_lookup ON turboquant_memory_calibrations(device_class, model_family, attention_path, updated_at DESC);",
+        ]),
+        DatabaseMigration(version: 21, name: "turboquant-kv-snapshot-store", sql: [
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_manifest (
+                snapshot_id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                model_id TEXT NOT NULL REFERENCES model_installs(repository) ON DELETE CASCADE,
+                model_revision TEXT,
+                tokenizer_hash TEXT NOT NULL,
+                profile_hash TEXT NOT NULL,
+                turboquant_layout_version INTEGER NOT NULL,
+                rope_config_hash TEXT NOT NULL,
+                token_prefix_hash TEXT NOT NULL,
+                fallback_contract_hash TEXT,
+                logical_length INTEGER NOT NULL,
+                pinned_prefix_length INTEGER NOT NULL,
+                compressed_key_bytes INTEGER NOT NULL,
+                compressed_value_bytes INTEGER NOT NULL,
+                blob_byte_count INTEGER NOT NULL,
+                encryption_key_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                invalidated_reason TEXT,
+                created_at REAL NOT NULL,
+                last_validated_at REAL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_blob (
+                snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES kv_snapshot_manifest(snapshot_id) ON DELETE CASCADE,
+                storage_location TEXT NOT NULL,
+                relative_path TEXT,
+                encrypted_blob BLOB,
+                encrypted_byte_count INTEGER NOT NULL,
+                integrity_checksum TEXT NOT NULL,
+                encryption_key_id TEXT NOT NULL,
+                cloud_sync_allowed INTEGER NOT NULL DEFAULT 0,
+                excluded_from_backup INTEGER NOT NULL DEFAULT 1,
+                created_at REAL NOT NULL,
+                committed_at REAL,
+                last_verified_at REAL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_reference (
+                id TEXT PRIMARY KEY NOT NULL,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                snapshot_id TEXT NOT NULL REFERENCES kv_snapshot_manifest(snapshot_id) ON DELETE CASCADE,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL DEFAULT 'active',
+                created_at REAL NOT NULL,
+                last_used_at REAL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_restore_attempt (
+                id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                snapshot_id TEXT,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                attempted_at REAL NOT NULL,
+                result TEXT NOT NULL,
+                failure_reason TEXT,
+                expected_identity_json TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_quarantine (
+                id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                snapshot_id TEXT,
+                conversation_id TEXT,
+                stage TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                blob_byte_count INTEGER NOT NULL,
+                quarantined_at REAL NOT NULL,
+                resolved_at REAL
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_manifest_conversation ON kv_snapshot_manifest(conversation_id, status, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_manifest_model ON kv_snapshot_manifest(model_id, model_revision, status, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_manifest_identity ON kv_snapshot_manifest(model_id, model_revision, tokenizer_hash, profile_hash, turboquant_layout_version, rope_config_hash, token_prefix_hash, logical_length);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_reference_conversation ON kv_snapshot_reference(conversation_id, state, last_used_at DESC, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_restore_attempt_conversation ON kv_snapshot_restore_attempt(conversation_id, attempted_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_quarantine_snapshot ON kv_snapshot_quarantine(snapshot_id, quarantined_at DESC);",
         ]),
     ]
 }

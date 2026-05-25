@@ -2276,7 +2276,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 20)
+        #expect(PinesDatabaseSchema.currentVersion == 21)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
         let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
         let projectSpacesMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 16 })
@@ -2347,6 +2347,21 @@ struct CoreContractTests {
         let cacheTopologySQL = cacheTopologyMigration.sql.joined(separator: "\n")
         #expect(cacheTopologySQL.contains("ALTER TABLE model_installs ADD COLUMN cache_topology"))
         #expect(cacheTopologySQL.contains("ALTER TABLE model_installs ADD COLUMN turbo_quant_family_support"))
+
+        let snapshotMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 21 })
+        let snapshotSQL = snapshotMigration.sql.joined(separator: "\n")
+        for table in [
+            "kv_snapshot_manifest",
+            "kv_snapshot_blob",
+            "kv_snapshot_reference",
+            "kv_snapshot_restore_attempt",
+            "kv_snapshot_quarantine",
+        ] {
+            #expect(snapshotSQL.contains("CREATE TABLE IF NOT EXISTS \(table)"))
+        }
+        #expect(snapshotSQL.contains("cloud_sync_allowed INTEGER NOT NULL DEFAULT 0"))
+        #expect(snapshotSQL.contains("excluded_from_backup INTEGER NOT NULL DEFAULT 1"))
+        #expect(snapshotSQL.contains("REFERENCES model_installs(repository) ON DELETE CASCADE"))
     }
 
     @Test

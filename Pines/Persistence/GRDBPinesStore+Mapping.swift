@@ -198,6 +198,83 @@ extension GRDBPinesStore {
         decodeJSON(row["calibration_json"] as String?)
     }
 
+    static func kvSnapshotManifest(from row: Row) -> TurboQuantKVSnapshotManifest {
+        TurboQuantKVSnapshotManifest(
+            schemaVersion: row["schema_version"],
+            snapshotID: UUID(uuidString: row["snapshot_id"]) ?? UUID(),
+            conversationID: UUID(uuidString: row["conversation_id"]) ?? UUID(),
+            modelID: row["model_id"],
+            modelRevision: row["model_revision"] as String?,
+            tokenizerHash: row["tokenizer_hash"],
+            profileHash: row["profile_hash"],
+            turboQuantLayoutVersion: row["turboquant_layout_version"],
+            ropeConfigHash: row["rope_config_hash"],
+            tokenPrefixHash: row["token_prefix_hash"],
+            fallbackContractHash: row["fallback_contract_hash"] as String?,
+            logicalLength: row["logical_length"],
+            pinnedPrefixLength: row["pinned_prefix_length"],
+            compressedKeyBytes: row["compressed_key_bytes"],
+            compressedValueBytes: row["compressed_value_bytes"],
+            blobByteCount: row["blob_byte_count"],
+            encryptionKeyID: row["encryption_key_id"],
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
+        )
+    }
+
+    static func kvSnapshotBlob(from row: Row) -> TurboQuantKVSnapshotBlob {
+        TurboQuantKVSnapshotBlob(
+            snapshotID: UUID(uuidString: row["snapshot_id"]) ?? UUID(),
+            encryptedByteCount: row["encrypted_byte_count"],
+            integrityChecksum: row["integrity_checksum"],
+            encryptionKeyID: row["encryption_key_id"],
+            storageLocation: row["storage_location"],
+            relativePath: row["relative_path"] as String?,
+            cloudSyncAllowed: (row["cloud_sync_allowed"] as Int) == 1,
+            excludedFromBackup: (row["excluded_from_backup"] as Int) == 1,
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            lastVerifiedAt: (row["last_verified_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
+        )
+    }
+
+    static func kvSnapshotReference(from row: Row) -> TurboQuantKVSnapshotReference {
+        TurboQuantKVSnapshotReference(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            conversationID: UUID(uuidString: row["conversation_id"]) ?? UUID(),
+            snapshotID: UUID(uuidString: row["snapshot_id"]) ?? UUID(),
+            pinned: (row["pinned"] as Int) == 1,
+            state: TurboQuantKVSnapshotState(rawValue: row["state"]) ?? .invalidated,
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"]),
+            lastUsedAt: (row["last_used_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
+        )
+    }
+
+    static func kvSnapshotRestoreAttempt(from row: Row) -> TurboQuantKVSnapshotRestoreAttempt {
+        TurboQuantKVSnapshotRestoreAttempt(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            schemaVersion: row["schema_version"],
+            snapshotID: (row["snapshot_id"] as String?).flatMap(UUID.init(uuidString:)),
+            conversationID: UUID(uuidString: row["conversation_id"]) ?? UUID(),
+            attemptedAt: Date(timeIntervalSinceReferenceDate: row["attempted_at"]),
+            result: TurboQuantKVSnapshotRestoreResult(rawValue: row["result"]) ?? .rejected,
+            failureReason: row["failure_reason"] as String?,
+            expectedIdentity: decodeJSON(row["expected_identity_json"] as String?)
+        )
+    }
+
+    static func kvSnapshotQuarantine(from row: Row) -> TurboQuantKVSnapshotQuarantine {
+        TurboQuantKVSnapshotQuarantine(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            schemaVersion: row["schema_version"],
+            snapshotID: (row["snapshot_id"] as String?).flatMap(UUID.init(uuidString:)),
+            conversationID: (row["conversation_id"] as String?).flatMap(UUID.init(uuidString:)),
+            stage: TurboQuantKVSnapshotQuarantineStage(rawValue: row["stage"]) ?? .restore,
+            reason: row["reason"],
+            blobByteCount: row["blob_byte_count"],
+            quarantinedAt: Date(timeIntervalSinceReferenceDate: row["quarantined_at"]),
+            resolvedAt: (row["resolved_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
+        )
+    }
+
     static func vaultDocument(from row: Row) -> VaultDocumentRecord {
         VaultDocumentRecord(
             id: UUID(uuidString: row["id"]) ?? UUID(),

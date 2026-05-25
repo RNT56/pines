@@ -27,6 +27,7 @@ actor GRDBPinesStore:
     ModelDownloadRepository,
     AuditEventRepository,
     TurboQuantEvidenceRepository,
+    TurboQuantKVSnapshotRepository,
     AppDataResetRepository
 {
     let database: DatabasePool
@@ -217,6 +218,11 @@ actor GRDBPinesStore:
         "provider_model_capabilities",
         "provider_research_runs",
         "projects",
+        "kv_snapshot_manifest",
+        "kv_snapshot_blob",
+        "kv_snapshot_reference",
+        "kv_snapshot_restore_attempt",
+        "kv_snapshot_quarantine",
     ]
 
     private static let userResetTables = plaintextMigrationTables
@@ -840,7 +846,248 @@ actor GRDBPinesStore:
 
     func deleteInstall(repository: String) async throws {
         try await database.write { db in
+            _ = try Self.deleteKVSnapshotRows(modelID: repository, db: db)
             try db.execute(sql: "DELETE FROM model_installs WHERE repository = ?", arguments: [repository])
+        }
+    }
+
+    // MARK: - TurboQuant KV Snapshots
+
+    func commitKVSnapshot(
+        _ request: TurboQuantKVSnapshotWriteRequest,
+        policy: SnapshotSecurityPolicy
+    ) async throws -> TurboQuantKVSnapshotWriteOutcome {
+        try request.manifest.validateForStorage(policy: policy)
+
+        if !request.writeCompletedAtomically {
+            let quarantine = TurboQuantKVSnapshotQuarantine(
+                snapshotID: request.manifest.snapshotID,
+                conversationID: request.manifest.conversationID,
+                stage: .write,
+                reason: "partial_write",
+                blobByteCount: Int64(request.encryptedBlob.count),
+                quarantinedAt: request.createdAt
+            )
+            try await quarantineKVSnapshot(quarantine)
+            return TurboQuantKVSnapshotWriteOutcome(
+                disposition: .quarantined,
+                manifest: request.manifest,
+                quarantine: quarantine
+            )
+        }
+
+        guard Int64(request.encryptedBlob.count) == request.manifest.blobByteCount else {
+            let quarantine = TurboQuantKVSnapshotQuarantine(
+                snapshotID: request.manifest.snapshotID,
+                conversationID: request.manifest.conversationID,
+                stage: .write,
+                reason: "blob_byte_count_mismatch",
+                blobByteCount: Int64(request.encryptedBlob.count),
+                quarantinedAt: request.createdAt
+            )
+            try await quarantineKVSnapshot(quarantine)
+            return TurboQuantKVSnapshotWriteOutcome(
+                disposition: .quarantined,
+                manifest: request.manifest,
+                quarantine: quarantine
+            )
+        }
+
+        guard request.manifest.blobByteCount <= policy.quotaBytes else {
+            let quarantine = TurboQuantKVSnapshotQuarantine(
+                snapshotID: request.manifest.snapshotID,
+                conversationID: request.manifest.conversationID,
+                stage: .quota,
+                reason: "snapshot_exceeds_quota",
+                blobByteCount: request.manifest.blobByteCount,
+                quarantinedAt: request.createdAt
+            )
+            try await quarantineKVSnapshot(quarantine)
+            return TurboQuantKVSnapshotWriteOutcome(
+                disposition: .quarantined,
+                manifest: request.manifest,
+                quarantine: quarantine
+            )
+        }
+
+        let blob = TurboQuantKVSnapshotBlob(
+            snapshotID: request.manifest.snapshotID,
+            encryptedByteCount: request.manifest.blobByteCount,
+            integrityChecksum: TurboQuantKVSnapshotBlob.checksum(for: request.encryptedBlob),
+            encryptionKeyID: request.manifest.encryptionKeyID,
+            createdAt: request.createdAt
+        )
+        try blob.validate(encryptedBytes: request.encryptedBlob, manifest: request.manifest)
+
+        let quotaResult = try await database.write { db -> (evicted: [UUID], quarantine: TurboQuantKVSnapshotQuarantine?) in
+            try Self.upsertKVSnapshotManifest(request.manifest, state: .active, invalidatedReason: nil, lastValidatedAt: nil, db: db)
+            try Self.upsertKVSnapshotBlob(blob, encryptedBlob: request.encryptedBlob, committedAt: request.createdAt, db: db)
+            try Self.upsertKVSnapshotReference(
+                TurboQuantKVSnapshotReference(
+                    conversationID: request.manifest.conversationID,
+                    snapshotID: request.manifest.snapshotID,
+                    pinned: request.pinned,
+                    createdAt: request.createdAt
+                ),
+                db: db
+            )
+            let evicted = try Self.enforceKVSnapshotQuota(policy: policy, protecting: request.manifest.snapshotID, db: db)
+            guard try Self.activeKVSnapshotBytes(db: db) <= policy.quotaBytes else {
+                let quarantine = TurboQuantKVSnapshotQuarantine(
+                    snapshotID: request.manifest.snapshotID,
+                    conversationID: request.manifest.conversationID,
+                    stage: .quota,
+                    reason: "quota_cannot_be_enforced_without_eviction_of_pinned_snapshot",
+                    blobByteCount: request.manifest.blobByteCount,
+                    quarantinedAt: request.createdAt
+                )
+                try db.execute(
+                    sql: "UPDATE kv_snapshot_manifest SET status = ?, invalidated_reason = ? WHERE snapshot_id = ?",
+                    arguments: [TurboQuantKVSnapshotState.quarantined.rawValue, quarantine.reason, request.manifest.snapshotID.uuidString]
+                )
+                try db.execute(sql: "DELETE FROM kv_snapshot_blob WHERE snapshot_id = ?", arguments: [request.manifest.snapshotID.uuidString])
+                try db.execute(
+                    sql: "UPDATE kv_snapshot_reference SET state = ? WHERE snapshot_id = ?",
+                    arguments: [TurboQuantKVSnapshotState.quarantined.rawValue, request.manifest.snapshotID.uuidString]
+                )
+                try Self.insertKVSnapshotQuarantine(quarantine, db: db)
+                return (evicted, quarantine)
+            }
+            return (evicted, nil)
+        }
+
+        if let quarantine = quotaResult.quarantine {
+            return TurboQuantKVSnapshotWriteOutcome(
+                disposition: .quarantined,
+                manifest: request.manifest,
+                blob: blob,
+                quarantine: quarantine,
+                evictedSnapshotIDs: quotaResult.evicted
+            )
+        }
+
+        return TurboQuantKVSnapshotWriteOutcome(
+            disposition: .committed,
+            manifest: request.manifest,
+            blob: blob,
+            evictedSnapshotIDs: quotaResult.evicted
+        )
+    }
+
+    func latestKVSnapshotManifest(conversationID: UUID) async throws -> TurboQuantKVSnapshotManifest? {
+        try await database.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                SELECT m.*
+                FROM kv_snapshot_manifest m
+                JOIN kv_snapshot_blob b ON b.snapshot_id = m.snapshot_id
+                WHERE m.conversation_id = ? AND m.status = ?
+                ORDER BY m.created_at DESC
+                LIMIT 1
+                """,
+                arguments: [conversationID.uuidString, TurboQuantKVSnapshotState.active.rawValue]
+            ).map(Self.kvSnapshotManifest(from:))
+        }
+    }
+
+    func listKVSnapshotManifests(conversationID: UUID? = nil) async throws -> [TurboQuantKVSnapshotManifest] {
+        try await database.read { db in
+            let rows: [Row]
+            if let conversationID {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM kv_snapshot_manifest WHERE conversation_id = ? ORDER BY created_at DESC",
+                    arguments: [conversationID.uuidString]
+                )
+            } else {
+                rows = try Row.fetchAll(db, sql: "SELECT * FROM kv_snapshot_manifest ORDER BY created_at DESC")
+            }
+            return rows.map(Self.kvSnapshotManifest(from:))
+        }
+    }
+
+    func recordKVSnapshotRestoreAttempt(_ attempt: TurboQuantKVSnapshotRestoreAttempt) async throws {
+        try await database.write { db in
+            try Self.insertKVSnapshotRestoreAttempt(attempt, db: db)
+        }
+    }
+
+    func quarantineKVSnapshot(_ quarantine: TurboQuantKVSnapshotQuarantine) async throws {
+        try await database.write { db in
+            if let snapshotID = quarantine.snapshotID {
+                try db.execute(
+                    sql: """
+                    UPDATE kv_snapshot_manifest
+                    SET status = ?, invalidated_reason = ?
+                    WHERE snapshot_id = ?
+                    """,
+                    arguments: [TurboQuantKVSnapshotState.quarantined.rawValue, quarantine.reason, snapshotID.uuidString]
+                )
+                try db.execute(
+                    sql: "UPDATE kv_snapshot_reference SET state = ? WHERE snapshot_id = ?",
+                    arguments: [TurboQuantKVSnapshotState.quarantined.rawValue, snapshotID.uuidString]
+                )
+            }
+            try Self.insertKVSnapshotQuarantine(quarantine, db: db)
+        }
+    }
+
+    func listKVSnapshotRestoreAttempts(conversationID: UUID? = nil, limit: Int = 100) async throws -> [TurboQuantKVSnapshotRestoreAttempt] {
+        try await database.read { db in
+            let rows: [Row]
+            if let conversationID {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM kv_snapshot_restore_attempt WHERE conversation_id = ? ORDER BY attempted_at DESC LIMIT ?",
+                    arguments: [conversationID.uuidString, max(1, limit)]
+                )
+            } else {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM kv_snapshot_restore_attempt ORDER BY attempted_at DESC LIMIT ?",
+                    arguments: [max(1, limit)]
+                )
+            }
+            return rows.map(Self.kvSnapshotRestoreAttempt(from:))
+        }
+    }
+
+    func listKVSnapshotQuarantines(unresolvedOnly: Bool = true) async throws -> [TurboQuantKVSnapshotQuarantine] {
+        try await database.read { db in
+            let rows: [Row]
+            if unresolvedOnly {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM kv_snapshot_quarantine WHERE resolved_at IS NULL ORDER BY quarantined_at DESC"
+                )
+            } else {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM kv_snapshot_quarantine ORDER BY quarantined_at DESC"
+                )
+            }
+            return rows.map(Self.kvSnapshotQuarantine(from:))
+        }
+    }
+
+    func deleteKVSnapshots(modelID: String) async throws -> [UUID] {
+        try await database.write { db in
+            try Self.deleteKVSnapshotRows(modelID: modelID, db: db)
+        }
+    }
+
+    func deleteAllKVSnapshots(reason: String) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM kv_snapshot_reference")
+            try db.execute(sql: "DELETE FROM kv_snapshot_blob")
+            try db.execute(sql: "DELETE FROM kv_snapshot_manifest")
+            try db.execute(sql: "DELETE FROM kv_snapshot_restore_attempt")
+            try db.execute(sql: "DELETE FROM kv_snapshot_quarantine")
+            try Self.insertKVSnapshotQuarantine(
+                TurboQuantKVSnapshotQuarantine(stage: .deletion, reason: reason, blobByteCount: 0),
+                db: db
+            )
         }
     }
 
@@ -2793,6 +3040,251 @@ actor GRDBPinesStore:
         observationStream { db in
             try Self.fetchAuditEvents(db, category: nil, limit: limit)
         }
+    }
+
+    // MARK: - Snapshot Helpers
+
+    private static func upsertKVSnapshotManifest(
+        _ manifest: TurboQuantKVSnapshotManifest,
+        state: TurboQuantKVSnapshotState,
+        invalidatedReason: String?,
+        lastValidatedAt: Date?,
+        db: Database
+    ) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO kv_snapshot_manifest
+                (snapshot_id, schema_version, conversation_id, model_id, model_revision,
+                 tokenizer_hash, profile_hash, turboquant_layout_version, rope_config_hash,
+                 token_prefix_hash, fallback_contract_hash, logical_length, pinned_prefix_length,
+                 compressed_key_bytes, compressed_value_bytes, blob_byte_count, encryption_key_id,
+                 status, invalidated_reason, created_at, last_validated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(snapshot_id) DO UPDATE SET
+                schema_version = excluded.schema_version,
+                conversation_id = excluded.conversation_id,
+                model_id = excluded.model_id,
+                model_revision = excluded.model_revision,
+                tokenizer_hash = excluded.tokenizer_hash,
+                profile_hash = excluded.profile_hash,
+                turboquant_layout_version = excluded.turboquant_layout_version,
+                rope_config_hash = excluded.rope_config_hash,
+                token_prefix_hash = excluded.token_prefix_hash,
+                fallback_contract_hash = excluded.fallback_contract_hash,
+                logical_length = excluded.logical_length,
+                pinned_prefix_length = excluded.pinned_prefix_length,
+                compressed_key_bytes = excluded.compressed_key_bytes,
+                compressed_value_bytes = excluded.compressed_value_bytes,
+                blob_byte_count = excluded.blob_byte_count,
+                encryption_key_id = excluded.encryption_key_id,
+                status = excluded.status,
+                invalidated_reason = excluded.invalidated_reason,
+                created_at = excluded.created_at,
+                last_validated_at = excluded.last_validated_at
+            """,
+            arguments: [
+                manifest.snapshotID.uuidString,
+                manifest.schemaVersion,
+                manifest.conversationID.uuidString,
+                manifest.modelID,
+                manifest.modelRevision,
+                manifest.tokenizerHash,
+                manifest.profileHash,
+                manifest.turboQuantLayoutVersion,
+                manifest.ropeConfigHash,
+                manifest.tokenPrefixHash,
+                manifest.fallbackContractHash,
+                manifest.logicalLength,
+                manifest.pinnedPrefixLength,
+                manifest.compressedKeyBytes,
+                manifest.compressedValueBytes,
+                manifest.blobByteCount,
+                manifest.encryptionKeyID,
+                state.rawValue,
+                invalidatedReason,
+                manifest.createdAt.timeIntervalSinceReferenceDate,
+                lastValidatedAt?.timeIntervalSinceReferenceDate,
+            ]
+        )
+    }
+
+    private static func upsertKVSnapshotBlob(
+        _ blob: TurboQuantKVSnapshotBlob,
+        encryptedBlob: Data,
+        committedAt: Date,
+        db: Database
+    ) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO kv_snapshot_blob
+                (snapshot_id, storage_location, relative_path, encrypted_blob, encrypted_byte_count,
+                 integrity_checksum, encryption_key_id, cloud_sync_allowed, excluded_from_backup,
+                 created_at, committed_at, last_verified_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(snapshot_id) DO UPDATE SET
+                storage_location = excluded.storage_location,
+                relative_path = excluded.relative_path,
+                encrypted_blob = excluded.encrypted_blob,
+                encrypted_byte_count = excluded.encrypted_byte_count,
+                integrity_checksum = excluded.integrity_checksum,
+                encryption_key_id = excluded.encryption_key_id,
+                cloud_sync_allowed = excluded.cloud_sync_allowed,
+                excluded_from_backup = excluded.excluded_from_backup,
+                created_at = excluded.created_at,
+                committed_at = excluded.committed_at,
+                last_verified_at = excluded.last_verified_at
+            """,
+            arguments: [
+                blob.snapshotID.uuidString,
+                blob.storageLocation,
+                blob.relativePath,
+                encryptedBlob,
+                blob.encryptedByteCount,
+                blob.integrityChecksum,
+                blob.encryptionKeyID,
+                blob.cloudSyncAllowed ? 1 : 0,
+                blob.excludedFromBackup ? 1 : 0,
+                blob.createdAt.timeIntervalSinceReferenceDate,
+                committedAt.timeIntervalSinceReferenceDate,
+                blob.lastVerifiedAt?.timeIntervalSinceReferenceDate,
+            ]
+        )
+    }
+
+    private static func upsertKVSnapshotReference(_ reference: TurboQuantKVSnapshotReference, db: Database) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO kv_snapshot_reference
+                (id, conversation_id, snapshot_id, pinned, state, created_at, last_used_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                conversation_id = excluded.conversation_id,
+                snapshot_id = excluded.snapshot_id,
+                pinned = excluded.pinned,
+                state = excluded.state,
+                created_at = excluded.created_at,
+                last_used_at = excluded.last_used_at
+            """,
+            arguments: [
+                reference.id.uuidString,
+                reference.conversationID.uuidString,
+                reference.snapshotID.uuidString,
+                reference.pinned ? 1 : 0,
+                reference.state.rawValue,
+                reference.createdAt.timeIntervalSinceReferenceDate,
+                reference.lastUsedAt?.timeIntervalSinceReferenceDate,
+            ]
+        )
+    }
+
+    private static func insertKVSnapshotRestoreAttempt(_ attempt: TurboQuantKVSnapshotRestoreAttempt, db: Database) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO kv_snapshot_restore_attempt
+                (id, schema_version, snapshot_id, conversation_id, attempted_at, result,
+                 failure_reason, expected_identity_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            arguments: [
+                attempt.id.uuidString,
+                attempt.schemaVersion,
+                attempt.snapshotID?.uuidString,
+                attempt.conversationID.uuidString,
+                attempt.attemptedAt.timeIntervalSinceReferenceDate,
+                attempt.result.rawValue,
+                attempt.failureReason,
+                encodeJSON(attempt.expectedIdentity),
+            ]
+        )
+    }
+
+    private static func insertKVSnapshotQuarantine(_ quarantine: TurboQuantKVSnapshotQuarantine, db: Database) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO kv_snapshot_quarantine
+                (id, schema_version, snapshot_id, conversation_id, stage, reason,
+                 blob_byte_count, quarantined_at, resolved_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            arguments: [
+                quarantine.id.uuidString,
+                quarantine.schemaVersion,
+                quarantine.snapshotID?.uuidString,
+                quarantine.conversationID?.uuidString,
+                quarantine.stage.rawValue,
+                quarantine.reason,
+                quarantine.blobByteCount,
+                quarantine.quarantinedAt.timeIntervalSinceReferenceDate,
+                quarantine.resolvedAt?.timeIntervalSinceReferenceDate,
+            ]
+        )
+    }
+
+    private static func deleteKVSnapshotRows(modelID: String, db: Database) throws -> [UUID] {
+        let ids = try String.fetchAll(
+            db,
+            sql: "SELECT snapshot_id FROM kv_snapshot_manifest WHERE model_id = ?",
+            arguments: [modelID]
+        ).compactMap(UUID.init(uuidString:))
+        try db.execute(sql: "DELETE FROM kv_snapshot_manifest WHERE model_id = ?", arguments: [modelID])
+        return ids
+    }
+
+    private static func enforceKVSnapshotQuota(
+        policy: SnapshotSecurityPolicy,
+        protecting protectedSnapshotID: UUID,
+        db: Database
+    ) throws -> [UUID] {
+        var evicted: [UUID] = []
+        while try activeKVSnapshotBytes(db: db) > policy.quotaBytes {
+            guard let snapshotID = try String.fetchOne(
+                db,
+                sql: """
+                SELECT m.snapshot_id
+                FROM kv_snapshot_manifest m
+                JOIN kv_snapshot_blob b ON b.snapshot_id = m.snapshot_id
+                LEFT JOIN kv_snapshot_reference r ON r.snapshot_id = m.snapshot_id
+                WHERE m.status = ?
+                    AND m.snapshot_id != ?
+                    AND COALESCE(r.pinned, 0) = 0
+                ORDER BY
+                    m.created_at ASC,
+                    COALESCE(r.last_used_at, r.created_at, m.created_at) ASC,
+                    b.encrypted_byte_count DESC
+                LIMIT 1
+                """,
+                arguments: [TurboQuantKVSnapshotState.active.rawValue, protectedSnapshotID.uuidString]
+            ) else {
+                break
+            }
+
+            try db.execute(
+                sql: "UPDATE kv_snapshot_manifest SET status = ?, invalidated_reason = ? WHERE snapshot_id = ?",
+                arguments: [TurboQuantKVSnapshotState.invalidated.rawValue, "quota_eviction", snapshotID]
+            )
+            try db.execute(sql: "DELETE FROM kv_snapshot_blob WHERE snapshot_id = ?", arguments: [snapshotID])
+            try db.execute(
+                sql: "UPDATE kv_snapshot_reference SET state = ? WHERE snapshot_id = ?",
+                arguments: [TurboQuantKVSnapshotState.invalidated.rawValue, snapshotID]
+            )
+            if let id = UUID(uuidString: snapshotID) {
+                evicted.append(id)
+            }
+        }
+        return evicted
+    }
+
+    private static func activeKVSnapshotBytes(db: Database) throws -> Int64 {
+        try Int64.fetchOne(
+            db,
+            sql: """
+            SELECT COALESCE(SUM(b.encrypted_byte_count), 0)
+            FROM kv_snapshot_manifest m
+            JOIN kv_snapshot_blob b ON b.snapshot_id = m.snapshot_id
+            WHERE m.status = ?
+            """,
+            arguments: [TurboQuantKVSnapshotState.active.rawValue]
+        ) ?? 0
     }
 
     // MARK: - Observation Fetches
