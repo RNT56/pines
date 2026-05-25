@@ -4,7 +4,7 @@
   "pines": {
     "repo": "pines",
     "branch": "tq/integration-pin-mlx-production",
-    "commit": "b410ae901ad92e969f46d482a01f12d1f9058851",
+    "commit": "7c337092a6c6a3c0ac4ea2b2afb019f8850a1891",
     "dirtyAtValidation": false
   },
   "mlxSwift": {
@@ -233,7 +233,8 @@
     "Full Xcode validation could not complete because local xcodebuild idled with no child compiler or fetch process; status remains pending.",
     "Wave 3.5 source pin surface has been promoted to the final Wave 7 MLX branches, and project.yml, generated Xcode project references, Xcode Package.resolved, runtime compatibility pair ID, docs/TURBOQUANT.md, and this manifest are synchronized to that pair.",
     "Status remains pending rather than green because this workspace has no online iPhone-class real device available for the required verified tuple, and full local Xcode package/app validation is still blocked by xcodebuild package-resolution stalling.",
-    "Do not use this manifest to promote Verified or Certified product claims until the releaseGate is closed."
+    "Do not use this manifest to promote Verified or Certified product claims until the releaseGate is closed.",
+    "The Pines commit recorded for Wave 3.5 is the pin-promotion code commit; this manifest update is metadata-only."
   ],
   "productionPinPromotion": {
     "branch": "tq/integration-pin-mlx-production",
