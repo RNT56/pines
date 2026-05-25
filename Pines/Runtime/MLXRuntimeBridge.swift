@@ -721,7 +721,7 @@ struct MLXRuntimeBridge: Sendable {
                 message: failureMessage,
                 recoverable: false,
                 recommendedAction: LocalInferenceFailureMatrix.rulesByKind[failureKind]?.productMessage,
-                admissionPlanID: contextPlan?.id,
+                admissionPlanID: nil,
                 runDecisionID: decision.decisionID
             )
             metadata[LocalProviderMetadataKeys.turboQuantFailureEventJSON] =
@@ -2720,12 +2720,13 @@ private actor MLXRuntimeState {
                             historyMessageCount: historyMessages.count + 1,
                             reducedHistoryForContext: reducedHistoryForContext
                         )
+                        let admissionMemoryCounters = deviceMonitor.memoryCounters()
                         var turboQuantAdmissionPlan = Self.localRuntimeAdmissionPlan(
                             request: request,
                             install: install,
                             profile: profile,
                             contextPlan: turboQuantContextPlan,
-                            memoryCounters: deviceMonitor.memoryCounters()
+                            memoryCounters: admissionMemoryCounters
                         )
                         latestTurboQuantContextPlan = turboQuantContextPlan
                         latestTurboQuantAdmissionPlan = turboQuantAdmissionPlan
@@ -2742,7 +2743,7 @@ private actor MLXRuntimeState {
                                 profile: profile,
                                 contextPlan: turboQuantContextPlan,
                                 admissionPlan: admissionPlan,
-                                memoryCounters: deviceMonitor.memoryCounters(),
+                                memoryCounters: admissionMemoryCounters,
                                 outcome: .rejectedBeforeRun,
                                 failureKind: .memoryAdmissionFailed,
                                 failureMessage: admissionPlan.userFacingMessage,
@@ -2780,7 +2781,7 @@ private actor MLXRuntimeState {
                                     profile: profile,
                                     contextPlan: turboQuantContextPlan,
                                     admissionPlan: turboQuantAdmissionPlan,
-                                    memoryCounters: deviceMonitor.memoryCounters(),
+                                    memoryCounters: admissionMemoryCounters,
                                     outcome: .rejectedBeforeRun,
                                     failureKind: .contextWindowExceeded,
                                     failureMessage: message,
@@ -2812,10 +2813,79 @@ private actor MLXRuntimeState {
                             install: install,
                             profile: profile,
                             contextPlan: turboQuantContextPlan,
-                            memoryCounters: deviceMonitor.memoryCounters()
+                            memoryCounters: admissionMemoryCounters
                         )
                         latestTurboQuantContextPlan = turboQuantContextPlan
                         latestTurboQuantAdmissionPlan = turboQuantAdmissionPlan
+
+                        if let admissionPlan = turboQuantAdmissionPlan,
+                           !admissionPlan.admitted {
+                            var failureMetadata: [String: String] = [:]
+                            Self.appendTurboQuantWave2Metadata(
+                                to: &failureMetadata,
+                                cache: nil,
+                                request: request,
+                                install: install,
+                                profile: profile,
+                                contextPlan: turboQuantContextPlan,
+                                admissionPlan: admissionPlan,
+                                memoryCounters: admissionMemoryCounters,
+                                outcome: .rejectedBeforeRun,
+                                failureKind: .memoryAdmissionFailed,
+                                failureMessage: admissionPlan.userFacingMessage,
+                                inputTokens: input.text.tokens.size,
+                                outputTokens: 0
+                            )
+                            latestTurboQuantFailureMetadata = failureMetadata
+                            continuation.yield(
+                                .failure(
+                                    InferenceStreamFailure(
+                                        code: LocalInferenceFailureKind.memoryAdmissionFailed.rawValue,
+                                        message: admissionPlan.userFacingMessage,
+                                        recoverable: false,
+                                        providerMetadata: failureMetadata
+                                    )
+                                )
+                            )
+                            return (tokenCount: 0, finish: nil, terminalFailureEmitted: true)
+                        }
+
+                        if let maxContextTokens = turboQuantAdmissionPlan?.admittedContextTokens
+                            ?? profile.quantization.maxKVSize,
+                           !generationPlan.fitPreparedPrompt(
+                               promptTokenCount: input.text.tokens.size,
+                               maxContextTokens: maxContextTokens
+                           ) {
+                            let message = "This local request needs \(input.text.tokens.size + generationPlan.reservedCompletionTokens) tokens (\(input.text.tokens.size) prompt + \(generationPlan.reservedCompletionTokens) completion), but \(request.modelID.rawValue) is admitted for \(maxContextTokens). Shorten the latest message or reduce local completion tokens."
+                            var failureMetadata: [String: String] = [:]
+                            Self.appendTurboQuantWave2Metadata(
+                                to: &failureMetadata,
+                                cache: nil,
+                                request: request,
+                                install: install,
+                                profile: profile,
+                                contextPlan: turboQuantContextPlan,
+                                admissionPlan: turboQuantAdmissionPlan,
+                                memoryCounters: admissionMemoryCounters,
+                                outcome: .rejectedBeforeRun,
+                                failureKind: .contextWindowExceeded,
+                                failureMessage: message,
+                                inputTokens: input.text.tokens.size,
+                                outputTokens: 0
+                            )
+                            latestTurboQuantFailureMetadata = failureMetadata
+                            continuation.yield(
+                                .failure(
+                                    InferenceStreamFailure(
+                                        code: LocalInferenceFailureKind.contextWindowExceeded.rawValue,
+                                        message: message,
+                                        recoverable: false,
+                                        providerMetadata: failureMetadata
+                                    )
+                                )
+                            )
+                            return (tokenCount: 0, finish: nil, terminalFailureEmitted: true)
+                        }
                         let parameters = Self.generateParameters(
                             from: request,
                             profile: profile,
