@@ -4,17 +4,17 @@ This document records the observed local repository state at the start of the im
 
 ## Current release-green status
 
-After the Wave 7 and production pin closeout, the active local compatibility pair is green:
+After the Layout V5 default device-test closeout, the active local compatibility pair is green:
 
 | Repo | Branch | Release-green commit |
 | --- | --- | --- |
-| `pines` | `tq/integration-pin-mlx-production` | `4d9d89eb801de2e5bb2635d8b81e81b27cd39b83` |
-| `mlx-swift` | `tq/wave7-core-platform` | `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772` |
-| `mlx-swift-lm` | `tq/wave7-lm-platform` | `6d2d791a12e60dc1bd7534d6c95454a2284edf8c` |
+| `pines` | `tq/real-device-evidence-acceptance` | branch head |
+| `mlx-swift` | `tq/layout-v5-default-device-tests` | `260c8fb16df772b8c20295529fde958fffb66369` |
+| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e` |
 
-Pines pins `MLXSwift` to `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772` and `MLXSwiftLM` to `6d2d791a12e60dc1bd7534d6c95454a2284edf8c` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
+Pines pins `MLXSwift` to `260c8fb16df772b8c20295529fde958fffb66369` and `MLXSwiftLM` to `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
 
-Local release gates are green, including full SwiftPM validation and `bash scripts/ci/run-xcode-validation.sh all`. Real-device model/device/mode evidence remains pending and is still required before any `Verified` or `Certified` product claim.
+Local release gates are green, including full SwiftPM validation and `bash scripts/ci/run-xcode-validation.sh all`. Layout V5 is the default MLX layout on this pair, with Layout V4 still supported for legacy/comparison runs. Real-device model/device/mode evidence remains pending and is still required before any `Verified` or `Certified` product claim.
 
 ## Observed workspace
 

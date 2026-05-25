@@ -4,10 +4,12 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 
 The current compatibility pair is green for local release gates. Pines can build, test, resolve the pinned MLX packages through Xcode, run simulator smoke tests, and enforce pin drift checks on:
 
-- `RNT56/mlx-swift`: `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772`
-- `RNT56/mlx-swift-lm`: `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`
+- `RNT56/mlx-swift`: `260c8fb16df772b8c20295529fde958fffb66369`
+- `RNT56/mlx-swift-lm`: `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e`
 
 This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
+
+The pinned pair makes Layout V5 the default TurboQuant attention layout for device testing. Layout V4 remains supported for legacy and A/B comparison runs until real-device evidence decides the production promotion surface.
 
 ## Runtime Strategy
 
@@ -20,8 +22,8 @@ This does not promote any model/device/mode to `Verified` or `Certified`. Those 
 - iOS memory warnings soft-recover through the runtime bridge while active generation still has emergency headroom; otherwise they stop the active local run and unload transient MLX containers.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772`
-  - `RNT56/mlx-swift-lm`: `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`
+  - `RNT56/mlx-swift`: `260c8fb16df772b8c20295529fde958fffb66369`
+  - `RNT56/mlx-swift-lm`: `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e`
   - Nested `mlx` inside `RNT56/mlx-swift`: `75b756717154890033209aaba4ffc89b113c5998`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, a tiled online fused decode path for admitted 64/80/96/112/128/192/240/256 head dimensions, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.

@@ -107,8 +107,8 @@ Vault retrieval stores both FP16 embeddings and compressed TurboQuant vector cod
 
 The app links MLX through exact fork pins in `project.yml`:
 
-- `https://github.com/RNT56/mlx-swift` at `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772`
-- `https://github.com/RNT56/mlx-swift-lm` at `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`
+- `https://github.com/RNT56/mlx-swift` at `260c8fb16df772b8c20295529fde958fffb66369`
+- `https://github.com/RNT56/mlx-swift-lm` at `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e`
 - Nested `mlx` inside `RNT56/mlx-swift` at `75b756717154890033209aaba4ffc89b113c5998`
 - Nested `mlx-c` inside `RNT56/mlx-swift` at `2abc34daff6ded246054d9e15b98870b5cd08b97`
 

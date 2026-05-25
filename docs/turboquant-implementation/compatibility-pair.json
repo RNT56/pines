@@ -3,20 +3,20 @@
   "status": "green",
   "pines": {
     "repo": "pines",
-    "branch": "tq/integration-pin-mlx-production",
-    "commit": "e710f7a604d4318fae8a1c9aa25a8c1735fc9c76",
+    "branch": "tq/real-device-evidence-acceptance",
+    "commit": "83f31d0847e7557042849a891f9eb1d1340f1a7d",
     "dirtyAtValidation": false
   },
   "mlxSwift": {
     "repo": "mlx-swift",
-    "branch": "tq/wave7-core-platform",
-    "commit": "21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772",
+    "branch": "tq/layout-v5-default-device-tests",
+    "commit": "260c8fb16df772b8c20295529fde958fffb66369",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
-    "branch": "tq/wave7-lm-platform",
-    "commit": "6d2d791a12e60dc1bd7534d6c95454a2284edf8c",
+    "branch": "tq/lm-layout-v5-default-device-tests",
+    "commit": "13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -40,7 +40,7 @@
     "OpenKVFormat": 1,
     "PlatformEvidenceDimensions": 1
   },
-  "validatedAt": "2026-05-25T15:12:29Z",
+  "validatedAt": "2026-05-25T20:08:26Z",
   "validationCommands": [
     {
       "repo": "pines",
@@ -233,15 +233,16 @@
     "Full Xcode validation is green on the final production pin pair. The previous xcodebuild package-resolution stall was resolved by removing ignored generated build artifacts and using locked package-resolution flags.",
     "Wave 3.5 source pin surface has been promoted to the final Wave 7 MLX branches, and project.yml, generated Xcode project references, Xcode Package.resolved, runtime compatibility pair ID, docs/TURBOQUANT.md, and this manifest are synchronized to that pair.",
     "Compatibility-pair status is green for local release gates. This does not create any Verified or Certified model/device/mode product claim; those still require imported real-device profile evidence.",
-    "No online iPhone-class real device was available in this workspace, so real-device profile evidence remains pending and product compatibility claims must stay evidence-gated.",
-    "The Pines commit recorded for Wave 3.5 is the pin-promotion code commit; this manifest update is metadata-only."
+    "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
+    "No online iPhone-class real device was available in this workspace; devicectl listed GBU-12, an iPhone 15 Pro Max (iPhone16,2), as unavailable. Real-device profile evidence remains pending and product compatibility claims must stay evidence-gated.",
+    "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only."
   ],
   "productionPinPromotion": {
-    "branch": "tq/integration-pin-mlx-production",
-    "status": "release-green-local-gates-passed",
-    "pinnedMLXSwift": "21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772",
-    "pinnedMLXSwiftLM": "6d2d791a12e60dc1bd7534d6c95454a2284edf8c",
-    "compatibilityPairID": "mlx-swift-21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772+mlx-swift-lm-6d2d791a12e60dc1bd7534d6c95454a2284edf8c",
+    "branch": "tq/real-device-evidence-acceptance",
+    "status": "release-green-local-gates-passed-layout-v5-default",
+    "pinnedMLXSwift": "260c8fb16df772b8c20295529fde958fffb66369",
+    "pinnedMLXSwiftLM": "13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e",
+    "compatibilityPairID": "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e",
     "releaseGate": "closed for compatibility-pair local release gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }
