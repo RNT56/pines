@@ -4,8 +4,8 @@
   "pines": {
     "repo": "pines",
     "branch": "tq/integration-runtime-bridge",
-    "commit": "ec2e1b8c549d159f7edb038706a0726399af6fd4",
-    "dirtyAtValidation": true
+    "commit": "a1cdcb4798047c9847a4532730b4b7f59c16fe86",
+    "dirtyAtValidation": false
   },
   "mlxSwift": {
     "repo": "mlx-swift",
@@ -169,7 +169,7 @@
   "notes": [
     "Pending validation. Do not use this file as production evidence until status is green.",
     "Wave 2 INT-2A updated project.yml, generated Xcode project pins, Xcode Package.resolved, and docs/TURBOQUANT.md to the validated Wave 1 MLX pair.",
-    "The Pines commit recorded here is the branch base for the current uncommitted Wave 2 workspace; dirtyAtValidation remains true until these Wave 2 changes are committed.",
+    "The Pines commit recorded here is the committed Wave 2 runtime-bridge integration. The compatibility pair remains pending because full local Xcode app validation could not complete in this workspace.",
     "Wave 0 blockers resolved: core contracts are in explicit files, LM typed errors are present, product TurboQuant generation requires throwing models, Pines reuses existing TurboQuant DTOs, and fallback-contract hashes are implemented.",
     "Wave 1 prerequisites validated: core contracts/router, LM runtime failures/cache snapshots/admission planner, and PinesCore control-plane tests passed.",
     "This manifest is not a production pin promotion.",
