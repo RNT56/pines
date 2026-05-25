@@ -184,7 +184,7 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "gemma4", "any-to-any"]
             )
         )
-        try expectEqual(gemma4.verification, .verified)
+        try expectEqual(gemma4.verification, .installable)
         try expectEqual(gemma4.modalities, [.text, .vision])
 
         let qwen35 = ModelPreflightClassifier().classify(

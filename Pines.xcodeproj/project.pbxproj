@@ -1457,7 +1457,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift-lm";
 			requirement = {
 				kind = revision;
-				revision = 31ffb314a01402e5b340fff1a19375a23d2710b9;
+				revision = 709eaa580a2fccb738520d202a4e36949b54c36c;
 			};
 		};
 		ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {

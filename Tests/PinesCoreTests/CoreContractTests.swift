@@ -3501,9 +3501,13 @@ struct CoreContractTests {
 
         for spec in qwenTurboQuantProfileCases {
             let result = classifier.classify(spec.preflightInput)
+            let expectedFamilySupport: TurboQuantFamilySupport =
+                spec.modalities == [.text] ? .hybridFull : .none
+            let expectedVerification: ModelVerificationState =
+                spec.modalities == [.text] ? .verified : .installable
 
             #expect(result.repository == spec.repository)
-            #expect(result.verification == .verified)
+            #expect(result.verification == expectedVerification)
             #expect(result.modalities == spec.modalities)
             #expect(result.modelType == spec.modelType)
             #expect(result.processorClass == spec.processorClass)
@@ -3511,7 +3515,7 @@ struct CoreContractTests {
             #expect(result.keyHeadDimension == spec.headDimension)
             #expect(result.valueHeadDimension == spec.headDimension)
             #expect(result.cacheTopology == .hybridAttentionAndNativeState)
-            #expect(result.turboQuantFamilySupport == .hybridFull)
+            #expect(result.turboQuantFamilySupport == expectedFamilySupport)
             #expect(result.estimatedBytes == spec.expectedDownloadBytes)
             #expect(result.reasons.isEmpty)
 
@@ -3541,7 +3545,7 @@ struct CoreContractTests {
             #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.cacheTopology == .hybridAttentionAndNativeState)
-            #expect(roundTrippedInstall.turboQuantFamilySupport == .hybridFull)
+            #expect(roundTrippedInstall.turboQuantFamilySupport == expectedFamilySupport)
 
             let hints = ModelRuntimeConfigurationHints.infer(
                 repository: spec.repository,
@@ -3708,6 +3712,64 @@ struct CoreContractTests {
                 familySupport: .attentionKVFull
             )
         )
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+                modelType: nil,
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .hybridFull
+            )
+        )
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Pixtral-12B-4bit",
+                modelType: "pixtral",
+                textConfigModelType: nil,
+                modalities: [.text, .vision],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-3n-E4B-it-4bit",
+                modelType: "gemma3n",
+                textConfigModelType: "gemma3n_text",
+                modalities: [.text, .vision],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-4-e2b-it-4bit",
+                modelType: "gemma4_assistant",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+    }
+
+    @Test
+    func preflightRequiresRuntimeCapabilityRegistryForVerifiedTurboQuantClaim() throws {
+        let classifier = ModelPreflightClassifier(
+            turboQuantRuntimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry(capabilities: [])
+        )
+        let result = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+                configJSON: Data(#"{"model_type":"qwen2","hidden_size":2048,"num_attention_heads":16}"#.utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 2_000_000),
+                    ModelFileInfo(path: "model.safetensors", size: 1_000_000_000),
+                ],
+                tags: ["mlx", "4bit"]
+            )
+        )
+
+        #expect(result.turboQuantFamilySupport == .attentionKVFull)
+        #expect(result.verification == .installable)
     }
 
     @Test
@@ -3816,16 +3878,18 @@ struct CoreContractTests {
 
         for spec in gemmaTurboQuantProfileCases {
             let result = classifier.classify(spec.preflightInput)
-      let isPromotedFamily = [
-        "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant",
-      ]
+            let isPromotedFamily = [
+                "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant",
+            ]
                 .contains(spec.modelType)
+            let expectedFamilySupport: TurboQuantFamilySupport =
+                spec.modalities == [.text] ? .attentionKVFull : .none
 
             #expect(result.repository == spec.repository)
-      let expectedVerification: ModelVerificationState =
-        spec.modelType == "gemma4_assistant"
+            let expectedVerification: ModelVerificationState =
+                spec.modelType == "gemma4_assistant"
                 ? .experimental
-                : (isPromotedFamily ? .verified : .installable)
+                : (isPromotedFamily && spec.modalities == [.text] ? .verified : .installable)
             #expect(result.verification == expectedVerification)
             #expect(result.modalities == spec.modalities)
             #expect(result.modelType == spec.modelType)
@@ -3834,7 +3898,7 @@ struct CoreContractTests {
             #expect(result.keyHeadDimension == spec.headDimension)
             #expect(result.valueHeadDimension == spec.headDimension)
             #expect(result.cacheTopology == spec.expectedCacheTopology)
-            #expect(result.turboQuantFamilySupport == .attentionKVFull)
+            #expect(result.turboQuantFamilySupport == expectedFamilySupport)
             #expect(result.estimatedBytes == spec.expectedDownloadBytes)
             #expect(result.reasons.isEmpty)
 
@@ -3864,7 +3928,7 @@ struct CoreContractTests {
             #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.cacheTopology == spec.expectedCacheTopology)
-            #expect(roundTrippedInstall.turboQuantFamilySupport == .attentionKVFull)
+            #expect(roundTrippedInstall.turboQuantFamilySupport == expectedFamilySupport)
 
             let hints = ModelRuntimeConfigurationHints.infer(
                 repository: spec.repository,
@@ -4194,11 +4258,9 @@ struct CoreContractTests {
                 ModelPreflightInput(
                     repository: repository,
                     configJSON: Data(configJSON.utf8),
-                    processorConfigJSON: #"{"processor_class":"Gemma3Processor"}"#.data(using: .utf8),
                     files: [
                         ModelFileInfo(path: "model.safetensors"),
                         ModelFileInfo(path: "tokenizer.json"),
-                        ModelFileInfo(path: "processor_config.json"),
                     ]
                 )
             )

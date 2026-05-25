@@ -4,15 +4,18 @@ public struct ModelPreflightClassifier: Sendable {
     public var supportedLLMTypes: Set<String>
     public var supportedVLMTypes: Set<String>
     public var supportedEmbedderTypes: Set<String>
+    public var turboQuantRuntimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry
 
     public init(
         supportedLLMTypes: Set<String> = Self.defaultSupportedLLMTypes,
         supportedVLMTypes: Set<String> = Self.defaultSupportedVLMTypes,
-        supportedEmbedderTypes: Set<String> = Self.defaultSupportedEmbedderTypes
+        supportedEmbedderTypes: Set<String> = Self.defaultSupportedEmbedderTypes,
+        turboQuantRuntimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry = .bundledFallback
     ) {
         self.supportedLLMTypes = supportedLLMTypes
         self.supportedVLMTypes = supportedVLMTypes
         self.supportedEmbedderTypes = supportedEmbedderTypes
+        self.turboQuantRuntimeCapabilities = turboQuantRuntimeCapabilities
     }
 
     public func classify(_ input: ModelPreflightInput) -> ModelPreflightResult {
@@ -156,7 +159,8 @@ public struct ModelPreflightClassifier: Sendable {
             keyHeadDimension: headDimensions.key,
             valueHeadDimension: headDimensions.value,
             routedExperts: routedExperts,
-            expertsPerToken: expertsPerToken
+            expertsPerToken: expertsPerToken,
+            runtimeCapabilities: turboQuantRuntimeCapabilities
         ) {
             verification = .verified
         } else {
@@ -306,7 +310,7 @@ public struct ModelPreflightClassifier: Sendable {
         if modelTypes.contains("mllama") || topology == .unsupported {
             return .unsupportedTopology
         }
-        guard modalities.contains(.text) else { return .none }
+        guard modalities == [.text] else { return .none }
         if modelTypes.contains("pixtral") {
             return .none
         }

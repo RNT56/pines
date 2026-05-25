@@ -423,7 +423,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-31ffb314a01402e5b340fff1a19375a23d2710b9"
+        "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-709eaa580a2fccb738520d202a4e36949b54c36c"
     static var turboQuantLayoutVersion: Int {
         #if canImport(MLX)
         MLX.TurboQuantAttentionLayout.currentVersion
@@ -431,10 +431,43 @@ struct MLXRuntimeBridge: Sendable {
         TurboQuantLayoutVersion.current
         #endif
     }
+    static var turboQuantRuntimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry {
+        #if canImport(MLXLLM)
+        return PinesTurboQuantRuntimeCapabilityRegistry(
+            capabilities: MLXLLM.MLXTurboQuantRuntimeCapabilityRegistry.capabilities.map { capability in
+                PinesTurboQuantRuntimeModelCapability(
+                    modelType: capability.modelType,
+                    supportsThrowingTurboQuantAttention: capability.supportsThrowingTurboQuantAttention,
+                    cacheTopology: Self.pinesTurboQuantCacheTopology(from: capability.cacheTopology),
+                    note: capability.note
+                )
+            }
+        )
+        #else
+        return .bundledFallback
+        #endif
+    }
 
     private let state = MLXRuntimeState()
     private let deviceMonitor = DeviceRuntimeMonitor()
     private let supervisor = LocalRuntimeSupervisor()
+
+    #if canImport(MLXLLM)
+    private static func pinesTurboQuantCacheTopology(
+        from topology: MLXLLM.MLXTurboQuantCacheTopology
+    ) -> PinesTurboQuantCacheTopology {
+        switch topology {
+        case .standardAttentionKV:
+            .standardAttentionKV
+        case .hybridAttentionKVAndNativeState:
+            .hybridAttentionKVAndNativeState
+        case .gatedVLMOrDualModel:
+            .gatedVLMOrDualModel
+        case .unsupported:
+            .unsupported
+        }
+    }
+    #endif
 
     private func runtimeMemoryMetadata(
         merging base: [String: String] = [:]
@@ -1079,7 +1112,8 @@ struct MLXRuntimeBridge: Sendable {
             modelType: install.modelType,
             textConfigModelType: install.textConfigModelType,
             modalities: install.modalities,
-            familySupport: install.turboQuantFamilySupport
+            familySupport: install.turboQuantFamilySupport,
+            runtimeCapabilities: Self.turboQuantRuntimeCapabilities
         )
     }
 
@@ -1089,7 +1123,8 @@ struct MLXRuntimeBridge: Sendable {
             modelType: install.modelType,
             textConfigModelType: install.textConfigModelType,
             modalities: install.modalities,
-            familySupport: install.turboQuantFamilySupport
+            familySupport: install.turboQuantFamilySupport,
+            runtimeCapabilities: Self.turboQuantRuntimeCapabilities
         )
     }
 

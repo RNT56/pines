@@ -68,6 +68,126 @@ public enum TurboQuantFamilySupport: String, Codable, Sendable, CaseIterable {
     }
 }
 
+public enum PinesTurboQuantCacheTopology: String, Codable, Sendable, CaseIterable {
+    case standardAttentionKV
+    case hybridAttentionKVAndNativeState
+    case gatedVLMOrDualModel
+    case unsupported
+}
+
+public struct PinesTurboQuantRuntimeModelCapability: Hashable, Codable, Sendable {
+    public var modelType: String
+    public var supportsThrowingTurboQuantAttention: Bool
+    public var cacheTopology: PinesTurboQuantCacheTopology
+    public var note: String?
+
+    public init(
+        modelType: String,
+        supportsThrowingTurboQuantAttention: Bool,
+        cacheTopology: PinesTurboQuantCacheTopology,
+        note: String? = nil
+    ) {
+        self.modelType = Self.normalize(modelType)
+        self.supportsThrowingTurboQuantAttention = supportsThrowingTurboQuantAttention
+        self.cacheTopology = cacheTopology
+        self.note = note
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+    }
+}
+
+public struct PinesTurboQuantRuntimeCapabilityRegistry: Hashable, Codable, Sendable {
+    public var capabilitiesByModelType: [String: PinesTurboQuantRuntimeModelCapability]
+
+    public init(capabilities: [PinesTurboQuantRuntimeModelCapability]) {
+        capabilitiesByModelType = Dictionary(
+            uniqueKeysWithValues: capabilities.map { ($0.modelType, $0) }
+        )
+    }
+
+    public static let bundledFallback = PinesTurboQuantRuntimeCapabilityRegistry(capabilities: [
+        .standard("llama"),
+        .standard("mistral"),
+        .standard("ministral3"),
+        .standard("mistral3"),
+        .standard("mistral4"),
+        .standard("gemma"),
+        .standard("gemma2"),
+        .standard("gemma3"),
+        .standard("gemma3_text"),
+        .standard("gemma3n"),
+        .standard("gemma3n_text"),
+        .standard("gemma4"),
+        .standard("gemma4_text"),
+        .gated("gemma4_assistant", note: "Gemma4 assistant is draft-only MTP and requires explicit dual-model orchestration."),
+        .standard("qwen2"),
+        .standard("qwen3"),
+        .standard("qwen3_moe"),
+        .hybrid("qwen3_5"),
+        .hybrid("qwen3_5_text"),
+        .hybrid("qwen3_5_moe"),
+        .hybrid("qwen3_5_moe_text"),
+        .standard("acereason"),
+        .standard("phi"),
+        .standard("phi3"),
+        .standard("granite"),
+        .standard("exaone4"),
+        .standard("smollm3"),
+        .hybrid("lfm2"),
+        .standard("glm4_moe_lite"),
+    ])
+
+    public func capability(for modelType: String?) -> PinesTurboQuantRuntimeModelCapability? {
+        guard let modelType else { return nil }
+        return capabilitiesByModelType[Self.normalize(modelType)]
+    }
+
+    public func supportsThrowingTurboQuantAttention(modelTypes: Set<String>) -> Bool {
+        modelTypes.contains {
+            capability(for: $0)?.supportsThrowingTurboQuantAttention == true
+        }
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+    }
+}
+
+private extension PinesTurboQuantRuntimeModelCapability {
+    static func standard(_ modelType: String) -> Self {
+        Self(
+            modelType: modelType,
+            supportsThrowingTurboQuantAttention: true,
+            cacheTopology: .standardAttentionKV
+        )
+    }
+
+    static func hybrid(_ modelType: String) -> Self {
+        Self(
+            modelType: modelType,
+            supportsThrowingTurboQuantAttention: true,
+            cacheTopology: .hybridAttentionKVAndNativeState
+        )
+    }
+
+    static func gated(_ modelType: String, note: String) -> Self {
+        Self(
+            modelType: modelType,
+            supportsThrowingTurboQuantAttention: false,
+            cacheTopology: .gatedVLMOrDualModel,
+            note: note
+        )
+    }
+}
+
 public enum TurboQuantRuntimeSupport: Sendable {
     public static let nonThrowingRuntimeReason =
         "TurboQuant profile metadata is available, but the linked MLX runtime model does not yet implement typed throwing TurboQuant attention."
@@ -77,18 +197,17 @@ public enum TurboQuantRuntimeSupport: Sendable {
         modelType: String?,
         textConfigModelType: String?,
         modalities: Set<ModelModality>,
-        familySupport: TurboQuantFamilySupport
+        familySupport: TurboQuantFamilySupport,
+        runtimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry = .bundledFallback
     ) -> Bool {
-        guard modalities.contains(.text) else { return false }
+        _ = repository
+        guard modalities == [.text] else { return false }
         guard familySupport == .attentionKVFull || familySupport == .hybridFull else {
             return false
         }
 
         let modelTypes = normalizedModelTypes(modelType, textConfigModelType)
-        return modelTypes.contains { supportedThrowingAttentionModelTypes.contains($0) }
-            || supportedThrowingAttentionRepositorySignals.contains {
-                repository.localizedCaseInsensitiveContains($0)
-            }
+        return runtimeCapabilities.supportsThrowingTurboQuantAttention(modelTypes: modelTypes)
     }
 
     public static func defaultDisabledReason(
@@ -96,7 +215,8 @@ public enum TurboQuantRuntimeSupport: Sendable {
         modelType: String?,
         textConfigModelType: String?,
         modalities: Set<ModelModality>,
-        familySupport: TurboQuantFamilySupport
+        familySupport: TurboQuantFamilySupport,
+        runtimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry = .bundledFallback
     ) -> String? {
         guard familySupport == .attentionKVFull || familySupport == .hybridFull else {
             return nil
@@ -106,74 +226,13 @@ public enum TurboQuantRuntimeSupport: Sendable {
             modelType: modelType,
             textConfigModelType: textConfigModelType,
             modalities: modalities,
-            familySupport: familySupport
+            familySupport: familySupport,
+            runtimeCapabilities: runtimeCapabilities
         ) else {
             return nil
         }
         return nonThrowingRuntimeReason
     }
-
-    private static let supportedThrowingAttentionModelTypes: Set<String> = [
-        "llama",
-        "gemma",
-        "gemma2",
-        "gemma3",
-        "gemma3_text",
-        "gemma3n",
-        "gemma3n_text",
-        "gemma4",
-        "gemma4_text",
-        "mistral",
-        "mistral3",
-        "mistral4",
-        "ministral3",
-        "qwen2",
-        "qwen3",
-        "qwen3_moe",
-        "qwen3_5",
-        "qwen3_5_text",
-        "qwen3_5_moe",
-        "qwen3_5_moe_text",
-        "acereason",
-        "phi",
-        "phi3",
-        "granite",
-        "exaone",
-        "exaone4",
-        "smollm3",
-        "lfm2",
-        "glm4_moe_lite",
-    ]
-
-    private static let supportedThrowingAttentionRepositorySignals: [String] = [
-        "llama-3",
-        "mistral",
-        "ministral",
-        "gemma-2",
-        "gemma2",
-        "gemma-3",
-        "gemma3",
-        "gemma-3n",
-        "gemma3n",
-        "gemma-4",
-        "gemma4",
-        "qwen2",
-        "qwen2.5",
-        "qwen2_5",
-        "qwen3",
-        "qwen3.5",
-        "qwen3_5",
-        "phi-",
-        "phi_",
-        "granite",
-        "exaone",
-        "smollm3",
-        "lfm2",
-        "lfm-2",
-        "glm4-moe-lite",
-        "glm-4-moe-lite",
-        "glm-4.7-flash",
-    ]
 
     private static func normalizedModelTypes(_ values: String?...) -> Set<String> {
         Set(

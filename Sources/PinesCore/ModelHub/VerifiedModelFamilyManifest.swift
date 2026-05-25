@@ -15,9 +15,10 @@ public struct VerifiedModelFamilyManifest: Sendable {
         keyHeadDimension: Int?,
         valueHeadDimension: Int?,
         routedExperts: Int?,
-        expertsPerToken: Int?
+        expertsPerToken: Int?,
+        runtimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry = .bundledFallback
     ) -> Bool {
-        guard modalities.contains(.text) else { return false }
+        guard modalities == [.text] else { return false }
         guard turboQuantFamilySupport == .attentionKVFull || turboQuantFamilySupport == .hybridFull else {
             return false
         }
@@ -29,7 +30,8 @@ public struct VerifiedModelFamilyManifest: Sendable {
             modelType: modelType,
             textConfigModelType: textConfigModelType,
             modalities: modalities,
-            familySupport: turboQuantFamilySupport
+            familySupport: turboQuantFamilySupport,
+            runtimeCapabilities: runtimeCapabilities
         ) else {
             return false
         }
