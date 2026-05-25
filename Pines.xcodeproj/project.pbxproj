@@ -126,6 +126,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		47BE46306FE59DA4A6611FBD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A68EBAF465EDED0F2EE626D4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5ABD42396BC25E46F453A6A1;
+			remoteInfo = Pines;
+		};
 		695D05E47C68DE935A435861 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = A68EBAF465EDED0F2EE626D4 /* Project object */;
@@ -736,6 +743,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				4FFFD20D4FC10014761D07E5 /* PBXTargetDependency */,
 			);
 			name = PinesTests;
 			packageProductDependencies = (
@@ -975,6 +983,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		4FFFD20D4FC10014761D07E5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5ABD42396BC25E46F453A6A1 /* Pines */;
+			targetProxy = 47BE46306FE59DA4A6611FBD /* PBXContainerItemProxy */;
+		};
 		79645B477F3A1EA937A09FC5 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 547D6AC8E60F928C9CB70C27 /* PinesLiveActivities */;
@@ -1116,6 +1129,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/pines.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/pines";
 			};
 			name = Release;
 		};
@@ -1135,6 +1149,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.schtack.pines.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/pines.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/pines";
 			};
 			name = Debug;
 		};
