@@ -56,6 +56,9 @@ This file tracks Wave 3 evidence-loop implementation after the completed Wave 2 
   - profile selection fails closed on unsupported schema/layout versions;
   - stable mismatch DTOs are surfaced through profile validation diagnostics;
   - `TurboQuantModelBenchmark` emits aggregate and per-result QualityGate-shaped quality output;
+  - audit fix: synthetic fallback-equivalence output now reports `prefillExact = false` and
+    `passed = false` until a real prefill-exactness suite is run, avoiding false Verified-quality
+    evidence;
   - validation passed: `swift build --target MLXLMCommon`, `swift build --target
     TurboQuantModelBenchmark`, `swift test --filter TurboQuantProfileTests`, and a focused
     benchmark JSON run.
@@ -65,14 +68,23 @@ This file tracks Wave 3 evidence-loop implementation after the completed Wave 2 
   - quality gate threshold evaluator;
   - memory calibration aggregation and in-memory store helpers;
   - GRDB schema/methods for evidence, revocations, calibration samples, and aggregates;
-  - compatibility UI state separation from catalog/preflight verification;
+  - audit fix: stored evidence is loaded into model previews so Verified/Revoked evidence can drive
+    compatibility UI state instead of labels being derived from catalog/preflight metadata only;
+  - handoff hardening: model preview evidence selection requires exact model revision and device
+    class for product-claim evidence, and filters all evidence by mode and admitted context before a
+    record can affect the UI;
+  - audit fix: profile evidence lookup and conflict revocation now use the full tuple
+    model/revision/tokenizer/profile/pair/device/hardware/OS/mode/fallback/layout/path/context;
+  - audit fix: `mlx-swift` core benchmark JSON can be wrapped into full Pines `BenchmarkReport.v1`
+    through an explicit adapter context rather than being mistaken for release evidence by itself;
   - real-device acceptance export/import wrapper that records import failures instead of fabricating
-    Verified evidence.
+    Verified evidence;
+  - support-bundle export DTO for evidence, revocations, and memory calibration records.
 - Focused Pines validation passed:
-  - `swift test --filter TurboQuantWave3EvidenceTests` passed 8 Swift Testing tests.
+  - `swift test --filter TurboQuantWave3EvidenceTests` passed 14 Swift Testing tests.
 - Broad Pines validation passed:
   - `swift build --disable-automatic-resolution`;
-  - `swift test --disable-automatic-resolution` passed 150 Swift Testing tests;
+  - `swift test --disable-automatic-resolution` passed 156 Swift Testing tests;
   - `swift run --disable-automatic-resolution PinesCoreTestRunner`;
   - `xcrun swiftc -parse -I .build/debug/Modules Pines/Runtime/MLXRuntimeBridge.swift`;
   - `git diff --check`;
@@ -85,7 +97,7 @@ This file tracks Wave 3 evidence-loop implementation after the completed Wave 2 
     `run-xcode-validation.sh prepare/generate/finalize`, which passed.
 - App-target syntax validation:
   - `xcrun swiftc -parse -I .build/arm64-apple-macosx/debug/Modules` passed for the changed
-    Pines app presentation, persistence, and model-view component files.
+    Pines app services, app model, presentation, persistence, and model-view component files.
 - Xcode package/app build limitation:
   - `bash scripts/ci/run-xcode-validation.sh resolve` stalled inside
     `xcodebuild -resolvePackageDependencies` with no progress;

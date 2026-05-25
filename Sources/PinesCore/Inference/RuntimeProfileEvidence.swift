@@ -253,10 +253,43 @@ public actor ProfileEvidenceStore {
 
     private func conflicts(_ lhs: RuntimeProfileEvidence, _ rhs: RuntimeProfileEvidence) -> Bool {
         lhs.modelID == rhs.modelID
+            && lhs.modelRevision == rhs.modelRevision
+            && lhs.tokenizerHash == rhs.tokenizerHash
+            && lhs.profileHash == rhs.profileHash
             && lhs.deviceClass == rhs.deviceClass
+            && lhs.hardwareModel == rhs.hardwareModel
+            && lhs.osBuild == rhs.osBuild
             && lhs.userMode == rhs.userMode
             && lhs.fallbackContractHash == rhs.fallbackContractHash
             && lhs.compatibilityPairID == rhs.compatibilityPairID
+            && lhs.layoutVersion == rhs.layoutVersion
+            && lhs.activeAttentionPath == rhs.activeAttentionPath
+            && lhs.admittedContextTokens == rhs.admittedContextTokens
             && lhs.id != rhs.id
     }
+}
+
+public protocol TurboQuantEvidenceRepository: Sendable {
+    func upsertTurboQuantProfileEvidence(_ evidence: RuntimeProfileEvidence) async throws
+    func turboQuantProfileEvidence(
+        modelID: String,
+        modelRevision: String?,
+        tokenizerHash: String?,
+        profileHash: String?,
+        compatibilityPairID: String?,
+        deviceClass: DevicePerformanceClass,
+        hardwareModel: String?,
+        osBuild: String?,
+        mode: TurboQuantUserMode,
+        fallbackContractHash: String?,
+        minimumContextTokens: Int
+    ) async throws -> RuntimeProfileEvidence?
+    func listTurboQuantProfileEvidence(modelID: String?) async throws -> [RuntimeProfileEvidence]
+    func revokeTurboQuantProfileEvidence(
+        id: UUID,
+        reason: String,
+        replacementEvidenceID: UUID?
+    ) async throws
+    func upsertRuntimeMemoryCalibrationSample(_ sample: RuntimeMemoryCalibrationSample) async throws
+    func upsertRuntimeMemoryCalibration(_ calibration: RuntimeMemoryCalibration) async throws
 }

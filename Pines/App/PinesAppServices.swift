@@ -25,6 +25,7 @@ typealias PinesLiveStore = any ConversationRepository
     & MCPServerRepository
     & ModelDownloadRepository
     & AuditEventRepository
+    & TurboQuantEvidenceRepository
     & AppDataResetRepository
 
 final class PinesAppServices: @unchecked Sendable {
@@ -127,6 +128,7 @@ final class PinesAppServices: @unchecked Sendable {
     var mcpServerRepository: (any MCPServerRepository)? { liveStore }
     var modelDownloadRepository: (any ModelDownloadRepository)? { liveStore }
     var auditRepository: (any AuditEventRepository)? { liveStore }
+    var turboQuantEvidenceRepository: (any TurboQuantEvidenceRepository)? { liveStore }
 
     var agentRuntimeFactory: any AgentRuntimeFactory {
         explicitAgentRuntimeFactory ?? DefaultAgentRuntimeFactory(

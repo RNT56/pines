@@ -31,6 +31,37 @@ struct TurboQuantWave3EvidenceTests {
         #expect(result.evidence.qualityGate.benchmarkSuiteID == TurboQuantBenchmarkSuiteID.mobileMemoryAcceptanceV1.rawValue)
     }
 
+    @Test func benchmarkImporterRejectsUnknownSchemaAndMissingFallbackHash() throws {
+        var wrongSchema = Self.report()
+        wrongSchema.schemaVersion = 999
+        #expect(throws: TurboQuantBenchmarkImportFailure.unsupportedSchema(name: "BenchmarkReport", version: 999)) {
+            _ = try TurboQuantBenchmarkImporter().importReport(
+                wrongSchema,
+                policy: TurboQuantBenchmarkImportPolicy()
+            )
+        }
+
+        var missingHash = Self.report()
+        missingHash.runtime.fallbackContractHash = " "
+        #expect(throws: TurboQuantBenchmarkImportFailure.missingFallbackContractHash) {
+            _ = try TurboQuantBenchmarkImporter().importReport(
+                missingHash,
+                policy: TurboQuantBenchmarkImportPolicy()
+            )
+        }
+    }
+
+    @Test func benchmarkImporterCarriesCalibrationSampleIntoEvidence() throws {
+        let report = Self.report()
+        let result = try TurboQuantBenchmarkImporter().importReport(
+            report,
+            policy: TurboQuantBenchmarkImportPolicy(requestedEvidenceLevel: .smokeTested)
+        )
+
+        #expect(result.memoryCalibrationSample?.id == report.memoryCalibrationSample?.id)
+        #expect(result.evidence.memoryCalibrationSampleID == report.memoryCalibrationSample?.id)
+    }
+
     @Test func benchmarkImporterRequiresPassingQualityForVerifiedEvidence() throws {
         var report = Self.report()
         report.qualityGate.passed = false
@@ -67,6 +98,133 @@ struct TurboQuantWave3EvidenceTests {
         #expect(allEvidence.count == 2)
         #expect(revocations.count == 1)
         #expect(revocations.first?.evidenceID == first.evidence.id)
+    }
+
+    @Test func profileEvidenceStoreLookupUsesExactTupleAndSkipsRevokedEvidence() async throws {
+        let report = Self.report()
+        let store = ProfileEvidenceStore()
+        let imported = try await store.importBenchmarkReport(
+            report,
+            policy: TurboQuantBenchmarkImportPolicy(
+                acceptedCompatibilityPairIDs: [report.compatibilityPairID],
+                acceptedFallbackContractHashes: [report.runtime.fallbackContractHash],
+                requestedEvidenceLevel: .verified,
+                allowVerifiedEvidence: true
+            )
+        )
+
+        let found = await store.evidence(
+            modelID: report.model.id,
+            modelRevision: report.model.revision,
+            tokenizerHash: report.model.tokenizerHash,
+            profileHash: report.model.profileHash,
+            compatibilityPairID: report.compatibilityPairID,
+            deviceClass: report.device.deviceClass,
+            hardwareModel: report.device.hardwareModel,
+            osBuild: report.device.osBuild,
+            mode: report.runtime.userMode,
+            fallbackContractHash: report.runtime.fallbackContractHash,
+            minimumContextTokens: report.runtime.admittedContextTokens
+        )
+        let wrongMode = await store.evidence(
+            modelID: report.model.id,
+            modelRevision: report.model.revision,
+            tokenizerHash: report.model.tokenizerHash,
+            profileHash: report.model.profileHash,
+            compatibilityPairID: report.compatibilityPairID,
+            deviceClass: report.device.deviceClass,
+            hardwareModel: report.device.hardwareModel,
+            osBuild: report.device.osBuild,
+            mode: .batterySaver,
+            fallbackContractHash: report.runtime.fallbackContractHash,
+            minimumContextTokens: report.runtime.admittedContextTokens
+        )
+
+        #expect(found?.id == imported.evidence.id)
+        #expect(wrongMode == nil)
+
+        _ = await store.revoke(id: imported.evidence.id, reason: "test revoke")
+        let revoked = await store.evidence(
+            modelID: report.model.id,
+            modelRevision: report.model.revision,
+            tokenizerHash: report.model.tokenizerHash,
+            profileHash: report.model.profileHash,
+            compatibilityPairID: report.compatibilityPairID,
+            deviceClass: report.device.deviceClass,
+            hardwareModel: report.device.hardwareModel,
+            osBuild: report.device.osBuild,
+            mode: report.runtime.userMode,
+            fallbackContractHash: report.runtime.fallbackContractHash,
+            minimumContextTokens: report.runtime.admittedContextTokens
+        )
+        #expect(revoked == nil)
+    }
+
+    @Test func profileEvidenceStoreDoesNotRevokeDistinctTuples() async throws {
+        let store = ProfileEvidenceStore()
+        let first = try await store.importBenchmarkReport(
+            Self.report(createdAt: Date(timeIntervalSinceReferenceDate: 1)),
+            policy: TurboQuantBenchmarkImportPolicy(requestedEvidenceLevel: .smokeTested)
+        )
+        var distinctReport = Self.report(createdAt: Date(timeIntervalSinceReferenceDate: 2))
+        distinctReport.model.revision = "different-revision"
+        _ = try await store.importBenchmarkReport(
+            distinctReport,
+            policy: TurboQuantBenchmarkImportPolicy(requestedEvidenceLevel: .smokeTested)
+        )
+
+        let allEvidence = await store.allEvidence()
+        let original = allEvidence.first { $0.id == first.evidence.id }
+        let revocations = await store.allRevocations()
+
+        #expect(original?.evidenceLevel == .smokeTested)
+        #expect(revocations.isEmpty)
+    }
+
+    @Test func coreBenchmarkAdapterWrapsCoreJSONIntoBenchmarkReportEnvelope() throws {
+        let core = TurboQuantCoreBenchmarkReport(
+            mlxSwiftCommit: "core-commit",
+            storageEstimate: TurboQuantCoreStorageEstimate(totalBytes: 512, actualBitsPerValue: 4.25),
+            pathDecision: TurboQuantCoreAttentionDecision(selectedPath: .onlineFused, estimatedScratchBytes: 256),
+            metrics: TurboQuantCoreBenchmarkMetrics(
+                contextTokens: 2048,
+                headDimension: 128,
+                queryLength: 1,
+                preset: "turbo4v2",
+                valueBits: 4,
+                groupSize: 64,
+                firstTokenLatencyMS: 12,
+                prefillTokensPerSecond: 900,
+                decodeTokensPerSecondP50: 40,
+                decodeTokensPerSecondP95: 35,
+                totalBytes: 512,
+                compressedKVBytes: 512,
+                peakMemoryBytes: 1024,
+                actualBitsPerValue: 4.25
+            ),
+            hiddenCopyAudit: TurboQuantCoreHiddenCopyAudit(status: .pass)
+        )
+        var runtime = Self.report().runtime
+        runtime.attentionPath = nil
+        let context = TurboQuantCoreBenchmarkAdapterContext(
+            compatibilityPairID: "pair-wave3",
+            device: Self.report().device,
+            model: Self.report().model,
+            runtime: runtime,
+            qualityGate: Self.report().qualityGate,
+            createdAt: Date(timeIntervalSinceReferenceDate: 123)
+        )
+
+        let report = try TurboQuantCoreBenchmarkAdapter().benchmarkReport(
+            from: core,
+            context: context
+        )
+
+        #expect(report.producer.repo == "mlx-swift")
+        #expect(report.producer.commit == "core-commit")
+        #expect(report.runtime.attentionPath == .onlineFused)
+        #expect(report.metrics.compressedKVBytes == 512)
+        #expect(report.metrics.decodedFallbackScratchBytes == 256)
     }
 
     @Test func qualityGateEvaluatorRecordsReasons() {
@@ -137,6 +295,23 @@ struct TurboQuantWave3EvidenceTests {
         #expect(decoded.importedEvidence == nil)
         #expect(decoded.importFailure?.contains("verifiedEvidenceDisabled") == true)
         #expect(decoded.report.compatibilityPairID == report.compatibilityPairID)
+    }
+
+    @Test func evidenceSupportBundleRoundTripsEvidenceAndCalibration() throws {
+        let result = try TurboQuantBenchmarkImporter().importReport(
+            Self.report(),
+            policy: TurboQuantBenchmarkImportPolicy(requestedEvidenceLevel: .smokeTested)
+        )
+        let bundle = TurboQuantEvidenceSupportBundle(
+            evidence: [result.evidence],
+            memoryCalibrationSamples: [try #require(result.memoryCalibrationSample)]
+        )
+        let exporter = TurboQuantEvidenceSupportBundleExporter()
+        let decoded = try exporter.decode(try exporter.encode(bundle))
+
+        #expect(decoded.schemaVersion == TurboQuantEvidenceSupportBundle.schemaVersion)
+        #expect(decoded.evidence.first?.id == result.evidence.id)
+        #expect(decoded.memoryCalibrationSamples.first?.id == result.memoryCalibrationSample?.id)
     }
 
     private static func report(createdAt: Date = Date()) -> TurboQuantBenchmarkReport {

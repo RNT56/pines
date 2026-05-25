@@ -52,3 +52,44 @@ public struct TurboQuantDeviceAcceptanceRunner: Sendable {
         try JSONDecoder().decode(TurboQuantDeviceAcceptanceExport.self, from: data)
     }
 }
+
+public struct TurboQuantEvidenceSupportBundle: Hashable, Codable, Sendable {
+    public static let schemaVersion = 1
+
+    public var schemaVersion: Int
+    public var evidence: [RuntimeProfileEvidence]
+    public var revocations: [RuntimeEvidenceRevocation]
+    public var memoryCalibrationSamples: [RuntimeMemoryCalibrationSample]
+    public var memoryCalibrations: [RuntimeMemoryCalibration]
+    public var exportedAt: Date
+
+    public init(
+        schemaVersion: Int = Self.schemaVersion,
+        evidence: [RuntimeProfileEvidence],
+        revocations: [RuntimeEvidenceRevocation] = [],
+        memoryCalibrationSamples: [RuntimeMemoryCalibrationSample] = [],
+        memoryCalibrations: [RuntimeMemoryCalibration] = [],
+        exportedAt: Date = Date()
+    ) {
+        self.schemaVersion = schemaVersion
+        self.evidence = evidence
+        self.revocations = revocations
+        self.memoryCalibrationSamples = memoryCalibrationSamples
+        self.memoryCalibrations = memoryCalibrations
+        self.exportedAt = exportedAt
+    }
+}
+
+public struct TurboQuantEvidenceSupportBundleExporter: Sendable {
+    public init() {}
+
+    public func encode(_ bundle: TurboQuantEvidenceSupportBundle) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(bundle)
+    }
+
+    public func decode(_ data: Data) throws -> TurboQuantEvidenceSupportBundle {
+        try JSONDecoder().decode(TurboQuantEvidenceSupportBundle.self, from: data)
+    }
+}

@@ -26,6 +26,7 @@ actor GRDBPinesStore:
     MCPServerRepository,
     ModelDownloadRepository,
     AuditEventRepository,
+    TurboQuantEvidenceRepository,
     AppDataResetRepository
 {
     let database: DatabasePool
@@ -923,31 +924,61 @@ actor GRDBPinesStore:
 
     func turboQuantProfileEvidence(
         modelID: String,
+        modelRevision: String? = nil,
+        tokenizerHash: String? = nil,
+        profileHash: String? = nil,
+        compatibilityPairID: String? = nil,
         deviceClass: DevicePerformanceClass,
+        hardwareModel: String? = nil,
+        osBuild: String? = nil,
         mode: TurboQuantUserMode,
-        fallbackContractHash: String
+        fallbackContractHash: String? = nil,
+        minimumContextTokens: Int = 0
     ) async throws -> RuntimeProfileEvidence? {
         try await database.read { db in
-            try Row.fetchOne(
+            var conditions = [
+                "model_id = ?",
+                "device_class = ?",
+                "user_mode = ?",
+                "evidence_level != ?",
+                "revoked_reason IS NULL",
+                "admitted_context_tokens >= ?",
+            ]
+            var arguments: StatementArguments = [
+                modelID,
+                deviceClass.rawValue,
+                mode.rawValue,
+                RuntimeEvidenceLevel.revoked.rawValue,
+                max(0, minimumContextTokens),
+            ]
+
+            func appendOptional(_ column: String, _ value: String?) {
+                if let value {
+                    conditions.append("\(column) = ?")
+                    _ = arguments.append(contentsOf: StatementArguments([value]))
+                } else {
+                    conditions.append("\(column) IS NULL")
+                }
+            }
+
+            appendOptional("model_revision", modelRevision)
+            appendOptional("tokenizer_hash", tokenizerHash)
+            appendOptional("profile_hash", profileHash)
+            if let compatibilityPairID {
+                conditions.append("compatibility_pair_id = ?")
+                _ = arguments.append(contentsOf: StatementArguments([compatibilityPairID]))
+            }
+            appendOptional("hardware_model", hardwareModel)
+            appendOptional("os_build", osBuild)
+            if let fallbackContractHash {
+                conditions.append("fallback_contract_hash = ?")
+                _ = arguments.append(contentsOf: StatementArguments([fallbackContractHash]))
+            }
+
+            return try Row.fetchOne(
                 db,
-                sql: """
-                SELECT * FROM turboquant_profile_evidence
-                WHERE model_id = ?
-                    AND device_class = ?
-                    AND user_mode = ?
-                    AND fallback_contract_hash = ?
-                    AND evidence_level != ?
-                    AND revoked_reason IS NULL
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                arguments: [
-                    modelID,
-                    deviceClass.rawValue,
-                    mode.rawValue,
-                    fallbackContractHash,
-                    RuntimeEvidenceLevel.revoked.rawValue,
-                ]
+                sql: "SELECT * FROM turboquant_profile_evidence WHERE \(conditions.joined(separator: " AND ")) ORDER BY created_at DESC LIMIT 1",
+                arguments: arguments
             ).map(Self.runtimeProfileEvidence(from:))
         }
     }

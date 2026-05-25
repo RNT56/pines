@@ -257,6 +257,238 @@ public struct TurboQuantBenchmarkImportResult: Hashable, Codable, Sendable {
     }
 }
 
+public struct TurboQuantCoreBenchmarkReport: Hashable, Codable, Sendable {
+    public static let schemaVersion = 1
+
+    public var schemaVersion: Int
+    public var mlxSwiftCommit: String?
+    public var storageEstimate: TurboQuantCoreStorageEstimate
+    public var pathDecision: TurboQuantCoreAttentionDecision?
+    public var metrics: TurboQuantCoreBenchmarkMetrics
+    public var hiddenCopyAudit: TurboQuantCoreHiddenCopyAudit
+
+    public init(
+        schemaVersion: Int = Self.schemaVersion,
+        mlxSwiftCommit: String? = nil,
+        storageEstimate: TurboQuantCoreStorageEstimate,
+        pathDecision: TurboQuantCoreAttentionDecision? = nil,
+        metrics: TurboQuantCoreBenchmarkMetrics,
+        hiddenCopyAudit: TurboQuantCoreHiddenCopyAudit
+    ) {
+        self.schemaVersion = schemaVersion
+        self.mlxSwiftCommit = mlxSwiftCommit
+        self.storageEstimate = storageEstimate
+        self.pathDecision = pathDecision
+        self.metrics = metrics
+        self.hiddenCopyAudit = hiddenCopyAudit
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case mlxSwiftCommit
+        case storageEstimate
+        case pathDecision
+        case metrics
+        case hiddenCopyAudit
+    }
+}
+
+public struct TurboQuantCoreStorageEstimate: Hashable, Codable, Sendable {
+    public var totalBytes: Int
+    public var actualBitsPerValue: Double
+
+    public init(totalBytes: Int, actualBitsPerValue: Double) {
+        self.totalBytes = max(0, totalBytes)
+        self.actualBitsPerValue = actualBitsPerValue
+    }
+}
+
+public struct TurboQuantCoreAttentionDecision: Hashable, Sendable {
+    public var selectedPath: TurboQuantAttentionPath
+    public var estimatedScratchBytes: Int
+
+    public init(selectedPath: TurboQuantAttentionPath, estimatedScratchBytes: Int = 0) {
+        self.selectedPath = selectedPath
+        self.estimatedScratchBytes = max(0, estimatedScratchBytes)
+    }
+}
+
+extension TurboQuantCoreAttentionDecision: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case selectedPath
+        case estimatedScratchBytes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        selectedPath = try container.decode(TurboQuantAttentionPath.self, forKey: .selectedPath)
+        estimatedScratchBytes = try container.decodeIfPresent(Int.self, forKey: .estimatedScratchBytes) ?? 0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(selectedPath, forKey: .selectedPath)
+        try container.encode(estimatedScratchBytes, forKey: .estimatedScratchBytes)
+    }
+}
+
+public struct TurboQuantCoreBenchmarkMetrics: Hashable, Codable, Sendable {
+    public var contextTokens: Int
+    public var headDimension: Int
+    public var queryLength: Int
+    public var preset: String
+    public var valueBits: Int?
+    public var groupSize: Int
+    public var firstTokenLatencyMS: Double?
+    public var prefillTokensPerSecond: Double?
+    public var decodeTokensPerSecondP50: Double?
+    public var decodeTokensPerSecondP95: Double?
+    public var totalBytes: Int
+    public var compressedKVBytes: Int
+    public var peakMemoryBytes: Int?
+    public var actualBitsPerValue: Double
+    public var fallbackUsed: Bool
+    public var fallbackReason: String?
+    public var memoryWarningsSeen: Int
+    public var jetsamObserved: Bool
+
+    public init(
+        contextTokens: Int,
+        headDimension: Int,
+        queryLength: Int,
+        preset: String,
+        valueBits: Int? = nil,
+        groupSize: Int,
+        firstTokenLatencyMS: Double? = nil,
+        prefillTokensPerSecond: Double? = nil,
+        decodeTokensPerSecondP50: Double? = nil,
+        decodeTokensPerSecondP95: Double? = nil,
+        totalBytes: Int,
+        compressedKVBytes: Int,
+        peakMemoryBytes: Int? = nil,
+        actualBitsPerValue: Double,
+        fallbackUsed: Bool = false,
+        fallbackReason: String? = nil,
+        memoryWarningsSeen: Int = 0,
+        jetsamObserved: Bool = false
+    ) {
+        self.contextTokens = max(0, contextTokens)
+        self.headDimension = max(0, headDimension)
+        self.queryLength = max(0, queryLength)
+        self.preset = preset
+        self.valueBits = valueBits
+        self.groupSize = max(1, groupSize)
+        self.firstTokenLatencyMS = firstTokenLatencyMS
+        self.prefillTokensPerSecond = prefillTokensPerSecond
+        self.decodeTokensPerSecondP50 = decodeTokensPerSecondP50
+        self.decodeTokensPerSecondP95 = decodeTokensPerSecondP95
+        self.totalBytes = max(0, totalBytes)
+        self.compressedKVBytes = max(0, compressedKVBytes)
+        self.peakMemoryBytes = peakMemoryBytes
+        self.actualBitsPerValue = actualBitsPerValue
+        self.fallbackUsed = fallbackUsed
+        self.fallbackReason = fallbackReason
+        self.memoryWarningsSeen = max(0, memoryWarningsSeen)
+        self.jetsamObserved = jetsamObserved
+    }
+}
+
+public enum TurboQuantCoreHiddenCopyAuditStatus: String, Codable, Sendable {
+    case pass
+    case warning
+    case fail
+    case pending
+    case skipped
+}
+
+public struct TurboQuantCoreHiddenCopyAudit: Hashable, Codable, Sendable {
+    public var status: TurboQuantCoreHiddenCopyAuditStatus
+    public var notes: [String]
+
+    public init(status: TurboQuantCoreHiddenCopyAuditStatus, notes: [String] = []) {
+        self.status = status
+        self.notes = notes
+    }
+}
+
+public struct TurboQuantCoreBenchmarkAdapterContext: Hashable, Codable, Sendable {
+    public var compatibilityPairID: String
+    public var device: TurboQuantBenchmarkDevice
+    public var model: TurboQuantBenchmarkModel
+    public var runtime: TurboQuantBenchmarkRuntime
+    public var qualityGate: TurboQuantQualityGate
+    public var memoryCalibrationSample: RuntimeMemoryCalibrationSample?
+    public var createdAt: Date
+
+    public init(
+        compatibilityPairID: String,
+        device: TurboQuantBenchmarkDevice,
+        model: TurboQuantBenchmarkModel,
+        runtime: TurboQuantBenchmarkRuntime,
+        qualityGate: TurboQuantQualityGate,
+        memoryCalibrationSample: RuntimeMemoryCalibrationSample? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.compatibilityPairID = compatibilityPairID
+        self.device = device
+        self.model = model
+        self.runtime = runtime
+        self.qualityGate = qualityGate
+        self.memoryCalibrationSample = memoryCalibrationSample
+        self.createdAt = createdAt
+    }
+}
+
+public struct TurboQuantCoreBenchmarkAdapter: Sendable {
+    public init() {}
+
+    public func benchmarkReport(
+        from coreReport: TurboQuantCoreBenchmarkReport,
+        context: TurboQuantCoreBenchmarkAdapterContext
+    ) throws -> TurboQuantBenchmarkReport {
+        guard coreReport.schemaVersion == TurboQuantCoreBenchmarkReport.schemaVersion else {
+            throw TurboQuantBenchmarkImportFailure.unsupportedSchema(
+                name: "CoreBenchmarkReport",
+                version: coreReport.schemaVersion
+            )
+        }
+        guard coreReport.hiddenCopyAudit.status != .fail else {
+            throw TurboQuantBenchmarkImportFailure.memoryGateFailed("Core hidden-copy audit failed.")
+        }
+
+        var runtime = context.runtime
+        runtime.preset = runtime.preset ?? coreReport.metrics.preset
+        runtime.valueBits = runtime.valueBits ?? coreReport.metrics.valueBits
+        runtime.groupSize = runtime.groupSize ?? coreReport.metrics.groupSize
+        runtime.attentionPath = runtime.attentionPath ?? coreReport.pathDecision?.selectedPath
+
+        return TurboQuantBenchmarkReport(
+            compatibilityPairID: context.compatibilityPairID,
+            producer: SchemaProducer(repo: "mlx-swift", commit: coreReport.mlxSwiftCommit ?? "unknown"),
+            device: context.device,
+            model: context.model,
+            runtime: runtime,
+            metrics: TurboQuantBenchmarkMetrics(
+                contextTokens: coreReport.metrics.contextTokens,
+                firstTokenLatencyMS: coreReport.metrics.firstTokenLatencyMS,
+                prefillTokensPerSecond: coreReport.metrics.prefillTokensPerSecond,
+                decodeTokensPerSecondP50: coreReport.metrics.decodeTokensPerSecondP50,
+                decodeTokensPerSecondP95: coreReport.metrics.decodeTokensPerSecondP95,
+                peakMemoryBytes: coreReport.metrics.peakMemoryBytes.map(Int64.init),
+                compressedKVBytes: Int64(coreReport.metrics.compressedKVBytes),
+                decodedFallbackScratchBytes: coreReport.pathDecision.map { Int64($0.estimatedScratchBytes) },
+                memoryWarningsSeen: coreReport.metrics.memoryWarningsSeen,
+                fallbackUsed: coreReport.metrics.fallbackUsed,
+                fallbackReason: coreReport.metrics.fallbackReason,
+                jetsamObserved: coreReport.metrics.jetsamObserved
+            ),
+            qualityGate: context.qualityGate,
+            memoryCalibrationSample: context.memoryCalibrationSample,
+            createdAt: context.createdAt
+        )
+    }
+}
+
 public struct TurboQuantBenchmarkImporter: Sendable {
     public init() {}
 

@@ -5240,6 +5240,10 @@ final class PinesAppModel: ObservableObject {
                     let downloads = snapshot.downloads
                     let downloadByRepository = Self.latestDownloadByRepository(downloads)
                     let installByRepository = Dictionary(uniqueKeysWithValues: installs.map { ($0.repository.lowercased(), $0) })
+                    let profileEvidenceByModelID = await Self.latestTurboQuantEvidenceByModelID(
+                        repository: services.turboQuantEvidenceRepository,
+                        enabled: snapshot.enrichRuntime
+                    )
                     await MainActor.run {
                         guard let self else { return }
                         if self.isShowingModelDiscoveryResults {
@@ -5272,6 +5276,7 @@ final class PinesAppModel: ObservableObject {
                                 installs: installs,
                                 downloads: downloads,
                                 runtime: services.mlxRuntime,
+                                profileEvidenceByModelID: profileEvidenceByModelID,
                                 enrichRuntime: snapshot.enrichRuntime
                             )
                             self.setIfChanged(\.models, previews)
@@ -5302,6 +5307,7 @@ final class PinesAppModel: ObservableObject {
                                 from: preview.install,
                                 runtime: services.mlxRuntime,
                                 download: downloadByRepository[key],
+                                profileEvidence: preview.runtimeProfileEvidence.map { [$0] } ?? [],
                                 enrichRuntime: self.isShowingModelDiscoveryResults ? false : self.shouldEnrichRuntimeModelPreviews
                             )
                         }
@@ -5475,13 +5481,36 @@ final class PinesAppModel: ObservableObject {
 
         let shouldEnrichRuntime = enrichRuntime ?? shouldEnrichRuntimeModelPreviews
         let installs = try await modelRepository.listInstalledAndCuratedModels()
+        let profileEvidenceByModelID = await Self.latestTurboQuantEvidenceByModelID(
+            repository: services.turboQuantEvidenceRepository,
+            enabled: shouldEnrichRuntime
+        )
         let previews = Self.modelPreviews(
             installs: installs,
             downloads: downloads,
             runtime: services.mlxRuntime,
+            profileEvidenceByModelID: profileEvidenceByModelID,
             enrichRuntime: shouldEnrichRuntime
         )
         return (downloads, previews)
+    }
+
+    private static func latestTurboQuantEvidenceByModelID(
+        repository: (any TurboQuantEvidenceRepository)?,
+        enabled: Bool
+    ) async -> [String: [RuntimeProfileEvidence]] {
+        guard enabled, let repository else { return [:] }
+        do {
+            let evidence = try await repository.listTurboQuantProfileEvidence(modelID: nil)
+            return Dictionary(
+                grouping: evidence,
+                by: { $0.modelID.lowercased() }
+            ).mapValues { records in
+                records.sorted { $0.createdAt > $1.createdAt }
+            }
+        } catch {
+            return [:]
+        }
     }
 
     private static func providerFilePreview(from record: ProviderFileRecord) -> PinesProviderFilePreview {

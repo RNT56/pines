@@ -299,6 +299,7 @@ struct PinesModelPreview: Identifiable, Hashable, Sendable {
     let readiness: Double
     let downloadProgress: ModelDownloadProgress?
     let compatibilityWarnings: [String]
+    let runtimeProfileEvidence: RuntimeProfileEvidence?
     let runtimeCompatibilityState: RuntimeCompatibilityState
 }
 
