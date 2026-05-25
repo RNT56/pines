@@ -173,6 +173,7 @@ public actor ProfileEvidenceStore {
         osBuild: String?,
         mode: TurboQuantUserMode,
         fallbackContractHash: String,
+        layoutVersion: Int?,
         minimumContextTokens: Int
     ) -> RuntimeProfileEvidence? {
         records.values
@@ -187,6 +188,7 @@ public actor ProfileEvidenceStore {
                     && (osBuild == nil || $0.osBuild == osBuild)
                     && $0.userMode == mode
                     && $0.fallbackContractHash == fallbackContractHash
+                    && $0.layoutVersion == layoutVersion
                     && $0.admittedContextTokens >= minimumContextTokens
                     && $0.evidenceLevel.canMakeProductCompatibilityClaim
                     && $0.revokedReason == nil
@@ -282,6 +284,7 @@ public protocol TurboQuantEvidenceRepository: Sendable {
         osBuild: String?,
         mode: TurboQuantUserMode,
         fallbackContractHash: String?,
+        layoutVersion: Int?,
         minimumContextTokens: Int
     ) async throws -> RuntimeProfileEvidence?
     func listTurboQuantProfileEvidence(modelID: String?) async throws -> [RuntimeProfileEvidence]

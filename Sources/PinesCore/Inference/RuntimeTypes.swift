@@ -834,6 +834,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var devicePerformanceClass: DevicePerformanceClass?
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy
     public var turboQuantValueBits: Int?
+    public var turboQuantLayoutVersion: Int?
     public var thermalDownshiftActive: Bool
     public var runtimePressureReason: RuntimePressureReason
     public var turboQuantProfileID: String?
@@ -866,6 +867,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case devicePerformanceClass
         case turboQuantOptimizationPolicy
         case turboQuantValueBits
+        case turboQuantLayoutVersion
         case thermalDownshiftActive
         case runtimePressureReason
         case turboQuantProfileID
@@ -899,6 +901,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         devicePerformanceClass: DevicePerformanceClass? = nil,
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy = .auto,
         turboQuantValueBits: Int? = nil,
+        turboQuantLayoutVersion: Int? = nil,
         thermalDownshiftActive: Bool = false,
         runtimePressureReason: RuntimePressureReason = .none,
         turboQuantProfileID: String? = nil,
@@ -930,6 +933,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.devicePerformanceClass = devicePerformanceClass
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
         self.turboQuantValueBits = turboQuantValueBits
+        self.turboQuantLayoutVersion = turboQuantLayoutVersion
         self.thermalDownshiftActive = thermalDownshiftActive
         self.runtimePressureReason = runtimePressureReason
         self.turboQuantProfileID = turboQuantProfileID
@@ -964,6 +968,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         devicePerformanceClass = try container.decodeIfPresent(DevicePerformanceClass.self, forKey: .devicePerformanceClass)
         turboQuantOptimizationPolicy = try container.decodeIfPresent(TurboQuantOptimizationPolicy.self, forKey: .turboQuantOptimizationPolicy) ?? .auto
         turboQuantValueBits = try container.decodeIfPresent(Int.self, forKey: .turboQuantValueBits)
+        turboQuantLayoutVersion = try container.decodeIfPresent(Int.self, forKey: .turboQuantLayoutVersion)
         thermalDownshiftActive = try container.decodeIfPresent(Bool.self, forKey: .thermalDownshiftActive) ?? false
         runtimePressureReason = try container.decodeIfPresent(RuntimePressureReason.self, forKey: .runtimePressureReason) ?? .none
         turboQuantProfileID = try container.decodeIfPresent(String.self, forKey: .turboQuantProfileID)

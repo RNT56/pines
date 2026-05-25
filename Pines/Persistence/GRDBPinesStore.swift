@@ -1180,6 +1180,7 @@ actor GRDBPinesStore:
         osBuild: String? = nil,
         mode: TurboQuantUserMode,
         fallbackContractHash: String? = nil,
+        layoutVersion: Int? = nil,
         minimumContextTokens: Int = 0
     ) async throws -> RuntimeProfileEvidence? {
         try await database.read { db in
@@ -1220,6 +1221,12 @@ actor GRDBPinesStore:
             if let fallbackContractHash {
                 conditions.append("fallback_contract_hash = ?")
                 _ = arguments.append(contentsOf: StatementArguments([fallbackContractHash]))
+            }
+            if let layoutVersion {
+                conditions.append("layout_version = ?")
+                _ = arguments.append(contentsOf: StatementArguments([layoutVersion]))
+            } else {
+                conditions.append("layout_version IS NULL")
             }
 
             return try Row.fetchOne(

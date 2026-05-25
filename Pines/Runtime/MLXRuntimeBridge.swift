@@ -880,6 +880,7 @@ struct MLXRuntimeBridge: Sendable {
                 turboQuantOptimizationPolicy: turboQuantDefaults?.optimizationPolicy
                     ?? deviceProfile.turboQuantOptimizationPolicy,
                 turboQuantValueBits: admission.useTurboQuant ? turboQuantDefaults?.valueBits : nil,
+                turboQuantLayoutVersion: admission.useTurboQuant ? 4 : nil,
                 thermalDownshiftActive: deviceProfile.thermalDownshiftActive,
                 runtimePressureReason: deviceProfile.runtimePressureReason,
                 turboQuantProfileID: admission.useTurboQuant ? turboQuantDefaults?.profileID : nil,

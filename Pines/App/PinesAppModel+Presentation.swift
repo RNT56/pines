@@ -348,6 +348,40 @@ extension PinesAppModel {
                           evidence.deviceClass == deviceClass else {
                         return false
                     }
+                    guard let runtimeLayoutVersion = quantization.turboQuantLayoutVersion,
+                          evidence.layoutVersion == runtimeLayoutVersion else {
+                        return false
+                    }
+                    guard let admission else {
+                        return false
+                    }
+                    let fallbackReserve = Int64(
+                        admission.memoryPlan?.runtimeZones.fallbackReserveBytes
+                            ?? Int(TurboQuantFallbackContract.defaultReserveBytes(for: mode))
+                    )
+                    let fallbackHash = TurboQuantFallbackContract.productDefault(
+                        for: mode,
+                        allowCloudRetry: false,
+                        reserveBytes: fallbackReserve
+                    ).contractHash
+                    guard evidence.fallbackContractHash == fallbackHash else {
+                        return false
+                    }
+                    if let attentionPath = quantization.activeAttentionPath,
+                       evidence.activeAttentionPath != attentionPath {
+                        return false
+                    }
+                    if let preset = quantization.preset,
+                       evidence.turboQuantPreset != preset.rawValue {
+                        return false
+                    }
+                    if let valueBits = quantization.turboQuantValueBits,
+                       evidence.valueBits != valueBits {
+                        return false
+                    }
+                    if evidence.groupSize != quantization.kvGroupSize {
+                        return false
+                    }
                 } else if let evidenceRevision = evidence.modelRevision,
                           let installRevision = install.revision,
                           evidenceRevision != installRevision {

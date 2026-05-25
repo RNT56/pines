@@ -772,8 +772,14 @@ struct ModelDetailView: View {
         if let requestedBackend = quantization.requestedBackend { items.append(.init("Requested backend", requestedBackend.displayName)) }
         if let activeBackend = quantization.activeBackend { items.append(.init("Active backend", activeBackend.displayName)) }
         if let attentionPath = quantization.activeAttentionPath { items.append(.init("Attention path", attentionPath.displayName)) }
+        if let layoutVersion = quantization.turboQuantLayoutVersion { items.append(.init("Layout", "v\(layoutVersion)")) }
         if let kernelProfile = quantization.metalKernelProfile { items.append(.init("Kernel", kernelProfile.displayName)) }
         if let selfTest = quantization.metalSelfTestStatus { items.append(.init("MLX self-test", selfTest.displayName)) }
+        if let evidence = model.runtimeProfileEvidence {
+            items.append(.init("Evidence", evidence.evidenceLevel.displayTitle, systemImage: "checkmark.seal"))
+            items.append(.init("Evidence tuple", evidence.tupleSummary, systemImage: "number", copyable: true))
+            items.append(.init("Evidence fallback hash", evidence.fallbackContractHash, systemImage: "number", copyable: true))
+        }
         if let rawFallbackAllocated = quantization.rawFallbackAllocated { items.append(.init("Raw KV fallback", rawFallbackAllocated ? "Allocated" : "Not allocated")) }
         if quantization.runtimePressureReason != .none {
             items.append(.init("Pressure reason", quantization.runtimePressureReason.displayName))
@@ -1036,6 +1042,39 @@ private extension PinesModelStatus {
         case .unsupported:
             theme.colors.tertiaryText
         }
+    }
+}
+
+private extension RuntimeEvidenceLevel {
+    var displayTitle: String {
+        switch self {
+        case .unverified:
+            "Unverified"
+        case .smokeTested:
+            "Smoke tested"
+        case .verified:
+            "Verified"
+        case .certified:
+            "Certified"
+        case .revoked:
+            "Revoked"
+        }
+    }
+}
+
+private extension RuntimeProfileEvidence {
+    var tupleSummary: String {
+        [
+            turboQuantPreset.map { "preset=\($0)" },
+            valueBits.map { "bits=\($0)" },
+            groupSize.map { "group=\($0)" },
+            layoutVersion.map { "layout=v\($0)" },
+            activeAttentionPath.map { "path=\($0.rawValue)" },
+            "mode=\(userMode.rawValue)",
+            "context=\(admittedContextTokens)",
+        ]
+        .compactMap(\.self)
+        .joined(separator: " ")
     }
 }
 

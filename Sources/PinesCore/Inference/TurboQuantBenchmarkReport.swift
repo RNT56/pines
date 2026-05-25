@@ -190,6 +190,7 @@ public enum TurboQuantBenchmarkImportFailure: Error, Hashable, LocalizedError, S
     case unknownCompatibilityPairID(String)
     case missingFallbackContractHash
     case fallbackContractHashMismatch(String)
+    case layoutVersionMismatch(expected: [Int], actual: Int?)
     case missingBenchmarkSuiteID
     case qualityGateFailed(String?)
     case memoryGateFailed(String)
@@ -207,6 +208,8 @@ public enum TurboQuantBenchmarkImportFailure: Error, Hashable, LocalizedError, S
             "Benchmark report is missing a fallback-contract hash."
         case .fallbackContractHashMismatch(let hash):
             "Fallback-contract hash \(hash) is not accepted for release evidence."
+        case .layoutVersionMismatch(let expected, let actual):
+            "Benchmark layout version \(actual.map(String.init) ?? "nil") is not accepted for release evidence; expected one of \(expected)."
         case .missingBenchmarkSuiteID:
             "Benchmark report is missing a benchmark suite ID."
         case .qualityGateFailed(let reason):
@@ -222,6 +225,7 @@ public enum TurboQuantBenchmarkImportFailure: Error, Hashable, LocalizedError, S
 public struct TurboQuantBenchmarkImportPolicy: Hashable, Codable, Sendable {
     public var acceptedCompatibilityPairIDs: Set<String>
     public var acceptedFallbackContractHashes: Set<String>
+    public var acceptedLayoutVersions: Set<Int>
     public var requestedEvidenceLevel: RuntimeEvidenceLevel
     public var allowVerifiedEvidence: Bool
     public var allowMemoryWarningsForVerified: Bool
@@ -229,12 +233,14 @@ public struct TurboQuantBenchmarkImportPolicy: Hashable, Codable, Sendable {
     public init(
         acceptedCompatibilityPairIDs: Set<String> = [],
         acceptedFallbackContractHashes: Set<String> = [],
+        acceptedLayoutVersions: Set<Int> = [],
         requestedEvidenceLevel: RuntimeEvidenceLevel = .smokeTested,
         allowVerifiedEvidence: Bool = false,
         allowMemoryWarningsForVerified: Bool = false
     ) {
         self.acceptedCompatibilityPairIDs = acceptedCompatibilityPairIDs
         self.acceptedFallbackContractHashes = acceptedFallbackContractHashes
+        self.acceptedLayoutVersions = acceptedLayoutVersions
         self.requestedEvidenceLevel = requestedEvidenceLevel
         self.allowVerifiedEvidence = allowVerifiedEvidence
         self.allowMemoryWarningsForVerified = allowMemoryWarningsForVerified
@@ -339,6 +345,9 @@ public struct TurboQuantCoreBenchmarkMetrics: Hashable, Codable, Sendable {
     public var preset: String
     public var valueBits: Int?
     public var groupSize: Int
+    public var layoutVersion: Int?
+    public var scaleStorage: String?
+    public var warmupIterations: Int?
     public var firstTokenLatencyMS: Double?
     public var prefillTokensPerSecond: Double?
     public var decodeTokensPerSecondP50: Double?
@@ -359,6 +368,9 @@ public struct TurboQuantCoreBenchmarkMetrics: Hashable, Codable, Sendable {
         preset: String,
         valueBits: Int? = nil,
         groupSize: Int,
+        layoutVersion: Int? = nil,
+        scaleStorage: String? = nil,
+        warmupIterations: Int? = nil,
         firstTokenLatencyMS: Double? = nil,
         prefillTokensPerSecond: Double? = nil,
         decodeTokensPerSecondP50: Double? = nil,
@@ -378,6 +390,9 @@ public struct TurboQuantCoreBenchmarkMetrics: Hashable, Codable, Sendable {
         self.preset = preset
         self.valueBits = valueBits
         self.groupSize = max(1, groupSize)
+        self.layoutVersion = layoutVersion
+        self.scaleStorage = scaleStorage
+        self.warmupIterations = warmupIterations.map { max(0, $0) }
         self.firstTokenLatencyMS = firstTokenLatencyMS
         self.prefillTokensPerSecond = prefillTokensPerSecond
         self.decodeTokensPerSecondP50 = decodeTokensPerSecondP50
@@ -460,6 +475,7 @@ public struct TurboQuantCoreBenchmarkAdapter: Sendable {
         runtime.preset = runtime.preset ?? coreReport.metrics.preset
         runtime.valueBits = runtime.valueBits ?? coreReport.metrics.valueBits
         runtime.groupSize = runtime.groupSize ?? coreReport.metrics.groupSize
+        runtime.layoutVersion = runtime.layoutVersion ?? coreReport.metrics.layoutVersion
         runtime.attentionPath = runtime.attentionPath ?? coreReport.pathDecision?.selectedPath
 
         return TurboQuantBenchmarkReport(
@@ -560,6 +576,13 @@ public struct TurboQuantBenchmarkImporter: Sendable {
             }
             guard policy.acceptedFallbackContractHashes.contains(report.runtime.fallbackContractHash) else {
                 throw TurboQuantBenchmarkImportFailure.fallbackContractHashMismatch(report.runtime.fallbackContractHash)
+            }
+            guard let layoutVersion = report.runtime.layoutVersion,
+                  policy.acceptedLayoutVersions.contains(layoutVersion) else {
+                throw TurboQuantBenchmarkImportFailure.layoutVersionMismatch(
+                    expected: Array(policy.acceptedLayoutVersions).sorted(),
+                    actual: report.runtime.layoutVersion
+                )
             }
             guard report.qualityGate.passed else {
                 throw TurboQuantBenchmarkImportFailure.qualityGateFailed(report.qualityGate.gateReason)

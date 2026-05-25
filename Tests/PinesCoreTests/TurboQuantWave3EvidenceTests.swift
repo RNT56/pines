@@ -73,6 +73,29 @@ struct TurboQuantWave3EvidenceTests {
                 policy: TurboQuantBenchmarkImportPolicy(
                     acceptedCompatibilityPairIDs: [report.compatibilityPairID],
                     acceptedFallbackContractHashes: [report.runtime.fallbackContractHash],
+                    acceptedLayoutVersions: [report.runtime.layoutVersion ?? 0],
+                    requestedEvidenceLevel: .verified,
+                    allowVerifiedEvidence: true
+                )
+            )
+        }
+    }
+
+    @Test func benchmarkImporterRequiresAcceptedLayoutForVerifiedEvidence() throws {
+        let report = Self.report()
+
+        #expect(
+            throws: TurboQuantBenchmarkImportFailure.layoutVersionMismatch(
+                expected: [5],
+                actual: report.runtime.layoutVersion
+            )
+        ) {
+            _ = try TurboQuantBenchmarkImporter().importReport(
+                report,
+                policy: TurboQuantBenchmarkImportPolicy(
+                    acceptedCompatibilityPairIDs: [report.compatibilityPairID],
+                    acceptedFallbackContractHashes: [report.runtime.fallbackContractHash],
+                    acceptedLayoutVersions: [5],
                     requestedEvidenceLevel: .verified,
                     allowVerifiedEvidence: true
                 )
@@ -108,6 +131,7 @@ struct TurboQuantWave3EvidenceTests {
             policy: TurboQuantBenchmarkImportPolicy(
                 acceptedCompatibilityPairIDs: [report.compatibilityPairID],
                 acceptedFallbackContractHashes: [report.runtime.fallbackContractHash],
+                acceptedLayoutVersions: [report.runtime.layoutVersion ?? 0],
                 requestedEvidenceLevel: .verified,
                 allowVerifiedEvidence: true
             )
@@ -124,6 +148,7 @@ struct TurboQuantWave3EvidenceTests {
             osBuild: report.device.osBuild,
             mode: report.runtime.userMode,
             fallbackContractHash: report.runtime.fallbackContractHash,
+            layoutVersion: report.runtime.layoutVersion,
             minimumContextTokens: report.runtime.admittedContextTokens
         )
         let wrongMode = await store.evidence(
@@ -137,11 +162,28 @@ struct TurboQuantWave3EvidenceTests {
             osBuild: report.device.osBuild,
             mode: .batterySaver,
             fallbackContractHash: report.runtime.fallbackContractHash,
+            layoutVersion: report.runtime.layoutVersion,
             minimumContextTokens: report.runtime.admittedContextTokens
         )
 
         #expect(found?.id == imported.evidence.id)
         #expect(wrongMode == nil)
+
+        let wrongLayout = await store.evidence(
+            modelID: report.model.id,
+            modelRevision: report.model.revision,
+            tokenizerHash: report.model.tokenizerHash,
+            profileHash: report.model.profileHash,
+            compatibilityPairID: report.compatibilityPairID,
+            deviceClass: report.device.deviceClass,
+            hardwareModel: report.device.hardwareModel,
+            osBuild: report.device.osBuild,
+            mode: report.runtime.userMode,
+            fallbackContractHash: report.runtime.fallbackContractHash,
+            layoutVersion: 5,
+            minimumContextTokens: report.runtime.admittedContextTokens
+        )
+        #expect(wrongLayout == nil)
 
         _ = await store.revoke(id: imported.evidence.id, reason: "test revoke")
         let revoked = await store.evidence(
@@ -155,6 +197,7 @@ struct TurboQuantWave3EvidenceTests {
             osBuild: report.device.osBuild,
             mode: report.runtime.userMode,
             fallbackContractHash: report.runtime.fallbackContractHash,
+            layoutVersion: report.runtime.layoutVersion,
             minimumContextTokens: report.runtime.admittedContextTokens
         )
         #expect(revoked == nil)
@@ -193,6 +236,9 @@ struct TurboQuantWave3EvidenceTests {
                 preset: "turbo4v2",
                 valueBits: 4,
                 groupSize: 64,
+                layoutVersion: 5,
+                scaleStorage: "float16",
+                warmupIterations: 2,
                 firstTokenLatencyMS: 12,
                 prefillTokensPerSecond: 900,
                 decodeTokensPerSecondP50: 40,
@@ -206,6 +252,7 @@ struct TurboQuantWave3EvidenceTests {
         )
         var runtime = Self.report().runtime
         runtime.attentionPath = nil
+        runtime.layoutVersion = nil
         let context = TurboQuantCoreBenchmarkAdapterContext(
             compatibilityPairID: "pair-wave3",
             device: Self.report().device,
@@ -223,6 +270,7 @@ struct TurboQuantWave3EvidenceTests {
         #expect(report.producer.repo == "mlx-swift")
         #expect(report.producer.commit == "core-commit")
         #expect(report.runtime.attentionPath == .onlineFused)
+        #expect(report.runtime.layoutVersion == 5)
         #expect(report.metrics.compressedKVBytes == 512)
         #expect(report.metrics.decodedFallbackScratchBytes == 256)
     }
