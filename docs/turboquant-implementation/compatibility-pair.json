@@ -4,7 +4,7 @@
   "pines": {
     "repo": "pines",
     "branch": "codex/local-runtime-hardening",
-    "commit": "2956939fdcf584f4988dd7dc3bd67f8e5bc0cddf",
+    "commit": "3f979581904c3993a355f4f8e1e5fe7ab9d38d75",
     "dirtyAtValidation": false
   },
   "mlxSwift": {
@@ -139,6 +139,7 @@
   "notes": [
     "Pending validation. Do not use this file as production evidence until status is green.",
     "Wave 0 reconciliation updated this manifest to the current integration branch heads.",
+    "The Pines commit recorded here is the blocker-resolution docs/control-contract handoff commit; later manifest-only commits may point back to it.",
     "Wave 0 blockers resolved: core contracts are in explicit files, LM typed errors are present, product TurboQuant generation requires throwing models, Pines reuses existing TurboQuant DTOs, and fallback-contract hashes are implemented.",
     "This manifest is not a production pin promotion.",
     "Pines project pins and docs/TURBOQUANT.md require later W0/INT-2A reconciliation before this pair can turn green."
