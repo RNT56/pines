@@ -62,6 +62,42 @@ struct TurboQuantWave1ControlPlaneTests {
         #expect(valid.validationErrors.isEmpty)
     }
 
+    @Test func streamFailureCarriesWave2ProviderMetadata() throws {
+        let contextPlan = ContextAssemblyPlan(
+            strategy: "mlx-exact-token-preflight-v1",
+            includedRecentMessageCount: 4,
+            clippedMessageCount: 1,
+            exactInputTokens: 512,
+            reservedCompletionTokens: 128,
+            truncationReason: "context_window"
+        )
+        let decision = TurboQuantRunDecision(
+            admission: Self.admissionPlan(contextPlanID: contextPlan.id),
+            selectedAttentionPath: .twoStageCompressed,
+            inputTokens: 512,
+            outputTokens: 0,
+            contextAssemblyPlanID: contextPlan.id,
+            memoryCalibrationSampleID: "sample"
+        )
+        let failure = InferenceStreamFailure(
+            code: LocalInferenceFailureKind.contextWindowExceeded.rawValue,
+            message: "too long",
+            recoverable: false,
+            providerMetadata: [
+                LocalProviderMetadataKeys.turboQuantContextAssemblyPlanID: contextPlan.id,
+                LocalProviderMetadataKeys.turboQuantRunDecisionID: decision.decisionID,
+            ]
+        )
+
+        let decoded = try JSONDecoder().decode(
+            InferenceStreamFailure.self,
+            from: try JSONEncoder().encode(failure)
+        )
+
+        #expect(decoded.providerMetadata[LocalProviderMetadataKeys.turboQuantContextAssemblyPlanID] == contextPlan.id)
+        #expect(decoded.providerMetadata[LocalProviderMetadataKeys.turboQuantRunDecisionID] == decision.decisionID)
+    }
+
     @Test func skeletonSchemasRoundTripCodable() throws {
         let qualityGate = Self.qualityGate()
         let evidence = RuntimeProfileEvidence(
@@ -95,6 +131,14 @@ struct TurboQuantWave1ControlPlaneTests {
         try roundTrip(qualityGate)
         try roundTrip(evidence)
         try roundTrip(calibration)
+        try roundTrip(
+            ContextAssemblyPlan(
+                strategy: "mlx-current-history-v1",
+                includedRecentMessageCount: 3,
+                exactInputTokens: 512,
+                reservedCompletionTokens: 128
+            )
+        )
     }
 
     private static func request(
@@ -135,6 +179,33 @@ struct TurboQuantWave1ControlPlaneTests {
             fallbackEquivalent: true,
             prefillExact: true,
             passed: true
+        )
+    }
+
+    private static func admissionPlan(contextPlanID: String) -> LocalRuntimeAdmissionPlan {
+        LocalRuntimeAdmissionPlan(
+            admitted: true,
+            requestedContextTokens: 1024,
+            admittedContextTokens: 1024,
+            reservedCompletionTokens: 128,
+            selectedMode: .balanced,
+            selectedKVStrategy: .turboQuant,
+            selectedAttentionPath: .twoStageCompressed,
+            fallbackContract: .productDefault(for: .balanced),
+            memoryZones: RuntimeMemoryZones(
+                modelWeightsBytes: 1,
+                compressedKVBytes: 2,
+                rawShadowBytes: 3,
+                packedFallbackBytes: TurboQuantFallbackContract.defaultReserveBytes(for: .balanced),
+                decodedFallbackScratchBytes: 4,
+                vaultIndexBytes: 5,
+                promptBufferBytes: 6,
+                metalScratchReserveBytes: 7,
+                uiReserveBytes: 8,
+                safetyReserveBytes: 9
+            ),
+            memoryCushionBytes: 10,
+            userFacingMessage: "admitted"
         )
     }
 

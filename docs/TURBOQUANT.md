@@ -11,9 +11,9 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 - iOS memory warnings soft-recover through the runtime bridge while active generation still has emergency headroom; otherwise they stop the active local run and unload transient MLX containers.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `a90b1097df45e4e70b6e0bb367624f8f5857970b`
-  - `RNT56/mlx-swift-lm`: `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c`
-  - Nested `mlx` inside `RNT56/mlx-swift`: `3eb8ef074b911b00ecdbeb47f7bdafd91a123ad0`
+  - `RNT56/mlx-swift`: `21002cb84fe37204b7cab3fbb363ecbc260bf6a4`
+  - `RNT56/mlx-swift-lm`: `6b15298efa1fe3db8cb78e15cd2b6bdb95b29075`
+  - Nested `mlx` inside `RNT56/mlx-swift`: `75b756717154890033209aaba4ffc89b113c5998`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, a tiled online fused decode path for admitted 64/80/96/112/128/192/240/256 head dimensions, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
 - `mlx-swift-lm` exposes `KVCacheStrategy.turboQuant`, `TurboQuantKVCache`, a raw-free physical-slot `RotatingTurboQuantKVCache` for supported `.metalPolarQJL` `maxKVSize` paths, a shared packed quantized-attention fallback before raw decode, prepared-prefix generation, prompt-cache serialization hooks, `TurboQuantCompressedKVCacheProtocol`, the bundled `TurboQuantProfileRegistry`, and `GenerateParameters` fields for cache strategy, preset, requested backend selection, value bits, device-adaptive optimization policy, model metadata, KV head dimensions, and compressed-attention diagnostics.

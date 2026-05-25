@@ -3007,7 +3007,13 @@ final class PinesAppModel: ObservableObject {
                 case let .failure(failure):
                     didReceiveTerminalEvent = true
                     failureMessage = failure.message
-                    try await flushAssistantUpdate(content: failure.message, messageStatus: .failed, threadStatus: .local, force: true)
+                    try await flushAssistantUpdate(
+                        content: failure.message,
+                        messageStatus: .failed,
+                        threadStatus: .local,
+                        force: true,
+                        providerMetadata: failure.providerMetadata
+                    )
                     setChatError(failure.message)
                     emitHaptic(.runFailed)
                 case let .metrics(metrics):

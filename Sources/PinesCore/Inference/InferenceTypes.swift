@@ -37,6 +37,17 @@ public enum LocalProviderMetadataKeys {
     public static let turboQuantRuntimeHeadroomBytes = "local.turboquant.runtime_headroom_bytes"
     public static let turboQuantCompressedKVBytes = "local.turboquant.compressed_kv_bytes"
     public static let turboQuantFallbackReserveBytes = "local.turboquant.fallback_reserve_bytes"
+    public static let turboQuantFallbackContractHash = "local.turboquant.fallback_contract_hash"
+    public static let turboQuantCloudRetryPermitted = "local.turboquant.cloud_retry_permitted"
+    public static let turboQuantCloudFallbackSuppressed = "local.turboquant.cloud_fallback_suppressed"
+    public static let turboQuantContextAssemblyPlanID = "local.turboquant.context_assembly_plan_id"
+    public static let turboQuantContextAssemblyPlanJSON = "local.turboquant.context_assembly_plan_json"
+    public static let turboQuantAdmissionPlanJSON = "local.turboquant.admission_plan_json"
+    public static let turboQuantRunDecisionID = "local.turboquant.run_decision_id"
+    public static let turboQuantRunDecisionJSON = "local.turboquant.run_decision_json"
+    public static let turboQuantFailureEventJSON = "local.turboquant.failure_event_json"
+    public static let turboQuantMemoryCalibrationSampleID = "local.turboquant.memory_calibration_sample_id"
+    public static let turboQuantMemoryCalibrationSampleJSON = "local.turboquant.memory_calibration_sample_json"
     public static let cacheTopology = "local.cache.topology"
     public static let turboQuantFamilySupport = "local.turboquant.family_support"
     public static let attentionCacheCount = "local.cache.attention_count"
@@ -1636,11 +1647,33 @@ public struct InferenceStreamFailure: Hashable, Codable, Sendable {
     public var code: String
     public var message: String
     public var recoverable: Bool
+    public var providerMetadata: [String: String]
 
-    public init(code: String, message: String, recoverable: Bool = false) {
+    public init(
+        code: String,
+        message: String,
+        recoverable: Bool = false,
+        providerMetadata: [String: String] = [:]
+    ) {
         self.code = code
         self.message = message
         self.recoverable = recoverable
+        self.providerMetadata = providerMetadata
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case message
+        case recoverable
+        case providerMetadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        code = try container.decode(String.self, forKey: .code)
+        message = try container.decode(String.self, forKey: .message)
+        recoverable = try container.decodeIfPresent(Bool.self, forKey: .recoverable) ?? false
+        providerMetadata = try container.decodeIfPresent([String: String].self, forKey: .providerMetadata) ?? [:]
     }
 }
 
