@@ -1947,6 +1947,411 @@ struct PinesActionBar<Content: View>: View {
     }
 }
 
+struct PinesWorkspaceSwitcherItem: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let systemImage: String
+}
+
+struct PinesWorkspaceSwitcher: View {
+    @Environment(\.pinesTheme) private var theme
+    @Binding var selectionID: String
+    let items: [PinesWorkspaceSwitcherItem]
+    var onSelect: (PinesWorkspaceSwitcherItem) -> Void = { _ in }
+
+    private static let labelMaxWidth: CGFloat = 236
+    private static let labelMinWidth: CGFloat = 164
+    private static let labelMinHeight: CGFloat = 46
+
+    private var selectedItem: PinesWorkspaceSwitcherItem {
+        items.first(where: { $0.id == selectionID }) ?? items[0]
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(items) { item in
+                Button {
+                    selectionID = item.id
+                    onSelect(item)
+                } label: {
+                    Label(item.title, systemImage: item.id == selectionID ? "checkmark" : item.systemImage)
+                }
+            }
+        } label: {
+            pickerLabel(for: selectedItem)
+        }
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+    }
+
+    private func pickerLabel(for item: PinesWorkspaceSwitcherItem) -> some View {
+        let shape = RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+        return HStack(spacing: theme.spacing.xsmall) {
+            Image(systemName: item.systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(theme.typography.callout.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+
+                Text(item.subtitle)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.leading, theme.spacing.xxsmall)
+        }
+        .foregroundStyle(theme.colors.accent)
+        .padding(.horizontal, theme.spacing.small)
+        .frame(minWidth: Self.labelMinWidth, maxWidth: Self.labelMaxWidth, alignment: .leading)
+        .frame(minHeight: Self.labelMinHeight, alignment: .leading)
+        .background(theme.colors.controlFill, in: shape)
+        .overlay {
+            shape.strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+        }
+        .contentShape(shape)
+    }
+}
+
+struct PinesMenuChip: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let systemImage: String
+    var tone: PinesCloudStatusTone = .neutral
+
+    var body: some View {
+        Label {
+            Text(title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .truncationMode(.middle)
+        } icon: {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .font(theme.typography.caption.weight(.semibold))
+        .foregroundStyle(tone.color(in: theme))
+        .padding(.horizontal, theme.spacing.small)
+        .padding(.vertical, theme.spacing.xsmall)
+        .frame(minHeight: 32)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .strokeBorder(tone.color(in: theme).opacity(0.24), lineWidth: theme.stroke.hairline)
+        }
+    }
+}
+
+struct PinesWorkspaceTopBar<Leading: View, Status: View, Actions: View, Bottom: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    @ViewBuilder var leading: () -> Leading
+    @ViewBuilder var status: () -> Status
+    @ViewBuilder var actions: () -> Actions
+    @ViewBuilder var bottom: () -> Bottom
+
+    init(
+        @ViewBuilder leading: @escaping () -> Leading,
+        @ViewBuilder status: @escaping () -> Status,
+        @ViewBuilder actions: @escaping () -> Actions,
+        @ViewBuilder bottom: @escaping () -> Bottom
+    ) {
+        self.leading = leading
+        self.status = status
+        self.actions = actions
+        self.bottom = bottom
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.medium) {
+            HStack(alignment: .center, spacing: theme.spacing.small) {
+                leading()
+
+                Spacer(minLength: theme.spacing.small)
+
+                status()
+
+                actions()
+            }
+
+            bottom()
+        }
+        .padding(.horizontal, theme.spacing.large)
+        .padding(.vertical, theme.spacing.medium)
+        .background(theme.colors.chromeBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(theme.colors.chromeBorder)
+                .frame(height: theme.stroke.hairline)
+        }
+    }
+}
+
+extension PinesWorkspaceTopBar where Bottom == EmptyView {
+    init(
+        @ViewBuilder leading: @escaping () -> Leading,
+        @ViewBuilder status: @escaping () -> Status,
+        @ViewBuilder actions: @escaping () -> Actions
+    ) {
+        self.leading = leading
+        self.status = status
+        self.actions = actions
+        self.bottom = { EmptyView() }
+    }
+}
+
+struct PinesComposerBar<Supplementary: View, Leading: View, Field: View, Trailing: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    var kind: PinesSurfaceKind = .chrome
+    var maxWidth: CGFloat?
+    var padding: CGFloat?
+    @ViewBuilder var supplementary: () -> Supplementary
+    @ViewBuilder var leading: () -> Leading
+    @ViewBuilder var field: () -> Field
+    @ViewBuilder var trailing: () -> Trailing
+
+    init(
+        kind: PinesSurfaceKind = .chrome,
+        maxWidth: CGFloat? = nil,
+        padding: CGFloat? = nil,
+        @ViewBuilder supplementary: @escaping () -> Supplementary,
+        @ViewBuilder leading: @escaping () -> Leading,
+        @ViewBuilder field: @escaping () -> Field,
+        @ViewBuilder trailing: @escaping () -> Trailing
+    ) {
+        self.kind = kind
+        self.maxWidth = maxWidth
+        self.padding = padding
+        self.supplementary = supplementary
+        self.leading = leading
+        self.field = field
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            supplementary()
+
+            HStack(alignment: .bottom, spacing: theme.spacing.small) {
+                leading()
+                field()
+                trailing()
+            }
+        }
+        .frame(maxWidth: maxWidth ?? .infinity)
+        .pinesSurface(kind, padding: padding ?? theme.spacing.small)
+    }
+}
+
+extension PinesComposerBar where Supplementary == EmptyView {
+    init(
+        kind: PinesSurfaceKind = .chrome,
+        maxWidth: CGFloat? = nil,
+        padding: CGFloat? = nil,
+        @ViewBuilder leading: @escaping () -> Leading,
+        @ViewBuilder field: @escaping () -> Field,
+        @ViewBuilder trailing: @escaping () -> Trailing
+    ) {
+        self.kind = kind
+        self.maxWidth = maxWidth
+        self.padding = padding
+        self.supplementary = { EmptyView() }
+        self.leading = leading
+        self.field = field
+        self.trailing = trailing
+    }
+}
+
+enum PinesMessageBubbleRole: Equatable {
+    case system
+    case user
+    case assistant
+    case tool
+
+    var title: String {
+        switch self {
+        case .system:
+            "System"
+        case .user:
+            "You"
+        case .assistant:
+            "Pines"
+        case .tool:
+            "Tool"
+        }
+    }
+
+    func tint(in theme: PinesTheme) -> Color {
+        switch self {
+        case .system:
+            theme.colors.warning
+        case .user:
+            theme.colors.info
+        case .assistant:
+            theme.colors.accent
+        case .tool:
+            theme.colors.tertiaryText
+        }
+    }
+
+    func bubbleFill(in theme: PinesTheme) -> AnyShapeStyle {
+        switch self {
+        case .system:
+            AnyShapeStyle(theme.colors.toolBubble)
+        case .user:
+            AnyShapeStyle(theme.colors.userBubble)
+        case .assistant:
+            AnyShapeStyle(theme.colors.assistantBubble)
+        case .tool:
+            AnyShapeStyle(theme.colors.toolBubble)
+        }
+    }
+
+    func bubbleBorder(in theme: PinesTheme) -> Color {
+        switch self {
+        case .system:
+            theme.colors.warning.opacity(0.24)
+        case .user:
+            theme.colors.info.opacity(0.24)
+        case .assistant:
+            theme.colors.accent.opacity(0.24)
+        case .tool:
+            theme.colors.separator
+        }
+    }
+}
+
+struct PinesMessageBubble<Content: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let role: PinesMessageBubbleRole
+    var title: String?
+    var isActive = false
+    var maxWidth: CGFloat?
+    var showsHeader = false
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            if showsHeader {
+                HStack(spacing: theme.spacing.xsmall) {
+                    PinesStatusIndicator(
+                        color: role.tint(in: theme),
+                        isActive: isActive,
+                        size: isActive ? 9 : 8
+                    )
+
+                    Text(title ?? role.title)
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .pinesFittingText()
+                }
+            }
+
+            content()
+        }
+        .padding(theme.spacing.medium)
+        .frame(maxWidth: maxWidth ?? .infinity, alignment: .leading)
+        .background(role.bubbleFill(in: theme), in: shape)
+        .overlay {
+            shape.strokeBorder(role.bubbleBorder(in: theme), lineWidth: theme.stroke.hairline)
+        }
+        .shadow(color: theme.shadow.panelColor.opacity(role == .assistant ? 0.55 : 0.32), radius: theme.shadow.panelRadius * 0.25, x: 0, y: theme.shadow.panelY * 0.20)
+        .scaleEffect(isActive && !reduceMotion ? 1.006 : 1)
+        .animation(reduceMotion ? nil : theme.motion.fast, value: isActive)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct PinesCompactIconButton: View {
+    @Environment(\.pinesTheme) private var theme
+    let title: String
+    let systemImage: String
+    var role: ButtonRole?
+    var isDisabled = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(role: role, action: action) {
+            Image(systemName: systemImage)
+                .frame(width: 16, height: 16)
+        }
+        .disabled(isDisabled)
+        .buttonStyle(.plain)
+        .foregroundStyle(foregroundColor)
+        .frame(width: 30, height: 30)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+        }
+        .accessibilityLabel(title)
+        .help(title)
+    }
+
+    private var foregroundColor: Color {
+        if isDisabled {
+            return theme.colors.disabledText
+        }
+        if role == .destructive {
+            return theme.colors.danger
+        }
+        return theme.colors.secondaryText
+    }
+}
+
+struct PinesArtifactCard<Preview: View, Details: View, Actions: View>: View {
+    @Environment(\.pinesTheme) private var theme
+    var isSelected = false
+    var minHeight: CGFloat = 260
+    var select: (() -> Void)?
+    @ViewBuilder var preview: () -> Preview
+    @ViewBuilder var details: () -> Details
+    @ViewBuilder var actions: () -> Actions
+
+    init(
+        isSelected: Bool = false,
+        minHeight: CGFloat = 260,
+        select: (() -> Void)? = nil,
+        @ViewBuilder preview: @escaping () -> Preview,
+        @ViewBuilder details: @escaping () -> Details,
+        @ViewBuilder actions: @escaping () -> Actions
+    ) {
+        self.isSelected = isSelected
+        self.minHeight = minHeight
+        self.select = select
+        self.preview = preview
+        self.details = details
+        self.actions = actions
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            preview()
+            details()
+            actions()
+        }
+        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
+        .pinesSurface(isSelected ? .selected : .panel, padding: theme.spacing.small)
+        .contentShape(shape)
+        .onTapGesture {
+            select?()
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
 struct PinesReadinessRing: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
