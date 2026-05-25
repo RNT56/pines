@@ -65,6 +65,7 @@ This file tracks Wave 6 speculative decode and platform-unlock implementation af
   - LM `TurboQuantSpeculativeTests` for target verifier, poor-acceptance disable metrics, and non-rotating compressed-cache rollback layout;
   - LM `SpeculativeDecodingTests` now asserts speculative completion metrics are present and internally consistent while output still matches target generation;
   - LM `MTPTokenIteratorTests` now asserts MTP metrics;
+  - LM MTP retention tests now serialize process-wide `MTPConfig.retainMTPWeights` mutations so full Swift Testing runs cannot race speculative/MTP model-loading state;
   - Pines `TurboQuantWave6SpeculativeTests` covers telemetry roundtrip, poor-acceptance auto-disable, admission budget reserves, RunDecision target-mismatch safety, verified speculative evidence gates, exact speculative evidence tuple matching, and disabled W29+ platform gates;
   - schema/database tests now include Wave 6 schema names and `PinesDatabaseSchema.currentVersion == 22`.
 
