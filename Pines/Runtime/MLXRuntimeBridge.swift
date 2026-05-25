@@ -423,7 +423,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-709eaa580a2fccb738520d202a4e36949b54c36c"
+        "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-e4329351a4445ab686b830f2cbad34b47835c215"
     static var turboQuantLayoutVersion: Int {
         #if canImport(MLX)
         MLX.TurboQuantAttentionLayout.currentVersion
@@ -580,7 +580,7 @@ struct MLXRuntimeBridge: Sendable {
         let admissionRequest = LocalRuntimeAdmissionRequest(
             modelID: install?.repository ?? request.modelID.rawValue,
             modelRevision: install?.revision,
-            parameterCount: install?.parameterCount,
+            parameterCount: install?.resolvedParameterCount,
             requestedContextTokens: requestedContext,
             reservedCompletionTokens: contextPlan.reservedCompletionTokens,
             userMode: profile.quantization.turboQuantUserMode,
@@ -1015,8 +1015,7 @@ struct MLXRuntimeBridge: Sendable {
         let memoryCounters = deviceMonitor.memoryCounters()
         let hasVision = install.modalities.contains(.vision)
         let isCompact = deviceProfile.memoryTier == .compact
-        let isSmallTextModel = (install.parameterCount ?? Int64.max) <= 2_000_000_000
-            || install.repository.localizedCaseInsensitiveContains("1B")
+        let isSmallTextModel = install.isSmallTextGenerationModel
         let recommendedMaxKVSize = hasVision
             ? min(deviceProfile.recommendedContextTokens, 4096)
             : (isSmallTextModel ? deviceProfile.recommendedSmallModelContextTokens : deviceProfile.recommendedContextTokens)
@@ -1202,7 +1201,7 @@ struct MLXRuntimeBridge: Sendable {
             )
         }
 
-        let smallDenseOrHybridModel = (install.parameterCount ?? Int64.max) <= 2_500_000_000
+        let smallDenseOrHybridModel = (install.resolvedParameterCount ?? Int64.max) <= 2_500_000_000
         if backend.metalAttentionAvailable == false,
            smallDenseOrHybridModel {
             let reason = backend.fallbackReason
@@ -1483,23 +1482,49 @@ struct MLXRuntimeBridge: Sendable {
         )
     }
 
-    private static func heuristicModelShape(for install: ModelInstall) -> (
+    fileprivate static func heuristicModelShape(for install: ModelInstall) -> (
         layerCount: Int,
         kvHeadCount: Int,
         headDimension: Int
     ) {
-        let parameterCount = install.parameterCount ?? 3_000_000_000
+        let parameterCount = install.resolvedParameterCount ?? 3_000_000_000
         let headDimension = install.keyHeadDimension ?? install.valueHeadDimension ?? 128
+        let totalLayerCount: Int
         if parameterCount <= 1_500_000_000 {
-            return (24, 8, headDimension)
+            totalLayerCount = 24
+        } else if parameterCount <= 3_500_000_000 {
+            totalLayerCount = 28
+        } else if parameterCount <= 9_000_000_000 {
+            totalLayerCount = 32
+        } else {
+            totalLayerCount = 48
         }
-        if parameterCount <= 3_500_000_000 {
-            return (28, 8, headDimension)
+        return (
+            turboQuantKVLayerCount(for: install, totalLayerCount: totalLayerCount),
+            8,
+            headDimension
+        )
+    }
+
+    private static func turboQuantKVLayerCount(
+        for install: ModelInstall,
+        totalLayerCount: Int
+    ) -> Int {
+        guard install.cacheTopology == .hybridAttentionAndNativeState
+            || install.turboQuantFamilySupport == .hybridFull
+        else {
+            return max(1, totalLayerCount)
         }
-        if parameterCount <= 9_000_000_000 {
-            return (32, 8, headDimension)
+
+        let modelTypes = [
+            install.modelType?.lowercased(),
+            install.textConfigModelType?.lowercased(),
+            install.repository.lowercased(),
+        ].compactMap { $0 }
+        if modelTypes.contains(where: { $0.contains("qwen3_5") || $0.contains("qwen3.5") }) {
+            return max(1, totalLayerCount / 4)
         }
-        return (48, 8, headDimension)
+        return max(1, totalLayerCount)
     }
 
     private static func intClamped(_ value: Int64?) -> Int? {
@@ -2199,7 +2224,7 @@ struct MLXRuntimeBridge: Sendable {
     #endif
 
     private static func parameterCountBillionScale(for install: ModelInstall) -> Double? {
-        install.parameterCount.map { Double($0) / 1_000_000_000 }
+        install.resolvedParameterCount.map { Double($0) / 1_000_000_000 }
     }
 
     func load(_ install: ModelInstall, profile: RuntimeProfile? = nil) async throws {
@@ -4085,18 +4110,7 @@ private actor MLXRuntimeState {
             kvHeadCount: Int,
             headDimension: Int
         ) {
-            let parameterCount = install.parameterCount ?? 3_000_000_000
-            let headDimension = install.keyHeadDimension ?? install.valueHeadDimension ?? 128
-            if parameterCount <= 1_500_000_000 {
-                return (24, 8, headDimension)
-            }
-            if parameterCount <= 3_500_000_000 {
-                return (28, 8, headDimension)
-            }
-            if parameterCount <= 9_000_000_000 {
-                return (32, 8, headDimension)
-            }
-            return (48, 8, headDimension)
+            MLXRuntimeBridge.heuristicModelShape(for: install)
         }
 
         func intClamped(_ value: Int64?) -> Int? {
@@ -4398,7 +4412,7 @@ private actor MLXRuntimeState {
 	               modelType: install.modelType,
 	               textConfigModelType: install.textConfigModelType,
 	               modality: install.modalities.contains(.vision) ? .visionText : .text,
-	               parameterCountB: install.parameterCount.map { Double($0) / 1_000_000_000 },
+	               parameterCountB: install.resolvedParameterCount.map { Double($0) / 1_000_000_000 },
 	               routedExperts: install.routedExperts,
 	               expertsPerToken: install.expertsPerToken,
 	               keyHeadDimension: install.keyHeadDimension,

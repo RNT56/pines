@@ -346,7 +346,7 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(resolverBody.contains("modelType: install.modelType"))
         XCTAssertTrue(resolverBody.contains("textConfigModelType: install.textConfigModelType"))
         XCTAssertTrue(resolverBody.contains("modality: install.modalities.contains(.vision) ? .visionText : .text"))
-        XCTAssertTrue(resolverBody.contains("parameterCountB: install.parameterCount.map { Double($0) / 1_000_000_000 }"))
+        XCTAssertTrue(resolverBody.contains("parameterCountB: install.resolvedParameterCount.map { Double($0) / 1_000_000_000 }"))
         XCTAssertTrue(resolverBody.contains("routedExperts: install.routedExperts"))
         XCTAssertTrue(resolverBody.contains("expertsPerToken: install.expertsPerToken"))
         XCTAssertTrue(resolverBody.contains("keyHeadDimension: install.keyHeadDimension"))

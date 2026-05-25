@@ -1432,6 +1432,18 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public extension ModelInstall {
+    var resolvedParameterCount: Int64? {
+        parameterCount
+            ?? ModelDiscoveryResourcePolicy.inferredParameterCount(repository: repository, tags: [])
+    }
+
+    var isSmallTextGenerationModel: Bool {
+        guard modalities == [.text], let resolvedParameterCount else { return false }
+        return resolvedParameterCount <= 2_000_000_000
+    }
+}
+
 public protocol LocalModelRunner: Sendable {
     func load(_ install: ModelInstall, profile: RuntimeProfile) async throws
     func unload() async

@@ -13,7 +13,7 @@ packages:
     revision: 260c8fb16df772b8c20295529fde958fffb66369
   MLXSwiftLM:
     url: https://github.com/RNT56/mlx-swift-lm
-    revision: 709eaa580a2fccb738520d202a4e36949b54c36c
+    revision: e4329351a4445ab686b830f2cbad34b47835c215
   SwiftTransformers:
     url: https://github.com/huggingface/swift-transformers
     from: 1.3.0

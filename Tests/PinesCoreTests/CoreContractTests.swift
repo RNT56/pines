@@ -3571,6 +3571,7 @@ struct CoreContractTests {
         for repository in [
             "mlx-community/Qwen3.5-0.8B-MLX-4bit",
             "mlx-community/Qwen3.5-2B-MLX-4bit",
+            "mlx-community/Qwen3.5-2B-OptiQ-4bit",
         ] {
             let spec = try #require(specsByRepository[repository])
             let decision = compactPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
@@ -3612,6 +3613,55 @@ struct CoreContractTests {
     }
 
     @Test
+    func modelInstallInfersSmallTextGenerationModelsFromRepositoryWhenMetadataIsMissing() {
+        let qwen08 = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Qwen3.5-0.8B-MLX-4bit"),
+            displayName: "Qwen3.5 0.8B",
+            repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+            modalities: [.text],
+            verification: .installable,
+            parameterCount: nil,
+            modelType: "qwen3_5"
+        )
+        let qwen2 = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Qwen3.5-2B-OptiQ-4bit"),
+            displayName: "Qwen3.5 2B OptiQ",
+            repository: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
+            modalities: [.text],
+            verification: .installable,
+            parameterCount: nil,
+            modelType: "qwen3_5"
+        )
+        let llama3B = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Llama-3.2-3B-Instruct-4bit"),
+            displayName: "Llama 3.2 3B",
+            repository: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            modalities: [.text],
+            verification: .installable,
+            parameterCount: nil,
+            modelType: "llama"
+        )
+        let gemma1B = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/gemma-3-1b-it-4bit"),
+            displayName: "Gemma 3 1B",
+            repository: "mlx-community/gemma-3-1b-it-4bit",
+            modalities: [.text],
+            verification: .installable,
+            parameterCount: nil,
+            modelType: "gemma3_text"
+        )
+
+        #expect(qwen08.resolvedParameterCount == 800_000_000)
+        #expect(qwen08.isSmallTextGenerationModel)
+        #expect(qwen2.resolvedParameterCount == 2_000_000_000)
+        #expect(qwen2.isSmallTextGenerationModel)
+        #expect(llama3B.resolvedParameterCount == 3_000_000_000)
+        #expect(!llama3B.isSmallTextGenerationModel)
+        #expect(gemma1B.resolvedParameterCount == 1_000_000_000)
+        #expect(gemma1B.isSmallTextGenerationModel)
+    }
+
+    @Test
     func turboQuantRuntimeSupportDefaultsForProfileBackedFamilies() throws {
         #expect(
             TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
@@ -3625,6 +3675,15 @@ struct CoreContractTests {
         #expect(
             TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
                 repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+                modelType: "qwen3_5",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .hybridFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
                 modelType: "qwen3_5",
                 textConfigModelType: nil,
                 modalities: [.text],
@@ -3957,6 +4016,7 @@ struct CoreContractTests {
         for repository in [
             "mlx-community/gemma-3-270m-it-qat-4bit",
             "mlx-community/gemma-3-1b-it-qat-4bit",
+            "mlx-community/gemma-3-1b-it-4bit",
             "mlx-community/gemma-3n-E2B-it-lm-4bit",
         ] {
             let spec = try #require(specsByRepository[repository])
@@ -4558,6 +4618,39 @@ struct CoreContractTests {
         #expect(plan.maxTokensClamped)
         #expect(plan.effectiveMaxKVSize == 4_096)
         #expect(!plan.maxKVSizeClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanClampsContinuationBeforeContextFailure() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 16_384))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 1_800_000_000,
+                thermalState: "nominal"
+            )
+        )
+        var plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        let continuationFits = plan.fitPreparedPrompt(
+            promptTokenCount: 15_900,
+            maxContextTokens: 16_384
+        )
+        #expect(continuationFits)
+        #expect(plan.reservedCompletionTokens == 484)
+        #expect(plan.effectiveMaxTokens == 484)
+        #expect(plan.maxTokensClamped)
+
+        let promptTooLarge = plan.fitPreparedPrompt(
+            promptTokenCount: 16_385,
+            maxContextTokens: 16_384
+        )
+        #expect(!promptTooLarge)
     }
 
     @Test
@@ -5495,6 +5588,13 @@ private var qwenTurboQuantProfileCases: [QwenTurboQuantProfileCase] {
                 modelBytes: 1_550_000_000
             ),
             QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
+                displayName: "Qwen3.5 2B OptiQ 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 2_000_000_000,
+                modelBytes: 1_550_000_000
+            ),
+            QwenTurboQuantProfileCase(
                 repository: "mlx-community/Qwen3.5-4B-MLX-4bit",
                 displayName: "Qwen3.5 4B MLX 4-bit",
                 modelType: "qwen3_5_text",
@@ -5677,6 +5777,14 @@ private var gemmaTurboQuantProfileCases: [GemmaTurboQuantProfileCase] {
             GemmaTurboQuantProfileCase(
                 repository: "mlx-community/gemma-3-1b-it-qat-4bit",
                 displayName: "Gemma 3 1B IT QAT 4-bit",
+                modelType: "gemma3_text",
+                parameterCount: 1_000_000_000,
+                headDimension: 256,
+                modelBytes: 770_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-1b-it-4bit",
+                displayName: "Gemma 3 1B IT 4-bit",
                 modelType: "gemma3_text",
                 parameterCount: 1_000_000_000,
                 headDimension: 256,

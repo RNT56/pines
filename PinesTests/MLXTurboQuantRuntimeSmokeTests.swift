@@ -120,6 +120,7 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
         let registry = MLXLMCommon.TurboQuantProfileRegistry.bundled
         let cases: [(String, String, String, Double)] = [
             ("mlx-community/Qwen3.5-0.8B-MLX-4bit", "qwen3_5", "qwen3.5-0.8b", 0.8),
+            ("mlx-community/Qwen3.5-2B-OptiQ-4bit", "qwen3_5", "qwen3.5-2b", 2),
             ("mlx-community/Qwen3.5-4B-MLX-4bit", "qwen3_5_text", "qwen3.5-4b", 4),
             ("mlx-community/Qwen3.6-27B-4bit", "qwen3_5", "qwen3.6-27b", 27),
             ("mlx-community/Qwen3.5-35B-A3B-4bit", "qwen3_5_moe", "qwen3.5-35b-a3b", 35),
@@ -161,6 +162,15 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
             valueHeadDimension: 256
         ))
         XCTAssertEqual(gemma3270m.id, "gemma-3-270m")
+
+        let gemma31b = try XCTUnwrap(registry.profile(
+            for: "mlx-community/gemma-3-1b-it-4bit",
+            modelType: "gemma3_text",
+            parameterCountB: 1,
+            keyHeadDimension: 256,
+            valueHeadDimension: 256
+        ))
+        XCTAssertEqual(gemma31b.id, "gemma-3-1b")
 
         let gemma312b = try XCTUnwrap(registry.profile(
             for: "mlx-community/gemma-3-12b-it-qat-4bit",
