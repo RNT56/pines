@@ -63,6 +63,13 @@ Machine-readable compatibility-pair files:
 - [compatibility-pair.schema.json](compatibility-pair.schema.json)
 - [compatibility-pair.json](compatibility-pair.json)
 
+Current status:
+
+- The active compatibility pair is green for local release gates.
+- Pines pins `mlx-swift` `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772` and `mlx-swift-lm` `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`.
+- Full local Xcode validation has passed for the pair.
+- Real-device model/device/mode evidence is still required before any product surface may claim `Verified` or `Certified` compatibility.
+
 Wave handoff logs:
 
 - [Wave 1 Changelog](Wave1-changelog.md)
@@ -102,6 +109,8 @@ These apply to all repos and all branches.
 
 Wave 7 implements W29+/MVP 6 platform contracts end to end while keeping every
 platform feature disabled by default, kill-switched, and evidence-required.
+
+Compatibility-pair `green` closes the local runtime-pair validation gate only. Evidence-backed model claims still require real hardware benchmark import through the evidence pipeline.
 
 ## Implementation principle
 

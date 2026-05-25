@@ -2,9 +2,18 @@
 
 Pine requests TurboQuant as the default local KV-cache strategy and stores vault embeddings with a compressed TurboQuant-compatible code path. The app consumes additive APIs from the maintained MLX forks so the runtime can be rebased as MLX Swift evolves.
 
+The current compatibility pair is green for local release gates. Pines can build, test, resolve the pinned MLX packages through Xcode, run simulator smoke tests, and enforce pin drift checks on:
+
+- `RNT56/mlx-swift`: `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772`
+- `RNT56/mlx-swift-lm`: `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`
+
+This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
+
 ## Runtime Strategy
 
-- Pine runtime profiles request `QuantizationAlgorithm.turboQuant` and use the bundled `mlx-swift-lm` TurboQuant profile registry where possible. Verified local generation defaults to `turbo4v2` for current-generation KV cache profiles, with `turbo3_5` retained as the conservative fallback.
+- Pine runtime profiles request `QuantizationAlgorithm.turboQuant` and use the bundled `mlx-swift-lm` TurboQuant profile registry where possible. Current-generation KV cache profiles default to `turbo4v2` when admitted by policy, with `turbo3_5` retained as the conservative fallback.
+- The app runs a local control plane before generation: it computes an admission plan, memory zones, a mode-specific fallback contract, selected context length, and a user-facing downgrade/rejection reason before creating the MLX cache.
+- Every local run can attach a TurboQuant RunDecision with admission, context plan, active attention path, fallback state, cache lifecycle, measured compressed bytes, calibration sample, speculative telemetry when present, and explicit no-cloud-fallback metadata.
 - Runtime profiles are adapted from `hw.machine`, memory, thermal state, Low Power Mode, Metal architecture, MLX working-set size, and the MLX TurboQuant self-test. Device names are diagnostic hints; verified MLX capabilities decide whether compressed Metal attention is active.
 - 6 GB A16-class devices use compact defaults. A17 Pro, A18, A18 Pro, A19, A19 Pro thin, A19 Pro sustained, and future verified devices get progressively larger prefill and context defaults, with conservative downshifts under thermal, Low Power Mode, or available-memory pressure.
 - Low-memory constrained generation clamps completion tokens from measured generation-start headroom so optimized TurboQuant can finish before crossing the emergency memory floor.
@@ -22,6 +31,10 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 - The app-level runtime smoke tests link MLX/MLXLMCommon, assert those fixed pins are present, validate high-bit TurboQuant seed propagation, and run a tiny Metal codec round trip when the executing device exposes the TurboQuant Metal codec.
 - `tools/update-mlx-pins.sh` advances the reproducible SHAs, regenerates `Pines.xcodeproj`, and can run the package plus iOS smoke-test checks. Renovate proposes these pin moves by PR instead of switching Pines to non-reproducible branch pins.
 - Pine requests the paper-exact `metalPolarQJL` backend by default. Devices with Metal compressed-attention support report the direct compressed attention path; unsupported shapes or devices use the shared MLX packed quantized-attention fallback before raw decode.
+- Context assembly is segment-aware: pinned prompt material, hot recent chat, retrieved vault evidence, summaries, dropped spans, and exact-prefix compressed KV pages are tracked separately. Warm compressed KV pages are never treated as semantic retrieval chunks unless the exact prefix identity is valid.
+- Encrypted local KV snapshot storage is implemented behind fail-closed restore gates. Snapshot manifests bind to model, tokenizer, profile, RoPE, prefix, layout version, and compatibility pair; corrupted or partial writes are quarantined, and snapshots are excluded from CloudKit sync by default.
+- Speculative decode support is wired through explicit telemetry and evidence gates. Fast/speculative behavior remains disabled or conservative unless tokenizer compatibility, target verification, acceptance rate, and quality/speed evidence pass.
+- Platform unlock contracts for adaptive precision, semantic/multimodal memory, agent memory, open KV descriptors, device mesh, personalization/adapters, and kill switches are present but disabled by default. Activation requires compatibility-pair status, feature-specific policy, and evidence.
 
 ## Vault Retrieval
 
@@ -34,6 +47,7 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 ## Diagnostics
 
 - Models and Settings show the requested codec, requested/active backend, Metal codec availability, Metal compressed-attention availability, active attention path, selected kernel variant, MLX self-test status, performance class, optimization policy, raw fallback allocation state, active fallback, preset, profile ID/source, profile diagnostics, cache topology, family support level, context window, thermal downshift, thermal state, device identifier, Metal architecture, MLX working set, and memory counters exposed by the runtime monitor.
+- Model compatibility surfaces distinguish `Unverified`, `Smoke-tested`, `Verified`, `Certified`, and `Revoked` evidence. Curated metadata alone cannot create a verified claim; evidence must match the active compatibility pair and exact tuple.
 - Runtime throughput, vault retrieval latency, memory-pressure events, and MetricKit payload availability are logged through `PinesRuntimeMetrics`.
 
 ## Fork Maintenance
@@ -41,6 +55,7 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 - Do not edit Xcode DerivedData package checkouts.
 - Maintain the Schtack/RNT56 forks of `mlx-swift` and `mlx-swift-lm`; Pine is pinned to known-good fork commits.
 - Keep `project.yml`, `Pines.xcodeproj`, and this document synchronized whenever a fork revision changes.
+- Keep `docs/turboquant-implementation/compatibility-pair.json` synchronized with the active pins. `green` there means the local compatibility pair passed release gates; it does not replace real-device profile evidence.
 - Current fork PRs:
   - `RNT56/mlx-swift#1`: TurboQuant packed tensor API, Polar/QJL reference backend contract, Metal codec and compressed-attention kernels, and deterministic quality gates.
   - `RNT56/mlx-swift-lm#1`: TurboQuant KV cache strategy, compressed attention routing, backend diagnostics, and Metal availability.
@@ -53,5 +68,5 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 
 - Move the current RNT56 fork branches under a Schtack GitHub organization if/when that organization is available to the authenticated account.
 - Tune tiled decode thresholds after real A16/A17/A18/A19 profiling. Runtime probes now choose between portable, wide, sustained, and packed-fallback profiles, but checked-in defaults should remain conservative until device traces justify raising them.
-- Re-run the KV-memory acceptance matrix on device. The supported `.metalPolarQJL` rotating path is raw-free; raw/packed fallback allocation is lazy and diagnostic-visible, and A17 Pro Qwen3.5 2B optimized inference has completed under low-memory pressure with the adaptive completion cap, but broader acceptance numbers still require real hardware measurement.
+- Re-run the KV-memory acceptance matrix on device. The supported `.metalPolarQJL` rotating path is raw-free; raw/packed fallback allocation is lazy and diagnostic-visible, but product `Verified`/`Certified` claims require imported real-device evidence, not simulator or desktop validation.
 - Validate the acceptance matrix on real A16, A17 Pro, A18, A18 Pro, A19, A19 Pro thin, and A19 Pro sustained devices with full Xcode and Instruments.

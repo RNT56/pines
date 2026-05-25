@@ -63,7 +63,7 @@ Until signing and App Store Connect automation are configured, releases publish 
 
 Do not publish an unsigned `.ipa`.
 
-Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed.
+Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed. The current TurboQuant compatibility pair is green for local release gates, including full Xcode package/app validation, but that does not by itself create `Verified` or `Certified` model/device/mode claims.
 
 ## v0.1.0 Preview Readiness
 
@@ -78,8 +78,10 @@ Before pushing the tag, verify:
 - `swift test --disable-automatic-resolution`
 - `swift run --disable-automatic-resolution PinesCoreTestRunner`
 - `npm --prefix site ci && npm --prefix site run build`
-- `bash scripts/ci/run-xcode-validation.sh`
+- `bash scripts/ci/run-xcode-validation.sh all`
 - `bash scripts/ci/package-release.sh v0.1.0`
+
+For TurboQuant-related release candidates, also verify that `docs/turboquant-implementation/compatibility-pair.json` is synchronized with `project.yml`, `Pines.xcodeproj`, the Xcode `Package.resolved`, and `MLXRuntimeBridge.turboQuantCompatibilityPairID`. A green compatibility pair means the local runtime pair passed release gates; real-device profile evidence is still required before product compatibility labels can become `Verified` or `Certified`.
 
 ## Future TestFlight Pipeline
 

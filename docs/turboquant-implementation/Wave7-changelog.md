@@ -22,11 +22,14 @@ to the remaining W29+ platform backlog while preserving all Wave 6 release gates
 - `mlx-swift-lm` branch base: `bb993db` from `tq/lm-speculative`.
 - `mlx-swift` Wave 7 branch: `tq/wave7-core-platform`.
 - `mlx-swift` branch base: `741fa31` from `tq/layout-v5-kernels`.
-- `compatibility-pair.json` remains `pending`; Wave 7 must not promote Verified,
-  Certified, Fast, adaptive precision, open-format, mesh, memory, or agent
-  product claims without a green compatibility pair and evidence.
-- Full local Xcode package/app validation remains blocked by the known
-  `xcodebuild -resolvePackageDependencies` stall.
+- `compatibility-pair.json` remained `pending` at Wave 7 start; Wave 7 could
+  not promote Verified, Certified, Fast, adaptive precision, open-format, mesh,
+  memory, or agent product claims without a green compatibility pair and
+  evidence.
+- Full local Xcode package/app validation was still blocked at Wave 7 start by
+  the known `xcodebuild -resolvePackageDependencies` stall. The later
+  production closeout resolved this local gate and passed
+  `bash scripts/ci/run-xcode-validation.sh all` on the final pair.
 - Pines retains the pre-existing generated scheme drift in:
   - `Pines.xcodeproj/xcshareddata/xcschemes/Pines.xcscheme`
   - `Pines.xcodeproj/xcshareddata/xcschemes/PinesWatch.xcscheme`
@@ -118,10 +121,12 @@ to the remaining W29+ platform backlog while preserving all Wave 6 release gates
   - `swift test --filter 'TurboQuantContractsTests|TurboQuantValidationTests|TurboQuantAttentionRouterTests|TurboQuantBenchmarkReportTests'` passed.
   - `swift build` passed.
   - `git diff --check` passed.
-  - Full `swift test` remains blocked by the pre-existing Metal library compile
-    failure in `MLXArrayIndexingTests.testFullIndexReadArray`:
-    `general_reduce_looped` is undeclared while compiling
-    `mlx/backend/metal/kernels/reduce.h`.
+  - Full `swift test` was blocked at Wave 7 handoff by the pre-existing Metal
+    library compile failure in `MLXArrayIndexingTests.testFullIndexReadArray`:
+    `general_reduce_looped` was undeclared while compiling
+    `mlx/backend/metal/kernels/reduce.h`. The later production closeout
+    regenerated the stale Metal reduce JIT source and full core tests passed on
+    the final branch.
 
 ### Exit State
 
@@ -129,12 +134,13 @@ to the remaining W29+ platform backlog while preserving all Wave 6 release gates
   `mlx-swift-lm`.
 - All Wave 7 features remain disabled by default, kill-switched, and
   evidence-required.
-- No Wave 7 product claim is promoted while `compatibility-pair.json` remains
-  pending.
-- Full local Xcode package/app validation remains blocked by the known
-  `xcodebuild -resolvePackageDependencies` stall.
-- The pre-existing Pines generated scheme drift remains uncommitted and outside
-  Wave 7 implementation scope.
+- No Wave 7 product claim is promoted without real-device evidence, even after
+  the compatibility pair becomes green.
+- A later production closeout resolved the full local Xcode package/app
+  validation blocker and marked `compatibility-pair.json` green for local
+  release gates.
+- The Wave 7 platform feature set remains disabled by default until
+  feature-specific policy and evidence gates pass.
 
 ### Post-Audit Hardening
 
@@ -168,6 +174,25 @@ several production-readiness gaps that were fixed before handoff:
 - `mlx-swift-lm`:
   - Made `MTPConfig.retainMTPWeights` lock-protected to remove the remaining
     process-wide race found by full LM test runs.
+
+### Production Closeout
+
+After Wave 7, the final release-green pass:
+
+- pushed the `mlx-swift` and `mlx-swift-lm` release branches;
+- regenerated the stale `mlx-swift` Metal reduce JIT source so full core tests
+  pass;
+- pinned `mlx-swift-lm` to the fixed core commit;
+- promoted Pines to `mlx-swift`
+  `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772` and `mlx-swift-lm`
+  `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`;
+- fixed locked Xcode package validation for the final pair;
+- passed `bash scripts/ci/run-xcode-validation.sh all`;
+- updated `compatibility-pair.json` to `green` for local release gates.
+
+This closeout does not create a real-device `Verified` or `Certified` model
+claim. Those claims still require imported model/device/mode evidence from an
+online iPhone-class device.
   - Updated `AGENTS.md` to match the current `Package.swift` MLX pin.
 
 Additional post-audit validation:

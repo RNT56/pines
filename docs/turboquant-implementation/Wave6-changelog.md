@@ -10,6 +10,12 @@ Read this alongside:
 
 This file tracks Wave 6 speculative decode and platform-unlock implementation after the completed Wave 5 optimization handoff.
 
+Current closeout note: a later production pin pass resolved the local Xcode
+package/app validation blocker and marked `compatibility-pair.json` green for
+local release gates. Speculative/Fast-mode product activation remains gated on
+target-match, tokenizer-compatible, no-auto-disable, speedup, and real-device
+evidence.
+
 ## 2026-05-25
 
 ### Start State
@@ -19,8 +25,10 @@ This file tracks Wave 6 speculative decode and platform-unlock implementation af
 - `mlx-swift-lm` Wave 6 branch: `tq/lm-speculative`.
 - `mlx-swift-lm` branch base: `76eabed` from `tq/lm-wave5-validation`.
 - `mlx-swift` remains at Wave 5 branch `tq/layout-v5-kernels` commit `741fa31`; no direct Core Wave 6 implementation is scheduled unless LM exposes a missing primitive.
-- `compatibility-pair.json` remains `pending`; Wave 6 must not promote Verified/Certified product claims without a green compatibility pair and evidence.
-- Full local Xcode package/app validation remains blocked by the known `xcodebuild -resolvePackageDependencies` stall.
+- `compatibility-pair.json` remained `pending` at Wave 6 start; Wave 6 could
+  not promote Verified/Certified product claims without a green compatibility
+  pair and evidence.
+- At Wave 6 start, full local Xcode package/app validation was blocked by the known `xcodebuild -resolvePackageDependencies` stall. A later production closeout resolved this local gate.
 - Pines had generated scheme drift in `Pines.xcodeproj/xcshareddata/xcschemes/Pines.xcscheme` and `PinesWatch.xcscheme` before Wave 6 implementation edits began.
 
 ### Wave 6 Scope
@@ -84,7 +92,12 @@ This file tracks Wave 6 speculative decode and platform-unlock implementation af
 
 ### Non-Green / Deferred Gates
 
-- `bash scripts/ci/run-xcode-validation.sh prepare && ... generate` still fails the generated-project drift check because pinned XcodeGen rewrites the two scheme files that were already dirty before Wave 6 began. The generated files were restored to the pre-validation snapshot so Wave 6 does not overwrite that pre-existing drift.
-- Full Xcode package/app validation remains blocked by the known local `xcodebuild -resolvePackageDependencies` stall.
+- At Wave 6 handoff, `bash scripts/ci/run-xcode-validation.sh prepare && ...
+  generate` still failed the generated-project drift check because pinned
+  XcodeGen rewrote the two scheme files that were already dirty before Wave 6
+  began. The generated files were restored to the pre-validation snapshot so
+  Wave 6 did not overwrite that pre-existing drift. The later production
+  closeout resolved generated-project drift on the final pair.
+- Full Xcode package/app validation was blocked at Wave 6 handoff by the known local `xcodebuild -resolvePackageDependencies` stall. A later production closeout passed the full Xcode validation script on the final pair.
 - Product activation remains disabled: speculative Fast mode requires imported verified evidence with target-match, tokenizer-compatible, no poor-acceptance auto-disable, and p50 decode speedup.
 - W29+ platform features remain design/schema gates only; every default gate is disabled, kill-switched, and evidence-required.

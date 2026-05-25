@@ -67,9 +67,12 @@ Do not sync:
 - prompt caches
 - provider-hosted file contents, provider context caches, provider batch payloads, realtime/live session payloads, or generated provider artifacts unless a later explicit sync/export workflow encrypts them first
 - generated embeddings and compressed vector codes by default
+- TurboQuant KV snapshots by default
 - transient tool/browser state
 
 Generated embeddings and compressed vector codes sync only when private iCloud sync and the separate embedding sync toggle are both enabled. Chat attachments remain local files; when a user chooses cloud execution, supported image/PDF/text attachments can be encoded into the provider request for that turn according to provider capability checks.
+
+TurboQuant KV snapshots are local encrypted blobs. They are bound to model, tokenizer, profile, RoPE, prefix, layout, and compatibility-pair identity, and restore fails closed on mismatch or corruption. Snapshot deletion is included in model deletion and data-erasure flows.
 
 Chat attachment imports use user-selected files, stage local copies under app support storage, and reject empty or oversized files before request construction. HEIC/HEIF inputs are converted to JPEG at import time, so the original local file is not sent directly to providers. Message row actions can copy content, edit user-authored text while no run is active, or import local message attachments into Vault; Vault import follows the normal local ingestion and embedding-approval flow.
 
@@ -85,6 +88,10 @@ Every production release must pass:
 
 - `swift test --disable-automatic-resolution`
 - `scripts/ci/check-public-hygiene.sh`
+- `scripts/ci/check-mlx-package-pins.sh`
+- `scripts/ci/run-xcode-validation.sh all`
 - encrypted-store migration verification against a plaintext fixture
 - CloudKit encrypted-zone verification showing no plaintext payload fields in `PinesPrivateEncryptedV1`
-- App Store privacy manifest review
+- App Store privacy manifest review for the signed archive
+
+TurboQuant model/device/mode compatibility claims require separate real-device evidence. A green runtime compatibility pair is necessary for local release, but it is not sufficient to label a model profile `Verified` or `Certified`.

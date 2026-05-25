@@ -12,6 +12,11 @@ Read this alongside:
 
 This file tracks Wave 5 optimization implementation after the completed Wave 4 context and persistence handoff.
 
+Current closeout note: a later production pass regenerated the stale
+`mlx-swift` Metal reduce JIT source, so full core tests now pass. The final
+compatibility pair is green for local release gates, while Layout V5 and
+optimization claims remain evidence-gated and real-device tuple dependent.
+
 ## 2026-05-25
 
 ### Start State
@@ -22,8 +27,10 @@ This file tracks Wave 5 optimization implementation after the completed Wave 4 c
 - `mlx-swift` branch base: `6a5d5d8` from `tq/core-benchmark-json`.
 - `mlx-swift-lm` Wave 5 validation branch: `tq/lm-wave5-validation`.
 - `mlx-swift-lm` branch base: `76eabed` from `tq/lm-kv-snapshots`.
-- `compatibility-pair.json` remains `pending`; Wave 5 must not promote Verified/Certified product claims without a green compatibility pair and evidence.
-- Full Xcode package/app validation remains blocked by the known local `xcodebuild -resolvePackageDependencies` stall.
+- `compatibility-pair.json` remained `pending` at Wave 5 start; Wave 5 could
+  not promote Verified/Certified product claims without a green compatibility
+  pair and evidence.
+- At Wave 5 start, full Xcode package/app validation was blocked by the known local `xcodebuild -resolvePackageDependencies` stall. A later production closeout resolved this local gate.
 
 ### Wave 5 Scope
 
@@ -97,7 +104,12 @@ This file tracks Wave 5 optimization implementation after the completed Wave 4 c
   - `swift test --filter TurboQuantContractsTests` passed 6 tests;
   - `swift test --filter QuantizationTests` passed 53 tests;
   - `swift build --target TurboQuantBenchmark` passed;
-  - full `swift test` remains non-green because `MLXArrayIndexingTests.testFullIndexReadArray` trips an existing Metal library build failure in `reduce.h` (`general_reduce_looped_5_reduce_sumint32`), before any Wave 5 tests are involved.
+  - full `swift test` was non-green at Wave 5 handoff because
+    `MLXArrayIndexingTests.testFullIndexReadArray` tripped an existing Metal
+    library build failure in `reduce.h`
+    (`general_reduce_looped_5_reduce_sumint32`), before any Wave 5 tests were
+    involved. The later production closeout regenerated the stale Metal reduce
+    JIT source and full core tests passed on the final branch.
 - Pines:
   - `swift build --disable-automatic-resolution` passed;
   - `swift test --disable-automatic-resolution --filter TurboQuantWave3EvidenceTests` passed 15 tests;
@@ -115,5 +127,5 @@ This file tracks Wave 5 optimization implementation after the completed Wave 4 c
   - full `swift test` passed: 115 XCTest tests plus 181 Swift Testing tests.
 - Hygiene:
   - `git diff --check` passed in `mlx-swift`, `pines`, and `mlx-swift-lm`.
-- Remaining known non-green gate:
-  - `xcodebuild -resolvePackageDependencies -project Pines.xcodeproj -scheme Pines` still stalls locally; a bounded 60-second run was terminated and no `xcodebuild` or `XCBBuildService` processes remained afterward.
+- Wave 5 handoff non-green gate, later resolved:
+  - `xcodebuild -resolvePackageDependencies -project Pines.xcodeproj -scheme Pines` stalled locally at handoff; the production closeout later passed `bash scripts/ci/run-xcode-validation.sh all` on the final pair.

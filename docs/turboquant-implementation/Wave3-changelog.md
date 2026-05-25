@@ -10,6 +10,11 @@ Read this alongside:
 
 This file tracks Wave 3 evidence-loop implementation after the completed Wave 2 runtime-bridge handoff.
 
+Current closeout note: a later production pin pass resolved the local Xcode
+package/app validation blocker and marked `compatibility-pair.json` green for
+local release gates. Real-device model/device/mode evidence is still pending, so
+`Verified` and `Certified` product claims remain disabled until evidence import.
+
 ## 2026-05-25
 
 ### Start State
@@ -19,7 +24,8 @@ This file tracks Wave 3 evidence-loop implementation after the completed Wave 2 
 - Wave 2 runtime bridge handoff is complete and pushed.
 - `mlx-swift` branch head: `21002cb` (`codex/turboquant-core-completion`).
 - `mlx-swift-lm` branch head: `6b15298` (`codex/turboquant-completion-hardening`).
-- `compatibility-pair.json` remains `pending` because local full Xcode app validation is blocked.
+- `compatibility-pair.json` remained `pending` at Wave 3 start because local
+  full Xcode app validation was blocked.
 
 ### Wave 3 Scope
 
@@ -109,10 +115,13 @@ This file tracks Wave 3 evidence-loop implementation after the completed Wave 2 
 
 ### Evidence Gate Status
 
-- Wave 3 implementation is functionally complete, but production evidence activation is not green in
-  this workspace.
-- `compatibility-pair.json` remains `pending` because full Xcode app validation is still blocked by
-  local `xcodebuild` behavior and no real-device evidence tuple was produced.
+- Wave 3 implementation was functionally complete at handoff, but production
+  evidence activation was not green in that workspace.
+- At Wave 3 handoff, `compatibility-pair.json` remained `pending` because full
+  Xcode app validation was still blocked by local `xcodebuild` behavior and no
+  real-device evidence tuple had been produced. The later production closeout
+  resolved the local Xcode blocker and marked the compatibility pair green for
+  local release gates; real-device evidence remains pending.
 - No real-device benchmark tuple was produced in this environment.
 - Verified/Certified product claims remain disabled by policy unless a caller supplies an accepted
   compatibility-pair ID, accepted fallback-contract hash, passing quality gate, no jetsam/memory
@@ -148,6 +157,8 @@ This file tracks Wave 3 evidence-loop implementation after the completed Wave 2 
   - `swift test --filter TurboQuantRuntimeFailureTests`;
   - `swift test --filter TurboQuantCacheRuntimeSnapshotTests`;
   - `swift run TurboQuantModelBenchmark --help`.
-- Full Xcode package/app validation remains the only non-green local gate because
-  `xcodebuild -resolvePackageDependencies` is the known local blocker.
+- At Wave 3 handoff, full Xcode package/app validation was the only non-green
+  local gate because `xcodebuild -resolvePackageDependencies` was the known
+  local blocker. The later production closeout resolved this local gate and
+  passed `bash scripts/ci/run-xcode-validation.sh all` on the final pair.
 - Confirmed no `xcodebuild` or `XCBBuildService` processes remained after validation.

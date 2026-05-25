@@ -11,6 +11,11 @@ Read this alongside:
 
 This file tracks Wave 4 context and persistence implementation after the completed Wave 3 evidence-loop handoff.
 
+Current closeout note: a later production pin pass resolved the local Xcode
+package/app validation blocker and marked `compatibility-pair.json` green for
+local release gates. Snapshot restore and `Verified`/`Certified` product claims
+remain evidence-gated; no real-device tuple was fabricated.
+
 ## 2026-05-25
 
 ### Start State
@@ -20,8 +25,10 @@ This file tracks Wave 4 context and persistence implementation after the complet
 - `mlx-swift-lm` Wave 4 branch: `tq/lm-kv-snapshots`.
 - `mlx-swift-lm` branch base: `c934e47` from `tq/lm-profile-v2-quality`.
 - `mlx-swift` remains at Wave 3 branch `tq/core-benchmark-json` commit `6a5d5d8`; no active Wave 4 core implementation is scheduled.
-- `compatibility-pair.json` remains `pending`; Wave 4 implementation must stay evidence-gated and must not promote Verified/Certified product claims.
-- Full Xcode package/app validation remains blocked by the known local `xcodebuild -resolvePackageDependencies` stall.
+- `compatibility-pair.json` remained `pending` at Wave 4 start; Wave 4
+  implementation had to stay evidence-gated and could not promote
+  Verified/Certified product claims.
+- At Wave 4 start, full Xcode package/app validation was blocked by the known local `xcodebuild -resolvePackageDependencies` stall. A later production closeout resolved this local gate.
 - Pines worktree had pre-existing generated scheme drift in `Pines.xcodeproj/xcshareddata/xcschemes/Pines.xcscheme` and `PinesWatch.xcscheme` before Wave 4 edits started.
 
 ### Wave 4 Scope
@@ -117,13 +124,16 @@ This file tracks Wave 4 context and persistence implementation after the complet
 - `mlx-swift`:
   - no Wave 4 code changes; branch remains clean on `tq/core-benchmark-json`.
 
-### Remaining Non-Green Gate
+### Wave 4 Handoff Non-Green Gate
 
-- Full Xcode package/app validation is still blocked by the local
-  `xcodebuild -resolvePackageDependencies` phase. A Wave 4 resolve attempt printed the Xcode invocation
-  and then stalled without further progress; it was terminated, and no `xcodebuild` or `XCBBuildService`
-  processes remained afterward.
-- App build/test phases were not run because they depend on that blocked Xcode package-resolution phase.
+- Full Xcode package/app validation was blocked at Wave 4 handoff by the local
+  `xcodebuild -resolvePackageDependencies` phase. A Wave 4 resolve attempt
+  printed the Xcode invocation and then stalled without further progress; it was
+  terminated, and no `xcodebuild` or `XCBBuildService` processes remained
+  afterward. The later production closeout resolved this local gate and passed
+  `bash scripts/ci/run-xcode-validation.sh all` on the final pair.
+- App build/test phases were not run at Wave 4 handoff because they depended on
+  that blocked Xcode package-resolution phase.
 - The initial generated scheme drift was normalized by pinned XcodeGen generation and is retained as
   generated scheme updates in the Wave 4 commit because `run-xcode-validation.sh generate` requires
   the generated output.

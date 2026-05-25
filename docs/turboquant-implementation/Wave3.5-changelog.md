@@ -26,12 +26,14 @@ loop.
     `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772`;
   - `mlx-swift-lm` `tq/wave7-lm-platform` at
     `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`.
-- `compatibility-pair.json` remained `pending`.
+- `compatibility-pair.json` remained `pending` at Wave 3.5 start.
 - The only connected physical device reported by `xcrun xctrace list devices`
   was a Mac-class device. The iPhone-class device was offline, so the required
   real-device verified tuple could not be produced in this workspace.
-- Full local Xcode package/app validation remained blocked by the known
-  `xcodebuild -resolvePackageDependencies` stall.
+- Full local Xcode package/app validation was still blocked at Wave 3.5 start
+  by the known `xcodebuild -resolvePackageDependencies` stall. The later
+  production closeout resolved this local gate and passed
+  `bash scripts/ci/run-xcode-validation.sh all` on the final pair.
 
 ### Scope
 
@@ -91,12 +93,20 @@ The following gates were run after promotion:
 
 ### Remaining Release Gates
 
-Wave 3.5 source wiring is complete, but the release gate is not green:
+Wave 3.5 source wiring was complete at the initial handoff, but release-green
+closeout happened in a later production pass:
 
-- no online iPhone-class device was available to produce the required
-  real-device verified tuple;
-- `compatibility-pair.json` must remain `pending`;
-- full local Xcode package/app validation is still blocked by the existing
-  `xcodebuild -resolvePackageDependencies` stall;
-- Verified/Certified product claims remain disabled until a real-device tuple
-  and full validation close these gates.
+- the stale `mlx-swift` Metal reduce JIT generated source was regenerated so
+  full core tests pass;
+- `mlx-swift-lm` was pinned to that release-green core commit;
+- Pines production pins, generated Xcode references, package lockfile,
+  `MLXRuntimeBridge.turboQuantCompatibilityPairID`, TurboQuant docs, and
+  `compatibility-pair.json` were synchronized to the final pair;
+- `bash scripts/ci/run-xcode-validation.sh all` passed, including locked
+  package resolution, unsigned iOS build, build-for-testing, simulator unit
+  smoke, simulator UI smoke, and final drift checks;
+- `compatibility-pair.json` is now `green` for local release gates.
+
+No online iPhone-class device was available to produce a real-device verified
+tuple. `Verified` and `Certified` model/device/mode product claims remain
+disabled until real-device evidence is imported for the exact tuple.

@@ -1,6 +1,6 @@
 # Implementation Status
 
-This repository is a working foundation for `pines`, not a complete App Store-ready MLX client yet.
+This repository is a working foundation for `pines`, not a signed App Store distribution yet. The local release gates for the current TurboQuant compatibility pair are green; model/device/mode `Verified` and `Certified` claims remain gated on real-device evidence.
 
 ## Implemented
 
@@ -36,6 +36,11 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 - Built-in calculator, time/date, attachment read, vault search/read, conversation search, Brave Search BYOK, web fetch, and WKWebView browser observe/action tools.
 - Vault file/PDF/image import pipeline with scoped file types, bounded source size/text extraction, OCR, chunking, and embedding invocation.
 - TurboQuant runtime profile defaults, requested/active backend diagnostics, Metal codec and compressed-attention availability diagnostics, compressed vault embedding storage, approximate vector search, and FP16 rerank path.
+- TurboQuant control-plane runtime: pre-generation admission, memory zones, mode-specific fallback contracts, typed local failure events, RunDecision metadata, calibration samples, compatibility-pair tracking, evidence import/revocation, quality gates, and compatibility UI states.
+- Context planning for pinned, recent, retrieved, summary, and dropped segments, with explicit separation between semantic retrieval and exact-prefix compressed KV pages.
+- Encrypted local KV snapshot manifests and blob storage, fail-closed identity validation, partial-write quarantine, quota/eviction policy, data-erasure hooks, and disabled-by-default restore gates.
+- Speculative decode contracts, target-verifier telemetry, acceptance-rate evidence gates, and auto-disable policy for poor acceptance or target mismatch.
+- Platform-unlock contracts for adaptive precision, semantic/multimodal/agent memory, open KV descriptors, device mesh, personalization/adapters, and release kill switches. These are disabled by default and require compatibility-pair plus evidence gates before product activation.
 - iOS runtime guardrails: memory/thermal adaptive profiles, compact 6 GB device defaults, memory-warning unload, bounded vector scans, batched vault embedding ingestion, foreground-only MLX execution, conservative background model-download network defaults, and recovered-download reconciliation.
 - Read-only runtime diagnostics and OSLog/MetricKit hooks for startup phases, generation speed, vault retrieval, and memory pressure.
 - CloudKit private database sync service for opt-in settings, conversations, vault chunks, and explicitly enabled embedding/code blobs.
@@ -54,9 +59,9 @@ This repository is a working foundation for `pines`, not a complete App Store-re
 
 ## Not Complete
 
-- Real-device TurboQuant acceptance on the A16 through A19 Pro hardware matrix.
+- Real-device TurboQuant acceptance on the A16 through A19 Pro hardware matrix, including at least one imported model/device/mode evidence tuple before any `Verified` or `Certified` product claim.
 - Production UX hardening for regenerate controls, fuller provider editing, provider-hosted transfer progress/retry/cancellation, richer hosted-tool approvals, CloudKit conflict UI, and detailed model compatibility messaging.
-- App Store privacy manifest validation against the final resolved package graph.
+- Signed App Store archive/export, TestFlight/App Store upload automation, and final App Store Connect privacy review for the submitted binary.
 - Remaining monolith candidates are semantic rather than mechanical: `PinesAppModel` still owns high-level orchestration, `SettingsDetailView` owns the full settings editor, and `ModelsViewComponents` owns model list/detail presentation. Split these further only alongside focused feature changes.
 
 ## Verification
@@ -68,11 +73,13 @@ swift build --disable-automatic-resolution
 swift test --disable-automatic-resolution
 swift run --disable-automatic-resolution PinesCoreTestRunner
 bash scripts/ci/xcodegen.sh generate
-bash scripts/ci/run-xcode-validation.sh
+bash scripts/ci/run-xcode-validation.sh all
 ```
 
-Full iOS verification requires full Xcode:
+For a direct generic iOS build:
 
 ```sh
 xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform=iOS' build
 ```
+
+The current TurboQuant compatibility pair passed `bash scripts/ci/run-xcode-validation.sh all`, including locked package resolution, unsigned iOS build, build-for-testing, simulator unit smoke tests, simulator UI smoke tests, and final generated-project/package drift checks.

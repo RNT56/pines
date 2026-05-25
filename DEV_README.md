@@ -115,7 +115,7 @@ Provider lifecycle records are generic on purpose. OpenAI Files/vector stores, A
 
 ## Persistence And Sync
 
-The local store is GRDB/SQLite. Schema source of truth is `Sources/PinesCore/Persistence/DatabaseSchema.swift`; the current schema version is `12`.
+The local store is GRDB/SQLite. Schema source of truth is `Sources/PinesCore/Persistence/DatabaseSchema.swift`; the current schema version is `23`.
 
 When changing persistence:
 
@@ -128,7 +128,7 @@ When changing persistence:
 - Add indexes for list, sync, search, and vector-scan paths before the UI depends on them.
 - Update core tests or `PinesCoreTestRunner` for schema contract changes.
 
-CloudKit is optional and private-database scoped. Do not sync API keys, model binaries, prompt caches, generated embeddings/vector codes by default, transient browser/tool state, or local chat attachment files. Generated embeddings and compressed vector codes sync only when private iCloud sync and the separate embedding sync toggle are both enabled.
+CloudKit is optional and private-database scoped. Do not sync API keys, model binaries, prompt caches, TurboQuant KV snapshots, generated embeddings/vector codes by default, transient browser/tool state, or local chat attachment files. Generated embeddings and compressed vector codes sync only when private iCloud sync and the separate embedding sync toggle are both enabled.
 
 Personal Apple Developer accounts are safe by default. `PINES_CODE_SIGN_ENTITLEMENTS` and `PINES_ICLOUD_SWIFT_FLAGS` are empty in `project.yml`, so Xcode does not request iCloud provisioning. Paid-team CloudKit builds must override both:
 
@@ -175,6 +175,8 @@ Performance-sensitive work must respect iOS memory pressure, thermal state, Low 
 
 TurboQuant is the requested default local KV-cache strategy. Pines requests the `metalPolarQJL` backend by default, reports requested/active backend and attention path diagnostics, and falls back to MLX packed attention when required by device capability or shape.
 
+The production bridge performs request-scoped local admission before generation. It records the admitted context, memory zones, fallback contract, context assembly plan, RunDecision, calibration sample, and explicit no-cloud-fallback metadata. `compatibility-pair.json` may be green for the pinned runtime pair while model/device/mode compatibility remains unverified; product `Verified` and `Certified` labels require matching real-device evidence.
+
 Device profile defaults from `DeviceProfile`:
 
 | Profile | Max model bytes | Context | Small-model context | Prefill | Embedding batch | Vector scan | Vision |
@@ -220,12 +222,14 @@ Current app-level limits and defaults:
 
 The iOS app links exact maintained MLX fork revisions through `project.yml` and the generated Xcode project:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `a90b1097df45e4e70b6e0bb367624f8f5857970b`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c`
-- Nested `mlx` inside `MLXSwift`: `3eb8ef074b911b00ecdbeb47f7bdafd91a123ad0`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`
+- Nested `mlx` inside `MLXSwift`: `75b756717154890033209aaba4ffc89b113c5998`
 - Nested `mlx-c` inside `MLXSwift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
 
 These pins are intentional because Pines consumes additive TurboQuant and compatibility APIs not assumed to exist in upstream package releases yet.
+
+The active TurboQuant compatibility pair is recorded in `docs/turboquant-implementation/compatibility-pair.json`. A `green` pair means the pinned runtime pair passed local release gates; it is not a substitute for real-device profile evidence.
 
 Use the helper to move pins:
 
@@ -233,7 +237,7 @@ Use the helper to move pins:
 tools/update-mlx-pins.sh
 ```
 
-CI checks that `project.yml` and `Pines.xcodeproj` agree, that pins are not below known-good minimums, that obsolete revisions are absent, and that nested `mlx`/`mlx-c` revisions match expectations. Do not edit Xcode DerivedData package checkouts.
+CI checks that `project.yml`, `Pines.xcodeproj`, the Xcode package lockfile, `docs/TURBOQUANT.md`, `compatibility-pair.json`, and `MLXRuntimeBridge.turboQuantCompatibilityPairID` agree; that pins are not below known-good minimums; that obsolete revisions are absent; and that nested `mlx`/`mlx-c` revisions match expectations. Do not edit Xcode DerivedData package checkouts.
 
 ## Model Discovery And Downloads
 
