@@ -5,7 +5,7 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 The current compatibility pair is green for local release gates. Pines can build, test, resolve the pinned MLX packages through Xcode, run simulator smoke tests, and enforce pin drift checks on:
 
 - `RNT56/mlx-swift`: `260c8fb16df772b8c20295529fde958fffb66369`
-- `RNT56/mlx-swift-lm`: `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e`
+- `RNT56/mlx-swift-lm`: `d469bcef9da8728a8da3f87bafa22c6c960837a9`
 
 This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
 
@@ -23,11 +23,11 @@ The pinned pair makes Layout V5 the default TurboQuant attention layout for devi
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
   - `RNT56/mlx-swift`: `260c8fb16df772b8c20295529fde958fffb66369`
-  - `RNT56/mlx-swift-lm`: `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e`
+  - `RNT56/mlx-swift-lm`: `d469bcef9da8728a8da3f87bafa22c6c960837a9`
   - Nested `mlx` inside `RNT56/mlx-swift`: `75b756717154890033209aaba4ffc89b113c5998`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, a tiled online fused decode path for admitted 64/80/96/112/128/192/240/256 head dimensions, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
-- `mlx-swift-lm` exposes `KVCacheStrategy.turboQuant`, `TurboQuantKVCache`, a raw-free physical-slot `RotatingTurboQuantKVCache` for supported `.metalPolarQJL` `maxKVSize` paths, a shared packed quantized-attention fallback before raw decode, prepared-prefix generation, prompt-cache serialization hooks, `TurboQuantCompressedKVCacheProtocol`, the bundled `TurboQuantProfileRegistry`, and `GenerateParameters` fields for cache strategy, preset, requested backend selection, value bits, device-adaptive optimization policy, model metadata, KV head dimensions, and compressed-attention diagnostics.
+- `mlx-swift-lm` exposes `KVCacheStrategy.turboQuant`, `TurboQuantKVCache`, a raw-free physical-slot `RotatingTurboQuantKVCache` for supported `.metalPolarQJL` `maxKVSize` paths, a shared packed quantized-attention fallback before raw decode, typed throwing TurboQuant generation paths for Llama, Gemma, Gemma 2/3, Qwen3, Qwen3 MoE, and Qwen3.5 text models, prepared-prefix generation, prompt-cache serialization hooks, `TurboQuantCompressedKVCacheProtocol`, the bundled `TurboQuantProfileRegistry`, and `GenerateParameters` fields for cache strategy, preset, requested backend selection, value bits, device-adaptive optimization policy, model metadata, KV head dimensions, and compressed-attention diagnostics.
 - Pines keeps a local prompt KV cache for text-only MLX turns. Cache entries are keyed by model/runtime/tokenizer and quantization shape, reused only on token-prefix match, trimmed after successful generation, and evicted before model unload under memory pressure or thermal downshift.
 - Pines marks Qwen3.5/Qwen3.6 as Hybrid Full: standard attention KV caches use TurboQuant, while Qwen linear-attention native state caches remain exact MLX state. Gemma 3/3n/4 and text Llama are marked TurboQuant full when metadata matches the pinned profile registry. Llama 3.2 Vision stays unsupported until the pinned `mlx-swift-lm` fork exposes `mllama` VLM registration, preprocessing, cache construction, and profiles.
 - The app-level runtime smoke tests link MLX/MLXLMCommon, assert those fixed pins are present, validate high-bit TurboQuant seed propagation, and run a tiny Metal codec round trip when the executing device exposes the TurboQuant Metal codec.

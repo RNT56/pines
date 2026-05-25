@@ -423,7 +423,14 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e"
+        "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-d469bcef9da8728a8da3f87bafa22c6c960837a9"
+    static var turboQuantLayoutVersion: Int {
+        #if canImport(MLX)
+        MLX.TurboQuantAttentionLayout.currentVersion
+        #else
+        TurboQuantLayoutVersion.current
+        #endif
+    }
 
     private let state = MLXRuntimeState()
     private let deviceMonitor = DeviceRuntimeMonitor()
@@ -983,6 +990,7 @@ struct MLXRuntimeBridge: Sendable {
         let backend = turboQuantBackendSnapshot()
         let linked = isLinked
         let usesTurboQuant = Self.usesTurboQuantByDefault(for: install)
+        let turboQuantDisabledReason = Self.turboQuantDefaultDisabledReason(for: install)
         let normalizedRequestedContextLength = AppSettingsSnapshot.normalizedLocalContextTokens(
             requestedContextLength ?? (usesTurboQuant ? recommendedMaxKVSize : min(recommendedMaxKVSize, 8192))
         )
@@ -991,7 +999,8 @@ struct MLXRuntimeBridge: Sendable {
             : min(normalizedRequestedContextLength, recommendedMaxKVSize, 8192)
         let fallbackReason = usesTurboQuant
             ? backend.fallbackReason
-            : "Using plain MLX KV cache because TurboQuant is not applicable to this install."
+            : turboQuantDisabledReason
+                ?? "Using plain MLX KV cache because TurboQuant is not applicable to this install."
         let turboQuantDefaults = usesTurboQuant
             ? Self.turboQuantRuntimeDefaults(
                 for: install,
@@ -1032,7 +1041,7 @@ struct MLXRuntimeBridge: Sendable {
                 turboQuantOptimizationPolicy: turboQuantDefaults?.optimizationPolicy
                     ?? deviceProfile.turboQuantOptimizationPolicy,
                 turboQuantValueBits: admission.useTurboQuant ? turboQuantDefaults?.valueBits : nil,
-                turboQuantLayoutVersion: admission.useTurboQuant ? 4 : nil,
+                turboQuantLayoutVersion: admission.useTurboQuant ? Self.turboQuantLayoutVersion : nil,
                 thermalDownshiftActive: deviceProfile.thermalDownshiftActive,
                 runtimePressureReason: deviceProfile.runtimePressureReason,
                 turboQuantProfileID: admission.useTurboQuant ? turboQuantDefaults?.profileID : nil,
@@ -1065,13 +1074,23 @@ struct MLXRuntimeBridge: Sendable {
     }
 
     private static func usesTurboQuantByDefault(for install: ModelInstall) -> Bool {
-        guard install.modalities.contains(.text) else { return false }
-        switch install.turboQuantFamilySupport {
-        case .attentionKVFull, .hybridFull:
-            return true
-        case .none, .unsupportedTopology:
-            return false
-        }
+        TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+            repository: install.repository,
+            modelType: install.modelType,
+            textConfigModelType: install.textConfigModelType,
+            modalities: install.modalities,
+            familySupport: install.turboQuantFamilySupport
+        )
+    }
+
+    private static func turboQuantDefaultDisabledReason(for install: ModelInstall) -> String? {
+        TurboQuantRuntimeSupport.defaultDisabledReason(
+            repository: install.repository,
+            modelType: install.modelType,
+            textConfigModelType: install.textConfigModelType,
+            modalities: install.modalities,
+            familySupport: install.turboQuantFamilySupport
+        )
     }
 
     private struct TurboQuantRuntimeDefaults {
@@ -1552,6 +1571,219 @@ struct MLXRuntimeBridge: Sendable {
             .compressedDecodeAllowed
         case .fatalOnFailure:
             .fatalOnFailure
+        }
+    }
+
+    fileprivate static func mlxTurboQuantAdmission(
+        from plan: LocalRuntimeAdmissionPlan,
+        profile: RuntimeProfile,
+        install: ModelInstall?
+    ) -> MLXLMCommon.TurboQuantAdmission? {
+        let requestedMode = mlxTurboQuantUserMode(from: profile.quantization.turboQuantUserMode)
+        let selectedMode = mlxTurboQuantUserMode(from: plan.selectedMode)
+        let preset = mlxTurboQuantAdmissionPreset(from: profile.quantization.preset ?? .conservativeFallback)
+        let valueBits = profile.quantization.turboQuantValueBits
+            ?? profile.quantization.preset?.defaultValueBits
+            ?? PinesCore.TurboQuantPreset.conservativeFallback.defaultValueBits
+        let groupSize = max(1, profile.quantization.kvGroupSize)
+        let admittedContext = max(1, plan.admittedContextTokens)
+        let shape = install.map(heuristicModelShape(for:)) ?? (layerCount: 1, kvHeadCount: 1, headDimension: 128)
+        let footprint = MLXLMCommon.TurboQuantLayerCacheFootprint(
+            layerCount: shape.layerCount,
+            kvHeadCount: shape.kvHeadCount,
+            headDimension: shape.headDimension,
+            groupSize: groupSize,
+            preset: preset,
+            valueBits: valueBits
+        )
+        let compressedBytesPerToken = max(
+            1,
+            intClamped(plan.memoryZones.compressedKVBytes / Int64(admittedContext)) ?? footprint.bytesPerTokenAllLayers
+        )
+        let rawShadowTokenCount = max(1, min(admittedContext, 512))
+        let rawBytesPerToken = max(
+            footprint.bytesPerTokenAllLayers,
+            intClamped(plan.memoryZones.rawShadowBytes / Int64(rawShadowTokenCount)) ?? footprint.bytesPerTokenAllLayers
+        )
+        let fallbackBytes = plan.memoryZones.packedFallbackBytes + plan.memoryZones.decodedFallbackScratchBytes
+        let packedFallbackBytesPerToken = max(
+            0,
+            intClamped(fallbackBytes / Int64(admittedContext)) ?? 0
+        )
+        let availableBytes = max(
+            plan.memoryZones.totalPlannedBytes,
+            plan.memoryZones.totalPlannedBytes + max(0, plan.memoryCushionBytes)
+        )
+        let zones = MLXLMCommon.TurboQuantRuntimeMemoryZones(
+            availableAppMemoryBytes: intClamped(availableBytes) ?? Int.max,
+            runtimeBudgetBytes: intClamped(max(0, availableBytes - plan.memoryZones.safetyReserveBytes)) ?? Int.max,
+            mlxActiveBytes: 0,
+            mlxCacheBytes: 0,
+            modelResidentBytes: intClamped(plan.memoryZones.modelWeightsBytes) ?? 0,
+            compressedKVBytes: intClamped(plan.memoryZones.compressedKVBytes) ?? 0,
+            rawShadowBytes: intClamped(plan.memoryZones.rawShadowBytes) ?? 0,
+            fallbackReserveBytes: intClamped(fallbackBytes) ?? 0,
+            scratchBytes: intClamped(plan.memoryZones.metalScratchReserveBytes) ?? 0,
+            promptAndTokenizerBytes: intClamped(plan.memoryZones.promptBufferBytes) ?? 0,
+            uiReserveBytes: intClamped(plan.memoryZones.uiReserveBytes) ?? 0,
+            safetyReserveBytes: intClamped(plan.memoryZones.safetyReserveBytes) ?? 0
+        )
+        let memoryPlan = MLXLMCommon.TurboQuantMemoryPlan(
+            requestedContextLength: max(1, plan.requestedContextTokens),
+            admittedContextLength: admittedContext,
+            requestedMode: requestedMode,
+            effectiveMode: selectedMode,
+            preset: preset,
+            valueBits: valueBits,
+            groupSize: groupSize,
+            fallbackPolicy: mlxTurboQuantFallbackPolicy(from: plan.fallbackContract),
+            rawBytesPerToken: rawBytesPerToken,
+            packedFallbackBytesPerToken: packedFallbackBytesPerToken,
+            compressedBytesPerToken: compressedBytesPerToken,
+            layerFootprint: footprint,
+            usesRawShadow: plan.memoryZones.rawShadowBytes > 0,
+            packedFallbackEnabled: plan.memoryZones.packedFallbackBytes > 0,
+            usesRollingSummaryMemory: false,
+            runtimeZones: zones
+        )
+        return MLXLMCommon.TurboQuantAdmission(
+            admitted: plan.admitted,
+            requestedContextLength: max(1, plan.requestedContextTokens),
+            admittedContextLength: plan.admitted ? admittedContext : 0,
+            requestedMode: requestedMode,
+            selectedMode: selectedMode,
+            memoryPlan: memoryPlan,
+            downgradeReasons: mlxTurboQuantAdmissionDowngrades(from: plan),
+            rejectedPaths: plan.rejectionReason.map {
+                [MLXLMCommon.RejectedPath(path: "pines-local-runtime-admission", reason: $0)]
+            } ?? [],
+            userMessage: plan.userFacingMessage
+        )
+    }
+
+    fileprivate static func mlxTurboQuantAdmission(
+        from admission: PinesCore.TurboQuantAdmission
+    ) -> MLXLMCommon.TurboQuantAdmission? {
+        guard let memoryPlan = admission.memoryPlan,
+              let mlxMemoryPlan = mlxTurboQuantMemoryPlan(from: memoryPlan) else {
+            return nil
+        }
+        return MLXLMCommon.TurboQuantAdmission(
+            admitted: admission.admitted,
+            requestedContextLength: admission.requestedContextLength,
+            admittedContextLength: admission.admittedContextLength,
+            requestedMode: mlxTurboQuantUserMode(from: admission.requestedMode),
+            selectedMode: mlxTurboQuantUserMode(from: admission.selectedMode),
+            memoryPlan: mlxMemoryPlan,
+            downgradeReasons: admission.downgradeReasons.map {
+                MLXLMCommon.TurboQuantAdmissionDowngrade(
+                    reason: mlxTurboQuantAdmissionDowngradeReason(from: $0.reason),
+                    message: $0.message
+                )
+            },
+            rejectedPaths: admission.rejectedPaths.map {
+                MLXLMCommon.RejectedPath(path: $0.path, reason: $0.reason)
+            },
+            userMessage: admission.userMessage
+        )
+    }
+
+    private static func mlxTurboQuantMemoryPlan(
+        from plan: PinesCore.TurboQuantMemoryPlan
+    ) -> MLXLMCommon.TurboQuantMemoryPlan? {
+        guard let footprint = plan.layerFootprint else { return nil }
+        return MLXLMCommon.TurboQuantMemoryPlan(
+            requestedContextLength: plan.requestedContextLength,
+            admittedContextLength: plan.admittedContextLength,
+            requestedMode: mlxTurboQuantUserMode(from: plan.requestedMode),
+            effectiveMode: mlxTurboQuantUserMode(from: plan.effectiveMode),
+            preset: mlxTurboQuantAdmissionPreset(from: plan.preset),
+            valueBits: plan.valueBits,
+            groupSize: plan.groupSize,
+            fallbackPolicy: mlxTurboQuantFallbackPolicy(from: plan.fallbackPolicy),
+            rawBytesPerToken: plan.rawBytesPerToken,
+            packedFallbackBytesPerToken: plan.packedFallbackBytesPerToken,
+            compressedBytesPerToken: plan.compressedBytesPerToken,
+            layerFootprint: MLXLMCommon.TurboQuantLayerCacheFootprint(
+                layerCount: footprint.layerCount,
+                kvHeadCount: footprint.kvHeadCount,
+                headDimension: footprint.headDimension,
+                groupSize: footprint.groupSize,
+                preset: mlxTurboQuantAdmissionPreset(from: footprint.preset),
+                valueBits: footprint.valueBits
+            ),
+            usesRawShadow: plan.usesRawShadow,
+            packedFallbackEnabled: plan.packedFallbackEnabled,
+            usesRollingSummaryMemory: plan.usesRollingSummaryMemory,
+            runtimeZones: MLXLMCommon.TurboQuantRuntimeMemoryZones(
+                availableAppMemoryBytes: plan.runtimeZones.availableAppMemoryBytes,
+                runtimeBudgetBytes: plan.runtimeZones.runtimeBudgetBytes,
+                mlxActiveBytes: plan.runtimeZones.mlxActiveBytes,
+                mlxCacheBytes: plan.runtimeZones.mlxCacheBytes,
+                modelResidentBytes: plan.runtimeZones.modelResidentBytes,
+                compressedKVBytes: plan.runtimeZones.compressedKVBytes,
+                rawShadowBytes: plan.runtimeZones.rawShadowBytes,
+                fallbackReserveBytes: plan.runtimeZones.fallbackReserveBytes,
+                scratchBytes: plan.runtimeZones.scratchBytes,
+                promptAndTokenizerBytes: plan.runtimeZones.promptAndTokenizerBytes,
+                uiReserveBytes: plan.runtimeZones.uiReserveBytes,
+                safetyReserveBytes: plan.runtimeZones.safetyReserveBytes,
+                rollingSummaryBytes: plan.runtimeZones.rollingSummaryBytes
+            )
+        )
+    }
+
+    private static func mlxTurboQuantAdmissionDowngrades(
+        from plan: LocalRuntimeAdmissionPlan
+    ) -> [MLXLMCommon.TurboQuantAdmissionDowngrade] {
+        var downgrades: [MLXLMCommon.TurboQuantAdmissionDowngrade] = []
+        if plan.admittedContextTokens < plan.requestedContextTokens {
+            downgrades.append(
+                MLXLMCommon.TurboQuantAdmissionDowngrade(
+                    reason: .reducedContext,
+                    message: plan.downgradeReason
+                        ?? "Reduced context from \(plan.requestedContextTokens) to \(plan.admittedContextTokens) tokens."
+                )
+            )
+        } else if let downgradeReason = plan.downgradeReason {
+            downgrades.append(
+                MLXLMCommon.TurboQuantAdmissionDowngrade(
+                    reason: .reducedContext,
+                    message: downgradeReason
+                )
+            )
+        }
+        if !plan.admitted, let rejectionReason = plan.rejectionReason {
+            downgrades.append(
+                MLXLMCommon.TurboQuantAdmissionDowngrade(
+                    reason: .refusedInsufficientMemory,
+                    message: rejectionReason
+                )
+            )
+        }
+        return downgrades
+    }
+
+    private static func mlxTurboQuantAdmissionDowngradeReason(
+        from reason: PinesCore.TurboQuantAdmissionDowngradeReason
+    ) -> MLXLMCommon.TurboQuantAdmissionDowngradeReason {
+        switch reason {
+        case .releasedRawShadow:
+            .releasedRawShadow
+        case .disabledPackedFallback:
+            .disabledPackedFallback
+        case .loweredValueBits:
+            .loweredValueBits
+        case .movedBalancedToMaxContext:
+            .movedBalancedToMaxContext
+        case .reducedContext:
+            .reducedContext
+        case .rollingSummaryMemory:
+            .rollingSummaryMemory
+        case .thermalOrBatterySaver:
+            .thermalOrBatterySaver
+        case .refusedInsufficientMemory:
+            .refusedInsufficientMemory
         }
     }
 
@@ -2496,7 +2728,29 @@ private actor MLXRuntimeState {
                 return .localRuntimeFailure(message)
             }
         }
+        #if canImport(MLXLMCommon)
+        if let turboQuantError = error as? MLXLMCommon.TurboQuantGenerationError {
+            return .localRuntimeFailure(turboQuantError.description)
+        }
+        #endif
+        let diagnostic = String(describing: error)
+        if !diagnostic.isEmpty && diagnostic != error.localizedDescription {
+            return .localRuntimeFailure(diagnostic)
+        }
         return .localRuntimeFailure(error.localizedDescription)
+    }
+
+    private static func validateTurboQuantRuntimeSupport(
+        model: any LanguageModel,
+        profile: RuntimeProfile
+    ) throws {
+        guard profile.quantization.kvCacheStrategy == .turboQuant else { return }
+        guard model is any ThrowingLanguageModel else {
+            let modelName = String(describing: Swift.type(of: model))
+            throw InferenceError.localRuntimeFailure(
+                "\(TurboQuantRuntimeSupport.nonThrowingRuntimeReason) Loaded MLX model: \(modelName)."
+            )
+        }
     }
     #endif
 
@@ -3202,6 +3456,7 @@ private actor MLXRuntimeState {
                         let cacheStartedAt = Date()
                         let hasToolSpecs = !(toolSpecs?.isEmpty ?? true)
                         let promptTokenIDs = Self.promptTokenIDs(from: input.text.tokens)
+                        try Self.validateTurboQuantRuntimeSupport(model: context.model, profile: profile)
                         let promptCacheSkipReason = Self.promptCacheMissReason(
                             input: input,
                             promptTokenIDs: promptTokenIDs,
@@ -3904,7 +4159,7 @@ private actor MLXRuntimeState {
             ? MLX.TurboQuantConfiguration.deterministicSeed(
                 modelID: install?.repository ?? request.modelID.rawValue,
                 revision: install?.revision ?? "main",
-                cacheLayoutVersion: 3
+                cacheLayoutVersion: MLXRuntimeBridge.turboQuantLayoutVersion
             )
             : nil
         let turboQuantFallbackPolicy: MLXLMCommon.TurboQuantFallbackPolicy
@@ -3921,10 +4176,24 @@ private actor MLXRuntimeState {
             ?? profile.quantization.turboQuantAdmission?.admittedContextLength
             ?? maxKVSizeOverride
             ?? profile.quantization.maxKVSize
+        let turboQuantAdmission =
+            turboQuantAdmissionPlan.flatMap {
+                MLXRuntimeBridge.mlxTurboQuantAdmission(from: $0, profile: profile, install: install)
+            }
+            ?? profile.quantization.turboQuantAdmission.flatMap {
+                MLXRuntimeBridge.mlxTurboQuantAdmission(from: $0)
+            }
+        let resolvedMaxKVSize: Int? =
+            if profile.quantization.kvCacheStrategy == .turboQuant,
+               let admittedContext = turboQuantAdmissionPlan?.admittedContextTokens {
+                min(maxKVSizeOverride ?? admittedContext, admittedContext)
+            } else {
+                maxKVSizeOverride ?? profile.quantization.maxKVSize
+            }
 
         return GenerateParameters(
             maxTokens: maxTokensOverride ?? request.sampling.maxTokens,
-            maxKVSize: maxKVSizeOverride ?? profile.quantization.maxKVSize,
+            maxKVSize: resolvedMaxKVSize,
             kvBits: profile.quantization.kvCacheStrategy == .turboQuant ? nil : profile.quantization.kvBits,
             kvGroupSize: profile.quantization.kvGroupSize,
             quantizedKVStart: profile.quantization.quantizedKVStart,
@@ -3936,8 +4205,8 @@ private actor MLXRuntimeState {
             ),
             turboQuantSeed: turboQuantSeed,
             turboQuantValueBits: Self.resolvedTurboQuantValueBits(for: profile, install: install),
-            turboQuantAdmissionPolicy: .automatic,
-            turboQuantAdmission: nil,
+            turboQuantAdmissionPolicy: profile.quantization.kvCacheStrategy == .turboQuant ? .required : .disabled,
+            turboQuantAdmission: turboQuantAdmission,
             turboQuantPerCacheResidentBudgetBytes: turboQuantPerCacheResidentBudgetBytes(),
             turboQuantAdmissionProfile: turboQuantAdmissionProfile,
             turboQuantRequestedContextLength: turboQuantRequestedContextLength,

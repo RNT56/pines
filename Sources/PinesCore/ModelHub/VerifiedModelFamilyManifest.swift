@@ -24,6 +24,15 @@ public struct VerifiedModelFamilyManifest: Sendable {
 
         let lowerRepository = repository.lowercased()
         guard !Self.isExplicitlyExcludedRepository(lowerRepository) else { return false }
+        guard TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+            repository: repository,
+            modelType: modelType,
+            textConfigModelType: textConfigModelType,
+            modalities: modalities,
+            familySupport: turboQuantFamilySupport
+        ) else {
+            return false
+        }
 
         let modelTypes = [
             modelType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),

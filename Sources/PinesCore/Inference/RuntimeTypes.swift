@@ -68,6 +68,101 @@ public enum TurboQuantFamilySupport: String, Codable, Sendable, CaseIterable {
     }
 }
 
+public enum TurboQuantRuntimeSupport: Sendable {
+    public static let nonThrowingRuntimeReason =
+        "TurboQuant profile metadata is available, but the linked MLX runtime model does not yet implement typed throwing TurboQuant attention."
+
+    public static func supportsThrowingAttentionGeneration(
+        repository: String,
+        modelType: String?,
+        textConfigModelType: String?,
+        modalities: Set<ModelModality>,
+        familySupport: TurboQuantFamilySupport
+    ) -> Bool {
+        guard modalities.contains(.text) else { return false }
+        guard familySupport == .attentionKVFull || familySupport == .hybridFull else {
+            return false
+        }
+
+        let modelTypes = normalizedModelTypes(modelType, textConfigModelType)
+        return modelTypes.contains { supportedThrowingAttentionModelTypes.contains($0) }
+            || supportedThrowingAttentionRepositorySignals.contains {
+                repository.localizedCaseInsensitiveContains($0)
+            }
+    }
+
+    public static func defaultDisabledReason(
+        repository: String,
+        modelType: String?,
+        textConfigModelType: String?,
+        modalities: Set<ModelModality>,
+        familySupport: TurboQuantFamilySupport
+    ) -> String? {
+        guard familySupport == .attentionKVFull || familySupport == .hybridFull else {
+            return nil
+        }
+        guard !supportsThrowingAttentionGeneration(
+            repository: repository,
+            modelType: modelType,
+            textConfigModelType: textConfigModelType,
+            modalities: modalities,
+            familySupport: familySupport
+        ) else {
+            return nil
+        }
+        return nonThrowingRuntimeReason
+    }
+
+    private static let supportedThrowingAttentionModelTypes: Set<String> = [
+        "llama",
+        "gemma",
+        "gemma2",
+        "gemma3",
+        "gemma3_text",
+        "gemma3n",
+        "gemma3n_text",
+        "gemma4",
+        "gemma4_text",
+        "qwen3",
+        "qwen3_moe",
+        "qwen3_5",
+        "qwen3_5_text",
+        "qwen3_5_moe",
+        "qwen3_5_moe_text",
+    ]
+
+    private static let supportedThrowingAttentionRepositorySignals: [String] = [
+        "llama-3",
+        "gemma-2",
+        "gemma2",
+        "gemma-3",
+        "gemma3",
+        "gemma-3n",
+        "gemma3n",
+        "gemma-4",
+        "gemma4",
+        "qwen3",
+        "qwen3.5",
+        "qwen3_5",
+    ]
+
+    private static func normalizedModelTypes(_ values: String?...) -> Set<String> {
+        Set(
+            values.compactMap {
+                $0?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                    .replacingOccurrences(of: "-", with: "_")
+            }.filter { !$0.isEmpty }
+        )
+    }
+}
+
+public enum TurboQuantLayoutVersion: Sendable {
+    public static let legacy = 4
+    public static let current = 5
+}
+
 public enum QuantizationAlgorithm: String, Codable, Sendable, CaseIterable {
     case none
     case mlxAffine

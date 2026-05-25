@@ -22,7 +22,7 @@ public struct TurboQuantKVSnapshotIdentity: Hashable, Codable, Sendable {
         ropeConfigHash: String,
         tokenPrefixHash: String,
         fallbackContractHash: String? = nil,
-        turboQuantLayoutVersion: Int = 4,
+        turboQuantLayoutVersion: Int = TurboQuantLayoutVersion.current,
         logicalLength: Int = 0,
         pinnedPrefixLength: Int = 0
     ) {

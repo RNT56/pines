@@ -3608,6 +3608,69 @@ struct CoreContractTests {
     }
 
     @Test
+    func turboQuantRuntimeSupportDefaultsForProfileBackedFamilies() throws {
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-3-1b-it-4bit",
+                modelType: "gemma3",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+                modelType: "qwen3_5",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .hybridFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+                modelType: "llama",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-3n-E2B-it-4bit",
+                modelType: "gemma3n",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-4-e2b-it-4bit",
+                modelType: "gemma4",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+    }
+
+    @Test
+    func modelInstallDecodingPreservesLegacyTurboQuantDefault() throws {
+        let payload = """
+        {
+          "modelID": "local-test",
+          "displayName": "Local Test",
+          "repository": "local/test",
+          "modalities": ["text"]
+        }
+        """
+        let install = try JSONDecoder().decode(ModelInstall.self, from: Data(payload.utf8))
+        #expect(install.turboQuantFamilySupport == .attentionKVFull)
+    }
+
+    @Test
     func gemmaTurboQuantPreflightCarriesProfileMetadataForExpandedFamilies() throws {
         let classifier = ModelPreflightClassifier()
 
