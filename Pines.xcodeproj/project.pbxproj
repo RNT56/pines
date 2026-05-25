@@ -45,7 +45,6 @@
 		4A8B7ADED7E800D30BC296A1 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 2F62656B16557CFACC3CBFF7 /* PinesCore */; };
 		51178ED2596CD94C977B39BF /* GeminiProviderRecordMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB652D0FDD899D4E676252F1 /* GeminiProviderRecordMapper.swift */; };
 		515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = 85E4D304B541EE6A90CEFD6F /* MLXEmbedders */; };
-		5177468AEE90F3F5B0176C01 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 95DFE02F2971CD6781ED862B /* MLXLMCommon */; };
 		51F0003C051BEA5B35753F1D /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 79453BB5651564170C3A0B1C /* Markdown */; };
 		52B797063FB95D83A2D63E7A /* PinesAppModel+MCP.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE279F766D8B0CC93D1D150 /* PinesAppModel+MCP.swift */; };
 		55937CA552490AEA6ED46131 /* PinesDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45C618F4FAB69FDDE0FC788B /* PinesDesignSystem.swift */; };
@@ -59,7 +58,6 @@
 		603860ECCF6BEE2F45D305E4 /* OpenAIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */; };
 		622414EEA3FC85D97066E52E /* OpenAIDeepResearchOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBFDDEACE5D7B83908CBE7C5 /* OpenAIDeepResearchOrchestrator.swift */; };
 		62BBB7D1AE85A01EA319E717 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 94F08BBEEA508DB04384B5C9 /* MLX */; };
-		63FEE590833F723DE49DFE36 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 7BFC7BFFCF2A7F677A7E215F /* MLX */; };
 		65F15CA6905766AC2C4C0280 /* GeminiProviderLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A91B81E9B245D2A619AC483 /* GeminiProviderLifecycleCoordinator.swift */; };
 		667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */; };
 		69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */; };
@@ -323,8 +321,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				2D09CE6C392BBD594E95F249 /* PinesCore in Frameworks */,
-				63FEE590833F723DE49DFE36 /* MLX in Frameworks */,
-				5177468AEE90F3F5B0176C01 /* MLXLMCommon in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -748,8 +744,6 @@
 			name = PinesTests;
 			packageProductDependencies = (
 				D09EC77F4F444343B14A238C /* PinesCore */,
-				7BFC7BFFCF2A7F677A7E215F /* MLX */,
-				95DFE02F2971CD6781ED862B /* MLXLMCommon */,
 			);
 			productName = PinesTests;
 			productReference = 1485AEE015D2E1E941159B3F /* PinesTests.xctest */;
@@ -1463,7 +1457,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift-lm";
 			requirement = {
 				kind = revision;
-				revision = d469bcef9da8728a8da3f87bafa22c6c960837a9;
+				revision = 31ffb314a01402e5b340fff1a19375a23d2710b9;
 			};
 		};
 		ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
@@ -1505,11 +1499,6 @@
 			package = 01E98600A0BAFFF175DAF8CC /* XCRemoteSwiftPackageReference "swift-markdown" */;
 			productName = Markdown;
 		};
-		7BFC7BFFCF2A7F677A7E215F /* MLX */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 82C15679A79285F6F8F33DE7 /* XCRemoteSwiftPackageReference "mlx-swift" */;
-			productName = MLX;
-		};
 		7CB37824DF7BF3CFC294142D /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */;
@@ -1529,11 +1518,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 82C15679A79285F6F8F33DE7 /* XCRemoteSwiftPackageReference "mlx-swift" */;
 			productName = MLX;
-		};
-		95DFE02F2971CD6781ED862B /* MLXLMCommon */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
-			productName = MLXLMCommon;
 		};
 		97ADD97B0749021A162048FE /* MLXNN */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -16,7 +16,7 @@
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "d469bcef9da8728a8da3f87bafa22c6c960837a9",
+    "commit": "31ffb314a01402e5b340fff1a19375a23d2710b9",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -234,7 +234,7 @@
     "Wave 3.5 source pin surface has been promoted to the final Wave 7 MLX branches, and project.yml, generated Xcode project references, Xcode Package.resolved, runtime compatibility pair ID, docs/TURBOQUANT.md, and this manifest are synchronized to that pair.",
     "Compatibility-pair status is green for local release gates. This does not create any Verified or Certified model/device/mode product claim; those still require imported real-device profile evidence.",
     "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
-    "mlx-swift-lm d469bcef9da8728a8da3f87bafa22c6c960837a9 adds typed throwing TurboQuant generation paths for the profile-backed Llama, Gemma, Qwen3, Qwen3 MoE, and Qwen3.5 families so default TurboQuant can run through the recoverable generation path instead of surfacing TurboQuantGenerationError.unsupportedModel.",
+    "mlx-swift-lm 31ffb314a01402e5b340fff1a19375a23d2710b9 broadens typed throwing TurboQuant generation paths across the profile-backed Llama, Gemma, Qwen, Mistral, Phi, Granite, Exaone, SmolLM3, LFM2, and GLM4 MoE Lite families so default TurboQuant can run through the recoverable generation path instead of surfacing TurboQuantGenerationError.unsupportedModel.",
     "No online iPhone-class real device was available in this workspace; devicectl listed GBU-12, an iPhone 15 Pro Max (iPhone16,2), as unavailable. Real-device profile evidence remains pending and product compatibility claims must stay evidence-gated.",
     "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only."
   ],
@@ -242,8 +242,8 @@
     "branch": "tq/real-device-evidence-acceptance",
     "status": "release-green-local-gates-passed-layout-v5-default",
     "pinnedMLXSwift": "260c8fb16df772b8c20295529fde958fffb66369",
-    "pinnedMLXSwiftLM": "d469bcef9da8728a8da3f87bafa22c6c960837a9",
-    "compatibilityPairID": "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-d469bcef9da8728a8da3f87bafa22c6c960837a9",
+    "pinnedMLXSwiftLM": "31ffb314a01402e5b340fff1a19375a23d2710b9",
+    "compatibilityPairID": "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-31ffb314a01402e5b340fff1a19375a23d2710b9",
     "releaseGate": "closed for compatibility-pair local release gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }

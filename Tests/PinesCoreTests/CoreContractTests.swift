@@ -3654,6 +3654,146 @@ struct CoreContractTests {
                 familySupport: .attentionKVFull
             )
         )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+                modelType: "qwen2",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Mistral-Small-4-119B-A6B-Instruct-4bit",
+                modelType: "mistral3",
+                textConfigModelType: "mistral4",
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Phi-4-mini-instruct-4bit",
+                modelType: "phi3",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/granite-3.3-2b-instruct-4bit",
+                modelType: "granite",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/LFM2-1.2B-Instruct-4bit",
+                modelType: "lfm2",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .hybridFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/GLM-4.7-Flash-4bit",
+                modelType: "glm4_moe_lite",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+    }
+
+    @Test
+    func broadTurboQuantRuntimeFamiliesPreflightAsSupported() throws {
+        let classifier = ModelPreflightClassifier()
+        let cases: [(String, String, ModelCacheTopology, TurboQuantFamilySupport, Int, Int)] = [
+            (
+                "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+                #"{"model_type":"qwen2","hidden_size":2048,"num_attention_heads":16}"#,
+                .standardAttention,
+                .attentionKVFull,
+                128,
+                128
+            ),
+            (
+                "mlx-community/Phi-4-mini-instruct-4bit",
+                #"{"model_type":"phi3","hidden_size":3072,"num_attention_heads":32}"#,
+                .standardAttention,
+                .attentionKVFull,
+                96,
+                96
+            ),
+            (
+                "mlx-community/granite-3.3-2b-instruct-4bit",
+                #"{"model_type":"granite","hidden_size":4096,"num_attention_heads":32}"#,
+                .standardAttention,
+                .attentionKVFull,
+                128,
+                128
+            ),
+            (
+                "mlx-community/EXAONE-4.0-1.2B-4bit",
+                #"{"model_type":"exaone4","head_dim":128,"sliding_window":4096}"#,
+                .slidingAttention,
+                .attentionKVFull,
+                128,
+                128
+            ),
+            (
+                "mlx-community/SmolLM3-3B-4bit",
+                #"{"model_type":"smollm3","hidden_size":2048,"num_attention_heads":32}"#,
+                .standardAttention,
+                .attentionKVFull,
+                64,
+                64
+            ),
+            (
+                "mlx-community/LFM2-1.2B-Instruct-4bit",
+                #"{"model_type":"lfm2","hidden_size":1024,"num_attention_heads":16,"layer_types":["full_attention","conv"]}"#,
+                .hybridAttentionAndNativeState,
+                .hybridFull,
+                64,
+                64
+            ),
+            (
+                "mlx-community/GLM-4.7-Flash-4bit",
+                #"{"model_type":"glm4_moe_lite","qk_nope_head_dim":128,"qk_rope_head_dim":64,"v_head_dim":128}"#,
+                .standardAttention,
+                .attentionKVFull,
+                192,
+                128
+            ),
+        ]
+
+        for (repository, configJSON, topology, familySupport, keyDimension, valueDimension) in cases {
+            let result = classifier.classify(
+                ModelPreflightInput(
+                    repository: repository,
+                    configJSON: Data(configJSON.utf8),
+                    files: [
+                        ModelFileInfo(path: "config.json", size: 10_000),
+                        ModelFileInfo(path: "tokenizer.json", size: 2_000_000),
+                        ModelFileInfo(path: "model.safetensors", size: 1_000_000_000),
+                    ],
+                    tags: ["mlx", "4bit"]
+                )
+            )
+
+            #expect(result.verification == .verified)
+            #expect(result.modalities == [.text])
+            #expect(result.cacheTopology == topology)
+            #expect(result.turboQuantFamilySupport == familySupport)
+            #expect(result.keyHeadDimension == keyDimension)
+            #expect(result.valueHeadDimension == valueDimension)
+            #expect(result.reasons.isEmpty)
+        }
     }
 
     @Test
@@ -3887,13 +4027,15 @@ struct CoreContractTests {
         #expect(llama.cacheTopology == .standardAttention)
         #expect(llama.turboQuantFamilySupport == .attentionKVFull)
 
-        #expect(mistralSmall4.verification == .installable)
+        #expect(mistralSmall4.verification == .verified)
         #expect(mistralSmall4.modelType == "mistral3")
         #expect(mistralSmall4.textConfigModelType == "mistral4")
         #expect(mistralSmall4.keyHeadDimension == 128)
         #expect(mistralSmall4.valueHeadDimension == 128)
         #expect(mistralSmall4.routedExperts == 128)
         #expect(mistralSmall4.expertsPerToken == 4)
+        #expect(mistralSmall4.cacheTopology == .standardAttention)
+        #expect(mistralSmall4.turboQuantFamilySupport == .attentionKVFull)
 
         #expect(pixtral.verification == .installable)
         #expect(pixtral.modalities == [.text, .vision])
@@ -3901,6 +4043,7 @@ struct CoreContractTests {
         #expect(pixtral.textConfigModelType == "mistral")
         #expect(pixtral.keyHeadDimension == 128)
         #expect(pixtral.valueHeadDimension == 128)
+        #expect(pixtral.turboQuantFamilySupport == .none)
 
         #expect(llama4.verification == .unsupported)
         #expect(llama4.modalities.isEmpty)
