@@ -135,3 +135,61 @@ to the remaining W29+ platform backlog while preserving all Wave 6 release gates
   `xcodebuild -resolvePackageDependencies` stall.
 - The pre-existing Pines generated scheme drift remains uncommitted and outside
   Wave 7 implementation scope.
+
+### Post-Audit Hardening
+
+After the initial Wave 7 implementation commit, a deeper cross-repo audit found
+several production-readiness gaps that were fixed before handoff:
+
+- `mlx-swift`:
+  - Made `TurboQuantKernelCapabilities` fully explicit for tiled fused support,
+    supported head dimensions, selected kernel profile, and failure reasons.
+  - Expanded `TurboQuantAttentionDecision` with the complete decision-ledger
+    fields required by Pines: head dimension, query length, logical length,
+    dtype, mask kind, kernel profile, and fallback reason.
+  - Added `.unavailable` as an explicit attention-path outcome so unsupported
+    requests do not masquerade as `.baseline` when no fallback is available.
+  - Hardened the router so unsupported masks/shapes with no budgeted fallback
+    fail closed as `.unavailable`.
+  - Changed benchmark failure reporting so failed compressed-path attempts emit
+    an unavailable decision instead of claiming the originally requested path.
+  - Rejected invalid V4 benchmark combinations that request fp16 attention scale
+    storage without opting into layout V5.
+- Pines:
+  - Added `.unavailable` to the local TurboQuant attention path enum.
+  - Tightened product compatibility matching so `Verified`/`Certified` states
+    require evidence from the active compatibility pair, preventing stale
+    evidence from promoting product claims.
+  - Replaced the test-only repeating-XOR snapshot cipher with authenticated
+    AES-GCM sealing backed by deterministic local key material for the current
+    store abstraction.
+  - Fixed in-memory snapshot restore selection so a newer mismatched or
+    corrupted snapshot no longer blocks restore from an older valid snapshot.
+- `mlx-swift-lm`:
+  - Made `MTPConfig.retainMTPWeights` lock-protected to remove the remaining
+    process-wide race found by full LM test runs.
+  - Updated `AGENTS.md` to match the current `Package.swift` MLX pin.
+
+Additional post-audit validation:
+
+- Pines:
+  - `swift build --disable-automatic-resolution` passed.
+  - `swift test --disable-automatic-resolution` passed with 189 tests.
+  - `swift run --disable-automatic-resolution PinesCoreTestRunner` passed.
+  - Focused Wave 3/Wave 7/snapshot tests passed.
+  - `xcrun swiftc -parse` passed for the changed runtime and presentation app
+    files.
+  - `git diff --check` passed.
+- `mlx-swift-lm`:
+  - `swift build --target MLXLMCommon` passed.
+  - Full `swift test --quiet` passed.
+  - Focused Wave 7/MTP safety tests passed.
+  - `git diff --check` passed.
+- `mlx-swift`:
+  - `swift build` passed.
+  - Focused contract/router/benchmark tests passed.
+  - V5 fp16-scale benchmark smoke emitted `onlineFused`, layout version `5`,
+    and scale storage `float16`.
+  - Invalid V4 fp16-scale benchmark options fail closed with an explicit
+    configuration error.
+  - `git diff --check` passed.

@@ -1,4 +1,5 @@
 import CryptoKit
+import CryptoKit
 import Foundation
 
 public struct TurboQuantKVSnapshotIdentity: Hashable, Codable, Sendable {
@@ -766,21 +767,24 @@ public protocol TurboQuantKVSnapshotRepository: Sendable {
 
 public struct TurboQuantSnapshotLocalCipher: Sendable {
     public var keyID: String
-    private var keyBytes: [UInt8]
+    private var key: SymmetricKey
 
     public init(keyID: String, keyMaterial: Data) {
         self.keyID = keyID
-        self.keyBytes = Array(keyMaterial.isEmpty ? Data("pines-local-snapshot-key".utf8) : keyMaterial)
+        precondition(!keyMaterial.isEmpty, "TurboQuant snapshot encryption requires non-empty key material")
+        self.key = SymmetricKey(data: SHA256.hash(data: keyMaterial))
     }
 
-    public func seal(_ plaintext: Data) -> Data {
-        Data(plaintext.enumerated().map { index, byte in
-            byte ^ keyBytes[index % keyBytes.count] ^ 0xA5
-        })
+    public func seal(_ plaintext: Data) throws -> Data {
+        let box = try AES.GCM.seal(plaintext, using: key)
+        guard let combined = box.combined else {
+            throw TurboQuantKVSnapshotStoreFailure.encryptionFailed
+        }
+        return combined
     }
 
-    public func open(_ sealed: Data) -> Data {
-        seal(sealed)
+    public func open(_ sealed: Data) throws -> Data {
+        try AES.GCM.open(AES.GCM.SealedBox(combined: sealed), using: key)
     }
 }
 
@@ -916,7 +920,7 @@ public actor TurboQuantKVSnapshotStore {
         guard manifest.encryptionKeyID == cipher.keyID else {
             throw TurboQuantKVSnapshotStoreFailure.encryptionKeyMismatch
         }
-        let encrypted = cipher.seal(plaintextBlob)
+        let encrypted = try cipher.seal(plaintextBlob)
         guard encrypted != plaintextBlob else {
             throw TurboQuantKVSnapshotStoreFailure.encryptionFailed
         }
@@ -974,11 +978,10 @@ public actor TurboQuantKVSnapshotStore {
             return .rejected(failure)
         }
 
-        guard let record = records.values
+        let candidates = records.values
             .filter({ $0.manifest.conversationID == conversationID && $0.state == .active })
             .sorted(by: { $0.manifest.createdAt > $1.manifest.createdAt })
-            .first
-        else {
+        guard !candidates.isEmpty else {
             recordAttempt(
                 snapshotID: nil,
                 conversationID: conversationID,
@@ -990,77 +993,99 @@ public actor TurboQuantKVSnapshotStore {
             return .missing
         }
 
-        do {
-            try record.manifest.validateForRestore(
-                expectedIdentity: expectedIdentity,
-                policy: policy,
-                restoreGate: restoreGate
-            )
-            guard let blob = blobMetadata[record.manifest.snapshotID] else {
-                throw TurboQuantKVSnapshotValidationFailure.missingBlob(record.manifest.snapshotID)
-            }
-            try blob.validate(encryptedBytes: record.encryptedBlob, manifest: record.manifest)
-        } catch let failure as TurboQuantKVSnapshotValidationFailure {
-            if case .checksumMismatch = failure {
-                let quarantine = quarantineSnapshot(
-                    snapshotID: record.manifest.snapshotID,
-                    conversationID: record.manifest.conversationID,
-                    stage: .integrity,
-                    reason: failure.errorDescription ?? "checksum_mismatch",
-                    blobByteCount: record.manifest.blobByteCount,
-                    quarantinedAt: attemptedAt
+        var lastFailure: (TurboQuantKVSnapshotManifest, TurboQuantKVSnapshotValidationFailure)?
+        var lastQuarantine: TurboQuantKVSnapshotQuarantine?
+
+        for record in candidates {
+            do {
+                try record.manifest.validateForRestore(
+                    expectedIdentity: expectedIdentity,
+                    policy: policy,
+                    restoreGate: restoreGate
                 )
+                guard let blob = blobMetadata[record.manifest.snapshotID] else {
+                    throw TurboQuantKVSnapshotValidationFailure.missingBlob(record.manifest.snapshotID)
+                }
+                try blob.validate(encryptedBytes: record.encryptedBlob, manifest: record.manifest)
+
+                var updated = record
+                updated.lastUsedAt = attemptedAt
+                records[record.manifest.snapshotID] = updated
+                if var reference = references[record.manifest.snapshotID] {
+                    reference.lastUsedAt = attemptedAt
+                    references[record.manifest.snapshotID] = reference
+                }
                 recordAttempt(
                     snapshotID: record.manifest.snapshotID,
                     conversationID: conversationID,
                     attemptedAt: attemptedAt,
-                    result: .quarantined,
+                    result: .accepted,
+                    failureReason: nil,
+                    expectedIdentity: expectedIdentity
+                )
+                return .accepted(record.manifest)
+            } catch let failure as TurboQuantKVSnapshotValidationFailure {
+                lastFailure = (record.manifest, failure)
+                if case .checksumMismatch = failure {
+                    let quarantine = quarantineSnapshot(
+                        snapshotID: record.manifest.snapshotID,
+                        conversationID: record.manifest.conversationID,
+                        stage: .integrity,
+                        reason: failure.errorDescription ?? "checksum_mismatch",
+                        blobByteCount: record.manifest.blobByteCount,
+                        quarantinedAt: attemptedAt
+                    )
+                    lastQuarantine = quarantine ?? lastQuarantine
+                    recordAttempt(
+                        snapshotID: record.manifest.snapshotID,
+                        conversationID: conversationID,
+                        attemptedAt: attemptedAt,
+                        result: .quarantined,
+                        failureReason: failure.errorDescription,
+                        expectedIdentity: expectedIdentity
+                    )
+                    continue
+                }
+                recordAttempt(
+                    snapshotID: record.manifest.snapshotID,
+                    conversationID: conversationID,
+                    attemptedAt: attemptedAt,
+                    result: .rejected,
                     failureReason: failure.errorDescription,
                     expectedIdentity: expectedIdentity
                 )
-                if let quarantine {
-                    return .quarantined(quarantine)
-                }
-                return .rejected(failure)
+                continue
+            } catch {
+                let failure = TurboQuantKVSnapshotValidationFailure.securityPolicyRejected(error.localizedDescription)
+                lastFailure = (record.manifest, failure)
+                recordAttempt(
+                    snapshotID: record.manifest.snapshotID,
+                    conversationID: conversationID,
+                    attemptedAt: attemptedAt,
+                    result: .rejected,
+                    failureReason: failure.errorDescription,
+                    expectedIdentity: expectedIdentity
+                )
+                continue
             }
-            recordAttempt(
-                snapshotID: record.manifest.snapshotID,
-                conversationID: conversationID,
-                attemptedAt: attemptedAt,
-                result: .rejected,
-                failureReason: failure.errorDescription,
-                expectedIdentity: expectedIdentity
-            )
-            return .rejected(failure)
-        } catch {
-            let failure = TurboQuantKVSnapshotValidationFailure.securityPolicyRejected(error.localizedDescription)
-            recordAttempt(
-                snapshotID: record.manifest.snapshotID,
-                conversationID: conversationID,
-                attemptedAt: attemptedAt,
-                result: .rejected,
-                failureReason: failure.errorDescription,
-                expectedIdentity: expectedIdentity
-            )
-            return .rejected(failure)
         }
 
-        var updated = record
-        updated.lastUsedAt = attemptedAt
-        records[record.manifest.snapshotID] = updated
-        if var reference = references[record.manifest.snapshotID] {
-            reference.lastUsedAt = attemptedAt
-            references[record.manifest.snapshotID] = reference
+        if let lastQuarantine {
+            return .quarantined(lastQuarantine)
         }
+        if let lastFailure {
+            return .rejected(lastFailure.1)
+        }
+
         recordAttempt(
-            snapshotID: record.manifest.snapshotID,
+            snapshotID: nil,
             conversationID: conversationID,
             attemptedAt: attemptedAt,
-            result: .accepted,
-            failureReason: nil,
+            result: .missing,
+            failureReason: "missing_snapshot",
             expectedIdentity: expectedIdentity
         )
-        return .accepted(record.manifest)
+        return .missing
     }
 
     public func simulateBlobCorruption(snapshotID: UUID, bytes: Data) {

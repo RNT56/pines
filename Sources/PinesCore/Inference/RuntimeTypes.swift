@@ -170,6 +170,7 @@ public enum TurboQuantAttentionPath: String, Codable, Sendable, CaseIterable {
     case twoStageCompressed
     case mlxPackedFallback
     case baseline
+    case unavailable
 
     public var displayName: String {
         switch self {
@@ -183,6 +184,8 @@ public enum TurboQuantAttentionPath: String, Codable, Sendable, CaseIterable {
             "MLX packed fallback"
         case .baseline:
             "Baseline"
+        case .unavailable:
+            "Unavailable"
         }
     }
 }

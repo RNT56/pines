@@ -138,6 +138,35 @@ struct TurboQuantKVSnapshotStoreTests {
         #expect(quarantines.contains { $0.stage == .deletion && $0.reason == "data_erasure" })
     }
 
+    @Test func restoreSkipsNewerMismatchedSnapshotAndUsesOlderValidSnapshot() async throws {
+        let store = TurboQuantKVSnapshotStore(policy: .init(quotaBytes: 4_096))
+        let older = Self.manifest(
+            snapshotID: UUID(uuidString: "00000000-0000-4000-8000-000000000301")!,
+            blobByteCount: 64,
+            createdAt: Date(timeIntervalSinceReferenceDate: 10)
+        )
+        var newer = Self.manifest(
+            snapshotID: UUID(uuidString: "00000000-0000-4000-8000-000000000302")!,
+            blobByteCount: 64,
+            createdAt: Date(timeIntervalSinceReferenceDate: 20)
+        )
+        newer.tokenPrefixHash = "different-prefix"
+
+        _ = try await store.store(Self.request(manifest: older))
+        _ = try await store.store(Self.request(manifest: newer))
+
+        let decision = await store.restoreDecision(
+            conversationID: older.conversationID,
+            expectedIdentity: older.identity,
+            restoreGate: .enabled()
+        )
+
+        #expect(decision == .accepted(older))
+        let attempts = await store.allRestoreAttempts()
+        #expect(attempts.contains { $0.snapshotID == newer.snapshotID && $0.result == .rejected })
+        #expect(attempts.contains { $0.snapshotID == older.snapshotID && $0.result == .accepted })
+    }
+
     private static func request(
         manifest: TurboQuantKVSnapshotManifest,
         encryptedBlob: Data? = nil,

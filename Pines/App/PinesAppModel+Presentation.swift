@@ -333,6 +333,7 @@ extension PinesAppModel {
         let mode = admission?.selectedMode ?? quantization.turboQuantUserMode
         let requiredContext = admission?.admittedContextLength ?? quantization.maxKVSize ?? 0
         let requestedSpeculativeDimensions = speculativeEvidenceDimensions(for: runtimeProfile)
+        let acceptedCompatibilityPairIDs = Set([MLXRuntimeBridge.turboQuantCompatibilityPairID])
 
         return records
             .filter { evidence in
@@ -340,6 +341,9 @@ extension PinesAppModel {
                     return false
                 }
                 if evidence.evidenceLevel.canMakeProductCompatibilityClaim {
+                    guard acceptedCompatibilityPairIDs.contains(evidence.compatibilityPairID) else {
+                        return false
+                    }
                     guard let evidenceRevision = evidence.modelRevision,
                           let installRevision = install.revision,
                           evidenceRevision == installRevision else {
