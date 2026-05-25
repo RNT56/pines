@@ -566,7 +566,10 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS projects"), "missing project spaces table")
         try expect(sql.contains("ALTER TABLE conversations ADD COLUMN project_id"), "missing conversation project link")
         try expect(sql.contains("ALTER TABLE vault_documents ADD COLUMN project_id"), "missing vault project link")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 21)
+        try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_dimensions_json"), "missing speculative evidence dimensions column")
+        try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_telemetry_json"), "missing speculative telemetry column")
+        try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json"), "missing speculative auto-disable column")
+        try expectEqual(PinesDatabaseSchema.currentVersion, 22)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")

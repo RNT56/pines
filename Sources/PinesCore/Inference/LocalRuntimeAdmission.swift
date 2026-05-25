@@ -28,6 +28,7 @@ public struct LocalRuntimeAdmissionRequest: Hashable, Codable, Sendable {
     public var metalScratchReserveBytes: Int64
     public var uiReserveBytes: Int64
     public var contextAssemblyPlanID: String?
+    public var speculativeBudget: TurboQuantSpeculativeAdmissionBudget?
 
     public init(
         schemaVersion: Int = Self.schemaVersion,
@@ -54,7 +55,8 @@ public struct LocalRuntimeAdmissionRequest: Hashable, Codable, Sendable {
         promptBufferBytes: Int64 = 0,
         metalScratchReserveBytes: Int64 = 0,
         uiReserveBytes: Int64 = 0,
-        contextAssemblyPlanID: String? = nil
+        contextAssemblyPlanID: String? = nil,
+        speculativeBudget: TurboQuantSpeculativeAdmissionBudget? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.modelID = modelID
@@ -81,6 +83,7 @@ public struct LocalRuntimeAdmissionRequest: Hashable, Codable, Sendable {
         self.metalScratchReserveBytes = max(0, metalScratchReserveBytes)
         self.uiReserveBytes = max(0, uiReserveBytes)
         self.contextAssemblyPlanID = contextAssemblyPlanID
+        self.speculativeBudget = speculativeBudget
     }
 }
 
@@ -101,6 +104,7 @@ public struct LocalRuntimeAdmissionPlan: Hashable, Codable, Sendable {
     public var calibrationApplied: RuntimeMemoryCalibrationSummary?
     public var downgradeReason: String?
     public var rejectionReason: String?
+    public var speculativeBudget: TurboQuantSpeculativeAdmissionBudget?
     public var userFacingMessage: String
 
     public init(
@@ -118,6 +122,7 @@ public struct LocalRuntimeAdmissionPlan: Hashable, Codable, Sendable {
         calibrationApplied: RuntimeMemoryCalibrationSummary? = nil,
         downgradeReason: String? = nil,
         rejectionReason: String? = nil,
+        speculativeBudget: TurboQuantSpeculativeAdmissionBudget? = nil,
         userFacingMessage: String
     ) {
         self.schemaVersion = schemaVersion
@@ -134,6 +139,7 @@ public struct LocalRuntimeAdmissionPlan: Hashable, Codable, Sendable {
         self.calibrationApplied = calibrationApplied
         self.downgradeReason = downgradeReason
         self.rejectionReason = rejectionReason
+        self.speculativeBudget = speculativeBudget
         self.userFacingMessage = userFacingMessage
     }
 
@@ -247,6 +253,7 @@ public struct LocalRuntimeAdmissionService: Sendable {
             calibrationApplied: calibrationSummary,
             downgradeReason: admitted ? downgradeReason : nil,
             rejectionReason: rejectionReason,
+            speculativeBudget: request.speculativeBudget,
             userFacingMessage: admitted
                 ? "Local context admitted for \(mode.displayName)."
                 : LocalInferenceFailureMatrix.rulesByKind[.memoryAdmissionFailed]?.productMessage
@@ -284,6 +291,15 @@ public struct LocalRuntimeAdmissionService: Sendable {
             decodedFallbackScratchBytes: decodedScratch,
             vaultIndexBytes: request.vaultIndexBytes,
             promptBufferBytes: request.promptBufferBytes,
+            speculativeDraftModelBytes: request.speculativeBudget?.enabled == true
+                ? request.speculativeBudget?.draftModelBytes
+                : nil,
+            speculativeDraftKVBytes: request.speculativeBudget?.enabled == true
+                ? request.speculativeBudget?.draftKVBytes
+                : nil,
+            speculativeRollbackReserveBytes: request.speculativeBudget?.enabled == true
+                ? request.speculativeBudget?.rollbackReserveBytes
+                : nil,
             metalScratchReserveBytes: request.metalScratchReserveBytes,
             uiReserveBytes: request.uiReserveBytes,
             safetyReserveBytes: safetyReserve

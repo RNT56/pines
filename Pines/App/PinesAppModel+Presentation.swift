@@ -332,6 +332,7 @@ extension PinesAppModel {
         let admission = quantization.turboQuantAdmission
         let mode = admission?.selectedMode ?? quantization.turboQuantUserMode
         let requiredContext = admission?.admittedContextLength ?? quantization.maxKVSize ?? 0
+        let requestedSpeculativeDimensions = speculativeEvidenceDimensions(for: runtimeProfile)
 
         return records
             .filter { evidence in
@@ -394,6 +395,9 @@ extension PinesAppModel {
                 guard evidence.userMode == mode else {
                     return false
                 }
+                guard (evidence.speculativeDimensions ?? .disabled).matches(requestedSpeculativeDimensions) else {
+                    return false
+                }
                 guard evidence.admittedContextTokens >= requiredContext else {
                     return false
                 }
@@ -401,6 +405,29 @@ extension PinesAppModel {
             }
             .sorted { $0.createdAt > $1.createdAt }
             .first
+    }
+
+    nonisolated static func speculativeEvidenceDimensions(for runtimeProfile: RuntimeProfile) -> TurboQuantSpeculativeEvidenceDimensions {
+        let quantization = runtimeProfile.quantization
+        if let telemetry = quantization.turboQuantSpeculativeTelemetry {
+            return telemetry.dimensions
+        }
+        if let settings = runtimeProfile.speculativeSettings ?? quantization.turboQuantSpeculativeSettings,
+           settings.enabled {
+            return TurboQuantSpeculativeEvidenceDimensions(
+                enabled: true,
+                draftModelID: settings.draftModelID ?? runtimeProfile.speculativeDraftModelID?.rawValue,
+                draftModelRevision: settings.draftModelRevision,
+                maxDraftTokens: settings.maxDraftTokens
+            )
+        }
+        if runtimeProfile.speculativeDecodingEnabled {
+            return TurboQuantSpeculativeEvidenceDimensions(
+                enabled: true,
+                draftModelID: runtimeProfile.speculativeDraftModelID?.rawValue
+            )
+        }
+        return .disabled
     }
 
     nonisolated static func downloadingFirst(_ previews: [PinesModelPreview]) -> [PinesModelPreview] {

@@ -749,6 +749,9 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
     public var partitionSummary: String?
     public var mtpAcceptanceRate: Double?
     public var audioCapability: Bool?
+    public var turboQuantSpeculativeTelemetry: TurboQuantSpeculativeTelemetry?
+    public var turboQuantSpeculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision?
+    public var turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate]?
 
     public init(
         requestedAlgorithm: QuantizationAlgorithm = .turboQuant,
@@ -779,7 +782,10 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         ssdAvgChunkLatencyMS: Double? = nil,
         partitionSummary: String? = nil,
         mtpAcceptanceRate: Double? = nil,
-        audioCapability: Bool? = nil
+        audioCapability: Bool? = nil,
+        turboQuantSpeculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
+        turboQuantSpeculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil,
+        turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate]? = nil
     ) {
         self.requestedAlgorithm = requestedAlgorithm
         self.activeAlgorithm = activeAlgorithm
@@ -810,6 +816,9 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         self.partitionSummary = partitionSummary
         self.mtpAcceptanceRate = mtpAcceptanceRate
         self.audioCapability = audioCapability
+        self.turboQuantSpeculativeTelemetry = turboQuantSpeculativeTelemetry
+        self.turboQuantSpeculativeAutoDisableDecision = turboQuantSpeculativeAutoDisableDecision
+        self.turboQuantPlatformFeatureGates = turboQuantPlatformFeatureGates
     }
 }
 
@@ -845,6 +854,10 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var memoryCounters: RuntimeMemoryCounters
     public var turboQuantUserMode: TurboQuantUserMode
     public var turboQuantAdmission: TurboQuantAdmission?
+    public var turboQuantSpeculativeSettings: TurboQuantSpeculativeSettings?
+    public var turboQuantSpeculativeTelemetry: TurboQuantSpeculativeTelemetry?
+    public var turboQuantSpeculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision?
+    public var turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate]
 
     private enum CodingKeys: String, CodingKey {
         case weightBits
@@ -878,6 +891,10 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case memoryCounters
         case turboQuantUserMode
         case turboQuantAdmission
+        case turboQuantSpeculativeSettings
+        case turboQuantSpeculativeTelemetry
+        case turboQuantSpeculativeAutoDisableDecision
+        case turboQuantPlatformFeatureGates
     }
 
     public init(
@@ -911,7 +928,11 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         activeFallbackReason: String? = nil,
         memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters(),
         turboQuantUserMode: TurboQuantUserMode = .balanced,
-        turboQuantAdmission: TurboQuantAdmission? = nil
+        turboQuantAdmission: TurboQuantAdmission? = nil,
+        turboQuantSpeculativeSettings: TurboQuantSpeculativeSettings? = nil,
+        turboQuantSpeculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
+        turboQuantSpeculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil,
+        turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate] = TurboQuantPlatformFeatureGate.wave6DisabledDefaults
     ) {
         self.weightBits = weightBits
         self.kvBits = kvBits
@@ -944,6 +965,10 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.memoryCounters = memoryCounters
         self.turboQuantUserMode = turboQuantUserMode
         self.turboQuantAdmission = turboQuantAdmission
+        self.turboQuantSpeculativeSettings = turboQuantSpeculativeSettings
+        self.turboQuantSpeculativeTelemetry = turboQuantSpeculativeTelemetry
+        self.turboQuantSpeculativeAutoDisableDecision = turboQuantSpeculativeAutoDisableDecision
+        self.turboQuantPlatformFeatureGates = turboQuantPlatformFeatureGates
     }
 
     public init(from decoder: Decoder) throws {
@@ -979,6 +1004,16 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         memoryCounters = try container.decodeIfPresent(RuntimeMemoryCounters.self, forKey: .memoryCounters) ?? RuntimeMemoryCounters()
         turboQuantUserMode = try container.decodeIfPresent(TurboQuantUserMode.self, forKey: .turboQuantUserMode) ?? .balanced
         turboQuantAdmission = try container.decodeIfPresent(TurboQuantAdmission.self, forKey: .turboQuantAdmission)
+        turboQuantSpeculativeSettings = try container.decodeIfPresent(TurboQuantSpeculativeSettings.self, forKey: .turboQuantSpeculativeSettings)
+        turboQuantSpeculativeTelemetry = try container.decodeIfPresent(TurboQuantSpeculativeTelemetry.self, forKey: .turboQuantSpeculativeTelemetry)
+        turboQuantSpeculativeAutoDisableDecision = try container.decodeIfPresent(
+            TurboQuantSpeculativeAutoDisableDecision.self,
+            forKey: .turboQuantSpeculativeAutoDisableDecision
+        )
+        turboQuantPlatformFeatureGates = try container.decodeIfPresent(
+            [TurboQuantPlatformFeatureGate].self,
+            forKey: .turboQuantPlatformFeatureGates
+        ) ?? TurboQuantPlatformFeatureGate.wave6DisabledDefaults
     }
 }
 
@@ -1002,6 +1037,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
     public var promptCacheIdentifier: String?
     public var speculativeDraftModelID: ModelID?
     public var speculativeDecodingEnabled: Bool
+    public var speculativeSettings: TurboQuantSpeculativeSettings?
     public var unloadOnMemoryPressure: Bool
     public var repetitionContextSize: Int
     public var maxConcurrentSessions: Int
@@ -1020,6 +1056,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
         promptCacheIdentifier: String? = nil,
         speculativeDraftModelID: ModelID? = nil,
         speculativeDecodingEnabled: Bool = false,
+        speculativeSettings: TurboQuantSpeculativeSettings? = nil,
         unloadOnMemoryPressure: Bool = true,
         repetitionContextSize: Int = 20,
         maxConcurrentSessions: Int = 1
@@ -1037,6 +1074,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
         self.promptCacheIdentifier = promptCacheIdentifier
         self.speculativeDraftModelID = speculativeDraftModelID
         self.speculativeDecodingEnabled = speculativeDecodingEnabled
+        self.speculativeSettings = speculativeSettings
         self.unloadOnMemoryPressure = unloadOnMemoryPressure
         self.repetitionContextSize = repetitionContextSize
         self.maxConcurrentSessions = maxConcurrentSessions
@@ -1056,6 +1094,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
         case promptCacheIdentifier
         case speculativeDraftModelID
         case speculativeDecodingEnabled
+        case speculativeSettings
         case unloadOnMemoryPressure
         case repetitionContextSize
         case maxConcurrentSessions
@@ -1076,6 +1115,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
         promptCacheIdentifier = try container.decodeIfPresent(String.self, forKey: .promptCacheIdentifier)
         speculativeDraftModelID = try container.decodeIfPresent(ModelID.self, forKey: .speculativeDraftModelID)
         speculativeDecodingEnabled = try container.decodeIfPresent(Bool.self, forKey: .speculativeDecodingEnabled) ?? false
+        speculativeSettings = try container.decodeIfPresent(TurboQuantSpeculativeSettings.self, forKey: .speculativeSettings)
         unloadOnMemoryPressure = try container.decodeIfPresent(Bool.self, forKey: .unloadOnMemoryPressure) ?? true
         repetitionContextSize = try container.decodeIfPresent(Int.self, forKey: .repetitionContextSize) ?? 20
         maxConcurrentSessions = try container.decodeIfPresent(Int.self, forKey: .maxConcurrentSessions) ?? 1

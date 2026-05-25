@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 21
+    public static let currentVersion = 22
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -1248,6 +1248,12 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_reference_conversation ON kv_snapshot_reference(conversation_id, state, last_used_at DESC, created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_restore_attempt_conversation ON kv_snapshot_restore_attempt(conversation_id, attempted_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_quarantine_snapshot ON kv_snapshot_quarantine(snapshot_id, quarantined_at DESC);",
+        ]),
+        DatabaseMigration(version: 22, name: "turboquant-speculative-evidence", sql: [
+            "ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_dimensions_json TEXT;",
+            "ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_telemetry_json TEXT;",
+            "ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json TEXT;",
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_speculative ON turboquant_profile_evidence(model_id, user_mode, layout_version, created_at DESC);",
         ]),
     ]
 }

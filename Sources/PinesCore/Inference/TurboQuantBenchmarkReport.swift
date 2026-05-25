@@ -107,6 +107,7 @@ public struct TurboQuantBenchmarkRuntime: Hashable, Codable, Sendable {
     public var layoutVersion: Int?
     public var attentionPath: TurboQuantAttentionPath?
     public var kernelProfile: String?
+    public var speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions?
     public var admittedContextTokens: Int
     public var reservedCompletionTokens: Int
 
@@ -119,6 +120,7 @@ public struct TurboQuantBenchmarkRuntime: Hashable, Codable, Sendable {
         layoutVersion: Int? = nil,
         attentionPath: TurboQuantAttentionPath? = nil,
         kernelProfile: String? = nil,
+        speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions? = nil,
         admittedContextTokens: Int,
         reservedCompletionTokens: Int
     ) {
@@ -130,6 +132,7 @@ public struct TurboQuantBenchmarkRuntime: Hashable, Codable, Sendable {
         self.layoutVersion = layoutVersion
         self.attentionPath = attentionPath
         self.kernelProfile = kernelProfile
+        self.speculativeDimensions = speculativeDimensions
         self.admittedContextTokens = max(0, admittedContextTokens)
         self.reservedCompletionTokens = max(0, reservedCompletionTokens)
     }
@@ -150,6 +153,7 @@ public struct TurboQuantBenchmarkMetrics: Hashable, Codable, Sendable {
     public var fallbackUsed: Bool
     public var fallbackReason: String?
     public var jetsamObserved: Bool
+    public var speculativeTelemetry: TurboQuantSpeculativeTelemetry?
 
     public init(
         contextTokens: Int,
@@ -165,7 +169,8 @@ public struct TurboQuantBenchmarkMetrics: Hashable, Codable, Sendable {
         memoryWarningsSeen: Int = 0,
         fallbackUsed: Bool = false,
         fallbackReason: String? = nil,
-        jetsamObserved: Bool = false
+        jetsamObserved: Bool = false,
+        speculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil
     ) {
         self.contextTokens = max(0, contextTokens)
         self.firstTokenLatencyMS = firstTokenLatencyMS
@@ -181,6 +186,7 @@ public struct TurboQuantBenchmarkMetrics: Hashable, Codable, Sendable {
         self.fallbackUsed = fallbackUsed
         self.fallbackReason = fallbackReason
         self.jetsamObserved = jetsamObserved
+        self.speculativeTelemetry = speculativeTelemetry
     }
 }
 
@@ -194,6 +200,7 @@ public enum TurboQuantBenchmarkImportFailure: Error, Hashable, LocalizedError, S
     case missingBenchmarkSuiteID
     case qualityGateFailed(String?)
     case memoryGateFailed(String)
+    case speculativeGateFailed(String)
     case verifiedEvidenceDisabled
 
     public var errorDescription: String? {
@@ -216,6 +223,8 @@ public enum TurboQuantBenchmarkImportFailure: Error, Hashable, LocalizedError, S
             reason ?? "Quality gate failed."
         case .memoryGateFailed(let reason):
             reason
+        case .speculativeGateFailed(let reason):
+            reason
         case .verifiedEvidenceDisabled:
             "Verified evidence import is disabled by policy."
         }
@@ -229,6 +238,7 @@ public struct TurboQuantBenchmarkImportPolicy: Hashable, Codable, Sendable {
     public var requestedEvidenceLevel: RuntimeEvidenceLevel
     public var allowVerifiedEvidence: Bool
     public var allowMemoryWarningsForVerified: Bool
+    public var speculativeAutoDisablePolicy: TurboQuantSpeculativeAutoDisablePolicy
 
     public init(
         acceptedCompatibilityPairIDs: Set<String> = [],
@@ -236,7 +246,8 @@ public struct TurboQuantBenchmarkImportPolicy: Hashable, Codable, Sendable {
         acceptedLayoutVersions: Set<Int> = [],
         requestedEvidenceLevel: RuntimeEvidenceLevel = .smokeTested,
         allowVerifiedEvidence: Bool = false,
-        allowMemoryWarningsForVerified: Bool = false
+        allowMemoryWarningsForVerified: Bool = false,
+        speculativeAutoDisablePolicy: TurboQuantSpeculativeAutoDisablePolicy = .productDefault
     ) {
         self.acceptedCompatibilityPairIDs = acceptedCompatibilityPairIDs
         self.acceptedFallbackContractHashes = acceptedFallbackContractHashes
@@ -244,6 +255,7 @@ public struct TurboQuantBenchmarkImportPolicy: Hashable, Codable, Sendable {
         self.requestedEvidenceLevel = requestedEvidenceLevel
         self.allowVerifiedEvidence = allowVerifiedEvidence
         self.allowMemoryWarningsForVerified = allowMemoryWarningsForVerified
+        self.speculativeAutoDisablePolicy = speculativeAutoDisablePolicy
     }
 }
 
@@ -531,6 +543,11 @@ public struct TurboQuantBenchmarkImporter: Sendable {
             groupSize: report.runtime.groupSize,
             layoutVersion: report.runtime.layoutVersion,
             activeAttentionPath: report.runtime.attentionPath,
+            speculativeDimensions: report.runtime.speculativeDimensions,
+            speculativeTelemetry: report.metrics.speculativeTelemetry,
+            speculativeAutoDisableDecision: report.metrics.speculativeTelemetry.map {
+                policy.speculativeAutoDisablePolicy.evaluate($0)
+            },
             admittedContextTokens: report.runtime.admittedContextTokens,
             peakMemoryBytes: report.metrics.peakMemoryBytes ?? 0,
             promptTokensPerSecond: report.metrics.prefillTokensPerSecond,
@@ -592,6 +609,24 @@ public struct TurboQuantBenchmarkImporter: Sendable {
             }
             if !policy.allowMemoryWarningsForVerified, report.metrics.memoryWarningsSeen > 0 {
                 throw TurboQuantBenchmarkImportFailure.memoryGateFailed("Memory warnings were observed during the benchmark.")
+            }
+            if report.runtime.speculativeDimensions?.enabled == true {
+                guard let telemetry = report.metrics.speculativeTelemetry else {
+                    throw TurboQuantBenchmarkImportFailure.speculativeGateFailed("Speculative evidence requires acceptance telemetry.")
+                }
+                let decision = policy.speculativeAutoDisablePolicy.evaluate(telemetry)
+                guard !decision.shouldDisable else {
+                    throw TurboQuantBenchmarkImportFailure.speculativeGateFailed(decision.message)
+                }
+                guard telemetry.targetSequenceMatched == true else {
+                    throw TurboQuantBenchmarkImportFailure.speculativeGateFailed("Accepted speculative tokens must match the target verifier.")
+                }
+                guard telemetry.tokenizerCompatible == true else {
+                    throw TurboQuantBenchmarkImportFailure.speculativeGateFailed("Draft and target tokenizers must be compatible.")
+                }
+                guard telemetry.p50DecodeSpeedup != nil else {
+                    throw TurboQuantBenchmarkImportFailure.speculativeGateFailed("Speculative verified evidence requires p50 decode speedup evidence.")
+                }
             }
         }
     }

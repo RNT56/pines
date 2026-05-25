@@ -20,6 +20,8 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
     public var compressedValueBytes: Int64?
     public var inputTokens: Int?
     public var outputTokens: Int?
+    public var speculativeTelemetry: TurboQuantSpeculativeTelemetry?
+    public var speculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision?
     public var contextAssemblyPlanID: String?
     public var memoryCalibrationSampleID: String?
 
@@ -41,6 +43,8 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
         compressedValueBytes: Int64? = nil,
         inputTokens: Int? = nil,
         outputTokens: Int? = nil,
+        speculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
+        speculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil,
         contextAssemblyPlanID: String? = nil,
         memoryCalibrationSampleID: String? = nil
     ) {
@@ -61,6 +65,8 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
         self.compressedValueBytes = compressedValueBytes.map { max(0, $0) }
         self.inputTokens = inputTokens.map { max(0, $0) }
         self.outputTokens = outputTokens.map { max(0, $0) }
+        self.speculativeTelemetry = speculativeTelemetry
+        self.speculativeAutoDisableDecision = speculativeAutoDisableDecision
         self.contextAssemblyPlanID = contextAssemblyPlanID
         self.memoryCalibrationSampleID = memoryCalibrationSampleID
     }
@@ -72,6 +78,10 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
         }
         if rejectedPaths.contains(where: { $0.reason.isEmpty }) {
             errors.append("rejected paths require reasons")
+        }
+        if speculativeTelemetry?.targetSequenceMatched == false,
+           speculativeAutoDisableDecision?.shouldDisable != true {
+            errors.append("target mismatch requires speculative auto-disable decision")
         }
         return errors
     }

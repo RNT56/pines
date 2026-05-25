@@ -11,6 +11,9 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
     public var decodedFallbackScratchBytes: Int64
     public var vaultIndexBytes: Int64
     public var promptBufferBytes: Int64
+    public var speculativeDraftModelBytes: Int64?
+    public var speculativeDraftKVBytes: Int64?
+    public var speculativeRollbackReserveBytes: Int64?
     public var metalScratchReserveBytes: Int64
     public var uiReserveBytes: Int64
     public var safetyReserveBytes: Int64
@@ -24,6 +27,9 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
             + decodedFallbackScratchBytes
             + vaultIndexBytes
             + promptBufferBytes
+            + (speculativeDraftModelBytes ?? 0)
+            + (speculativeDraftKVBytes ?? 0)
+            + (speculativeRollbackReserveBytes ?? 0)
             + metalScratchReserveBytes
             + uiReserveBytes
             + safetyReserveBytes
@@ -42,6 +48,9 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
             decodedFallbackScratchBytes,
             vaultIndexBytes,
             promptBufferBytes,
+            speculativeDraftModelBytes ?? 0,
+            speculativeDraftKVBytes ?? 0,
+            speculativeRollbackReserveBytes ?? 0,
             metalScratchReserveBytes,
             uiReserveBytes,
             safetyReserveBytes,
@@ -58,6 +67,9 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
         decodedFallbackScratchBytes: Int64,
         vaultIndexBytes: Int64,
         promptBufferBytes: Int64,
+        speculativeDraftModelBytes: Int64? = nil,
+        speculativeDraftKVBytes: Int64? = nil,
+        speculativeRollbackReserveBytes: Int64? = nil,
         metalScratchReserveBytes: Int64,
         uiReserveBytes: Int64,
         safetyReserveBytes: Int64,
@@ -71,6 +83,9 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
         self.decodedFallbackScratchBytes = max(0, decodedFallbackScratchBytes)
         self.vaultIndexBytes = max(0, vaultIndexBytes)
         self.promptBufferBytes = max(0, promptBufferBytes)
+        self.speculativeDraftModelBytes = speculativeDraftModelBytes.map { max(0, $0) }
+        self.speculativeDraftKVBytes = speculativeDraftKVBytes.map { max(0, $0) }
+        self.speculativeRollbackReserveBytes = speculativeRollbackReserveBytes.map { max(0, $0) }
         self.metalScratchReserveBytes = max(0, metalScratchReserveBytes)
         self.uiReserveBytes = max(0, uiReserveBytes)
         self.safetyReserveBytes = max(0, safetyReserveBytes)
@@ -83,6 +98,9 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
             + self.decodedFallbackScratchBytes
             + self.vaultIndexBytes
             + self.promptBufferBytes
+            + (self.speculativeDraftModelBytes ?? 0)
+            + (self.speculativeDraftKVBytes ?? 0)
+            + (self.speculativeRollbackReserveBytes ?? 0)
             + self.metalScratchReserveBytes
             + self.uiReserveBytes
             + self.safetyReserveBytes

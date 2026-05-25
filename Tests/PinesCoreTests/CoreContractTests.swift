@@ -13,6 +13,8 @@ struct CoreContractTests {
         #expect(TurboQuantSchemaRegistry.versionsByName[.modelProfile] == 2)
         #expect(TurboQuantSchemaRegistry.versionsByName[.turboQuantLayout] == 4)
         #expect(TurboQuantSchemaRegistry.versionsByName[.turboQuantLayoutNext] == 5)
+        #expect(TurboQuantSchemaRegistry.versionsByName[.speculativeDecode] == 1)
+        #expect(TurboQuantSchemaRegistry.versionsByName[.platformFeatureGate] == 1)
         #expect(TurboQuantSchemaRegistry.allDefinitions.count == TurboQuantSchemaName.allCases.count)
     }
 
@@ -2276,7 +2278,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 21)
+        #expect(PinesDatabaseSchema.currentVersion == 22)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
         let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
         let projectSpacesMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 16 })
@@ -2362,6 +2364,12 @@ struct CoreContractTests {
         #expect(snapshotSQL.contains("cloud_sync_allowed INTEGER NOT NULL DEFAULT 0"))
         #expect(snapshotSQL.contains("excluded_from_backup INTEGER NOT NULL DEFAULT 1"))
         #expect(snapshotSQL.contains("REFERENCES model_installs(repository) ON DELETE CASCADE"))
+
+        let speculativeMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 22 })
+        let speculativeSQL = speculativeMigration.sql.joined(separator: "\n")
+        #expect(speculativeSQL.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_dimensions_json"))
+        #expect(speculativeSQL.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_telemetry_json"))
+        #expect(speculativeSQL.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json"))
     }
 
     @Test

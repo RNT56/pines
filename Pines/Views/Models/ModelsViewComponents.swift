@@ -773,6 +773,29 @@ struct ModelDetailView: View {
         if let activeBackend = quantization.activeBackend { items.append(.init("Active backend", activeBackend.displayName)) }
         if let attentionPath = quantization.activeAttentionPath { items.append(.init("Attention path", attentionPath.displayName)) }
         if let layoutVersion = quantization.turboQuantLayoutVersion { items.append(.init("Layout", "v\(layoutVersion)")) }
+        if model.runtimeProfile.speculativeDecodingEnabled
+            || quantization.turboQuantSpeculativeSettings?.enabled == true
+            || quantization.turboQuantSpeculativeTelemetry != nil {
+            let telemetry = quantization.turboQuantSpeculativeTelemetry
+            let state = telemetry?.state.displayName
+                ?? (model.runtimeProfile.speculativeDecodingEnabled ? "Eligible" : "Disabled")
+            items.append(.init("Speculative decode", state, systemImage: "bolt.badge.clock"))
+            if let draft = model.runtimeProfile.speculativeDraftModelID?.rawValue
+                ?? quantization.turboQuantSpeculativeSettings?.draftModelID {
+                items.append(.init("Draft model", draft, systemImage: "rectangle.stack.badge.play", copyable: true))
+            }
+            if let acceptanceRate = telemetry?.acceptanceRate {
+                items.append(.init("Acceptance", acceptanceRate.formatted(.percent.precision(.fractionLength(1))), systemImage: "checkmark.circle"))
+            }
+            if let decision = quantization.turboQuantSpeculativeAutoDisableDecision,
+               decision.shouldDisable {
+                items.append(.init("Speculative policy", decision.reason.displayName, systemImage: "pause.circle", copyable: true))
+            }
+        }
+        let designOnlyGates = quantization.turboQuantPlatformFeatureGates.filter { !$0.isProductActive }
+        if !designOnlyGates.isEmpty {
+            items.append(.init("Platform gates", "\(designOnlyGates.count) disabled", systemImage: "lock.shield"))
+        }
         if let kernelProfile = quantization.metalKernelProfile { items.append(.init("Kernel", kernelProfile.displayName)) }
         if let selfTest = quantization.metalSelfTestStatus { items.append(.init("MLX self-test", selfTest.displayName)) }
         if let evidence = model.runtimeProfileEvidence {
@@ -1070,6 +1093,7 @@ private extension RuntimeProfileEvidence {
             groupSize.map { "group=\($0)" },
             layoutVersion.map { "layout=v\($0)" },
             activeAttentionPath.map { "path=\($0.rawValue)" },
+            speculativeDimensions?.tupleSummaryParts.joined(separator: " "),
             "mode=\(userMode.rawValue)",
             "context=\(admittedContextTokens)",
         ]

@@ -16,6 +16,8 @@ public enum TurboQuantSchemaName: String, Codable, Sendable, CaseIterable {
     case turboQuantLayout = "TurboQuantLayout"
     case turboQuantLayoutNext = "TurboQuantLayoutNext"
     case adaptivePrecisionPolicy = "AdaptivePrecisionPolicy"
+    case speculativeDecode = "SpeculativeDecode"
+    case platformFeatureGate = "PlatformFeatureGate"
 }
 
 public struct TurboQuantSchemaDefinition: Hashable, Codable, Sendable {
@@ -44,6 +46,8 @@ public enum TurboQuantSchemaRegistry {
     public static let turboQuantLayout = TurboQuantSchemaDefinition(name: .turboQuantLayout, version: 4)
     public static let turboQuantLayoutNext = TurboQuantSchemaDefinition(name: .turboQuantLayoutNext, version: 5)
     public static let adaptivePrecisionPolicy = TurboQuantSchemaDefinition(name: .adaptivePrecisionPolicy, version: 1)
+    public static let speculativeDecode = TurboQuantSchemaDefinition(name: .speculativeDecode, version: 1)
+    public static let platformFeatureGate = TurboQuantSchemaDefinition(name: .platformFeatureGate, version: 1)
 
     public static let allDefinitions: [TurboQuantSchemaDefinition] = [
         admissionPlan,
@@ -61,6 +65,8 @@ public enum TurboQuantSchemaRegistry {
         turboQuantLayout,
         turboQuantLayoutNext,
         adaptivePrecisionPolicy,
+        speculativeDecode,
+        platformFeatureGate,
     ]
 
     public static let versionsByName: [TurboQuantSchemaName: Int] = Dictionary(

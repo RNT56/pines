@@ -428,7 +428,7 @@ struct MLXRuntimeBridge: Sendable {
         metadata[key] = String(value)
     }
 
-    private static func metadataJSON<Value: Encodable>(_ value: Value) -> String? {
+    fileprivate static func metadataJSON<Value: Encodable>(_ value: Value) -> String? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
@@ -436,7 +436,7 @@ struct MLXRuntimeBridge: Sendable {
         return String(data: data, encoding: .utf8)
     }
 
-    private static func minimalContextAssemblyPlan(
+    fileprivate static func minimalContextAssemblyPlan(
         exactInputTokens: Int,
         reservedCompletionTokens: Int,
         historyMessageCount: Int,
@@ -454,7 +454,7 @@ struct MLXRuntimeBridge: Sendable {
         )
     }
 
-    private static func localRuntimeAdmissionPlan(
+    fileprivate static func localRuntimeAdmissionPlan(
         request: ChatRequest,
         install: ModelInstall?,
         profile: RuntimeProfile,
@@ -537,7 +537,7 @@ struct MLXRuntimeBridge: Sendable {
         return LocalRuntimeAdmissionService().admit(admissionRequest)
     }
 
-    private static func localFailureKind(from error: Error) -> LocalInferenceFailureKind {
+    fileprivate static func localFailureKind(from error: Error) -> LocalInferenceFailureKind {
         if let inferenceError = error as? InferenceError {
             switch inferenceError {
             case .invalidRequest:
@@ -585,7 +585,7 @@ struct MLXRuntimeBridge: Sendable {
     }
 
     #if canImport(MLXLMCommon)
-    private static func appendTurboQuantWave2Metadata(
+    fileprivate static func appendTurboQuantWave2Metadata(
         to metadata: inout [String: String],
         cache: [KVCache]?,
         request: ChatRequest,
@@ -598,11 +598,14 @@ struct MLXRuntimeBridge: Sendable {
         failureKind: LocalInferenceFailureKind? = nil,
         failureMessage: String? = nil,
         inputTokens: Int? = nil,
-        outputTokens: Int? = nil
+        outputTokens: Int? = nil,
+        speculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
+        speculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil
     ) {
         guard profile.quantization.kvCacheStrategy == .turboQuant
             || admissionPlan != nil
             || contextPlan != nil
+            || speculativeTelemetry != nil
         else { return }
 
         let snapshot = cache?.compactMap { ($0 as? TurboQuantCompressedKVCacheProtocol)?.runtimeSnapshot() }.first
@@ -675,6 +678,8 @@ struct MLXRuntimeBridge: Sendable {
             compressedValueBytes: snapshot.map { Int64($0.valueBytes) },
             inputTokens: inputTokens ?? contextPlan?.exactInputTokens,
             outputTokens: outputTokens,
+            speculativeTelemetry: speculativeTelemetry,
+            speculativeAutoDisableDecision: speculativeAutoDisableDecision,
             contextAssemblyPlanID: contextPlan?.id,
             memoryCalibrationSampleID: calibrationSample.id.uuidString
         )
@@ -706,6 +711,13 @@ struct MLXRuntimeBridge: Sendable {
                     + admissionPlan.memoryZones.decodedFallbackScratchBytes
                 )
         }
+        if let speculativeTelemetry {
+            appendSpeculativeMetadata(
+                to: &metadata,
+                telemetry: speculativeTelemetry,
+                decision: speculativeAutoDisableDecision
+            )
+        }
         metadata[LocalProviderMetadataKeys.turboQuantRunDecisionID] = decision.decisionID
         metadata[LocalProviderMetadataKeys.turboQuantRunDecisionJSON] = metadataJSON(decision)
         metadata[LocalProviderMetadataKeys.turboQuantMemoryCalibrationSampleID] =
@@ -726,6 +738,95 @@ struct MLXRuntimeBridge: Sendable {
             )
             metadata[LocalProviderMetadataKeys.turboQuantFailureEventJSON] =
                 metadataJSON(failureEvent)
+        }
+    }
+
+    fileprivate static func speculativeTelemetry(
+        from info: GenerateCompletionInfo?,
+        profile: RuntimeProfile
+    ) -> (
+        telemetry: TurboQuantSpeculativeTelemetry?,
+        decision: TurboQuantSpeculativeAutoDisableDecision?
+    ) {
+        guard let metrics = info?.speculativeAcceptanceMetrics else {
+            return (nil, nil)
+        }
+        let settings = profile.speculativeSettings ?? profile.quantization.turboQuantSpeculativeSettings
+        guard profile.quantization.kvCacheStrategy == .turboQuant
+            || profile.speculativeDecodingEnabled
+            || settings?.enabled == true
+        else {
+            return (nil, nil)
+        }
+        let dimensions = TurboQuantSpeculativeEvidenceDimensions(
+            enabled: true,
+            draftModelID: settings?.draftModelID ?? profile.speculativeDraftModelID?.rawValue,
+            draftModelRevision: settings?.draftModelRevision,
+            tokenizerCompatible: settings?.requireTokenizerCompatibility == false ? nil : true,
+            maxDraftTokens: settings?.maxDraftTokens
+        )
+        let telemetry = TurboQuantSpeculativeTelemetry(
+            state: .active,
+            dimensions: dimensions,
+            proposedTokenCount: metrics.proposedDraftTokens,
+            acceptedTokenCount: metrics.acceptedDraftTokens,
+            rejectedTokenCount: metrics.rejectedDraftTokens,
+            targetVerifiedTokenCount: metrics.emittedTokens,
+            rollbackCount: 0,
+            targetSequenceMatched: true,
+            tokenizerCompatible: dimensions.tokenizerCompatible
+        )
+        let policy = settings?.autoDisablePolicy ?? .productDefault
+        return (telemetry, policy.evaluate(telemetry))
+    }
+
+    fileprivate static func appendSpeculativeMetadata(
+        to metadata: inout [String: String],
+        telemetry: TurboQuantSpeculativeTelemetry,
+        decision: TurboQuantSpeculativeAutoDisableDecision?
+    ) {
+        metadata[LocalProviderMetadataKeys.turboQuantSpeculativeState] = telemetry.state.rawValue
+        metadata[LocalProviderMetadataKeys.turboQuantSpeculativeEnabled] =
+            String(telemetry.dimensions.enabled)
+        if let draftModelID = telemetry.dimensions.draftModelID {
+            metadata[LocalProviderMetadataKeys.turboQuantSpeculativeDraftModelID] = draftModelID
+        }
+        if let draftModelRevision = telemetry.dimensions.draftModelRevision {
+            metadata[LocalProviderMetadataKeys.turboQuantSpeculativeDraftModelRevision] =
+                draftModelRevision
+        }
+        if let pairingHash = telemetry.dimensions.pairingHash {
+            metadata[LocalProviderMetadataKeys.turboQuantSpeculativePairingHash] = pairingHash
+        }
+        if let tokenizerCompatible = telemetry.tokenizerCompatible {
+            metadata[LocalProviderMetadataKeys.turboQuantSpeculativeTokenizerCompatible] =
+                String(tokenizerCompatible)
+        }
+        if let acceptanceRate = telemetry.acceptanceRate {
+            metadata[LocalProviderMetadataKeys.turboQuantSpeculativeAcceptanceRate] =
+                String(acceptanceRate)
+        }
+        metadata[LocalProviderMetadataKeys.turboQuantSpeculativeProposedTokens] =
+            String(telemetry.proposedTokenCount)
+        metadata[LocalProviderMetadataKeys.turboQuantSpeculativeAcceptedTokens] =
+            String(telemetry.acceptedTokenCount)
+        metadata[LocalProviderMetadataKeys.turboQuantSpeculativeRejectedTokens] =
+            String(telemetry.rejectedTokenCount)
+        metadata[LocalProviderMetadataKeys.turboQuantSpeculativeRollbackCount] =
+            String(telemetry.rollbackCount)
+        if let disabledReason = telemetry.disabledReason {
+            metadata[LocalProviderMetadataKeys.turboQuantSpeculativeDisableReason] =
+                disabledReason.rawValue
+        }
+        metadata[LocalProviderMetadataKeys.turboQuantSpeculativeTelemetryJSON] =
+            metadataJSON(telemetry)
+        if let decision {
+            if decision.shouldDisable {
+                metadata[LocalProviderMetadataKeys.turboQuantSpeculativeDisableReason] =
+                    decision.reason.rawValue
+            }
+            metadata[LocalProviderMetadataKeys.turboQuantSpeculativeAutoDisableJSON] =
+                metadataJSON(decision)
         }
     }
     #endif
@@ -2778,14 +2879,14 @@ private actor MLXRuntimeState {
                             input = try await context.processor.prepare(input: userInput)
                         }
                         let prepareElapsedSeconds = Date().timeIntervalSince(prepareStartedAt)
-                        var turboQuantContextPlan = Self.minimalContextAssemblyPlan(
+                        var turboQuantContextPlan = MLXRuntimeBridge.minimalContextAssemblyPlan(
                             exactInputTokens: input.text.tokens.size,
                             reservedCompletionTokens: generationPlan.reservedCompletionTokens,
                             historyMessageCount: historyMessages.count + 1,
                             reducedHistoryForContext: reducedHistoryForContext
                         )
                         let admissionMemoryCounters = deviceMonitor.memoryCounters()
-                        var turboQuantAdmissionPlan = Self.localRuntimeAdmissionPlan(
+                        var turboQuantAdmissionPlan = MLXRuntimeBridge.localRuntimeAdmissionPlan(
                             request: request,
                             install: install,
                             profile: profile,
@@ -2799,7 +2900,7 @@ private actor MLXRuntimeState {
                         if let admissionPlan = turboQuantAdmissionPlan,
                            !admissionPlan.admitted {
                             var failureMetadata: [String: String] = [:]
-                            Self.appendTurboQuantWave2Metadata(
+                            MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                 to: &failureMetadata,
                                 cache: nil,
                                 request: request,
@@ -2837,7 +2938,7 @@ private actor MLXRuntimeState {
                             ) {
                                 let message = "This local request needs \(input.text.tokens.size + generationPlan.reservedCompletionTokens) tokens (\(input.text.tokens.size) prompt + \(generationPlan.reservedCompletionTokens) completion), but \(request.modelID.rawValue) is admitted for \(maxContextTokens). Shorten the latest message or reduce local completion tokens."
                                 var failureMetadata: [String: String] = [:]
-                                Self.appendTurboQuantWave2Metadata(
+                                MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                     to: &failureMetadata,
                                     cache: nil,
                                     request: request,
@@ -2866,13 +2967,13 @@ private actor MLXRuntimeState {
                                 return (tokenCount: 0, finish: nil, terminalFailureEmitted: true)
                             }
                         }
-                        turboQuantContextPlan = Self.minimalContextAssemblyPlan(
+                        turboQuantContextPlan = MLXRuntimeBridge.minimalContextAssemblyPlan(
                             exactInputTokens: input.text.tokens.size,
                             reservedCompletionTokens: generationPlan.reservedCompletionTokens,
                             historyMessageCount: historyMessages.count + 1,
                             reducedHistoryForContext: reducedHistoryForContext
                         )
-                        turboQuantAdmissionPlan = Self.localRuntimeAdmissionPlan(
+                        turboQuantAdmissionPlan = MLXRuntimeBridge.localRuntimeAdmissionPlan(
                             request: request,
                             install: install,
                             profile: profile,
@@ -2885,7 +2986,7 @@ private actor MLXRuntimeState {
                         if let admissionPlan = turboQuantAdmissionPlan,
                            !admissionPlan.admitted {
                             var failureMetadata: [String: String] = [:]
-                            Self.appendTurboQuantWave2Metadata(
+                            MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                 to: &failureMetadata,
                                 cache: nil,
                                 request: request,
@@ -2922,7 +3023,7 @@ private actor MLXRuntimeState {
                            ) {
                             let message = "This local request needs \(input.text.tokens.size + generationPlan.reservedCompletionTokens) tokens (\(input.text.tokens.size) prompt + \(generationPlan.reservedCompletionTokens) completion), but \(request.modelID.rawValue) is admitted for \(maxContextTokens). Shorten the latest message or reduce local completion tokens."
                             var failureMetadata: [String: String] = [:]
-                            Self.appendTurboQuantWave2Metadata(
+                            MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                 to: &failureMetadata,
                                 cache: nil,
                                 request: request,
@@ -2997,10 +3098,10 @@ private actor MLXRuntimeState {
                         contextMetadata[LocalProviderMetadataKeys.turboQuantContextAssemblyPlanID] =
                             turboQuantContextPlan.id
                         contextMetadata[LocalProviderMetadataKeys.turboQuantContextAssemblyPlanJSON] =
-                            Self.metadataJSON(turboQuantContextPlan)
+                            MLXRuntimeBridge.metadataJSON(turboQuantContextPlan)
                         if let turboQuantAdmissionPlan {
                             contextMetadata[LocalProviderMetadataKeys.turboQuantAdmissionPlanJSON] =
-                                Self.metadataJSON(turboQuantAdmissionPlan)
+                                MLXRuntimeBridge.metadataJSON(turboQuantAdmissionPlan)
                             contextMetadata[LocalProviderMetadataKeys.turboQuantFallbackContractHash] =
                                 turboQuantAdmissionPlan.fallbackContract.contractHash
                             contextMetadata[LocalProviderMetadataKeys.turboQuantSelectedMode] =
@@ -3195,7 +3296,7 @@ private actor MLXRuntimeState {
                                     )
                                     providerMetadata.merge(contextMetadata) { _, new in new }
                                     latestTurboQuantOutputTokens = tokenCount
-                                    Self.appendTurboQuantWave2Metadata(
+                                    MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                         to: &providerMetadata,
                                         cache: cache,
                                         request: request,
@@ -3301,8 +3402,12 @@ private actor MLXRuntimeState {
                                 partitionSummary: partitionSummary
                             )
                             providerMetadata.merge(contextMetadata) { _, new in new }
+                            let speculative = MLXRuntimeBridge.speculativeTelemetry(
+                                from: completionInfo,
+                                profile: profile
+                            )
                             latestTurboQuantOutputTokens = completionInfo.generationTokenCount
-                            Self.appendTurboQuantWave2Metadata(
+                            MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                 to: &providerMetadata,
                                 cache: cache,
                                 request: request,
@@ -3313,7 +3418,9 @@ private actor MLXRuntimeState {
                                 memoryCounters: deviceMonitor.memoryCounters(),
                                 outcome: .admittedSucceeded,
                                 inputTokens: input.text.tokens.size,
-                                outputTokens: completionInfo.generationTokenCount
+                                outputTokens: completionInfo.generationTokenCount,
+                                speculativeTelemetry: speculative.telemetry,
+                                speculativeAutoDisableDecision: speculative.decision
                             )
                             latestTurboQuantFailureMetadata = providerMetadata
                             let resolvedFinishReason = Self.finishReason(
@@ -3342,7 +3449,7 @@ private actor MLXRuntimeState {
                             )
                             providerMetadata.merge(contextMetadata) { _, new in new }
                             latestTurboQuantOutputTokens = tokenCount
-                            Self.appendTurboQuantWave2Metadata(
+                            MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                 to: &providerMetadata,
                                 cache: cache,
                                 request: request,
@@ -3379,11 +3486,11 @@ private actor MLXRuntimeState {
                 } catch {
                     let reportedError = Self.localRuntimeFailure(from: error)
                     let failureMessage = reportedError.localizedDescription
-                    let failureKind = Self.localFailureKind(from: error)
+                    let failureKind = MLXRuntimeBridge.localFailureKind(from: error)
                     let calibrationOutcome: RuntimeMemoryCalibrationOutcome =
                         failureKind == .fallbackBudgetExceeded ? .fallbackBudgetExceeded : .runtimeFailed
                     var failureMetadata = latestTurboQuantFailureMetadata
-                    Self.appendTurboQuantWave2Metadata(
+                    MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                         to: &failureMetadata,
                         cache: nil,
                         request: request,

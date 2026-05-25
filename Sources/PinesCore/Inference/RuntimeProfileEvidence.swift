@@ -33,6 +33,9 @@ public struct RuntimeProfileEvidence: Hashable, Codable, Sendable, Identifiable 
     public var groupSize: Int?
     public var layoutVersion: Int?
     public var activeAttentionPath: TurboQuantAttentionPath?
+    public var speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions?
+    public var speculativeTelemetry: TurboQuantSpeculativeTelemetry?
+    public var speculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision?
     public var admittedContextTokens: Int
     public var peakMemoryBytes: Int64
     public var promptTokensPerSecond: Double?
@@ -63,6 +66,9 @@ public struct RuntimeProfileEvidence: Hashable, Codable, Sendable, Identifiable 
         groupSize: Int? = nil,
         layoutVersion: Int? = nil,
         activeAttentionPath: TurboQuantAttentionPath? = nil,
+        speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions? = nil,
+        speculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
+        speculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil,
         admittedContextTokens: Int,
         peakMemoryBytes: Int64,
         promptTokensPerSecond: Double? = nil,
@@ -92,6 +98,9 @@ public struct RuntimeProfileEvidence: Hashable, Codable, Sendable, Identifiable 
         self.groupSize = groupSize
         self.layoutVersion = layoutVersion
         self.activeAttentionPath = activeAttentionPath
+        self.speculativeDimensions = speculativeDimensions
+        self.speculativeTelemetry = speculativeTelemetry
+        self.speculativeAutoDisableDecision = speculativeAutoDisableDecision
         self.admittedContextTokens = max(0, admittedContextTokens)
         self.peakMemoryBytes = max(0, peakMemoryBytes)
         self.promptTokensPerSecond = promptTokensPerSecond
@@ -174,6 +183,7 @@ public actor ProfileEvidenceStore {
         mode: TurboQuantUserMode,
         fallbackContractHash: String,
         layoutVersion: Int?,
+        speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions? = nil,
         minimumContextTokens: Int
     ) -> RuntimeProfileEvidence? {
         records.values
@@ -189,6 +199,7 @@ public actor ProfileEvidenceStore {
                     && $0.userMode == mode
                     && $0.fallbackContractHash == fallbackContractHash
                     && $0.layoutVersion == layoutVersion
+                    && ($0.speculativeDimensions ?? .disabled).matches(speculativeDimensions)
                     && $0.admittedContextTokens >= minimumContextTokens
                     && $0.evidenceLevel.canMakeProductCompatibilityClaim
                     && $0.revokedReason == nil
@@ -266,6 +277,7 @@ public actor ProfileEvidenceStore {
             && lhs.compatibilityPairID == rhs.compatibilityPairID
             && lhs.layoutVersion == rhs.layoutVersion
             && lhs.activeAttentionPath == rhs.activeAttentionPath
+            && (lhs.speculativeDimensions ?? .disabled).matches(rhs.speculativeDimensions)
             && lhs.admittedContextTokens == rhs.admittedContextTokens
             && lhs.id != rhs.id
     }
@@ -285,6 +297,7 @@ public protocol TurboQuantEvidenceRepository: Sendable {
         mode: TurboQuantUserMode,
         fallbackContractHash: String?,
         layoutVersion: Int?,
+        speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions?,
         minimumContextTokens: Int
     ) async throws -> RuntimeProfileEvidence?
     func listTurboQuantProfileEvidence(modelID: String?) async throws -> [RuntimeProfileEvidence]
