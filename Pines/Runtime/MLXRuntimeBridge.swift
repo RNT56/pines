@@ -1038,7 +1038,9 @@ struct MLXRuntimeBridge: Sendable {
                 profile: memoryProfile,
                 requestedContextLength: requestedContextLength,
                 userMode: mlxTurboQuantUserMode(from: userMode),
-                fallbackPolicy: .compressedDecodeAllowed,
+                fallbackPolicy: mlxTurboQuantFallbackPolicy(
+                    from: TurboQuantFallbackContract.productDefault(for: userMode)
+                ),
                 preset: mlxTurboQuantAdmissionPreset(from: defaults?.preset ?? .conservativeFallback),
                 valueBits: defaults?.valueBits,
                 groupSize: defaults?.groupSize ?? 64,
@@ -1184,7 +1186,9 @@ struct MLXRuntimeBridge: Sendable {
                 preset: selectedPreset,
                 valueBits: selectedValueBits,
                 groupSize: groupSize,
-                fallbackPolicy: .compressedDecodeAllowed,
+                fallbackPolicy: coreTurboQuantFallbackPolicy(
+                    from: TurboQuantFallbackContract.productDefault(for: selectedMode)
+                ),
                 rawBytesPerToken: rawBytesPerToken,
                 packedFallbackBytesPerToken: packedFallbackBytesPerToken,
                 compressedBytesPerToken: currentCompressedBytesPerToken,
@@ -1369,6 +1373,50 @@ struct MLXRuntimeBridge: Sendable {
             ?? .turbo3_5
     }
 
+    private static func mlxTurboQuantFallbackPolicy(
+        from contract: PinesCore.TurboQuantFallbackContract
+    ) -> MLXLMCommon.TurboQuantFallbackPolicy {
+        if contract.failIfCompressedPathUnavailable {
+            return .exactRequired
+        }
+        if contract.allowDecodedLayerLocalFallback || contract.allowFullDecodedFallback {
+            return .compressedDecodeAllowed
+        }
+        if contract.allowPackedFallback {
+            return .packedAllowed
+        }
+        return .exactRequired
+    }
+
+    private static func mlxTurboQuantFallbackPolicy(
+        from policy: PinesCore.TurboQuantFallbackPolicy
+    ) -> MLXLMCommon.TurboQuantFallbackPolicy {
+        switch policy {
+        case .exactRequired:
+            .exactRequired
+        case .packedAllowed:
+            .packedAllowed
+        case .compressedDecodeAllowed:
+            .compressedDecodeAllowed
+        case .fatalOnFailure:
+            .fatalOnFailure
+        }
+    }
+
+    private static func mlxTurboQuantPerCacheResidentBudgetBytes(
+        admissionPlan: LocalRuntimeAdmissionPlan?,
+        install: ModelInstall?
+    ) -> Int? {
+        guard let admissionPlan else { return nil }
+        let layerCount = install.map { heuristicModelShape(for: $0).layerCount } ?? 1
+        let totalResidentBytes =
+            admissionPlan.memoryZones.compressedKVBytes
+            + admissionPlan.memoryZones.rawShadowBytes
+            + admissionPlan.memoryZones.packedFallbackBytes
+            + admissionPlan.memoryZones.decodedFallbackScratchBytes
+        return intClamped(max(1, totalResidentBytes / Int64(max(1, layerCount))))
+    }
+
     private static func mlxTurboQuantThermalState(_ state: String?) -> MLXLMCommon.TurboQuantThermalState {
         switch state?.lowercased() {
         case "nominal":
@@ -1502,6 +1550,21 @@ struct MLXRuntimeBridge: Sendable {
         case .fatalOnFailure:
             .fatalOnFailure
         }
+    }
+
+    private static func coreTurboQuantFallbackPolicy(
+        from contract: PinesCore.TurboQuantFallbackContract
+    ) -> PinesCore.TurboQuantFallbackPolicy {
+        if contract.failIfCompressedPathUnavailable {
+            return .exactRequired
+        }
+        if contract.allowDecodedLayerLocalFallback || contract.allowFullDecodedFallback {
+            return .compressedDecodeAllowed
+        }
+        if contract.allowPackedFallback {
+            return .packedAllowed
+        }
+        return .exactRequired
     }
 
     private static func coreTurboQuantAdmissionDowngradeReason(
@@ -2891,7 +2954,9 @@ private actor MLXRuntimeState {
                             profile: profile,
                             install: install,
                             maxTokensOverride: generationPlan.effectiveMaxTokens,
-                            maxKVSizeOverride: generationPlan.effectiveMaxKVSize
+                            maxKVSizeOverride: generationPlan.effectiveMaxKVSize,
+                            turboQuantAdmissionPlan: turboQuantAdmissionPlan,
+                            promptTokenCount: input.text.tokens.size
                         )
                         var contextMetadata: [String: String] = [
                             ChatContextMetadataKeys.exactInputTokens: String(input.text.tokens.size),
@@ -2903,10 +2968,13 @@ private actor MLXRuntimeState {
                             LocalProviderMetadataKeys.turboQuantProfileSource: profile.quantization.turboQuantProfileSource ?? "none",
                             LocalProviderMetadataKeys.cacheTopology: install?.cacheTopology.rawValue ?? ModelCacheTopology.unsupported.rawValue,
                             LocalProviderMetadataKeys.turboQuantFamilySupport: install?.turboQuantFamilySupport.rawValue ?? TurboQuantFamilySupport.none.rawValue,
-                            LocalProviderMetadataKeys.turboQuantAdmissionDecision: profile.quantization.turboQuantAdmission?.admitted == false
+                            LocalProviderMetadataKeys.turboQuantAdmissionDecision: turboQuantAdmissionPlan?.admitted == false
                                 ? "refused"
                                 : (profile.quantization.kvCacheStrategy == .turboQuant ? "turboQuant" : "plain_rotating_kv"),
-                            LocalProviderMetadataKeys.turboQuantAdmissionReason: profile.quantization.activeFallbackReason ?? "TurboQuant admitted",
+                            LocalProviderMetadataKeys.turboQuantAdmissionReason:
+                                turboQuantAdmissionPlan?.userFacingMessage
+                                ?? profile.quantization.activeFallbackReason
+                                ?? "TurboQuant admitted",
                             LocalProviderMetadataKeys.turboQuantUserMode: profile.quantization.turboQuantUserMode.rawValue,
                             LocalProviderMetadataKeys.generationPrepareElapsedSeconds: String(prepareElapsedSeconds),
                             LocalProviderMetadataKeys.generationPreflightAttempts: String(preflightAttempts),
@@ -2934,6 +3002,21 @@ private actor MLXRuntimeState {
                                 Self.metadataJSON(turboQuantAdmissionPlan)
                             contextMetadata[LocalProviderMetadataKeys.turboQuantFallbackContractHash] =
                                 turboQuantAdmissionPlan.fallbackContract.contractHash
+                            contextMetadata[LocalProviderMetadataKeys.turboQuantSelectedMode] =
+                                turboQuantAdmissionPlan.selectedMode.rawValue
+                            contextMetadata[LocalProviderMetadataKeys.turboQuantAdmittedContext] =
+                                String(turboQuantAdmissionPlan.admittedContextTokens)
+                            contextMetadata[LocalProviderMetadataKeys.turboQuantRuntimeBudgetBytes] =
+                                String(turboQuantAdmissionPlan.memoryZones.totalPlannedBytes)
+                            contextMetadata[LocalProviderMetadataKeys.turboQuantRuntimeHeadroomBytes] =
+                                String(turboQuantAdmissionPlan.memoryCushionBytes)
+                            contextMetadata[LocalProviderMetadataKeys.turboQuantCompressedKVBytes] =
+                                String(turboQuantAdmissionPlan.memoryZones.compressedKVBytes)
+                            contextMetadata[LocalProviderMetadataKeys.turboQuantFallbackReserveBytes] =
+                                String(
+                                    turboQuantAdmissionPlan.memoryZones.packedFallbackBytes
+                                    + turboQuantAdmissionPlan.memoryZones.decodedFallbackScratchBytes
+                                )
                             contextMetadata[LocalProviderMetadataKeys.turboQuantCloudRetryPermitted] =
                                 String(turboQuantAdmissionPlan.fallbackContract.allowCloudRetry)
                             contextMetadata[LocalProviderMetadataKeys.turboQuantCloudFallbackSuppressed] =
@@ -2951,7 +3034,8 @@ private actor MLXRuntimeState {
                         if !profile.quantization.turboQuantProfileDiagnostics.isEmpty {
                             contextMetadata[LocalProviderMetadataKeys.turboQuantProfileDiagnostics] = profile.quantization.turboQuantProfileDiagnostics.joined(separator: " | ")
                         }
-                        if let maxContextTokens = profile.quantization.maxKVSize {
+                        if let maxContextTokens = turboQuantAdmissionPlan?.admittedContextTokens
+                            ?? profile.quantization.maxKVSize {
                             contextMetadata[ChatContextMetadataKeys.contextWindowTokens] = String(maxContextTokens)
                             contextMetadata[ChatContextMetadataKeys.inputBudgetTokens] = String(
                                 max(0, maxContextTokens - generationPlan.reservedCompletionTokens)
@@ -3543,7 +3627,9 @@ private actor MLXRuntimeState {
         profile: RuntimeProfile,
         install: ModelInstall?,
         maxTokensOverride: Int? = nil,
-        maxKVSizeOverride: Int? = nil
+        maxKVSizeOverride: Int? = nil,
+        turboQuantAdmissionPlan: LocalRuntimeAdmissionPlan? = nil,
+        promptTokenCount: Int = 0
     ) -> GenerateParameters {
         let turboQuantSeed: UInt64? =
             profile.quantization.kvCacheStrategy == .turboQuant
@@ -3553,6 +3639,17 @@ private actor MLXRuntimeState {
                 cacheLayoutVersion: 3
             )
             : nil
+        let turboQuantFallbackPolicy =
+            turboQuantAdmissionPlan.map { mlxTurboQuantFallbackPolicy(from: $0.fallbackContract) }
+            ?? profile.quantization.turboQuantAdmission?.memoryPlan
+                .map { mlxTurboQuantFallbackPolicy(from: $0.fallbackPolicy) }
+            ?? .compressedDecodeAllowed
+        let turboQuantAdmissionProfile = install.flatMap { mlxModelMemoryProfile(for: $0) }
+        let turboQuantRequestedContextLength =
+            turboQuantAdmissionPlan?.admittedContextTokens
+            ?? profile.quantization.turboQuantAdmission?.admittedContextLength
+            ?? maxKVSizeOverride
+            ?? profile.quantization.maxKVSize
 
         return GenerateParameters(
             maxTokens: maxTokensOverride ?? request.sampling.maxTokens,
@@ -3568,6 +3665,21 @@ private actor MLXRuntimeState {
             ),
             turboQuantSeed: turboQuantSeed,
             turboQuantValueBits: resolvedTurboQuantValueBits(for: profile, install: install),
+            turboQuantAdmissionPolicy: .automatic,
+            turboQuantAdmission: nil,
+            turboQuantPerCacheResidentBudgetBytes: mlxTurboQuantPerCacheResidentBudgetBytes(
+                admissionPlan: turboQuantAdmissionPlan,
+                install: install
+            ),
+            turboQuantAdmissionProfile: turboQuantAdmissionProfile,
+            turboQuantRequestedContextLength: turboQuantRequestedContextLength,
+            turboQuantPromptTokenCount: promptTokenCount,
+            turboQuantUserMode: mlxTurboQuantUserMode(
+                from: turboQuantAdmissionPlan?.selectedMode
+                    ?? profile.quantization.turboQuantAdmission?.selectedMode
+                    ?? profile.quantization.turboQuantUserMode
+            ),
+            turboQuantFallbackPolicy: turboQuantFallbackPolicy,
             temperature: request.sampling.temperature,
             topP: request.sampling.topP,
             repetitionPenalty: request.sampling.repetitionPenalty,

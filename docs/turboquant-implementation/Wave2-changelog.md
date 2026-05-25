@@ -72,6 +72,14 @@ This file tracks Wave 2 implementation progress after the completed Wave 1 hando
     after completion-token fitting;
   - typed `FailureEvent` metadata no longer places a context assembly plan ID in `admissionPlanID`
     because `LocalRuntimeAdmissionPlan.v1` has no standalone plan ID field.
+- End-to-end worker-surface audit closed the remaining INT-1 runtime-boundary gaps:
+  - mode-derived fallback policy is now passed to MLX-LM admission instead of using a hardcoded
+    compressed-decode fallback policy;
+  - `GenerateParameters` now receives the final admission context, prompt token count,
+    admission profile, fallback policy, and per-cache resident budget derived from the
+    request-scoped `LocalRuntimeAdmissionPlan`;
+  - direct context-window metadata now reports the request-scoped admitted context instead of the
+    legacy profile cap when a Wave 2 admission plan exists.
 
 ### Validation
 
@@ -94,6 +102,15 @@ This file tracks Wave 2 implementation progress after the completed Wave 1 hando
   - `xcrun swiftc -parse -I .build/debug/Modules Pines/Runtime/MLXRuntimeBridge.swift`;
   - `swift test --filter TurboQuantWave1ControlPlaneTests`;
   - `git diff --check`.
+- Final runtime-boundary audit validation:
+  - `xcrun swiftc -parse -I .build/debug/Modules Pines/Runtime/MLXRuntimeBridge.swift` passed;
+  - `swift build --disable-automatic-resolution` passed;
+  - `swift test --filter TurboQuantWave1ControlPlaneTests` passed;
+  - `git diff --check` passed.
+  - `swift test --disable-automatic-resolution` was also re-run in the current
+    `tq/wave3-evidence-loop` worktree and is blocked by the dirty Wave 3 database schema change:
+    `openAIParityMigrationAddsTablesAndRunProvenance` still expects schema version 19 while the
+    dirty worktree has version 20. This is outside the Wave 2 bridge/pin surface.
 
 ### Validation Blocker
 
