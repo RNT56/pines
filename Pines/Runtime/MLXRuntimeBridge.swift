@@ -89,6 +89,57 @@ private final class MLXGenerationCancellationBox: @unchecked Sendable {
     }
 }
 
+private final class MLXGenerationTelemetryBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var contextPlan: ContextAssemblyPlan?
+    private var admissionPlan: LocalRuntimeAdmissionPlan?
+    private var failureMetadata: [String: String] = [:]
+    private var inputTokens: Int?
+    private var outputTokens: Int?
+
+    func setContextPlan(_ plan: ContextAssemblyPlan?) {
+        lock.lock()
+        contextPlan = plan
+        lock.unlock()
+    }
+
+    func setAdmissionPlan(_ plan: LocalRuntimeAdmissionPlan?) {
+        lock.lock()
+        admissionPlan = plan
+        lock.unlock()
+    }
+
+    func setFailureMetadata(_ metadata: [String: String]) {
+        lock.lock()
+        failureMetadata = metadata
+        lock.unlock()
+    }
+
+    func setInputTokens(_ tokens: Int?) {
+        lock.lock()
+        inputTokens = tokens
+        lock.unlock()
+    }
+
+    func setOutputTokens(_ tokens: Int?) {
+        lock.lock()
+        outputTokens = tokens
+        lock.unlock()
+    }
+
+    func snapshot() -> (
+        contextPlan: ContextAssemblyPlan?,
+        admissionPlan: LocalRuntimeAdmissionPlan?,
+        failureMetadata: [String: String],
+        inputTokens: Int?,
+        outputTokens: Int?
+    ) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (contextPlan, admissionPlan, failureMetadata, inputTokens, outputTokens)
+    }
+}
+
 #if canImport(MLX)
 private final class MLXCachePressureController: @unchecked Sendable {
     static let shared = MLXCachePressureController()
@@ -372,7 +423,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-d8725e195fd4e0d0cedb3acdca5d1a8327377c19+mlx-swift-lm-beca69f07458b3c04075f0adaf31ef3908629d66"
+        "mlx-swift-21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772+mlx-swift-lm-6d2d791a12e60dc1bd7534d6c95454a2284edf8c"
 
     private let state = MLXRuntimeState()
     private let deviceMonitor = DeviceRuntimeMonitor()
@@ -1404,7 +1455,6 @@ struct MLXRuntimeBridge: Sendable {
         return Int(value)
     }
 
-    #if canImport(MLXLMCommon) && canImport(MLX)
     private static func mlxModelMemoryProfile(for install: ModelInstall) -> MLXLMCommon.ModelMemoryProfile? {
         if let localURL = install.localURL,
            let profile = try? MLXLMCommon.ModelMemoryProfile.profile(
@@ -1691,7 +1741,6 @@ struct MLXRuntimeBridge: Sendable {
             .refusedInsufficientMemory
         }
     }
-    #endif
 
     private static func turboQuantRuntimeDefaults(
         for install: ModelInstall,
@@ -2790,13 +2839,9 @@ private actor MLXRuntimeState {
         activeGenerationCancellation = generationCancellation
         activeGenerationSoftMemoryWarningCount = 0
 
-        return AsyncThrowingStream { continuation in
+        return AsyncThrowingStream<InferenceStreamEvent, Error>(bufferingPolicy: .unbounded) { continuation in
             let task = Task {
-                var latestTurboQuantContextPlan: ContextAssemblyPlan?
-                var latestTurboQuantAdmissionPlan: LocalRuntimeAdmissionPlan?
-                var latestTurboQuantFailureMetadata: [String: String] = [:]
-                var latestTurboQuantInputTokens: Int?
-                var latestTurboQuantOutputTokens: Int?
+                let latestTurboQuantTelemetry = MLXGenerationTelemetryBox()
                 defer {
                     generationCancellation.cancel()
                     #if canImport(MLX)
@@ -2807,8 +2852,13 @@ private actor MLXRuntimeState {
                     }
                 }
                 do {
-                    let result = try await withTaskCancellationHandler {
-                        try await container.perform { context in
+	                    let result = try await withTaskCancellationHandler {
+	                        try await container.perform {
+	                            (context: MLXLMCommon.ModelContext) async throws -> (
+	                                tokenCount: Int,
+	                                finish: InferenceFinish?,
+	                                terminalFailureEmitted: Bool
+	                            ) in
                         let images = imageURLs.map(UserInput.Image.url)
                         let audio = audioURLs.map(UserInput.Audio.url)
                         var tokenCount = 0
@@ -2893,9 +2943,9 @@ private actor MLXRuntimeState {
                             contextPlan: turboQuantContextPlan,
                             memoryCounters: admissionMemoryCounters
                         )
-                        latestTurboQuantContextPlan = turboQuantContextPlan
-                        latestTurboQuantAdmissionPlan = turboQuantAdmissionPlan
-                        latestTurboQuantInputTokens = input.text.tokens.size
+                        latestTurboQuantTelemetry.setContextPlan(turboQuantContextPlan)
+                        latestTurboQuantTelemetry.setAdmissionPlan(turboQuantAdmissionPlan)
+                        latestTurboQuantTelemetry.setInputTokens(input.text.tokens.size)
 
                         if let admissionPlan = turboQuantAdmissionPlan,
                            !admissionPlan.admitted {
@@ -2915,9 +2965,9 @@ private actor MLXRuntimeState {
                                 inputTokens: input.text.tokens.size,
                                 outputTokens: 0
                             )
-                            latestTurboQuantFailureMetadata = failureMetadata
+                            latestTurboQuantTelemetry.setFailureMetadata(failureMetadata)
                             continuation.yield(
-                                .failure(
+                                InferenceStreamEvent.failure(
                                     InferenceStreamFailure(
                                         code: LocalInferenceFailureKind.memoryAdmissionFailed.rawValue,
                                         message: admissionPlan.userFacingMessage,
@@ -2953,9 +3003,9 @@ private actor MLXRuntimeState {
                                     inputTokens: input.text.tokens.size,
                                     outputTokens: 0
                                 )
-                                latestTurboQuantFailureMetadata = failureMetadata
+                                latestTurboQuantTelemetry.setFailureMetadata(failureMetadata)
                                 continuation.yield(
-                                    .failure(
+                                    InferenceStreamEvent.failure(
                                         InferenceStreamFailure(
                                             code: LocalInferenceFailureKind.contextWindowExceeded.rawValue,
                                             message: message,
@@ -2980,8 +3030,8 @@ private actor MLXRuntimeState {
                             contextPlan: turboQuantContextPlan,
                             memoryCounters: admissionMemoryCounters
                         )
-                        latestTurboQuantContextPlan = turboQuantContextPlan
-                        latestTurboQuantAdmissionPlan = turboQuantAdmissionPlan
+                        latestTurboQuantTelemetry.setContextPlan(turboQuantContextPlan)
+                        latestTurboQuantTelemetry.setAdmissionPlan(turboQuantAdmissionPlan)
 
                         if let admissionPlan = turboQuantAdmissionPlan,
                            !admissionPlan.admitted {
@@ -3001,9 +3051,9 @@ private actor MLXRuntimeState {
                                 inputTokens: input.text.tokens.size,
                                 outputTokens: 0
                             )
-                            latestTurboQuantFailureMetadata = failureMetadata
+                            latestTurboQuantTelemetry.setFailureMetadata(failureMetadata)
                             continuation.yield(
-                                .failure(
+                                InferenceStreamEvent.failure(
                                     InferenceStreamFailure(
                                         code: LocalInferenceFailureKind.memoryAdmissionFailed.rawValue,
                                         message: admissionPlan.userFacingMessage,
@@ -3038,9 +3088,9 @@ private actor MLXRuntimeState {
                                 inputTokens: input.text.tokens.size,
                                 outputTokens: 0
                             )
-                            latestTurboQuantFailureMetadata = failureMetadata
+                            latestTurboQuantTelemetry.setFailureMetadata(failureMetadata)
                             continuation.yield(
-                                .failure(
+                                InferenceStreamEvent.failure(
                                     InferenceStreamFailure(
                                         code: LocalInferenceFailureKind.contextWindowExceeded.rawValue,
                                         message: message,
@@ -3125,7 +3175,7 @@ private actor MLXRuntimeState {
                                 String(!turboQuantAdmissionPlan.fallbackContract.allowCloudRetry)
                         }
                         contextMetadata.merge(generationPlan.providerMetadata()) { _, new in new }
-                        latestTurboQuantFailureMetadata = contextMetadata
+                        latestTurboQuantTelemetry.setFailureMetadata(contextMetadata)
                         if install?.turboQuantFamilySupport == .hybridFull,
                            profile.quantization.kvCacheStrategy == .turboQuant {
                             contextMetadata[LocalProviderMetadataKeys.hybridStateExplanation] = "Attention KV caches use TurboQuant; architecture-specific native state caches remain exact."
@@ -3295,7 +3345,7 @@ private actor MLXRuntimeState {
                                         partitionSummary: partitionSummary
                                     )
                                     providerMetadata.merge(contextMetadata) { _, new in new }
-                                    latestTurboQuantOutputTokens = tokenCount
+                                    latestTurboQuantTelemetry.setOutputTokens(tokenCount)
                                     MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                         to: &providerMetadata,
                                         cache: cache,
@@ -3309,7 +3359,7 @@ private actor MLXRuntimeState {
                                         inputTokens: input.text.tokens.size,
                                         outputTokens: tokenCount
                                     )
-                                    latestTurboQuantFailureMetadata = providerMetadata
+                                    latestTurboQuantTelemetry.setFailureMetadata(providerMetadata)
                                     finish = InferenceFinish(
                                         reason: .stop,
                                         providerMetadata: providerMetadata
@@ -3406,7 +3456,7 @@ private actor MLXRuntimeState {
                                 from: completionInfo,
                                 profile: profile
                             )
-                            latestTurboQuantOutputTokens = completionInfo.generationTokenCount
+                            latestTurboQuantTelemetry.setOutputTokens(completionInfo.generationTokenCount)
                             MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                 to: &providerMetadata,
                                 cache: cache,
@@ -3422,7 +3472,7 @@ private actor MLXRuntimeState {
                                 speculativeTelemetry: speculative.telemetry,
                                 speculativeAutoDisableDecision: speculative.decision
                             )
-                            latestTurboQuantFailureMetadata = providerMetadata
+                            latestTurboQuantTelemetry.setFailureMetadata(providerMetadata)
                             let resolvedFinishReason = Self.finishReason(
                                 from: completionInfo.stopReason,
                                 generatedTokens: completionInfo.generationTokenCount,
@@ -3448,7 +3498,7 @@ private actor MLXRuntimeState {
                                 partitionSummary: partitionSummary
                             )
                             providerMetadata.merge(contextMetadata) { _, new in new }
-                            latestTurboQuantOutputTokens = tokenCount
+                            latestTurboQuantTelemetry.setOutputTokens(tokenCount)
                             MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                                 to: &providerMetadata,
                                 cache: cache,
@@ -3462,7 +3512,7 @@ private actor MLXRuntimeState {
                                 inputTokens: input.text.tokens.size,
                                 outputTokens: tokenCount
                             )
-                            latestTurboQuantFailureMetadata = providerMetadata
+                            latestTurboQuantTelemetry.setFailureMetadata(providerMetadata)
                             finish = InferenceFinish(reason: .stop, providerMetadata: providerMetadata)
                         }
                         return (tokenCount: tokenCount, finish: finish, terminalFailureEmitted: false)
@@ -3489,21 +3539,22 @@ private actor MLXRuntimeState {
                     let failureKind = MLXRuntimeBridge.localFailureKind(from: error)
                     let calibrationOutcome: RuntimeMemoryCalibrationOutcome =
                         failureKind == .fallbackBudgetExceeded ? .fallbackBudgetExceeded : .runtimeFailed
-                    var failureMetadata = latestTurboQuantFailureMetadata
+                    let telemetrySnapshot = latestTurboQuantTelemetry.snapshot()
+                    var failureMetadata = telemetrySnapshot.failureMetadata
                     MLXRuntimeBridge.appendTurboQuantWave2Metadata(
                         to: &failureMetadata,
                         cache: nil,
                         request: request,
                         install: install,
                         profile: profile,
-                        contextPlan: latestTurboQuantContextPlan,
-                        admissionPlan: latestTurboQuantAdmissionPlan,
+                        contextPlan: telemetrySnapshot.contextPlan,
+                        admissionPlan: telemetrySnapshot.admissionPlan,
                         memoryCounters: deviceMonitor.memoryCounters(),
                         outcome: calibrationOutcome,
                         failureKind: failureKind,
                         failureMessage: failureMessage,
-                        inputTokens: latestTurboQuantInputTokens,
-                        outputTokens: latestTurboQuantOutputTokens
+                        inputTokens: telemetrySnapshot.inputTokens,
+                        outputTokens: telemetrySnapshot.outputTokens
                     )
                     #if DEBUG
                     await FreezeBreadcrumbJournal.shared.record(
@@ -3515,7 +3566,7 @@ private actor MLXRuntimeState {
                     )
                     #endif
                     continuation.yield(
-                        .failure(
+                        InferenceStreamEvent.failure(
                             InferenceStreamFailure(
                                 code: failureKind.rawValue,
                                 message: failureMessage,
@@ -3534,9 +3585,9 @@ private actor MLXRuntimeState {
             }
         }
         #else
-        return AsyncThrowingStream { continuation in
+        return AsyncThrowingStream<InferenceStreamEvent, Error>(bufferingPolicy: .unbounded) { continuation in
             continuation.yield(
-                .failure(
+                InferenceStreamEvent.failure(
                     InferenceStreamFailure(
                         code: "mlx_unlinked",
                         message: "MLX runtime packages are not linked in this build.",
@@ -3739,6 +3790,115 @@ private actor MLXRuntimeState {
         turboQuantAdmissionPlan: LocalRuntimeAdmissionPlan? = nil,
         promptTokenCount: Int = 0
     ) -> GenerateParameters {
+        func modelShape(for install: ModelInstall) -> (
+            layerCount: Int,
+            kvHeadCount: Int,
+            headDimension: Int
+        ) {
+            let parameterCount = install.parameterCount ?? 3_000_000_000
+            let headDimension = install.keyHeadDimension ?? install.valueHeadDimension ?? 128
+            if parameterCount <= 1_500_000_000 {
+                return (24, 8, headDimension)
+            }
+            if parameterCount <= 3_500_000_000 {
+                return (28, 8, headDimension)
+            }
+            if parameterCount <= 9_000_000_000 {
+                return (32, 8, headDimension)
+            }
+            return (48, 8, headDimension)
+        }
+
+        func intClamped(_ value: Int64?) -> Int? {
+            guard let value else { return nil }
+            if value <= 0 { return 0 }
+            if value >= Int64(Int.max) { return Int.max }
+            return Int(value)
+        }
+
+        func modelMemoryProfile(for install: ModelInstall) -> MLXLMCommon.ModelMemoryProfile? {
+            if let localURL = install.localURL,
+               let profile = try? MLXLMCommon.ModelMemoryProfile.profile(
+                   modelDirectory: localURL,
+                   modelID: install.repository
+               ) {
+                return profile
+            }
+
+            let shape = modelShape(for: install)
+            let hiddenSize = max(shape.headDimension, shape.headDimension * max(1, shape.kvHeadCount * 4))
+            return MLXLMCommon.ModelMemoryProfile(
+                modelID: install.repository,
+                modelType: install.modelType ?? install.textConfigModelType ?? "unknown",
+                layerCount: shape.layerCount,
+                hiddenSize: hiddenSize,
+                attentionHeadCount: max(1, hiddenSize / max(1, shape.headDimension)),
+                kvHeadCount: shape.kvHeadCount,
+                headDimension: shape.headDimension,
+                quantizationBits: MLXLMCommon.ModelMemoryProfile.detectQuantizationBits(modelID: install.repository),
+                isMixtureOfExperts: (install.routedExperts ?? 0) > 1,
+                expertCount: install.routedExperts,
+                activeExpertCount: install.expertsPerToken,
+                weightBytes: intClamped(install.estimatedBytes)
+            )
+        }
+
+        func turboQuantUserMode(
+            from mode: PinesCore.TurboQuantUserMode
+        ) -> MLXLMCommon.TurboQuantUserMode {
+            switch mode {
+            case .fastest:
+                .fastest
+            case .balanced:
+                .balanced
+            case .maxContext:
+                .maxContext
+            case .batterySaver:
+                .batterySaver
+            }
+        }
+
+        func makeMLXTurboQuantFallbackPolicy(
+            from contract: PinesCore.TurboQuantFallbackContract
+        ) -> MLXLMCommon.TurboQuantFallbackPolicy {
+            if contract.failIfCompressedPathUnavailable {
+                return .exactRequired
+            }
+            if contract.allowDecodedLayerLocalFallback || contract.allowFullDecodedFallback {
+                return .compressedDecodeAllowed
+            }
+            if contract.allowPackedFallback {
+                return .packedAllowed
+            }
+            return .exactRequired
+        }
+
+        func makeMLXTurboQuantFallbackPolicy(
+            from policy: PinesCore.TurboQuantFallbackPolicy
+        ) -> MLXLMCommon.TurboQuantFallbackPolicy {
+            switch policy {
+            case .exactRequired:
+                .exactRequired
+            case .packedAllowed:
+                .packedAllowed
+            case .compressedDecodeAllowed:
+                .compressedDecodeAllowed
+            case .fatalOnFailure:
+                .fatalOnFailure
+            }
+        }
+
+        func turboQuantPerCacheResidentBudgetBytes() -> Int? {
+            guard let admissionPlan = turboQuantAdmissionPlan else { return nil }
+            let layerCount = install.map { modelShape(for: $0).layerCount } ?? 1
+            let totalResidentBytes =
+                admissionPlan.memoryZones.compressedKVBytes
+                + admissionPlan.memoryZones.rawShadowBytes
+                + admissionPlan.memoryZones.packedFallbackBytes
+                + admissionPlan.memoryZones.decodedFallbackScratchBytes
+            return intClamped(max(1, totalResidentBytes / Int64(max(1, layerCount))))
+        }
+
         let turboQuantSeed: UInt64? =
             profile.quantization.kvCacheStrategy == .turboQuant
             ? MLX.TurboQuantConfiguration.deterministicSeed(
@@ -3747,12 +3907,15 @@ private actor MLXRuntimeState {
                 cacheLayoutVersion: 3
             )
             : nil
-        let turboQuantFallbackPolicy =
-            turboQuantAdmissionPlan.map { mlxTurboQuantFallbackPolicy(from: $0.fallbackContract) }
-            ?? profile.quantization.turboQuantAdmission?.memoryPlan
-                .map { mlxTurboQuantFallbackPolicy(from: $0.fallbackPolicy) }
-            ?? .compressedDecodeAllowed
-        let turboQuantAdmissionProfile = install.flatMap { mlxModelMemoryProfile(for: $0) }
+        let turboQuantFallbackPolicy: MLXLMCommon.TurboQuantFallbackPolicy
+        if let admissionPlan = turboQuantAdmissionPlan {
+            turboQuantFallbackPolicy = makeMLXTurboQuantFallbackPolicy(from: admissionPlan.fallbackContract)
+        } else if let fallbackPolicy = profile.quantization.turboQuantAdmission?.memoryPlan?.fallbackPolicy {
+            turboQuantFallbackPolicy = makeMLXTurboQuantFallbackPolicy(from: fallbackPolicy)
+        } else {
+            turboQuantFallbackPolicy = .compressedDecodeAllowed
+        }
+        let turboQuantAdmissionProfile = install.flatMap { modelMemoryProfile(for: $0) }
         let turboQuantRequestedContextLength =
             turboQuantAdmissionPlan?.admittedContextTokens
             ?? profile.quantization.turboQuantAdmission?.admittedContextLength
@@ -3765,24 +3928,21 @@ private actor MLXRuntimeState {
             kvBits: profile.quantization.kvCacheStrategy == .turboQuant ? nil : profile.quantization.kvBits,
             kvGroupSize: profile.quantization.kvGroupSize,
             quantizedKVStart: profile.quantization.quantizedKVStart,
-            kvCacheStrategy: mlxKVCacheStrategy(from: profile.quantization.kvCacheStrategy),
-            turboQuantPreset: mlxTurboQuantPreset(from: profile.quantization.preset),
-            turboQuantBackend: mlxTurboQuantBackend(from: profile.quantization.requestedBackend),
-            turboQuantOptimizationPolicy: mlxTurboQuantOptimizationPolicy(
+            kvCacheStrategy: Self.mlxKVCacheStrategy(from: profile.quantization.kvCacheStrategy),
+            turboQuantPreset: Self.mlxTurboQuantPreset(from: profile.quantization.preset),
+            turboQuantBackend: Self.mlxTurboQuantBackend(from: profile.quantization.requestedBackend),
+            turboQuantOptimizationPolicy: Self.mlxTurboQuantOptimizationPolicy(
                 from: profile.quantization.turboQuantOptimizationPolicy
             ),
             turboQuantSeed: turboQuantSeed,
-            turboQuantValueBits: resolvedTurboQuantValueBits(for: profile, install: install),
+            turboQuantValueBits: Self.resolvedTurboQuantValueBits(for: profile, install: install),
             turboQuantAdmissionPolicy: .automatic,
             turboQuantAdmission: nil,
-            turboQuantPerCacheResidentBudgetBytes: mlxTurboQuantPerCacheResidentBudgetBytes(
-                admissionPlan: turboQuantAdmissionPlan,
-                install: install
-            ),
+            turboQuantPerCacheResidentBudgetBytes: turboQuantPerCacheResidentBudgetBytes(),
             turboQuantAdmissionProfile: turboQuantAdmissionProfile,
             turboQuantRequestedContextLength: turboQuantRequestedContextLength,
             turboQuantPromptTokenCount: promptTokenCount,
-            turboQuantUserMode: mlxTurboQuantUserMode(
+            turboQuantUserMode: turboQuantUserMode(
                 from: turboQuantAdmissionPlan?.selectedMode
                     ?? profile.quantization.turboQuantAdmission?.selectedMode
                     ?? profile.quantization.turboQuantUserMode

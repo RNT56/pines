@@ -23,9 +23,9 @@ loop.
   - `mlx-swift-lm`: `6b15298efa1fe3db8cb78e15cd2b6bdb95b29075`.
 - Final local MLX Wave 7 branches were committed but not reachable remotely:
   - `mlx-swift` `tq/wave7-core-platform` at
-    `d8725e195fd4e0d0cedb3acdca5d1a8327377c19`;
+    `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772`;
   - `mlx-swift-lm` `tq/wave7-lm-platform` at
-    `beca69f07458b3c04075f0adaf31ef3908629d66`.
+    `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`.
 - `compatibility-pair.json` remained `pending`.
 - The only connected physical device reported by `xcrun xctrace list devices`
   was a Mac-class device. The iPhone-class device was offline, so the required
@@ -57,8 +57,8 @@ or promote Verified/Certified product claims while release gates remain open.
   - `RNT56/mlx-swift-lm` branch `tq/wave7-lm-platform`.
 - Created Pines branch `tq/integration-pin-mlx-production`.
 - Promoted Pines production pins to the final Wave 7 pair:
-  - `mlx-swift`: `d8725e195fd4e0d0cedb3acdca5d1a8327377c19`;
-  - `mlx-swift-lm`: `beca69f07458b3c04075f0adaf31ef3908629d66`.
+  - `mlx-swift`: `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772`;
+  - `mlx-swift-lm`: `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`.
 - Regenerated the Xcode project with `scripts/ci/xcodegen.sh generate`.
 - Updated the Xcode package lockfile to the same pair.
 - Updated `MLXRuntimeBridge.turboQuantCompatibilityPairID` so run decisions,

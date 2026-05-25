@@ -15,6 +15,8 @@ xcode_package_flags=(
   -skipPackagePluginValidation
   -onlyUsePackageVersionsFromResolvedFile
   -disableAutomaticPackageResolution
+  -scmProvider
+  system
 )
 
 mkdir -p "$log_dir"
