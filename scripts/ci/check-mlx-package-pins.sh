@@ -8,6 +8,10 @@ MLX_SWIFT_LM_MIN_REVISION="861a9bd0e581317ddfce7446d306cbbb7916a75f"
 MLX_SWIFT_NESTED_MLX_REVISION="75b756717154890033209aaba4ffc89b113c5998"
 MLX_SWIFT_NESTED_MLX_C_REVISION="2abc34daff6ded246054d9e15b98870b5cd08b97"
 PROJECT_FILE="Pines.xcodeproj/project.pbxproj"
+XCODE_PACKAGE_RESOLVED="Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+TURBOQUANT_DOC="docs/TURBOQUANT.md"
+COMPATIBILITY_PAIR_JSON="docs/turboquant-implementation/compatibility-pair.json"
+MLX_RUNTIME_BRIDGE="Pines/Runtime/MLXRuntimeBridge.swift"
 
 OLD_MLX_SWIFT_REVISIONS=(
   "8f0718404a323698c7b5730f2de3af2b5e21f854"
@@ -71,6 +75,22 @@ pbxproj_revision() {
     }
     in_package && $0 ~ /^\t\t};/ { exit }
   ' "$PROJECT_FILE"
+}
+
+package_resolved_revision() {
+  local identity="$1"
+  python3 - "$XCODE_PACKAGE_RESOLVED" "$identity" <<'PY'
+import json
+import sys
+
+path, identity = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+for pin in data.get("pins", []):
+    if pin.get("identity") == identity:
+        print(pin.get("state", {}).get("revision", ""))
+        break
+PY
 }
 
 require_sha() {
@@ -149,11 +169,15 @@ project_mlx_swift_revision="$(project_yml_revision MLXSwift)"
 project_mlx_swift_lm_revision="$(project_yml_revision MLXSwiftLM)"
 pbx_mlx_swift_revision="$(pbxproj_revision mlx-swift)"
 pbx_mlx_swift_lm_revision="$(pbxproj_revision mlx-swift-lm)"
+xcode_resolved_mlx_swift_revision="$(package_resolved_revision mlx-swift)"
+xcode_resolved_mlx_swift_lm_revision="$(package_resolved_revision mlx-swift-lm)"
 
 require_sha "project.yml mlx-swift" "$project_mlx_swift_revision"
 require_sha "project.yml mlx-swift-lm" "$project_mlx_swift_lm_revision"
 require_sha "Pines.xcodeproj mlx-swift" "$pbx_mlx_swift_revision"
 require_sha "Pines.xcodeproj mlx-swift-lm" "$pbx_mlx_swift_lm_revision"
+require_sha "Xcode Package.resolved mlx-swift" "$xcode_resolved_mlx_swift_revision"
+require_sha "Xcode Package.resolved mlx-swift-lm" "$xcode_resolved_mlx_swift_lm_revision"
 
 if [[ "$project_mlx_swift_revision" != "$pbx_mlx_swift_revision" ]]; then
   fail "project.yml and Pines.xcodeproj disagree for mlx-swift: $project_mlx_swift_revision vs $pbx_mlx_swift_revision."
@@ -161,15 +185,41 @@ fi
 if [[ "$project_mlx_swift_lm_revision" != "$pbx_mlx_swift_lm_revision" ]]; then
   fail "project.yml and Pines.xcodeproj disagree for mlx-swift-lm: $project_mlx_swift_lm_revision vs $pbx_mlx_swift_lm_revision."
 fi
+if [[ "$project_mlx_swift_revision" != "$xcode_resolved_mlx_swift_revision" ]]; then
+  fail "project.yml and Xcode Package.resolved disagree for mlx-swift: $project_mlx_swift_revision vs $xcode_resolved_mlx_swift_revision."
+fi
+if [[ "$project_mlx_swift_lm_revision" != "$xcode_resolved_mlx_swift_lm_revision" ]]; then
+  fail "project.yml and Xcode Package.resolved disagree for mlx-swift-lm: $project_mlx_swift_lm_revision vs $xcode_resolved_mlx_swift_lm_revision."
+fi
+
+expected_pair_id="mlx-swift-${project_mlx_swift_revision}+mlx-swift-lm-${project_mlx_swift_lm_revision}"
 
 for revision in "${OLD_MLX_SWIFT_REVISIONS[@]}"; do
   require_absent project.yml "$revision" "project.yml still references an obsolete mlx-swift revision."
   require_absent "$PROJECT_FILE" "$revision" "Generated Xcode project still references an obsolete mlx-swift revision."
+  require_absent "$XCODE_PACKAGE_RESOLVED" "$revision" "Xcode Package.resolved still references an obsolete mlx-swift revision."
 done
 for revision in "${OLD_MLX_SWIFT_LM_REVISIONS[@]}"; do
   require_absent project.yml "$revision" "project.yml still references an obsolete mlx-swift-lm revision."
   require_absent "$PROJECT_FILE" "$revision" "Generated Xcode project still references an obsolete mlx-swift-lm revision."
+  require_absent "$XCODE_PACKAGE_RESOLVED" "$revision" "Xcode Package.resolved still references an obsolete mlx-swift-lm revision."
 done
+
+if ! grep -q "$project_mlx_swift_revision" "$TURBOQUANT_DOC"; then
+  fail "$TURBOQUANT_DOC does not document the pinned mlx-swift revision $project_mlx_swift_revision."
+fi
+if ! grep -q "$project_mlx_swift_lm_revision" "$TURBOQUANT_DOC"; then
+  fail "$TURBOQUANT_DOC does not document the pinned mlx-swift-lm revision $project_mlx_swift_lm_revision."
+fi
+if ! grep -q "$project_mlx_swift_revision" "$COMPATIBILITY_PAIR_JSON"; then
+  fail "$COMPATIBILITY_PAIR_JSON does not record the pinned mlx-swift revision $project_mlx_swift_revision."
+fi
+if ! grep -q "$project_mlx_swift_lm_revision" "$COMPATIBILITY_PAIR_JSON"; then
+  fail "$COMPATIBILITY_PAIR_JSON does not record the pinned mlx-swift-lm revision $project_mlx_swift_lm_revision."
+fi
+if ! grep -q "$expected_pair_id" "$MLX_RUNTIME_BRIDGE"; then
+  fail "$MLX_RUNTIME_BRIDGE does not expose the expected compatibility pair ID $expected_pair_id."
+fi
 
 verify_not_below_minimum "mlx-swift" "$MLX_SWIFT_REPO" "$project_mlx_swift_revision" "$MLX_SWIFT_MIN_REVISION"
 verify_not_below_minimum "mlx-swift-lm" "$MLX_SWIFT_LM_REPO" "$project_mlx_swift_lm_revision" "$MLX_SWIFT_LM_MIN_REVISION"

@@ -11,8 +11,8 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 - iOS memory warnings soft-recover through the runtime bridge while active generation still has emergency headroom; otherwise they stop the active local run and unload transient MLX containers.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `21002cb84fe37204b7cab3fbb363ecbc260bf6a4`
-  - `RNT56/mlx-swift-lm`: `6b15298efa1fe3db8cb78e15cd2b6bdb95b29075`
+  - `RNT56/mlx-swift`: `d8725e195fd4e0d0cedb3acdca5d1a8327377c19`
+  - `RNT56/mlx-swift-lm`: `beca69f07458b3c04075f0adaf31ef3908629d66`
   - Nested `mlx` inside `RNT56/mlx-swift`: `75b756717154890033209aaba4ffc89b113c5998`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, a tiled online fused decode path for admitted 64/80/96/112/128/192/240/256 head dimensions, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.

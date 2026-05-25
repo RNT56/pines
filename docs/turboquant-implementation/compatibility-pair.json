@@ -3,20 +3,20 @@
   "status": "pending",
   "pines": {
     "repo": "pines",
-    "branch": "tq/integration-runtime-bridge",
-    "commit": "5266cd7e958891ff889019c8f9762e233f62017a",
+    "branch": "tq/integration-pin-mlx-production",
+    "commit": "b410ae901ad92e969f46d482a01f12d1f9058851",
     "dirtyAtValidation": false
   },
   "mlxSwift": {
     "repo": "mlx-swift",
-    "branch": "codex/turboquant-core-completion",
-    "commit": "21002cb84fe37204b7cab3fbb363ecbc260bf6a4",
+    "branch": "tq/wave7-core-platform",
+    "commit": "d8725e195fd4e0d0cedb3acdca5d1a8327377c19",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
-    "branch": "codex/turboquant-completion-hardening",
-    "commit": "6b15298efa1fe3db8cb78e15cd2b6bdb95b29075",
+    "branch": "tq/wave7-lm-platform",
+    "commit": "beca69f07458b3c04075f0adaf31ef3908629d66",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -155,6 +155,54 @@
       "command": "swift test --filter TurboQuantRuntimeFailureTests && swift test --filter TurboQuantCacheRuntimeSnapshotTests && swift test --filter TurboQuantAdmissionPlannerTests",
       "result": "passed",
       "notes": "Wave 2 sidecar validation passed 17 focused Wave 1 prerequisite tests."
+    },
+    {
+      "repo": "pines",
+      "command": "swift build --disable-automatic-resolution",
+      "result": "passed",
+      "notes": "Wave 3.5 production pin branch builds after promoting project.yml and generated Xcode package references to the final Wave 7 MLX pair."
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --disable-automatic-resolution",
+      "result": "passed",
+      "notes": "Full SwiftPM test suite passed with 189 tests on the production pin branch."
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": "PinesCoreTestRunner passed after pin promotion."
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Pin guard now verifies project.yml, generated Xcode package references, Xcode Package.resolved, docs/TURBOQUANT.md, compatibility-pair.json, and MLXRuntimeBridge compatibility pair ID."
+    },
+    {
+      "repo": "pines",
+      "command": "python3 -m json.tool docs/turboquant-implementation/compatibility-pair.json && jsonschema.validate(...)",
+      "result": "passed",
+      "notes": "Compatibility pair JSON parses and validates against the local schema after adding productionPinPromotion metadata."
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/xcodegen.sh generate && bash scripts/ci/run-xcode-validation.sh prepare/generate/finalize",
+      "result": "passed",
+      "notes": "Generated project and package-lock drift checks pass after normalizing the pre-existing scheme drift."
+    },
+    {
+      "repo": "pines",
+      "command": "xcodebuild -resolvePackageDependencies -project Pines.xcodeproj -scheme Pines",
+      "result": "failed",
+      "notes": "Still times out with only the command-line invocation emitted; no xcodebuild or XCBBuildService process remains after timeout cleanup."
+    },
+    {
+      "repo": "pines",
+      "command": "xcrun xctrace list devices",
+      "result": "skipped",
+      "notes": "No online iPhone-class device was available. The only iPhone-class physical device was listed offline, so the required real-device verified tuple could not be produced in this workspace."
     }
   ],
   "signoffs": {
@@ -178,12 +226,21 @@
     }
   },
   "notes": [
-    "Pending validation. Do not use this file as production evidence until status is green.",
     "Wave 2 INT-2A updated project.yml, generated Xcode project pins, Xcode Package.resolved, and docs/TURBOQUANT.md to the validated Wave 1 MLX pair.",
     "The Pines commit recorded here is the committed Wave 2 runtime-bridge integration including the post-audit admission metadata hardening. The compatibility pair remains pending because full local Xcode app validation could not complete in this workspace.",
     "Wave 0 blockers resolved: core contracts are in explicit files, LM typed errors are present, product TurboQuant generation requires throwing models, Pines reuses existing TurboQuant DTOs, and fallback-contract hashes are implemented.",
     "Wave 1 prerequisites validated: core contracts/router, LM runtime failures/cache snapshots/admission planner, and PinesCore control-plane tests passed.",
-    "This manifest is not a production pin promotion.",
-    "Full Xcode validation could not complete because local xcodebuild idled with no child compiler or fetch process; status remains pending."
-  ]
+    "Full Xcode validation could not complete because local xcodebuild idled with no child compiler or fetch process; status remains pending.",
+    "Wave 3.5 source pin surface has been promoted to the final Wave 7 MLX branches, and project.yml, generated Xcode project references, Xcode Package.resolved, runtime compatibility pair ID, docs/TURBOQUANT.md, and this manifest are synchronized to that pair.",
+    "Status remains pending rather than green because this workspace has no online iPhone-class real device available for the required verified tuple, and full local Xcode package/app validation is still blocked by xcodebuild package-resolution stalling.",
+    "Do not use this manifest to promote Verified or Certified product claims until the releaseGate is closed."
+  ],
+  "productionPinPromotion": {
+    "branch": "tq/integration-pin-mlx-production",
+    "status": "pin-surface-promoted-release-gates-pending",
+    "pinnedMLXSwift": "d8725e195fd4e0d0cedb3acdca5d1a8327377c19",
+    "pinnedMLXSwiftLM": "beca69f07458b3c04075f0adaf31ef3908629d66",
+    "compatibilityPairID": "mlx-swift-d8725e195fd4e0d0cedb3acdca5d1a8327377c19+mlx-swift-lm-beca69f07458b3c04075f0adaf31ef3908629d66",
+    "releaseGate": "pending real-device verified tuple and full Xcode package/app validation"
+  }
 }

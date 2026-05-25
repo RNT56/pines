@@ -372,7 +372,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-21002cb84fe37204b7cab3fbb363ecbc260bf6a4+mlx-swift-lm-6b15298efa1fe3db8cb78e15cd2b6bdb95b29075"
+        "mlx-swift-d8725e195fd4e0d0cedb3acdca5d1a8327377c19+mlx-swift-lm-beca69f07458b3c04075f0adaf31ef3908629d66"
 
     private let state = MLXRuntimeState()
     private let deviceMonitor = DeviceRuntimeMonitor()

@@ -25,6 +25,26 @@
     "pines": { "$ref": "#/$defs/repoRef" },
     "mlxSwift": { "$ref": "#/$defs/repoRef" },
     "mlxSwiftLM": { "$ref": "#/$defs/repoRef" },
+    "productionPinPromotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch",
+        "status",
+        "pinnedMLXSwift",
+        "pinnedMLXSwiftLM",
+        "compatibilityPairID",
+        "releaseGate"
+      ],
+      "properties": {
+        "branch": { "type": "string" },
+        "status": { "type": "string" },
+        "pinnedMLXSwift": { "type": "string" },
+        "pinnedMLXSwiftLM": { "type": "string" },
+        "compatibilityPairID": { "type": "string" },
+        "releaseGate": { "type": "string" }
+      }
+    },
     "schemaSet": {
       "type": "object",
       "additionalProperties": { "type": "integer" }

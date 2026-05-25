@@ -63,6 +63,17 @@ Machine-readable compatibility-pair files:
 - [compatibility-pair.schema.json](compatibility-pair.schema.json)
 - [compatibility-pair.json](compatibility-pair.json)
 
+Wave handoff logs:
+
+- [Wave 1 Changelog](Wave1-changelog.md)
+- [Wave 2 Changelog](Wave2-changelog.md)
+- [Wave 3 Changelog](Wave3-changelog.md)
+- [Wave 3.5 Changelog](Wave3.5-changelog.md)
+- [Wave 4 Changelog](Wave4-changelog.md)
+- [Wave 5 Changelog](Wave5-changelog.md)
+- [Wave 6 Changelog](Wave6-changelog.md)
+- [Wave 7 Changelog](Wave7-changelog.md)
+
 ## Non-negotiable rules
 
 These apply to all repos and all branches.
@@ -89,9 +100,8 @@ These apply to all repos and all branches.
 | MVP 5 | Speculative TurboQuant | tentative cache append is rollback-safe; accepted tokens match target; poor acceptance disables speculation; Fast mode improves p50 decode speed |
 | MVP 6 | Platform unlocks | adaptive precision, semantic memory, multimodal memory, agents, open format, device mesh, and personalization/adapters |
 
-Wave 7 progress is tracked in [Wave 7 Changelog](Wave7-changelog.md). Wave 7
-implements W29+/MVP 6 platform contracts end to end while keeping every platform
-feature disabled by default, kill-switched, and evidence-required.
+Wave 7 implements W29+/MVP 6 platform contracts end to end while keeping every
+platform feature disabled by default, kill-switched, and evidence-required.
 
 ## Implementation principle
 
