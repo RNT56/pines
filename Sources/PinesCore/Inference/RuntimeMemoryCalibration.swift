@@ -209,3 +209,135 @@ public struct RuntimeMemoryCalibrationSummary: Hashable, Codable, Sendable {
         self.updatedAt = calibration.updatedAt
     }
 }
+
+public struct RuntimeMemoryCalibrationAggregator: Sendable {
+    public init() {}
+
+    public func aggregate(
+        samples: [RuntimeMemoryCalibrationSample],
+        deviceClass: DevicePerformanceClass,
+        modelFamily: String,
+        attentionPath: TurboQuantAttentionPath,
+        staleAfter: Date? = nil,
+        updatedAt: Date = Date()
+    ) -> RuntimeMemoryCalibration? {
+        let matching = samples.filter {
+            $0.deviceClass == deviceClass
+                && $0.modelID.localizedCaseInsensitiveContains(modelFamily)
+                && ($0.attentionPath ?? attentionPath) == attentionPath
+        }
+        guard !matching.isEmpty else { return nil }
+
+        let peakRatios = matching.compactMap { sample -> Double? in
+            guard let observed = sample.observedPeakMemoryBytes, observed > 0 else { return nil }
+            let estimated = max(1, sample.estimatedCompressedKVBytes + sample.estimatedFallbackBytes + sample.estimatedScratchBytes)
+            return Double(observed) / Double(estimated)
+        }
+        let scratchRatios = matching.compactMap { sample -> Double? in
+            guard let actual = sample.availableMemoryAtPrefillEnd ?? sample.availableMemoryAtDecodeEnd,
+                  sample.availableMemoryAtAdmission > actual
+            else { return nil }
+            let observedDelta = sample.availableMemoryAtAdmission - actual
+            return Double(observedDelta) / Double(max(1, sample.estimatedScratchBytes))
+        }
+        let fallbackRatios = matching.compactMap { sample -> Double? in
+            guard let actual = sample.actualFallbackBytes, actual > 0 else { return nil }
+            return Double(actual) / Double(max(1, sample.estimatedFallbackBytes))
+        }
+        let warningPenalty: Int64 = matching.contains { $0.memoryWarningsSeen > 0 } ? 256 * 1_024 * 1_024 : 0
+        let minimumAdmissionMemory = matching.map(\.availableMemoryAtAdmission).min()
+        let defaultSafetyReserve: Int64 = 512 * 1_024 * 1_024
+        let baseSafetyReserve: Int64
+        if let minimumAdmissionMemory {
+            baseSafetyReserve = max(defaultSafetyReserve, minimumAdmissionMemory / 5)
+        } else {
+            baseSafetyReserve = defaultSafetyReserve
+        }
+
+        return RuntimeMemoryCalibration(
+            deviceClass: deviceClass,
+            modelFamily: modelFamily,
+            attentionPath: attentionPath,
+            sampleCount: matching.count,
+            estimatedToActualPeakRatioP95: percentile95(peakRatios, defaultValue: 1),
+            scratchMultiplier: percentile95(scratchRatios, defaultValue: 1),
+            fallbackMultiplier: percentile95(fallbackRatios, defaultValue: 1),
+            safetyReserveBytes: baseSafetyReserve + warningPenalty,
+            staleAfter: staleAfter,
+            updatedAt: updatedAt
+        )
+    }
+
+    private func percentile95(_ values: [Double], defaultValue: Double) -> Double {
+        let sorted = values.filter { $0.isFinite && $0 > 0 }.sorted()
+        guard !sorted.isEmpty else { return defaultValue }
+        let index = min(sorted.count - 1, Int((Double(sorted.count - 1) * 0.95).rounded(.up)))
+        return max(defaultValue, sorted[index])
+    }
+}
+
+public actor RuntimeMemoryCalibrationStore {
+    private var samples: [UUID: RuntimeMemoryCalibrationSample] = [:]
+    private var calibrations: [String: RuntimeMemoryCalibration] = [:]
+
+    public init(
+        samples: [RuntimeMemoryCalibrationSample] = [],
+        calibrations: [RuntimeMemoryCalibration] = []
+    ) {
+        self.samples = Dictionary(uniqueKeysWithValues: samples.map { ($0.id, $0) })
+        self.calibrations = Dictionary(uniqueKeysWithValues: calibrations.map { (Self.key($0.deviceClass, $0.modelFamily, $0.attentionPath), $0) })
+    }
+
+    public func upsertSample(_ sample: RuntimeMemoryCalibrationSample) {
+        samples[sample.id] = sample
+    }
+
+    public func upsertCalibration(_ calibration: RuntimeMemoryCalibration) {
+        calibrations[Self.key(calibration.deviceClass, calibration.modelFamily, calibration.attentionPath)] = calibration
+    }
+
+    public func aggregate(
+        deviceClass: DevicePerformanceClass,
+        modelFamily: String,
+        attentionPath: TurboQuantAttentionPath,
+        staleAfter: Date? = nil
+    ) -> RuntimeMemoryCalibration? {
+        guard let calibration = RuntimeMemoryCalibrationAggregator().aggregate(
+            samples: Array(samples.values),
+            deviceClass: deviceClass,
+            modelFamily: modelFamily,
+            attentionPath: attentionPath,
+            staleAfter: staleAfter
+        ) else {
+            return nil
+        }
+        upsertCalibration(calibration)
+        return calibration
+    }
+
+    public func calibration(
+        deviceClass: DevicePerformanceClass,
+        modelFamily: String,
+        attentionPath: TurboQuantAttentionPath,
+        at date: Date = Date()
+    ) -> RuntimeMemoryCalibration? {
+        let calibration = calibrations[Self.key(deviceClass, modelFamily, attentionPath)]
+        return calibration?.isStale(at: date) == true ? nil : calibration
+    }
+
+    public func allSamples() -> [RuntimeMemoryCalibrationSample] {
+        samples.values.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    public func allCalibrations() -> [RuntimeMemoryCalibration] {
+        calibrations.values.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private static func key(
+        _ deviceClass: DevicePerformanceClass,
+        _ modelFamily: String,
+        _ attentionPath: TurboQuantAttentionPath
+    ) -> String {
+        "\(deviceClass.rawValue)|\(modelFamily.lowercased())|\(attentionPath.rawValue)"
+    }
+}

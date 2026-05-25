@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 19
+    public static let currentVersion = 20
 
     public static let migrations: [DatabaseMigration] = [
         DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
@@ -1081,6 +1081,88 @@ public enum PinesDatabaseSchema {
         DatabaseMigration(version: 19, name: "model-install-cache-topology-support", sql: [
             "ALTER TABLE model_installs ADD COLUMN cache_topology TEXT NOT NULL DEFAULT 'standardAttention';",
             "ALTER TABLE model_installs ADD COLUMN turbo_quant_family_support TEXT NOT NULL DEFAULT 'attentionKVFull';",
+        ]),
+        DatabaseMigration(version: 20, name: "turboquant-evidence-loop", sql: [
+            """
+            CREATE TABLE IF NOT EXISTS turboquant_profile_evidence (
+                id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                evidence_level TEXT NOT NULL,
+                compatibility_pair_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                model_revision TEXT,
+                tokenizer_hash TEXT,
+                profile_hash TEXT,
+                fallback_contract_hash TEXT NOT NULL,
+                device_class TEXT NOT NULL,
+                hardware_model TEXT,
+                os_build TEXT NOT NULL,
+                user_mode TEXT NOT NULL,
+                turboquant_preset TEXT,
+                value_bits INTEGER,
+                group_size INTEGER,
+                layout_version INTEGER,
+                active_attention_path TEXT,
+                admitted_context_tokens INTEGER NOT NULL,
+                peak_memory_bytes INTEGER NOT NULL,
+                prompt_tokens_per_second REAL,
+                decode_tokens_per_second_p50 REAL,
+                decode_tokens_per_second_p95 REAL,
+                first_token_latency_ms REAL,
+                quality_gate_json TEXT NOT NULL,
+                memory_calibration_sample_id TEXT,
+                revoked_reason TEXT,
+                created_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS turboquant_evidence_revocations (
+                id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                evidence_id TEXT NOT NULL REFERENCES turboquant_profile_evidence(id) ON DELETE CASCADE,
+                revoked_at REAL NOT NULL,
+                reason TEXT NOT NULL,
+                replacement_evidence_id TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS turboquant_memory_calibration_samples (
+                id TEXT PRIMARY KEY NOT NULL,
+                sample_json TEXT NOT NULL,
+                compatibility_pair_id TEXT,
+                model_id TEXT NOT NULL,
+                model_revision TEXT,
+                device_class TEXT NOT NULL,
+                user_mode TEXT NOT NULL,
+                attention_path TEXT,
+                run_outcome TEXT NOT NULL,
+                requested_context_tokens INTEGER NOT NULL,
+                admitted_context_tokens INTEGER NOT NULL,
+                observed_peak_memory_bytes INTEGER,
+                memory_warnings_seen INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS turboquant_memory_calibrations (
+                id TEXT PRIMARY KEY NOT NULL,
+                calibration_json TEXT NOT NULL,
+                device_class TEXT NOT NULL,
+                model_family TEXT NOT NULL,
+                attention_path TEXT NOT NULL,
+                sample_count INTEGER NOT NULL,
+                estimated_to_actual_peak_ratio_p95 REAL NOT NULL,
+                scratch_multiplier REAL NOT NULL,
+                fallback_multiplier REAL NOT NULL,
+                safety_reserve_bytes INTEGER NOT NULL,
+                stale_after REAL,
+                updated_at REAL NOT NULL
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_lookup ON turboquant_profile_evidence(model_id, compatibility_pair_id, device_class, user_mode, fallback_contract_hash, evidence_level, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_tuple ON turboquant_profile_evidence(model_id, model_revision, tokenizer_hash, profile_hash, layout_version, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_memory_samples_lookup ON turboquant_memory_calibration_samples(model_id, device_class, user_mode, attention_path, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_memory_calibrations_lookup ON turboquant_memory_calibrations(device_class, model_family, attention_path, updated_at DESC);",
         ]),
     ]
 }

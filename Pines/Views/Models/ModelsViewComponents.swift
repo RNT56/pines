@@ -837,14 +837,76 @@ struct ModelDetailView: View {
 
     private var compatibilityCard: some View {
         PinesCardSection("Compatibility", subtitle: "Warnings surfaced before install or execution.", systemImage: "exclamationmark.triangle") {
+            Label(model.runtimeCompatibilityState.title, systemImage: model.runtimeCompatibilityState.systemImage)
+                .font(theme.typography.callout.weight(.semibold))
+                .foregroundStyle(model.runtimeCompatibilityState.tint(in: theme))
+                .lineLimit(2)
+                .minimumScaleFactor(0.86)
+                .pinesSurface(.inset, padding: theme.spacing.small)
+
             ForEach(model.compatibilityWarnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .font(theme.typography.callout)
-                    .foregroundStyle(model.install.verification == .unsupported ? theme.colors.danger : theme.colors.warning)
+                    .foregroundStyle(model.runtimeCompatibilityState == .unsupported ? theme.colors.danger : theme.colors.warning)
                     .lineLimit(3)
                     .minimumScaleFactor(0.86)
                     .pinesSurface(.inset, padding: theme.spacing.small)
             }
+        }
+    }
+}
+
+private extension RuntimeCompatibilityState {
+    var title: String {
+        switch self {
+        case .verified:
+            "Verified by benchmark evidence"
+        case .conservative:
+            "Conservative"
+        case .unverified:
+            "Unverified"
+        case .unsupported:
+            "Unsupported"
+        case .degraded:
+            "Degraded"
+        case .benchmarkRequired:
+            "Benchmark required"
+        case .revoked:
+            "Revoked"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .verified:
+            "checkmark.seal.fill"
+        case .conservative:
+            "shield"
+        case .unverified:
+            "questionmark.circle"
+        case .unsupported:
+            "xmark.octagon"
+        case .degraded:
+            "arrow.down.forward.circle"
+        case .benchmarkRequired:
+            "speedometer"
+        case .revoked:
+            "exclamationmark.octagon"
+        }
+    }
+
+    func tint(in theme: PinesTheme) -> Color {
+        switch self {
+        case .verified:
+            theme.colors.success
+        case .conservative:
+            theme.colors.accent
+        case .unverified:
+            theme.colors.secondaryText
+        case .unsupported, .revoked:
+            theme.colors.danger
+        case .degraded, .benchmarkRequired:
+            theme.colors.warning
         }
     }
 }

@@ -136,6 +136,68 @@ extension GRDBPinesStore {
         )
     }
 
+    static func runtimeProfileEvidence(from row: Row) -> RuntimeProfileEvidence {
+        RuntimeProfileEvidence(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            schemaVersion: row["schema_version"],
+            evidenceLevel: RuntimeEvidenceLevel(rawValue: row["evidence_level"]) ?? .unverified,
+            compatibilityPairID: row["compatibility_pair_id"],
+            modelID: row["model_id"],
+            modelRevision: row["model_revision"] as String?,
+            tokenizerHash: row["tokenizer_hash"] as String?,
+            profileHash: row["profile_hash"] as String?,
+            fallbackContractHash: row["fallback_contract_hash"],
+            deviceClass: DevicePerformanceClass(rawValue: row["device_class"]) ?? .futureVerified,
+            hardwareModel: row["hardware_model"] as String?,
+            osBuild: row["os_build"],
+            userMode: TurboQuantUserMode(rawValue: row["user_mode"]) ?? .balanced,
+            turboQuantPreset: row["turboquant_preset"] as String?,
+            valueBits: row["value_bits"] as Int?,
+            groupSize: row["group_size"] as Int?,
+            layoutVersion: row["layout_version"] as Int?,
+            activeAttentionPath: (row["active_attention_path"] as String?).flatMap(TurboQuantAttentionPath.init(rawValue:)),
+            admittedContextTokens: row["admitted_context_tokens"],
+            peakMemoryBytes: row["peak_memory_bytes"],
+            promptTokensPerSecond: row["prompt_tokens_per_second"] as Double?,
+            decodeTokensPerSecondP50: row["decode_tokens_per_second_p50"] as Double?,
+            decodeTokensPerSecondP95: row["decode_tokens_per_second_p95"] as Double?,
+            firstTokenLatencyMS: row["first_token_latency_ms"] as Double?,
+            qualityGate: decodeJSON(row["quality_gate_json"] as String?) ?? TurboQuantQualityGate(
+                benchmarkSuiteID: "unknown",
+                deterministicTop1MatchRate: 0,
+                logitKLDivergenceMean: 1_000_000,
+                logitMaxAbsErrorP95: 1_000_000,
+                noNaNOrInf: false,
+                fallbackEquivalent: false,
+                prefillExact: false,
+                gateReason: "quality gate JSON decode failed",
+                passed: false
+            ),
+            memoryCalibrationSampleID: (row["memory_calibration_sample_id"] as String?).flatMap(UUID.init(uuidString:)),
+            revokedReason: row["revoked_reason"] as String?,
+            createdAt: Date(timeIntervalSinceReferenceDate: row["created_at"])
+        )
+    }
+
+    static func runtimeEvidenceRevocation(from row: Row) -> RuntimeEvidenceRevocation {
+        RuntimeEvidenceRevocation(
+            id: UUID(uuidString: row["id"]) ?? UUID(),
+            schemaVersion: row["schema_version"],
+            evidenceID: UUID(uuidString: row["evidence_id"]) ?? UUID(),
+            revokedAt: Date(timeIntervalSinceReferenceDate: row["revoked_at"]),
+            reason: row["reason"],
+            replacementEvidenceID: (row["replacement_evidence_id"] as String?).flatMap(UUID.init(uuidString:))
+        )
+    }
+
+    static func runtimeMemoryCalibrationSample(from row: Row) -> RuntimeMemoryCalibrationSample? {
+        decodeJSON(row["sample_json"] as String?)
+    }
+
+    static func runtimeMemoryCalibration(from row: Row) -> RuntimeMemoryCalibration? {
+        decodeJSON(row["calibration_json"] as String?)
+    }
+
     static func vaultDocument(from row: Row) -> VaultDocumentRecord {
         VaultDocumentRecord(
             id: UUID(uuidString: row["id"]) ?? UUID(),

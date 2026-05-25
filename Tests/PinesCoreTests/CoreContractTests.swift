@@ -2276,7 +2276,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-        #expect(PinesDatabaseSchema.currentVersion == 19)
+        #expect(PinesDatabaseSchema.currentVersion == 20)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
         let genericProviderMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 15 })
         let projectSpacesMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 16 })

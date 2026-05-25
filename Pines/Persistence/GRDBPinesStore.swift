@@ -843,6 +843,250 @@ actor GRDBPinesStore:
         }
     }
 
+    // MARK: - TurboQuant Evidence
+
+    func upsertTurboQuantProfileEvidence(_ evidence: RuntimeProfileEvidence) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO turboquant_profile_evidence
+                    (id, schema_version, evidence_level, compatibility_pair_id, model_id,
+                     model_revision, tokenizer_hash, profile_hash, fallback_contract_hash,
+                     device_class, hardware_model, os_build, user_mode, turboquant_preset,
+                     value_bits, group_size, layout_version, active_attention_path,
+                     admitted_context_tokens, peak_memory_bytes, prompt_tokens_per_second,
+                     decode_tokens_per_second_p50, decode_tokens_per_second_p95,
+                     first_token_latency_ms, quality_gate_json, memory_calibration_sample_id,
+                     revoked_reason, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    evidence_level = excluded.evidence_level,
+                    compatibility_pair_id = excluded.compatibility_pair_id,
+                    model_id = excluded.model_id,
+                    model_revision = excluded.model_revision,
+                    tokenizer_hash = excluded.tokenizer_hash,
+                    profile_hash = excluded.profile_hash,
+                    fallback_contract_hash = excluded.fallback_contract_hash,
+                    device_class = excluded.device_class,
+                    hardware_model = excluded.hardware_model,
+                    os_build = excluded.os_build,
+                    user_mode = excluded.user_mode,
+                    turboquant_preset = excluded.turboquant_preset,
+                    value_bits = excluded.value_bits,
+                    group_size = excluded.group_size,
+                    layout_version = excluded.layout_version,
+                    active_attention_path = excluded.active_attention_path,
+                    admitted_context_tokens = excluded.admitted_context_tokens,
+                    peak_memory_bytes = excluded.peak_memory_bytes,
+                    prompt_tokens_per_second = excluded.prompt_tokens_per_second,
+                    decode_tokens_per_second_p50 = excluded.decode_tokens_per_second_p50,
+                    decode_tokens_per_second_p95 = excluded.decode_tokens_per_second_p95,
+                    first_token_latency_ms = excluded.first_token_latency_ms,
+                    quality_gate_json = excluded.quality_gate_json,
+                    memory_calibration_sample_id = excluded.memory_calibration_sample_id,
+                    revoked_reason = excluded.revoked_reason,
+                    created_at = excluded.created_at
+                """,
+                arguments: [
+                    evidence.id.uuidString,
+                    evidence.schemaVersion,
+                    evidence.evidenceLevel.rawValue,
+                    evidence.compatibilityPairID,
+                    evidence.modelID,
+                    evidence.modelRevision,
+                    evidence.tokenizerHash,
+                    evidence.profileHash,
+                    evidence.fallbackContractHash,
+                    evidence.deviceClass.rawValue,
+                    evidence.hardwareModel,
+                    evidence.osBuild,
+                    evidence.userMode.rawValue,
+                    evidence.turboQuantPreset,
+                    evidence.valueBits,
+                    evidence.groupSize,
+                    evidence.layoutVersion,
+                    evidence.activeAttentionPath?.rawValue,
+                    evidence.admittedContextTokens,
+                    evidence.peakMemoryBytes,
+                    evidence.promptTokensPerSecond,
+                    evidence.decodeTokensPerSecondP50,
+                    evidence.decodeTokensPerSecondP95,
+                    evidence.firstTokenLatencyMS,
+                    Self.encodeJSON(evidence.qualityGate) ?? "{}",
+                    evidence.memoryCalibrationSampleID?.uuidString,
+                    evidence.revokedReason,
+                    evidence.createdAt.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func turboQuantProfileEvidence(
+        modelID: String,
+        deviceClass: DevicePerformanceClass,
+        mode: TurboQuantUserMode,
+        fallbackContractHash: String
+    ) async throws -> RuntimeProfileEvidence? {
+        try await database.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                SELECT * FROM turboquant_profile_evidence
+                WHERE model_id = ?
+                    AND device_class = ?
+                    AND user_mode = ?
+                    AND fallback_contract_hash = ?
+                    AND evidence_level != ?
+                    AND revoked_reason IS NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                arguments: [
+                    modelID,
+                    deviceClass.rawValue,
+                    mode.rawValue,
+                    fallbackContractHash,
+                    RuntimeEvidenceLevel.revoked.rawValue,
+                ]
+            ).map(Self.runtimeProfileEvidence(from:))
+        }
+    }
+
+    func listTurboQuantProfileEvidence(modelID: String? = nil) async throws -> [RuntimeProfileEvidence] {
+        try await database.read { db in
+            let rows: [Row]
+            if let modelID {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM turboquant_profile_evidence WHERE model_id = ? ORDER BY created_at DESC",
+                    arguments: [modelID]
+                )
+            } else {
+                rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM turboquant_profile_evidence ORDER BY created_at DESC"
+                )
+            }
+            return rows.map(Self.runtimeProfileEvidence(from:))
+        }
+    }
+
+    func revokeTurboQuantProfileEvidence(id: UUID, reason: String, replacementEvidenceID: UUID? = nil) async throws {
+        let revocation = RuntimeEvidenceRevocation(
+            evidenceID: id,
+            reason: reason,
+            replacementEvidenceID: replacementEvidenceID
+        )
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE turboquant_profile_evidence SET evidence_level = ?, revoked_reason = ? WHERE id = ?",
+                arguments: [RuntimeEvidenceLevel.revoked.rawValue, reason, id.uuidString]
+            )
+            try db.execute(
+                sql: """
+                INSERT INTO turboquant_evidence_revocations
+                    (id, schema_version, evidence_id, revoked_at, reason, replacement_evidence_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                arguments: [
+                    revocation.id.uuidString,
+                    revocation.schemaVersion,
+                    revocation.evidenceID.uuidString,
+                    revocation.revokedAt.timeIntervalSinceReferenceDate,
+                    revocation.reason,
+                    revocation.replacementEvidenceID?.uuidString,
+                ]
+            )
+        }
+    }
+
+    func upsertRuntimeMemoryCalibrationSample(_ sample: RuntimeMemoryCalibrationSample) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO turboquant_memory_calibration_samples
+                    (id, sample_json, compatibility_pair_id, model_id, model_revision,
+                     device_class, user_mode, attention_path, run_outcome,
+                     requested_context_tokens, admitted_context_tokens,
+                     observed_peak_memory_bytes, memory_warnings_seen, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    sample_json = excluded.sample_json,
+                    compatibility_pair_id = excluded.compatibility_pair_id,
+                    model_id = excluded.model_id,
+                    model_revision = excluded.model_revision,
+                    device_class = excluded.device_class,
+                    user_mode = excluded.user_mode,
+                    attention_path = excluded.attention_path,
+                    run_outcome = excluded.run_outcome,
+                    requested_context_tokens = excluded.requested_context_tokens,
+                    admitted_context_tokens = excluded.admitted_context_tokens,
+                    observed_peak_memory_bytes = excluded.observed_peak_memory_bytes,
+                    memory_warnings_seen = excluded.memory_warnings_seen,
+                    created_at = excluded.created_at
+                """,
+                arguments: [
+                    sample.id.uuidString,
+                    Self.encodeJSON(sample) ?? "{}",
+                    sample.compatibilityPairID,
+                    sample.modelID,
+                    sample.modelRevision,
+                    sample.deviceClass.rawValue,
+                    sample.userMode.rawValue,
+                    sample.attentionPath?.rawValue,
+                    sample.runOutcome,
+                    sample.requestedContextTokens,
+                    sample.admittedContextTokens,
+                    sample.observedPeakMemoryBytes,
+                    sample.memoryWarningsSeen,
+                    sample.createdAt.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func upsertRuntimeMemoryCalibration(_ calibration: RuntimeMemoryCalibration) async throws {
+        let id = [
+            calibration.deviceClass.rawValue,
+            calibration.modelFamily.lowercased(),
+            calibration.attentionPath.rawValue,
+        ].joined(separator: "|")
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO turboquant_memory_calibrations
+                    (id, calibration_json, device_class, model_family, attention_path,
+                     sample_count, estimated_to_actual_peak_ratio_p95, scratch_multiplier,
+                     fallback_multiplier, safety_reserve_bytes, stale_after, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    calibration_json = excluded.calibration_json,
+                    sample_count = excluded.sample_count,
+                    estimated_to_actual_peak_ratio_p95 = excluded.estimated_to_actual_peak_ratio_p95,
+                    scratch_multiplier = excluded.scratch_multiplier,
+                    fallback_multiplier = excluded.fallback_multiplier,
+                    safety_reserve_bytes = excluded.safety_reserve_bytes,
+                    stale_after = excluded.stale_after,
+                    updated_at = excluded.updated_at
+                """,
+                arguments: [
+                    id,
+                    Self.encodeJSON(calibration) ?? "{}",
+                    calibration.deviceClass.rawValue,
+                    calibration.modelFamily,
+                    calibration.attentionPath.rawValue,
+                    calibration.sampleCount,
+                    calibration.estimatedToActualPeakRatioP95,
+                    calibration.scratchMultiplier,
+                    calibration.fallbackMultiplier,
+                    calibration.safetyReserveBytes,
+                    calibration.staleAfter?.timeIntervalSinceReferenceDate,
+                    calibration.updatedAt.timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
     // MARK: - Vault
 
     func listDocuments() async throws -> [VaultDocumentRecord] {

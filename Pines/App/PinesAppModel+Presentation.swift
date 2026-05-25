@@ -189,7 +189,7 @@ extension PinesAppModel {
             readiness = install.state == .installed ? 1 : (install.state == .downloading ? 0.5 : 0)
         }
 
-        let compatibilityWarnings: [String]
+        var compatibilityWarnings: [String]
         switch install.verification {
         case .unsupported:
             compatibilityWarnings = ["This repository is not compatible with the current MLX runtime profile."]
@@ -216,6 +216,30 @@ extension PinesAppModel {
                 ),
                 promptCacheIdentifier: install.repository
             )
+        let runtimeCompatibilityState = RuntimeCompatibilityState.resolve(
+            installVerification: install.verification,
+            evidence: nil,
+            admission: runtimeProfile.quantization.turboQuantAdmission,
+            requestedContextTokens: runtimeProfile.quantization.turboQuantAdmission?.requestedContextLength
+        )
+        switch runtimeCompatibilityState {
+        case .verified:
+            break
+        case .conservative:
+            compatibilityWarnings.append("Runs with conservative defaults until matching benchmark evidence is imported.")
+        case .unverified:
+            compatibilityWarnings.append("No trusted local benchmark evidence is available for this model/device/mode tuple.")
+        case .unsupported:
+            if compatibilityWarnings.isEmpty {
+                compatibilityWarnings.append("This tuple is unsupported by the current runtime profile.")
+            }
+        case .degraded:
+            compatibilityWarnings.append("Runtime will use a reduced context or fallback path for this tuple.")
+        case .benchmarkRequired:
+            compatibilityWarnings.append("Benchmark evidence is required before this tuple can make a support claim.")
+        case .revoked:
+            compatibilityWarnings.append("Previous benchmark evidence was revoked and cannot support this tuple.")
+        }
         let contextWindow: String
         if enrichRuntime,
            let admittedContext = runtimeProfile.quantization.turboQuantAdmission?.admittedContextLength,
@@ -239,7 +263,8 @@ extension PinesAppModel {
             capabilities: install.modalities.map(\.rawValue).sorted(),
             readiness: readiness,
             downloadProgress: download,
-            compatibilityWarnings: compatibilityWarnings
+            compatibilityWarnings: compatibilityWarnings,
+            runtimeCompatibilityState: runtimeCompatibilityState
         )
     }
 

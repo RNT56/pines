@@ -109,3 +109,72 @@ public struct TurboQuantQualityGate: Hashable, Codable, Sendable {
         )
     }
 }
+
+public struct TurboQuantQualityGateThresholds: Hashable, Codable, Sendable {
+    public var minimumTop1MatchRate: Double
+    public var maximumKLDivergenceMean: Double
+    public var maximumLogitMaxAbsErrorP95: Double
+    public var maximumPerplexityDeltaPercent: Double?
+    public var maximumTaskEvalDeltaPercent: Double?
+    public var minimumRetrievalNeedlePassRate: Double?
+
+    public init(
+        minimumTop1MatchRate: Double = 0.95,
+        maximumKLDivergenceMean: Double = 0.05,
+        maximumLogitMaxAbsErrorP95: Double = 0.5,
+        maximumPerplexityDeltaPercent: Double? = 5,
+        maximumTaskEvalDeltaPercent: Double? = 2,
+        minimumRetrievalNeedlePassRate: Double? = nil
+    ) {
+        self.minimumTop1MatchRate = minimumTop1MatchRate
+        self.maximumKLDivergenceMean = maximumKLDivergenceMean
+        self.maximumLogitMaxAbsErrorP95 = maximumLogitMaxAbsErrorP95
+        self.maximumPerplexityDeltaPercent = maximumPerplexityDeltaPercent
+        self.maximumTaskEvalDeltaPercent = maximumTaskEvalDeltaPercent
+        self.minimumRetrievalNeedlePassRate = minimumRetrievalNeedlePassRate
+    }
+}
+
+public struct TurboQuantQualityGateEvaluator: Sendable {
+    public var thresholds: TurboQuantQualityGateThresholds
+
+    public init(thresholds: TurboQuantQualityGateThresholds = TurboQuantQualityGateThresholds()) {
+        self.thresholds = thresholds
+    }
+
+    public func evaluated(_ gate: TurboQuantQualityGate) -> TurboQuantQualityGate {
+        var reasons: [String] = []
+        if !gate.noNaNOrInf { reasons.append("NaN or Inf detected") }
+        if !gate.prefillExact { reasons.append("prefill exactness failed") }
+        if !gate.fallbackEquivalent { reasons.append("fallback equivalence failed") }
+        if gate.deterministicTop1MatchRate < thresholds.minimumTop1MatchRate {
+            reasons.append("top-1 match below threshold")
+        }
+        if gate.logitKLDivergenceMean > thresholds.maximumKLDivergenceMean {
+            reasons.append("KL divergence above threshold")
+        }
+        if gate.logitMaxAbsErrorP95 > thresholds.maximumLogitMaxAbsErrorP95 {
+            reasons.append("p95 max logit error above threshold")
+        }
+        if let measured = gate.perplexityDeltaPercent,
+           let threshold = thresholds.maximumPerplexityDeltaPercent,
+           measured > threshold {
+            reasons.append("perplexity delta above threshold")
+        }
+        if let measured = gate.taskEvalDeltaPercent,
+           let threshold = thresholds.maximumTaskEvalDeltaPercent,
+           measured > threshold {
+            reasons.append("task eval delta above threshold")
+        }
+        if let measured = gate.retrievalNeedlePassRate,
+           let threshold = thresholds.minimumRetrievalNeedlePassRate,
+           measured < threshold {
+            reasons.append("retrieval needle pass rate below threshold")
+        }
+
+        var evaluated = gate
+        evaluated.passed = reasons.isEmpty
+        evaluated.gateReason = reasons.isEmpty ? gate.gateReason : reasons.joined(separator: "; ")
+        return evaluated
+    }
+}
