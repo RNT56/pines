@@ -10,13 +10,13 @@
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "5e8e1824ba158ad0830f85ea6d8f862dee3aad02",
+    "commit": "e07642fe9cf9c4b305a2d282d3e4a5e1e965323e",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "7fbe950c0a34f11aabd50ba43f18bedcdaf37fd4",
+    "commit": "ef88592d1a4f72b73a869bea39c627801cd13517",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -270,17 +270,17 @@
     "Wave 3.5 source pin surface has been promoted to the final Wave 7 MLX branches, and project.yml, generated Xcode project references, Xcode Package.resolved, runtime compatibility pair ID, docs/TURBOQUANT.md, and this manifest are synchronized to that pair.",
     "Compatibility-pair status is green for local release gates. This does not create any Verified or Certified model/device/mode product claim; those still require imported real-device profile evidence.",
     "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
-    "mlx-swift 5e8e1824ba158ad0830f85ea6d8f862dee3aad02 fixes the turbo8 key path by adding 5-, 6-, and 7-bit Lloyd-Max Metal codebooks and covers the 7-bit key codec plus QJL matmul against the Swift reference.",
-    "mlx-swift-lm 7fbe950c0a34f11aabd50ba43f18bedcdaf37fd4 marks conservative turbo8 Qwen/Gemma/Llama profiles as guarded rather than certified, tightens decoded fallback exactness and admission reserves, maps typed MLX TurboQuant backend errors for Pines, and pins the LM package to the corrected mlx-swift core.",
+    "mlx-swift e07642fe9cf9c4b305a2d282d3e4a5e1e965323e adds lower-bit QK product-reference coverage for turbo2_5, turbo3_5, turbo4, and turbo4v2 while retaining the turbo8 Metal codebook fix.",
+    "mlx-swift-lm ef88592d1a4f72b73a869bea39c627801cd13517 keeps lower-bit turbo4v2 and turbo3_5 profile routing guarded and conservative until certified, while preserving guarded conservative turbo8 profiles for quality-sensitive Qwen/Gemma/Llama cases.",
     "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
     "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only."
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
     "status": "release-green-local-gates-passed-layout-v5-default",
-    "pinnedMLXSwift": "5e8e1824ba158ad0830f85ea6d8f862dee3aad02",
-    "pinnedMLXSwiftLM": "7fbe950c0a34f11aabd50ba43f18bedcdaf37fd4",
-    "compatibilityPairID": "mlx-swift-5e8e1824ba158ad0830f85ea6d8f862dee3aad02+mlx-swift-lm-7fbe950c0a34f11aabd50ba43f18bedcdaf37fd4",
+    "pinnedMLXSwift": "e07642fe9cf9c4b305a2d282d3e4a5e1e965323e",
+    "pinnedMLXSwiftLM": "ef88592d1a4f72b73a869bea39c627801cd13517",
+    "compatibilityPairID": "mlx-swift-e07642fe9cf9c4b305a2d282d3e4a5e1e965323e+mlx-swift-lm-ef88592d1a4f72b73a869bea39c627801cd13517",
     "releaseGate": "closed for compatibility-pair local release gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }

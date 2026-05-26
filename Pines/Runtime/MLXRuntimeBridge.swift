@@ -423,7 +423,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-5e8e1824ba158ad0830f85ea6d8f862dee3aad02+mlx-swift-lm-7fbe950c0a34f11aabd50ba43f18bedcdaf37fd4"
+        "mlx-swift-e07642fe9cf9c4b305a2d282d3e4a5e1e965323e+mlx-swift-lm-ef88592d1a4f72b73a869bea39c627801cd13517"
     static var turboQuantLayoutVersion: Int {
         #if canImport(MLX)
         MLX.TurboQuantAttentionLayout.currentVersion
