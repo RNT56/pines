@@ -10,13 +10,13 @@
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "5a990749fae2125f7a69506b486238ab1ac166c2",
+    "commit": "210fb8983784e17276aa84f60850158535502bb4",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "233ef2f0198d6bd637fc3929cd2ae9491b53d3ce",
+    "commit": "ab52b3d978bca2eaa4fa7a4b7bc8bd9aa63fc18d",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -271,16 +271,16 @@
     "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
     "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
     "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only.",
-    "mlx-swift 5a990749fae2125f7a69506b486238ab1ac166c2 caches fused-attention query rows in threadgroup memory and moves mutable compressed-attention decode layout state out of the Metal templates for compressed decode, QK, AV, and fused decode, reducing per-token kernel-specialization churn while preserving compressed attention quality.",
-    "mlx-swift-lm 233ef2f0198d6bd637fc3929cd2ae9491b53d3ce pins the runtime-layout kernel revision, adds the Qwen3.5/Qwen3.6 Turbo8 proof and path-comparison pipeline, promotes Qwen production profiles to exact initial prefill plus throughput-oriented two-stage compressed decode, keeps turbo4v2/turbo3_5 guarded, corrects Turbo4V2 key-bit metadata across bundled and exported profiles, defaults the strict release proof to decode query length 1, and hardens compressed decode for normal transposed Q/K/V layouts, update-failure fallback, packed fallback residency, rotating single-token window masks, and Qwen 256-head throughput routing.",
-    "TurboQuantQwenProof strict Mac release proof passed locally with fp16 Turbo8, Qwen3.5 2B, 8K/16K contexts, query length 1, twoStageCompressed, 2/2 ok, and minimum compressed decode throughput 29.94 tok/s. Path comparison showed fused remains slower than two-stage for Qwen 256-head decode, so fused stays an optimization target rather than the production route; 32K remains a stress gate."
+    "mlx-swift 210fb8983784e17276aa84f60850158535502bb4 keeps runtime-layout kernel specialization stable and adds word-level packed magnitude read/write helpers shared by fused, QK, AV, decode, and encode paths. Fixed-width Turbo8/Turbo4V2 skip high-mask/popcount work, while mixed Turbo3.5 computes magnitude bit width and packed offset once before reading.",
+    "mlx-swift-lm ab52b3d978bca2eaa4fa7a4b7bc8bd9aa63fc18d pins the fused bit-path optimization, keeps Qwen3.5/Qwen3.6 Turbo8 production profiles on exact initial prefill plus throughput-oriented two-stage compressed decode, keeps turbo4v2/turbo3_5 guarded, and retains Qwen 256-head throughput routing until fused beats two-stage at p50/p95.",
+    "TurboQuantQwenProof path-comparison Mac release proof passed locally with fp16 Qwen3.5 2B, 8K/16K contexts, query length 1, Turbo8/Turbo4V2/Turbo3.5, and forced twoStage/fused paths: 12/12 ok. Current proof minimums were Turbo8 fused 20.49 tok/s at 16K, Turbo4V2 fused 29.16 tok/s at 16K, and Turbo3.5 fused 25.22 tok/s at 16K. Two-stage still wins Qwen 256-head decode and remains the production route; 32K remains a stress gate."
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
     "status": "release-green-local-qwen-proof-gates-passed",
-    "pinnedMLXSwift": "5a990749fae2125f7a69506b486238ab1ac166c2",
-    "pinnedMLXSwiftLM": "233ef2f0198d6bd637fc3929cd2ae9491b53d3ce",
-    "compatibilityPairID": "mlx-swift-5a990749fae2125f7a69506b486238ab1ac166c2+mlx-swift-lm-233ef2f0198d6bd637fc3929cd2ae9491b53d3ce",
+    "pinnedMLXSwift": "210fb8983784e17276aa84f60850158535502bb4",
+    "pinnedMLXSwiftLM": "ab52b3d978bca2eaa4fa7a4b7bc8bd9aa63fc18d",
+    "compatibilityPairID": "mlx-swift-210fb8983784e17276aa84f60850158535502bb4+mlx-swift-lm-ab52b3d978bca2eaa4fa7a4b7bc8bd9aa63fc18d",
     "releaseGate": "closed for local Qwen proof and focused compatibility gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }
