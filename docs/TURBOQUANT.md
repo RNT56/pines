@@ -52,6 +52,19 @@ The pinned pair makes Layout V5 the default TurboQuant attention layout for devi
 - Model compatibility surfaces distinguish `Unverified`, `Smoke-tested`, `Verified`, `Certified`, and `Revoked` evidence. Curated metadata alone cannot create a verified claim; evidence must match the active compatibility pair and exact tuple.
 - Runtime throughput, vault retrieval latency, memory-pressure events, and MetricKit payload availability are logged through `PinesRuntimeMetrics`.
 
+## Physical Device Evidence
+
+Latest real-device smoke validation for the active compatibility pair ran on `iPhone16,2` / A17 Pro (`7BFB7B72-C40C-58A7-B2C6-F075BDE21116`) on 2026-05-26. These runs are evidence for the exact local artifact tuple only; they do not certify lower-bit compressed attention paths.
+
+| Model | Artifact | Result | Active profile/path | Observed result |
+| --- | --- | --- | --- | --- |
+| `mlx-community/Qwen3.5-2B-OptiQ-4bit` | `ios-freeze-stress-20260526T110210Z` | Completed | `turbo8`, exact raw shadow, baseline attention | Coherent output, no repeated bigram/trigram issue, `3.27 tok/s`, first token `1.66s`, stopped at the 192-token guard. |
+| `mlx-community/gemma-3-1b-it-4bit` | `ios-freeze-stress-20260526T110605Z` | Failed stress gate | `turbo8`, exact raw shadow configured | Runtime loaded and emitted 14 tokens, but only `0.71 tok/s`; the stress harness still saw the assistant in `streaming`. |
+| `mlx-community/Llama-3.2-3B-Instruct-4bit` | `ios-freeze-stress-20260526T110703Z` | Completed | `turbo8`, exact raw shadow, baseline attention | Coherent stop, no repeated bigram/trigram issue, `0.90 tok/s`; active KV window fell to 2048 under low-memory/thermal pressure. |
+| `mlx-community/Qwen3.5-0.8B-MLX-4bit` | `ios-freeze-stress-20260526T110824Z` | Completed | `turbo8`, exact raw shadow, baseline attention | Coherent stop, no repeated bigram/trigram issue, `2.62 tok/s`, first token `1.32s`; context was thermally constrained to 4096. |
+
+Current conclusion: conservative `turbo8` plus exact raw shadow recovers correctness for the tested Qwen and Llama profiles, but it is not the intended TurboQuant speed path. Gemma 3 1B remains insufficient on real device. Lower-bit `turbo4v2`, `turbo4`, `turbo3_5`, and `turbo2_5` are covered by reference QK estimator tests in `mlx-swift`, but their MLX-LM production profiles stay `guarded` because earlier real-device compressed attention runs produced repetitive or degraded text. Promotion from `guarded` to `Verified` requires per-model evidence that the active compressed attention path, not the exact raw shadow fallback, passes repetition, stop, memory, and throughput gates.
+
 ## Fork Maintenance
 
 - Do not edit Xcode DerivedData package checkouts.
