@@ -4,19 +4,19 @@
   "pines": {
     "repo": "pines",
     "branch": "tq/real-device-evidence-acceptance",
-    "commit": "83f31d0847e7557042849a891f9eb1d1340f1a7d",
+    "commit": "branch head",
     "dirtyAtValidation": false
   },
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "e07642fe9cf9c4b305a2d282d3e4a5e1e965323e",
+    "commit": "c96dd8c7b374fa50d64b35bf8c5d7739df7d9984",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "5265a1a6ce48b25fe63848792bd11714bf962a87",
+    "commit": "110bc26b4124df915ee2eb89f9774d1d617977ab",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -40,7 +40,7 @@
     "OpenKVFormat": 1,
     "PlatformEvidenceDimensions": 1
   },
-  "validatedAt": "2026-05-26T09:31:20Z",
+  "validatedAt": "2026-05-26T13:55:00Z",
   "validationCommands": [
     {
       "repo": "pines",
@@ -267,20 +267,20 @@
     "Wave 0 blockers resolved: core contracts are in explicit files, LM typed errors are present, product TurboQuant generation requires throwing models, Pines reuses existing TurboQuant DTOs, and fallback-contract hashes are implemented.",
     "Wave 1 prerequisites validated: core contracts/router, LM runtime failures/cache snapshots/admission planner, and PinesCore control-plane tests passed.",
     "Full Xcode validation is green on the final production pin pair. The previous xcodebuild package-resolution stall was resolved by removing ignored generated build artifacts and using locked package-resolution flags.",
-    "Wave 3.5 source pin surface has been promoted to the final Wave 7 MLX branches, and project.yml, generated Xcode project references, Xcode Package.resolved, runtime compatibility pair ID, docs/TURBOQUANT.md, and this manifest are synchronized to that pair.",
     "Compatibility-pair status is green for local release gates. This does not create any Verified or Certified model/device/mode product claim; those still require imported real-device profile evidence.",
     "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
-    "mlx-swift e07642fe9cf9c4b305a2d282d3e4a5e1e965323e adds lower-bit QK product-reference coverage for turbo2_5, turbo3_5, turbo4, and turbo4v2 while retaining the turbo8 Metal codebook fix.",
-    "mlx-swift-lm 5265a1a6ce48b25fe63848792bd11714bf962a87 keeps lower-bit turbo4v2 and turbo3_5 profile routing guarded/conservative, restores exact initial prefill for quality-sensitive turbo8 profiles, keeps auto decode raw-free, and makes conservative paths prefer exact raw attention while a complete raw shadow exists.",
     "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
-    "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only."
+    "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only.",
+    "mlx-swift c96dd8c7b374fa50d64b35bf8c5d7739df7d9984 caches fused-attention query rows in threadgroup memory, reducing redundant query loads while preserving compressed attention quality.",
+    "mlx-swift-lm 110bc26b4124df915ee2eb89f9774d1d617977ab adds the Qwen3.5/Qwen3.6 Turbo8 proof pipeline, promotes Qwen production profiles to exact initial prefill plus throughput-oriented two-stage compressed decode, keeps turbo4v2/turbo3_5 guarded, and defaults the strict release proof to decode query length 1.",
+    "TurboQuantQwenProof strict release matrix passed locally with fp16 Turbo8, 8K/16K contexts, query length 1, twoStageCompressed, 10/10 ok, and minimum compressed decode throughput 23.93 tok/s; 32K remains a stress gate."
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
-    "status": "release-green-local-gates-passed-layout-v5-default",
-    "pinnedMLXSwift": "e07642fe9cf9c4b305a2d282d3e4a5e1e965323e",
-    "pinnedMLXSwiftLM": "5265a1a6ce48b25fe63848792bd11714bf962a87",
-    "compatibilityPairID": "mlx-swift-e07642fe9cf9c4b305a2d282d3e4a5e1e965323e+mlx-swift-lm-5265a1a6ce48b25fe63848792bd11714bf962a87",
-    "releaseGate": "closed for compatibility-pair local release gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
+    "status": "release-green-local-qwen-proof-gates-passed",
+    "pinnedMLXSwift": "c96dd8c7b374fa50d64b35bf8c5d7739df7d9984",
+    "pinnedMLXSwiftLM": "110bc26b4124df915ee2eb89f9774d1d617977ab",
+    "compatibilityPairID": "mlx-swift-c96dd8c7b374fa50d64b35bf8c5d7739df7d9984+mlx-swift-lm-110bc26b4124df915ee2eb89f9774d1d617977ab",
+    "releaseGate": "closed for local Qwen proof and focused compatibility gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }
