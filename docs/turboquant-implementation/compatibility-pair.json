@@ -10,13 +10,13 @@
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "1faa77e24cceced76e79a0761e8080c1ddbbfb4c",
+    "commit": "cff5d0ad87f79585ac778224c21a5278d25a4e79",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "528089ed2380b866068a70e7bf395c94de2499e0",
+    "commit": "9159b8b1341c4a471c376c9f89b3e11672849e99",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -40,7 +40,7 @@
     "OpenKVFormat": 1,
     "PlatformEvidenceDimensions": 1
   },
-  "validatedAt": "2026-05-26T16:15:17Z",
+  "validatedAt": "2026-05-26T16:55:46Z",
   "validationCommands": [
     {
       "repo": "pines",
@@ -244,7 +244,7 @@
       "repo": "pines",
       "command": "bash scripts/ci/check-mlx-package-pins.sh",
       "result": "passed",
-      "notes": "Pin guard passed after promoting Pines to mlx-swift 1faa77e24cceced76e79a0761e8080c1ddbbfb4c and mlx-swift-lm 528089ed2380b866068a70e7bf395c94de2499e0."
+      "notes": "Pin guard passed after promoting Pines to mlx-swift cff5d0ad87f79585ac778224c21a5278d25a4e79 and mlx-swift-lm 9159b8b1341c4a471c376c9f89b3e11672849e99."
     },
     {
       "repo": "pines",
@@ -262,25 +262,25 @@
       "repo": "pines",
       "command": "bash scripts/ci/run-xcode-validation.sh prepare && bash scripts/ci/run-xcode-validation.sh resolve",
       "result": "passed",
-      "notes": "Locked Xcode package resolution checked out mlx-swift 1faa77e and mlx-swift-lm 528089e with no package-lock drift."
+      "notes": "Locked Xcode package resolution checked out mlx-swift cff5d0a and mlx-swift-lm 9159b8b with no package-lock drift."
     },
     {
       "repo": "mlx-swift",
       "command": "swift test --filter TurboQuant",
       "result": "passed",
-      "notes": "Block-parallel fused partial/reduce kernels, Mac Apple silicon profile selection, p50/p95 benchmark reporting, and cross-scheme long-context fused correctness passed locally."
+      "notes": "Block-parallel fused partial/reduce kernels, Mac Apple silicon profile selection, grouped-query block fused decode, p50/p95 benchmark reporting, and cross-scheme long-context fused correctness passed locally."
     },
     {
       "repo": "mlx-swift-lm",
       "command": "swift test --filter TurboQuant",
       "result": "passed",
-      "notes": "Qwen throughput-policy routing, profile metadata, p50/p95 proof accounting, and TurboQuant cache/profile tests passed locally."
+      "notes": "Qwen throughput-policy routing, production/large-context proof accounting, profile metadata, and TurboQuant cache/profile tests passed locally."
     },
     {
       "repo": "mlx-swift-lm",
-      "command": "swift run -c release TurboQuantQwenProof --profiles qwen3.5-2b --contexts 8192,16384,32768 --query-lengths 1 --iterations 20 --dtype float16 --schemes turbo8,turbo4v2,turbo3_5 --min-extended-tokens-per-second 20 --strict --cooldown-ms 500",
+      "command": "swift run -c release TurboQuantQwenProof --profiles qwen3.5-2b --contexts 32768 --experimental-contexts 65536 --query-lengths 1 --iterations 20 --warmup 2 --dtype float16 --schemes turbo8,turbo4v2,turbo3_5 --min-extended-tokens-per-second 20 --strict --cooldown-ms 500",
       "result": "passed",
-      "notes": "Strict Mac proof passed 9/9 Qwen-shaped fused cases. P95 rates were Turbo8 52.45/39.10/22.61 tok/s, Turbo4V2 57.65/45.08/28.05 tok/s, and Turbo3.5 53.35/41.93/23.47 tok/s at 8K/16K/32K."
+      "notes": "Strict Mac proof passed 3/3 32K production Qwen-shaped fused cases. P95 rates were Turbo8 27.14 tok/s, Turbo4V2 31.85 tok/s, and Turbo3.5 28.09 tok/s. The 64K experiment rows remained below the 20 tok/s promotion floor: Turbo8 15.92 tok/s, Turbo4V2 19.12 tok/s, Turbo3.5 17.42 tok/s."
     },
     {
       "repo": "mlx-swift-lm",
@@ -319,16 +319,16 @@
     "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
     "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
     "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only.",
-    "mlx-swift 1faa77e24cceced76e79a0761e8080c1ddbbfb4c adds block-parallel fused partial/reduce attention for long-context decode, sizes partial buffers by stable cache-capacity blocks to avoid per-token kernel specialization churn, adds a Mac Apple silicon kernel profile, and reports real p50/p95 attention throughput.",
-    "mlx-swift-lm 528089ed2380b866068a70e7bf395c94de2499e0 pins the block-parallel fused core, routes Qwen3.5/Qwen3.6 Turbo8/Turbo4V2/Turbo3.5 throughput profiles through fused compressed decode after exact initial prefill, and gates production proof on p95 token rate.",
-    "TurboQuantQwenProof strict Mac release proof passed locally with fp16 Qwen3.5 2B shape, 16 query heads, 4 KV heads, 8K/16K/32K contexts, query length 1, and Turbo8/Turbo4V2/Turbo3.5: 9/9 ok. P95 minimums were Turbo8 22.61 tok/s at 32K, Turbo4V2 28.05 tok/s at 32K, and Turbo3.5 23.47 tok/s at 32K. Forced path comparison also showed fused beating two-stage at p50/p95 through 32K; 64K remains a stress target on this Mac because p95 stayed below 20 tok/s."
+    "mlx-swift cff5d0ad87f79585ac778224c21a5278d25a4e79 adds a Mac-gated grouped-query block fused kernel for Qwen-style GQA decode while keeping the portable block-partial fused path for iOS/device testing.",
+    "mlx-swift-lm 9159b8b1341c4a471c376c9f89b3e11672849e99 pins the grouped-query fused core and extends TurboQuantQwenProof with production gates plus separate large-context experiment rows for 64K/128K/256K evidence.",
+    "TurboQuantQwenProof strict Mac release proof passed locally with fp16 Qwen3.5 2B shape, 16 query heads, 4 KV heads, 32K production context, query length 1, and Turbo8/Turbo4V2/Turbo3.5: 3/3 ok. P95 rates were Turbo8 27.14 tok/s, Turbo4V2 31.85 tok/s, and Turbo3.5 28.09 tok/s at 32K. 64K remains experiment-only because p95 stayed below 20 tok/s under sustained pinned-package load."
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
     "status": "release-green-local-qwen-proof-gates-passed",
-    "pinnedMLXSwift": "1faa77e24cceced76e79a0761e8080c1ddbbfb4c",
-    "pinnedMLXSwiftLM": "528089ed2380b866068a70e7bf395c94de2499e0",
-    "compatibilityPairID": "mlx-swift-1faa77e24cceced76e79a0761e8080c1ddbbfb4c+mlx-swift-lm-528089ed2380b866068a70e7bf395c94de2499e0",
+    "pinnedMLXSwift": "cff5d0ad87f79585ac778224c21a5278d25a4e79",
+    "pinnedMLXSwiftLM": "9159b8b1341c4a471c376c9f89b3e11672849e99",
+    "compatibilityPairID": "mlx-swift-cff5d0ad87f79585ac778224c21a5278d25a4e79+mlx-swift-lm-9159b8b1341c4a471c376c9f89b3e11672849e99",
     "releaseGate": "closed for local Qwen proof and focused compatibility gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }
