@@ -5,7 +5,7 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 The current compatibility pair is green for local release gates. Pines can build, test, resolve the pinned MLX packages through Xcode, run simulator smoke tests, and enforce pin drift checks on:
 
 - `RNT56/mlx-swift`: `bc3fc52e78d1bf1b2073cfc14154b8329b514587`
-- `RNT56/mlx-swift-lm`: `1af28b79449a95b471b3805926aef1347afd7423`
+- `RNT56/mlx-swift-lm`: `0dda609cf9226b166b794088905b99b01e8f1f46`
 
 This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
 
@@ -23,7 +23,7 @@ The pinned pair makes Layout V5 the default TurboQuant attention layout for devi
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
   - `RNT56/mlx-swift`: `bc3fc52e78d1bf1b2073cfc14154b8329b514587`
-  - `RNT56/mlx-swift-lm`: `1af28b79449a95b471b3805926aef1347afd7423`
+  - `RNT56/mlx-swift-lm`: `0dda609cf9226b166b794088905b99b01e8f1f46`
   - Nested `mlx` inside `RNT56/mlx-swift`: `75b756717154890033209aaba4ffc89b113c5998`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, `turbo8` high-precision KV-cache mode, a device-profile-gated tiled online fused decode path, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.

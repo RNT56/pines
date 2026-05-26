@@ -16,7 +16,7 @@
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "1af28b79449a95b471b3805926aef1347afd7423",
+    "commit": "0dda609cf9226b166b794088905b99b01e8f1f46",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -271,7 +271,7 @@
     "Compatibility-pair status is green for local release gates. This does not create any Verified or Certified model/device/mode product claim; those still require imported real-device profile evidence.",
     "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
     "mlx-swift bc3fc52e78d1bf1b2073cfc14154b8329b514587 gates wide tiled online fused heads by hardware model and self-test quality, adds a turbo8 precision preset, and covers Qwen-like grouped-query 8-bit compressed attention in tests.",
-    "mlx-swift-lm 1af28b79449a95b471b3805926aef1347afd7423 exports a runtime TurboQuant capability registry, keeps typed throwing TurboQuant generation paths across the profile-backed Llama, Gemma, Qwen, Mistral, Phi, Granite, Exaone4, SmolLM3, LFM2, and GLM4 MoE Lite families, fixes 4-bit model ID parsing for 2B model names, exposes Qwen3.5/Qwen3Next hybrid cache budgets as attention-KV-only, and keeps dense hybrid Qwen plus quality-sensitive Gemma 3 1B and Llama 3.2 3B profiles on conservative turbo8 with an exact recent raw shadow so short/current decode logits remain raw-equivalent while compressed KV is committed.",
+    "mlx-swift-lm 0dda609cf9226b166b794088905b99b01e8f1f46 exports a runtime TurboQuant capability registry, keeps typed throwing TurboQuant generation paths across the profile-backed Llama, Gemma, Qwen, Mistral, Phi, Granite, Exaone4, SmolLM3, LFM2, and GLM4 MoE Lite families, fixes 4-bit model ID parsing for 2B model names, exposes Qwen3.5/Qwen3Next hybrid cache budgets as attention-KV-only, and keeps dense hybrid Qwen plus quality-sensitive Gemma 3 1B and Llama 3.2 3B profiles on conservative turbo8 with an exact recent raw shadow so short/current decode logits remain raw-equivalent while compressed KV is committed.",
     "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
     "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only."
   ],
@@ -279,8 +279,8 @@
     "branch": "tq/real-device-evidence-acceptance",
     "status": "release-green-local-gates-passed-layout-v5-default",
     "pinnedMLXSwift": "bc3fc52e78d1bf1b2073cfc14154b8329b514587",
-    "pinnedMLXSwiftLM": "1af28b79449a95b471b3805926aef1347afd7423",
-    "compatibilityPairID": "mlx-swift-bc3fc52e78d1bf1b2073cfc14154b8329b514587+mlx-swift-lm-1af28b79449a95b471b3805926aef1347afd7423",
+    "pinnedMLXSwiftLM": "0dda609cf9226b166b794088905b99b01e8f1f46",
+    "compatibilityPairID": "mlx-swift-bc3fc52e78d1bf1b2073cfc14154b8329b514587+mlx-swift-lm-0dda609cf9226b166b794088905b99b01e8f1f46",
     "releaseGate": "closed for compatibility-pair local release gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }
