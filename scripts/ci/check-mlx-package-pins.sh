@@ -14,6 +14,7 @@ COMPATIBILITY_PAIR_JSON="docs/turboquant-implementation/compatibility-pair.json"
 MLX_RUNTIME_BRIDGE="Pines/Runtime/MLXRuntimeBridge.swift"
 
 OLD_MLX_SWIFT_REVISIONS=(
+  "c96dd8c7b374fa50d64b35bf8c5d7739df7d9984"
   "8f0718404a323698c7b5730f2de3af2b5e21f854"
   "48375f1d8f0694dee2ce8aab7f46be50c5297aec"
   "5db40d34a96a9c6889b6583d6cc09f8b8f05ea5e"
@@ -25,6 +26,7 @@ OLD_MLX_SWIFT_REVISIONS=(
   "2b0bd735a0cf18e0bdb87d1b066e2e9127299e08"
 )
 OLD_MLX_SWIFT_LM_REVISIONS=(
+  "c8a544503bcdad21ee736feec68f0ed7e07a9b29"
   "915a08dc8315b825b7f86109f12ba4d62d34f186"
   "bf7bab132f9810d8ab3e5c6e0adbcf3db0b40551"
   "bb5f6f837896503b1f660eaeed2850fb0f232a64"

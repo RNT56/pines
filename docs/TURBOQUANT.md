@@ -4,8 +4,8 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 
 The current compatibility pair is green for local release gates. Pines can build, test, resolve the pinned MLX packages through Xcode, run simulator smoke tests, and enforce pin drift checks on:
 
-- `RNT56/mlx-swift`: `c96dd8c7b374fa50d64b35bf8c5d7739df7d9984`
-- `RNT56/mlx-swift-lm`: `c8a544503bcdad21ee736feec68f0ed7e07a9b29`
+- `RNT56/mlx-swift`: `5a990749fae2125f7a69506b486238ab1ac166c2`
+- `RNT56/mlx-swift-lm`: `52483d012bb2434cdc13bd2bba504b6b0f9d65d5`
 
 This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
 
@@ -22,11 +22,11 @@ The pinned pair makes Layout V5 the default TurboQuant attention layout for devi
 - iOS memory warnings soft-recover through the runtime bridge while active generation still has emergency headroom; otherwise they stop the active local run and unload transient MLX containers.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `c96dd8c7b374fa50d64b35bf8c5d7739df7d9984`
-  - `RNT56/mlx-swift-lm`: `c8a544503bcdad21ee736feec68f0ed7e07a9b29`
+  - `RNT56/mlx-swift`: `5a990749fae2125f7a69506b486238ab1ac166c2`
+  - `RNT56/mlx-swift-lm`: `52483d012bb2434cdc13bd2bba504b6b0f9d65d5`
   - Nested `mlx` inside `RNT56/mlx-swift`: `75b756717154890033209aaba4ffc89b113c5998`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
-- `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, `turbo8` high-precision KV-cache mode, a device-profile-gated tiled online fused decode path, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
+- `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, runtime-layout direct compressed `QK^T`, runtime-layout direct compressed `AV`, runtime-layout compressed decode, `turbo8` high-precision KV-cache mode, a device-profile-gated tiled online fused decode path with runtime sequence-state inputs, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
 - `mlx-swift-lm` exposes `KVCacheStrategy.turboQuant`, `TurboQuantKVCache`, a physical-slot `RotatingTurboQuantKVCache` for supported `.metalPolarQJL` `maxKVSize` paths, a shared packed quantized-attention fallback before raw decode, typed throwing TurboQuant generation paths and an exported runtime capability registry for the profile-backed Llama, Gemma, Qwen, Mistral, Phi, Granite, Exaone4, SmolLM3, LFM2, and GLM4 MoE Lite families, prepared-prefix generation, prompt-cache serialization hooks, `TurboQuantCompressedKVCacheProtocol`, the bundled `TurboQuantProfileRegistry`, guarded conservative routing for lower-bit `turbo4v2` and `turbo3_5` profiles, Qwen3.5/Qwen3.6 exact-prefill two-stage compressed decode policies, and `GenerateParameters` fields for cache strategy, preset, requested backend selection, value bits, fallback policy, device-adaptive optimization policy, model metadata, KV head dimensions, and compressed-attention diagnostics.
 - Pines keeps a local prompt KV cache for text-only MLX turns. Cache entries are keyed by model/runtime/tokenizer and quantization shape, reused only on token-prefix match, trimmed after successful generation, and evicted before model unload under memory pressure or thermal downshift.
 - Pines marks Qwen3.5/Qwen3.6 and LFM2 hybrid models as Hybrid Full: standard attention KV caches use TurboQuant, while linear/conv/native state caches remain exact MLX state. Gemma 3/3n/4, text Llama, Mistral/Ministral, Qwen2/Qwen3, Phi/Phi3, Granite, Exaone, SmolLM3, and GLM4 MoE Lite are marked TurboQuant full when metadata matches the pinned profile registry. Llama 3.2 Vision, Pixtral, and draft-only Gemma4 assistant paths stay gated until the pinned runtime exposes complete VLM or dual-model orchestration coverage.

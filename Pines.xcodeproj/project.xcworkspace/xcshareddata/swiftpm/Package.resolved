@@ -42,7 +42,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RNT56/mlx-swift",
       "state" : {
-        "revision" : "c96dd8c7b374fa50d64b35bf8c5d7739df7d9984"
+        "revision" : "5a990749fae2125f7a69506b486238ab1ac166c2"
       }
     },
     {
@@ -50,7 +50,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RNT56/mlx-swift-lm",
       "state" : {
-        "revision" : "c8a544503bcdad21ee736feec68f0ed7e07a9b29"
+        "revision" : "52483d012bb2434cdc13bd2bba504b6b0f9d65d5"
       }
     },
     {

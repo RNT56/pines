@@ -10,13 +10,13 @@
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "c96dd8c7b374fa50d64b35bf8c5d7739df7d9984",
+    "commit": "5a990749fae2125f7a69506b486238ab1ac166c2",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "c8a544503bcdad21ee736feec68f0ed7e07a9b29",
+    "commit": "52483d012bb2434cdc13bd2bba504b6b0f9d65d5",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -271,16 +271,16 @@
     "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
     "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
     "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only.",
-    "mlx-swift c96dd8c7b374fa50d64b35bf8c5d7739df7d9984 caches fused-attention query rows in threadgroup memory, reducing redundant query loads while preserving compressed attention quality.",
-    "mlx-swift-lm c8a544503bcdad21ee736feec68f0ed7e07a9b29 adds the Qwen3.5/Qwen3.6 Turbo8 proof pipeline, promotes Qwen production profiles to exact initial prefill plus throughput-oriented two-stage compressed decode, keeps turbo4v2/turbo3_5 guarded, defaults the strict release proof to decode query length 1, and hardens compressed decode for normal transposed Q/K/V layouts, update-failure fallback, packed fallback residency, and rotating single-token window masks.",
-    "TurboQuantQwenProof strict release matrix passed locally with fp16 Turbo8, 8K/16K contexts, query length 1, twoStageCompressed, 10/10 ok, and minimum compressed decode throughput 25.45 tok/s; 32K remains a stress gate."
+    "mlx-swift 5a990749fae2125f7a69506b486238ab1ac166c2 caches fused-attention query rows in threadgroup memory and moves mutable compressed-attention decode layout state out of the Metal templates for compressed decode, QK, AV, and fused decode, reducing per-token kernel-specialization churn while preserving compressed attention quality.",
+    "mlx-swift-lm 52483d012bb2434cdc13bd2bba504b6b0f9d65d5 pins the runtime-layout kernel revision, adds the Qwen3.5/Qwen3.6 Turbo8 proof pipeline, promotes Qwen production profiles to exact initial prefill plus throughput-oriented two-stage compressed decode, keeps turbo4v2/turbo3_5 guarded, defaults the strict release proof to decode query length 1, and hardens compressed decode for normal transposed Q/K/V layouts, update-failure fallback, packed fallback residency, and rotating single-token window masks.",
+    "TurboQuantQwenProof strict release matrix passed locally with fp16 Turbo8, 8K/16K contexts, query length 1, twoStageCompressed, 10/10 ok, and minimum compressed decode throughput 23.19 tok/s; 32K remains a stress gate."
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
     "status": "release-green-local-qwen-proof-gates-passed",
-    "pinnedMLXSwift": "c96dd8c7b374fa50d64b35bf8c5d7739df7d9984",
-    "pinnedMLXSwiftLM": "c8a544503bcdad21ee736feec68f0ed7e07a9b29",
-    "compatibilityPairID": "mlx-swift-c96dd8c7b374fa50d64b35bf8c5d7739df7d9984+mlx-swift-lm-c8a544503bcdad21ee736feec68f0ed7e07a9b29",
+    "pinnedMLXSwift": "5a990749fae2125f7a69506b486238ab1ac166c2",
+    "pinnedMLXSwiftLM": "52483d012bb2434cdc13bd2bba504b6b0f9d65d5",
+    "compatibilityPairID": "mlx-swift-5a990749fae2125f7a69506b486238ab1ac166c2+mlx-swift-lm-52483d012bb2434cdc13bd2bba504b6b0f9d65d5",
     "releaseGate": "closed for local Qwen proof and focused compatibility gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }
