@@ -423,7 +423,10 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-e07642fe9cf9c4b305a2d282d3e4a5e1e965323e+mlx-swift-lm-ef88592d1a4f72b73a869bea39c627801cd13517"
+        "mlx-swift-e07642fe9cf9c4b305a2d282d3e4a5e1e965323e+mlx-swift-lm-5265a1a6ce48b25fe63848792bd11714bf962a87"
+    private static let shortContextPlainKVTokenThreshold = 4_096
+    private static let forceTurboQuantShortContextEnvironmentKey =
+        "PINES_FORCE_TURBOQUANT_SHORT_CONTEXT"
     static var turboQuantLayoutVersion: Int {
         #if canImport(MLX)
         MLX.TurboQuantAttentionLayout.currentVersion
@@ -543,6 +546,56 @@ struct MLXRuntimeBridge: Sendable {
             reservedCompletionTokens: reservedCompletionTokens,
             truncationReason: reducedHistoryForContext ? "context_window" : nil
         )
+    }
+
+    fileprivate static func runtimeProfileForPreparedGeneration(
+        baseProfile: RuntimeProfile,
+        exactInputTokens: Int,
+        reservedCompletionTokens: Int
+    ) -> RuntimeProfile {
+        guard baseProfile.quantization.kvCacheStrategy == .turboQuant else {
+            return baseProfile
+        }
+        guard baseProfile.quantization.turboQuantUserMode != .maxContext else {
+            return baseProfile
+        }
+        guard ProcessInfo.processInfo.environment[forceTurboQuantShortContextEnvironmentKey] != "1" else {
+            return baseProfile
+        }
+
+        let requestTokens = max(0, exactInputTokens) + max(0, reservedCompletionTokens)
+        guard requestTokens > 0, requestTokens <= shortContextPlainKVTokenThreshold else {
+            return baseProfile
+        }
+
+        var profile = baseProfile
+        profile.name = "\(baseProfile.name) Short Context Plain KV"
+        profile.promptCacheIdentifier = [
+            baseProfile.promptCacheIdentifier,
+            "plain-short-context-v1",
+        ]
+        .compactMap { $0 }
+        .joined(separator: "|")
+        profile.quantization.algorithm = .none
+        profile.quantization.kvCacheStrategy = .none
+        profile.quantization.kvBits = nil
+        profile.quantization.maxKVSize = min(
+            baseProfile.quantization.maxKVSize ?? shortContextPlainKVTokenThreshold,
+            shortContextPlainKVTokenThreshold
+        )
+        profile.quantization.preset = nil
+        profile.quantization.requestedBackend = nil
+        profile.quantization.activeBackend = nil
+        profile.quantization.activeAttentionPath = nil
+        profile.quantization.rawFallbackAllocated = nil
+        profile.quantization.turboQuantValueBits = nil
+        profile.quantization.turboQuantAdmission = nil
+        profile.quantization.activeFallbackReason =
+            "Plain KV selected for short local request (\(requestTokens) tokens <= \(shortContextPlainKVTokenThreshold)); TurboQuant remains reserved for extended context."
+        profile.quantization.turboQuantProfileDiagnostics.append(
+            "Short-context router selected plain KV because request_tokens=\(requestTokens) <= \(shortContextPlainKVTokenThreshold)."
+        )
+        return profile
     }
 
     fileprivate static func localRuntimeAdmissionPlan(
@@ -3275,6 +3328,11 @@ private actor MLXRuntimeState {
                             )
                             input = try await context.processor.prepare(input: userInput)
                         }
+                        let profile = MLXRuntimeBridge.runtimeProfileForPreparedGeneration(
+                            baseProfile: profile,
+                            exactInputTokens: input.text.tokens.size,
+                            reservedCompletionTokens: generationPlan.reservedCompletionTokens
+                        )
                         let prepareElapsedSeconds = Date().timeIntervalSince(prepareStartedAt)
                         var turboQuantContextPlan = MLXRuntimeBridge.minimalContextAssemblyPlan(
                             exactInputTokens: input.text.tokens.size,
