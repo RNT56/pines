@@ -16,7 +16,7 @@
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "52483d012bb2434cdc13bd2bba504b6b0f9d65d5",
+    "commit": "233ef2f0198d6bd637fc3929cd2ae9491b53d3ce",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -272,15 +272,15 @@
     "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
     "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only.",
     "mlx-swift 5a990749fae2125f7a69506b486238ab1ac166c2 caches fused-attention query rows in threadgroup memory and moves mutable compressed-attention decode layout state out of the Metal templates for compressed decode, QK, AV, and fused decode, reducing per-token kernel-specialization churn while preserving compressed attention quality.",
-    "mlx-swift-lm 52483d012bb2434cdc13bd2bba504b6b0f9d65d5 pins the runtime-layout kernel revision, adds the Qwen3.5/Qwen3.6 Turbo8 proof pipeline, promotes Qwen production profiles to exact initial prefill plus throughput-oriented two-stage compressed decode, keeps turbo4v2/turbo3_5 guarded, defaults the strict release proof to decode query length 1, and hardens compressed decode for normal transposed Q/K/V layouts, update-failure fallback, packed fallback residency, and rotating single-token window masks.",
-    "TurboQuantQwenProof strict release matrix passed locally with fp16 Turbo8, 8K/16K contexts, query length 1, twoStageCompressed, 10/10 ok, and minimum compressed decode throughput 23.19 tok/s; 32K remains a stress gate."
+    "mlx-swift-lm 233ef2f0198d6bd637fc3929cd2ae9491b53d3ce pins the runtime-layout kernel revision, adds the Qwen3.5/Qwen3.6 Turbo8 proof and path-comparison pipeline, promotes Qwen production profiles to exact initial prefill plus throughput-oriented two-stage compressed decode, keeps turbo4v2/turbo3_5 guarded, corrects Turbo4V2 key-bit metadata across bundled and exported profiles, defaults the strict release proof to decode query length 1, and hardens compressed decode for normal transposed Q/K/V layouts, update-failure fallback, packed fallback residency, rotating single-token window masks, and Qwen 256-head throughput routing.",
+    "TurboQuantQwenProof strict Mac release proof passed locally with fp16 Turbo8, Qwen3.5 2B, 8K/16K contexts, query length 1, twoStageCompressed, 2/2 ok, and minimum compressed decode throughput 29.94 tok/s. Path comparison showed fused remains slower than two-stage for Qwen 256-head decode, so fused stays an optimization target rather than the production route; 32K remains a stress gate."
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
     "status": "release-green-local-qwen-proof-gates-passed",
     "pinnedMLXSwift": "5a990749fae2125f7a69506b486238ab1ac166c2",
-    "pinnedMLXSwiftLM": "52483d012bb2434cdc13bd2bba504b6b0f9d65d5",
-    "compatibilityPairID": "mlx-swift-5a990749fae2125f7a69506b486238ab1ac166c2+mlx-swift-lm-52483d012bb2434cdc13bd2bba504b6b0f9d65d5",
+    "pinnedMLXSwiftLM": "233ef2f0198d6bd637fc3929cd2ae9491b53d3ce",
+    "compatibilityPairID": "mlx-swift-5a990749fae2125f7a69506b486238ab1ac166c2+mlx-swift-lm-233ef2f0198d6bd637fc3929cd2ae9491b53d3ce",
     "releaseGate": "closed for local Qwen proof and focused compatibility gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }
