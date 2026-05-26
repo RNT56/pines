@@ -851,7 +851,7 @@ struct PinesCoreTestRunner {
         try expectEqual(runtimeProfile.quantization.activeBackend, .mlxPacked)
         try expectEqual(runtimeProfile.quantization.metalCodecAvailable, false)
         try expectEqual(runtimeProfile.quantization.turboQuantUserMode, .balanced)
-        try expectEqual(TurboQuantPreset.allCases, [.turbo2_5, .turbo3_5, .turbo4, .turbo4v2])
+        try expectEqual(TurboQuantPreset.allCases, [.turbo2_5, .turbo3_5, .turbo4, .turbo4v2, .turbo8])
         try expectEqual(TurboQuantUserMode.allCases, [.fastest, .balanced, .maxContext, .batterySaver])
         try expectEqual(TurboQuantPreset.defaultGeneration, .turbo4v2)
         try expectEqual(TurboQuantPreset.conservativeFallback, .turbo3_5)
@@ -860,6 +860,10 @@ struct PinesCoreTestRunner {
         try expectEqual(TurboQuantPreset.turbo4v2.baseBits, 4)
         try expectEqual(TurboQuantPreset.turbo4v2.outlierBits, 4)
         try expectEqual(TurboQuantPreset.turbo4v2.defaultValueBits, 4)
+        try expectEqual(TurboQuantPreset.turbo8.effectiveBits, 8)
+        try expectEqual(TurboQuantPreset.turbo8.baseBits, 8)
+        try expectEqual(TurboQuantPreset.turbo8.outlierBits, 8)
+        try expectEqual(TurboQuantPreset.turbo8.defaultValueBits, 8)
         let legacyQuantization = try JSONDecoder().decode(
             QuantizationProfile.self,
             from: #"{"kvBits":8,"kvGroupSize":64,"quantizedKVStart":256}"#.data(using: .utf8)!

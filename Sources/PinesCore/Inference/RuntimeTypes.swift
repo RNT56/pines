@@ -262,6 +262,7 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
     case turbo3_5
     case turbo4
     case turbo4v2
+    case turbo8
 
     public static let defaultGeneration: Self = .turbo4v2
     public static let conservativeFallback: Self = .turbo3_5
@@ -277,6 +278,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             "TurboQuant 4-bit"
         case .turbo4v2:
             "TurboQuant 4-bit V2"
+        case .turbo8:
+            "TurboQuant 8-bit"
         }
     }
 
@@ -286,6 +289,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             2
         case .turbo3_5, .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 
@@ -297,6 +302,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             3
         case .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 
@@ -306,6 +313,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             3
         case .turbo3_5, .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 
@@ -317,6 +326,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             3.5
         case .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 
@@ -326,6 +337,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             2
         case .turbo3_5, .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 }
@@ -1438,9 +1451,154 @@ public extension ModelInstall {
             ?? ModelDiscoveryResourcePolicy.inferredParameterCount(repository: repository, tags: [])
     }
 
+    var effectiveTurboQuantModalities: Set<ModelModality> {
+        guard modalities.contains(.text),
+              modalities.contains(.vision),
+              turboQuantModelTypeHints.contains(where: Self.isQwen35TurboQuantFamily),
+              cacheTopology == .hybridAttentionAndNativeState,
+              keyHeadDimension == 256,
+              valueHeadDimension == 256,
+              !hasExplicitVisionInstallSignal
+        else {
+            return modalities
+        }
+        return [.text]
+    }
+
+    var effectiveTurboQuantFamilySupport: TurboQuantFamilySupport {
+        if turboQuantFamilySupport == .attentionKVFull
+            || turboQuantFamilySupport == .hybridFull {
+            return turboQuantFamilySupport
+        }
+        if turboQuantFamilySupport == .unsupportedTopology,
+           effectiveTurboQuantModalities != [.text] {
+            return turboQuantFamilySupport
+        }
+        guard effectiveTurboQuantModalities == [.text] else { return turboQuantFamilySupport }
+
+        let modelTypes = turboQuantModelTypeHints
+        let supportedHeadShape = Self.supportedTurboQuantAttentionHeadShape(
+            key: keyHeadDimension,
+            value: valueHeadDimension
+        )
+        switch cacheTopology {
+        case .hybridAttentionAndNativeState:
+            if modelTypes.contains(where: Self.isQwen35TurboQuantFamily)
+                && keyHeadDimension == 256 && valueHeadDimension == 256
+            {
+                return .hybridFull
+            }
+            if modelTypes.contains("lfm2"), supportedHeadShape {
+                return .hybridFull
+            }
+            return turboQuantFamilySupport
+        case .standardAttention, .slidingAttention, .sharedKVAttention:
+            guard supportedHeadShape else { return turboQuantFamilySupport }
+            if modelTypes.contains(where: Self.isBroadTurboQuantTextFamily) {
+                return .attentionKVFull
+            }
+            return turboQuantFamilySupport
+        case .visionLanguageAttention, .unsupported:
+            return turboQuantFamilySupport
+        }
+    }
+
     var isSmallTextGenerationModel: Bool {
-        guard modalities == [.text], let resolvedParameterCount else { return false }
+        guard effectiveTurboQuantModalities == [.text], let resolvedParameterCount else { return false }
         return resolvedParameterCount <= 2_000_000_000
+    }
+
+    private var hasExplicitVisionInstallSignal: Bool {
+        if cacheTopology == .visionLanguageAttention {
+            return true
+        }
+        for value in [repository, displayName, modelType, textConfigModelType] {
+            guard let value else { continue }
+            let lowercased = value
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let normalized = lowercased
+                .replacingOccurrences(of: "-", with: "_")
+                .replacingOccurrences(of: ".", with: "_")
+            if lowercased.contains("vision")
+                || lowercased.contains("visual")
+                || lowercased.contains("image")
+                || lowercased.contains("video")
+                || lowercased.contains("omni")
+                || lowercased.contains("multimodal")
+                || lowercased.contains("vlprocessor")
+                || lowercased.contains("qwen2vl")
+                || lowercased.contains("qwen3vl")
+            {
+                return true
+            }
+            if normalized.contains("_vl")
+                || normalized.contains("/vl")
+                || normalized.hasPrefix("vl_")
+                || normalized.contains("qwen2_vl")
+                || normalized.contains("qwen3_vl")
+                || normalized.contains("qwen3_5_vl")
+            {
+                return true
+            }
+        }
+        return false
+    }
+
+    private var turboQuantModelTypeHints: Set<String> {
+        var hints = Set<String>()
+        for value in [modelType, textConfigModelType, repository, displayName] {
+            guard let value else { continue }
+            let normalized = value
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "-", with: "_")
+                .replacingOccurrences(of: ".", with: "_")
+            guard !normalized.isEmpty else { continue }
+            hints.insert(normalized)
+        }
+        return hints
+    }
+
+    private static func supportedTurboQuantAttentionHeadShape(key: Int?, value: Int?) -> Bool {
+        guard let key, let value, key == value else { return false }
+        return [64, 80, 96, 112, 128, 160, 192, 256, 512].contains(key)
+    }
+
+    private static func isQwen35TurboQuantFamily(_ value: String) -> Bool {
+        value == "qwen3_5"
+            || value == "qwen3_5_text"
+            || value == "qwen3_5_moe"
+            || value == "qwen3_5_moe_text"
+            || value.contains("qwen3_5")
+    }
+
+    private static func isBroadTurboQuantTextFamily(_ value: String) -> Bool {
+        value == "llama"
+            || value == "mistral"
+            || value == "mistral3"
+            || value == "mistral4"
+            || value == "ministral3"
+            || value == "gemma"
+            || value == "gemma2"
+            || value == "gemma3"
+            || value == "gemma3_text"
+            || value == "gemma3n"
+            || value == "gemma3n_text"
+            || value == "gemma4"
+            || value == "gemma4_text"
+            || value == "qwen2"
+            || value == "qwen3"
+            || value == "qwen3_moe"
+            || value == "acereason"
+            || value == "phi"
+            || value == "phi3"
+            || value == "granite"
+            || value == "exaone"
+            || value == "exaone4"
+            || value == "smollm3"
+            || value == "glm4_moe_lite"
+            || isQwen35TurboQuantFamily(value)
     }
 }
 
@@ -2077,33 +2235,99 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
         safety: LocalRuntimeSafetyAssessment,
         availableMemoryBytes: Int64?
     ) -> Int? {
-        guard safety.constrainedModeActive else { return nil }
-        let policyLimit: Int?
+        let pressureLimit: Int?
         switch safety.pressureReason {
         case .lowMemory:
             if let availableMemoryBytes {
                 if availableMemoryBytes < 1_000_000_000 {
-                    policyLimit = 128
+                    pressureLimit = 128
                 } else if availableMemoryBytes < 1_200_000_000 {
-                    policyLimit = 256
+                    pressureLimit = 256
                 } else if availableMemoryBytes < LocalRuntimeSafetyPolicy.constrainedAvailableMemoryBytes {
-                    policyLimit = 512
+                    pressureLimit = 512
                 } else {
-                    policyLimit = 1_024
+                    pressureLimit = 1_024
                 }
             } else {
-                policyLimit = 512
+                pressureLimit = 512
             }
         case .thermalFair, .thermalSerious, .thinThermal:
-            policyLimit = 768
+            pressureLimit = 768
         case .lowPower:
-            policyLimit = 1_024
+            pressureLimit = 1_024
         case .none, .thermalCritical:
-            policyLimit = nil
+            pressureLimit = nil
         }
 
+        let loadedTurboQuantHeadroomLimit = Self.loadedTurboQuantHeadroomCompletionLimit(
+            profile: profile,
+            availableMemoryBytes: availableMemoryBytes
+        )
+        let policyLimit: Int?
+        if safety.constrainedModeActive {
+            policyLimit = [pressureLimit, loadedTurboQuantHeadroomLimit]
+                .compactMap { $0 }
+                .min()
+        } else {
+            policyLimit = loadedTurboQuantHeadroomLimit
+        }
         guard let policyLimit else { return nil }
         return min(profile.quantization.maxKVSize ?? policyLimit, policyLimit)
+    }
+
+    private static func loadedTurboQuantHeadroomCompletionLimit(
+        profile: RuntimeProfile,
+        availableMemoryBytes: Int64?
+    ) -> Int? {
+        guard profile.quantization.kvCacheStrategy == .turboQuant,
+              let availableMemoryBytes else {
+            return nil
+        }
+        let headroomLimit: Int?
+        if availableMemoryBytes < 1_000_000_000 {
+            headroomLimit = 128
+        } else if availableMemoryBytes < 1_200_000_000 {
+            headroomLimit = 256
+        } else if availableMemoryBytes < 1_800_000_000 {
+            headroomLimit = 384
+        } else if availableMemoryBytes < 2_600_000_000 {
+            headroomLimit = 512
+        } else if availableMemoryBytes < 3_000_000_000 {
+            headroomLimit = 768
+        } else {
+            headroomLimit = nil
+        }
+        return [headroomLimit, hybridTurboQuantCompletionLimit(profile: profile, availableMemoryBytes: availableMemoryBytes)]
+            .compactMap { $0 }
+            .min()
+    }
+
+    private static func hybridTurboQuantCompletionLimit(
+        profile: RuntimeProfile,
+        availableMemoryBytes: Int64
+    ) -> Int? {
+        guard isHybridTurboQuantRuntimeProfile(profile) else { return nil }
+        if availableMemoryBytes < 3_200_000_000 {
+            return 256
+        }
+        if availableMemoryBytes < 4_000_000_000 {
+            return 384
+        }
+        if availableMemoryBytes < 5_000_000_000 {
+            return 512
+        }
+        return nil
+    }
+
+    private static func isHybridTurboQuantRuntimeProfile(_ profile: RuntimeProfile) -> Bool {
+        guard profile.quantization.kvCacheStrategy == .turboQuant else { return false }
+        let profileID = profile.quantization.turboQuantProfileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let profileID, !profileID.isEmpty else { return false }
+        return profileID.contains("qwen3.5")
+            || profileID.contains("qwen3.6")
+            || profileID.contains("lfm2")
     }
 
     private mutating func fitKVCacheToPreparedPrompt(

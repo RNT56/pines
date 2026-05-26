@@ -128,13 +128,20 @@ extension PinesAppModel {
                 "turboquant_profile_source": stressRuntimeProfile.quantization.turboQuantProfileSource ?? "none",
                 "model_type": install.modelType ?? "unknown",
                 "text_config_model_type": install.textConfigModelType ?? "none",
+                "processor_class": install.processorClass ?? "none",
                 "parameter_count": install.parameterCount.map(String.init) ?? "unknown",
+                "modalities": install.modalities.map(\.rawValue).sorted().joined(separator: ","),
+                "effective_turboquant_modalities": install.effectiveTurboQuantModalities.map(\.rawValue).sorted().joined(separator: ","),
                 "key_head_dimension": install.keyHeadDimension.map(String.init) ?? "unknown",
                 "value_head_dimension": install.valueHeadDimension.map(String.init) ?? "unknown",
                 "routed_experts": install.routedExperts.map(String.init) ?? "none",
                 "experts_per_token": install.expertsPerToken.map(String.init) ?? "none",
                 "cache_topology": install.cacheTopology.rawValue,
-                "turboquant_family_support": install.turboQuantFamilySupport.rawValue,
+                "turboquant_family_support": install.effectiveTurboQuantFamilySupport.rawValue,
+                "stored_turboquant_family_support": install.turboQuantFamilySupport.rawValue,
+                "effective_turboquant_family_support": install.effectiveTurboQuantFamilySupport.rawValue,
+                "runtime_kv_cache_strategy": stressRuntimeProfile.quantization.kvCacheStrategy.rawValue,
+                "runtime_turboquant_diagnostics": stressRuntimeProfile.quantization.turboQuantProfileDiagnostics.joined(separator: " | "),
                 "disable_turboquant": String(configuration.disableTurboQuant),
             ],
             enabled: true
@@ -238,16 +245,19 @@ extension PinesAppModel {
                     targetContextTokens: targetContextTokens,
                     message: "Completed iteration \(iteration) with status \(status?.rawValue ?? "unknown")."
                 )
+                var completionMetadata = Self.localStressOutputDiagnostics(lastAssistant?.content ?? "")
+                completionMetadata.merge(Self.localStressProviderDiagnostics(lastAssistant)) { _, new in new }
+                completionMetadata.merge([
+                    "iteration": String(iteration),
+                    "context_mode": configuration.contextMode.rawValue,
+                    "target_context_tokens": targetContextTokens.map(String.init) ?? "short",
+                    "assistant_message_id": lastAssistant?.id.uuidString ?? "none",
+                    "assistant_status": status?.rawValue ?? "unknown",
+                ]) { _, new in new }
                 await FreezeBreadcrumbJournal.shared.record(
                     stage: "stress.iteration.complete",
                     runID: configuration.runID,
-                    metadata: [
-                        "iteration": String(iteration),
-                        "context_mode": configuration.contextMode.rawValue,
-                        "target_context_tokens": targetContextTokens.map(String.init) ?? "short",
-                        "assistant_message_id": lastAssistant?.id.uuidString ?? "none",
-                        "assistant_status": status?.rawValue ?? "unknown",
-                    ],
+                    metadata: completionMetadata,
                     enabled: true
                 )
                 if status != .complete {
@@ -308,6 +318,13 @@ extension PinesAppModel {
                 }
                 if let lastAssistant,
                    let outputFailure = Self.localStressOutputQualityFailure(lastAssistant.content) {
+                    await FreezeBreadcrumbJournal.shared.record(
+                        stage: "stress.iteration.output_rejected",
+                        runID: configuration.runID,
+                        detail: outputFailure,
+                        metadata: Self.localStressOutputDiagnostics(lastAssistant.content),
+                        enabled: true
+                    )
                     await failStressRun(
                         configuration,
                         iteration: iteration,
@@ -486,6 +503,103 @@ extension PinesAppModel {
         }
 
         return nil
+    }
+
+    private static func localStressOutputDiagnostics(_ content: String) -> [String: String] {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let scalars = Array(text.unicodeScalars)
+        let replacementCount = scalars.filter { $0.value == 0xfffd }.count
+        let controlCount = scalars.filter { scalar in
+            CharacterSet.controlCharacters.contains(scalar)
+                && scalar != "\n"
+                && scalar != "\r"
+                && scalar != "\t"
+        }.count
+        let letterCount = scalars.filter { CharacterSet.letters.contains($0) }.count
+        let words = text
+            .lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 3 }
+        let wordGroups = Dictionary(grouping: words, by: { $0 })
+        let mostRepeatedEntry = wordGroups.max { left, right in left.value.count < right.value.count }
+        let mostRepeated = mostRepeatedEntry?.value.count ?? 0
+        let mostRepeatedWord = mostRepeatedEntry?.key ?? ""
+        let uniqueWordCount = wordGroups.count
+        let maxRepeatedBigram = maxRepeatedNgramCount(words: words, size: 2)
+        let maxRepeatedTrigram = maxRepeatedNgramCount(words: words, size: 3)
+        let sample = text
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .prefix(240)
+        let suffixSample = text
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .suffix(240)
+        return [
+            "assistant_content_characters": String(text.count),
+            "assistant_unicode_scalar_count": String(scalars.count),
+            "assistant_letter_count": String(letterCount),
+            "assistant_control_character_count": String(controlCount),
+            "assistant_replacement_character_count": String(replacementCount),
+            "assistant_word_count": String(words.count),
+            "assistant_unique_word_count": String(uniqueWordCount),
+            "assistant_most_repeated_word_count": String(mostRepeated),
+            "assistant_most_repeated_word": mostRepeatedWord,
+            "assistant_max_repeated_bigram_count": String(maxRepeatedBigram),
+            "assistant_max_repeated_trigram_count": String(maxRepeatedTrigram),
+            "assistant_content_sample": String(sample),
+            "assistant_content_suffix_sample": String(suffixSample),
+        ]
+    }
+
+    private static func localStressProviderDiagnostics(_ message: ChatMessage?) -> [String: String] {
+        guard let metadata = message?.providerMetadata else { return [:] }
+        let keys: Set<String> = [
+            LocalProviderMetadataKeys.turboQuantPreset,
+            LocalProviderMetadataKeys.turboQuantRequestedBackend,
+            LocalProviderMetadataKeys.turboQuantActiveBackend,
+            LocalProviderMetadataKeys.turboQuantValueBits,
+            LocalProviderMetadataKeys.turboQuantAttentionPath,
+            LocalProviderMetadataKeys.turboQuantKernelProfile,
+            LocalProviderMetadataKeys.turboQuantSelfTestStatus,
+            LocalProviderMetadataKeys.turboQuantFallbackReason,
+            LocalProviderMetadataKeys.turboQuantLastUnsupportedShape,
+            LocalProviderMetadataKeys.turboQuantRawFallbackAllocated,
+            LocalProviderMetadataKeys.turboQuantProfileID,
+            LocalProviderMetadataKeys.turboQuantAdmissionDecision,
+            LocalProviderMetadataKeys.turboQuantSelectedMode,
+            LocalProviderMetadataKeys.cacheTopology,
+            LocalProviderMetadataKeys.turboQuantFamilySupport,
+            LocalProviderMetadataKeys.attentionCacheCount,
+            LocalProviderMetadataKeys.nativeStateCacheCount,
+            LocalProviderMetadataKeys.runtimePressureReason,
+            LocalProviderMetadataKeys.runtimeLowPowerMode,
+            LocalProviderMetadataKeys.runtimeMaxKVSize,
+            LocalProviderMetadataKeys.runtimePrefillStepSize,
+            LocalProviderMetadataKeys.generationCompletionTokens,
+            LocalProviderMetadataKeys.generationElapsedSeconds,
+            LocalProviderMetadataKeys.generationTokensPerSecond,
+            LocalProviderMetadataKeys.generationFirstTokenLatencySeconds,
+            LocalProviderMetadataKeys.generationPrepareElapsedSeconds,
+            LocalProviderMetadataKeys.generationCacheCreateElapsedSeconds,
+            LocalProviderMetadataKeys.generationEffectiveMaxTokens,
+            LocalProviderMetadataKeys.generationIncompleteReason,
+        ]
+        return metadata.reduce(into: [String: String]()) { result, entry in
+            guard keys.contains(entry.key) else { return }
+            result["provider.\(entry.key)"] = String(entry.value.prefix(500))
+        }
+    }
+
+    private static func maxRepeatedNgramCount(words: [String], size: Int) -> Int {
+        guard size > 0, words.count >= size else { return 0 }
+        var counts: [String: Int] = [:]
+        for index in 0...(words.count - size) {
+            let key = words[index..<(index + size)].joined(separator: " ")
+            counts[key, default: 0] += 1
+        }
+        return counts.values.max() ?? 0
     }
 
     private func settledLastAssistantMessage(

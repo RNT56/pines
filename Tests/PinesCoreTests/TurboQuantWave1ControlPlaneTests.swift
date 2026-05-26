@@ -50,6 +50,32 @@ struct TurboQuantWave1ControlPlaneTests {
         #expect(plan.downgradeReason != nil)
     }
 
+    @Test func admissionSeparatesLoadedWeightsFromIncrementalGenerationBudget() {
+        let loadedRequest = Self.request(
+            availableMemoryBytes: 1_700 * 1_024 * 1_024,
+            requestedContextTokens: 2_304,
+            compressedKVBytesPerToken: 32 * 1_024,
+            estimatedModelWeightsBytes: 0,
+            userMode: .batterySaver
+        )
+        let doubleCountedRequest = Self.request(
+            availableMemoryBytes: 1_700 * 1_024 * 1_024,
+            requestedContextTokens: 2_304,
+            compressedKVBytesPerToken: 32 * 1_024,
+            estimatedModelWeightsBytes: 1_550_000_000,
+            userMode: .batterySaver
+        )
+
+        let loadedPlan = LocalRuntimeAdmissionService().admit(loadedRequest)
+        let doubleCountedPlan = LocalRuntimeAdmissionService().admit(doubleCountedRequest)
+
+        #expect(loadedPlan.admitted)
+        #expect(loadedPlan.memoryZones.modelWeightsBytes == 0)
+        #expect(loadedPlan.memoryCushionBytes > 0)
+        #expect(!doubleCountedPlan.admitted)
+        #expect(doubleCountedPlan.rejectionReason == LocalInferenceFailureKind.memoryAdmissionFailed.rawValue)
+    }
+
     @Test func runDecisionRequiresFallbackReason() {
         let invalid = TurboQuantRunDecision(fallbackUsed: true)
         let valid = TurboQuantRunDecision(
@@ -144,14 +170,16 @@ struct TurboQuantWave1ControlPlaneTests {
     private static func request(
         availableMemoryBytes: Int64,
         requestedContextTokens: Int = 8192,
-        compressedKVBytesPerToken: Int64 = 256 * 1_024
+        compressedKVBytesPerToken: Int64 = 256 * 1_024,
+        estimatedModelWeightsBytes: Int64? = nil,
+        userMode: TurboQuantUserMode = .balanced
     ) -> LocalRuntimeAdmissionRequest {
         LocalRuntimeAdmissionRequest(
             modelID: "test-model",
             requestedContextTokens: requestedContextTokens,
             reservedCompletionTokens: 512,
-            userMode: .balanced,
-            fallbackContract: .productDefault(for: .balanced),
+            userMode: userMode,
+            fallbackContract: .productDefault(for: userMode),
             deviceClass: .a17Pro,
             osBuild: "test",
             memoryCounters: RuntimeMemoryCounters(
@@ -159,6 +187,7 @@ struct TurboQuantWave1ControlPlaneTests {
                 processResidentMemoryBytes: 128 * 1_024 * 1_024
             ),
             quantizationDiagnostics: RuntimeQuantizationDiagnostics(activeAttentionPath: .twoStageCompressed),
+            estimatedModelWeightsBytes: estimatedModelWeightsBytes,
             compressedKVBytesPerToken: compressedKVBytesPerToken,
             rawShadowBytes: 32 * 1_024 * 1_024,
             packedFallbackBytesPerToken: 16 * 1_024,

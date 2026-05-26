@@ -9,10 +9,10 @@ After the Layout V5 default device-test closeout, the active local compatibility
 | Repo | Branch | Release-green commit |
 | --- | --- | --- |
 | `pines` | `tq/real-device-evidence-acceptance` | branch head |
-| `mlx-swift` | `tq/layout-v5-default-device-tests` | `260c8fb16df772b8c20295529fde958fffb66369` |
-| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e` |
+| `mlx-swift` | `tq/layout-v5-default-device-tests` | `bc3fc52e78d1bf1b2073cfc14154b8329b514587` |
+| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `905db8d4d8d894086b036c61afee5324f0d575ba` |
 
-Pines pins `MLXSwift` to `260c8fb16df772b8c20295529fde958fffb66369` and `MLXSwiftLM` to `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
+Pines pins `MLXSwift` to `bc3fc52e78d1bf1b2073cfc14154b8329b514587` and `MLXSwiftLM` to `905db8d4d8d894086b036c61afee5324f0d575ba` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
 
 Local release gates are green, including full SwiftPM validation and `bash scripts/ci/run-xcode-validation.sh all`. Layout V5 is the default MLX layout on this pair, with Layout V4 still supported for legacy/comparison runs. Real-device model/device/mode evidence remains pending and is still required before any `Verified` or `Certified` product claim.
 

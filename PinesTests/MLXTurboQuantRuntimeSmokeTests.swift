@@ -2,8 +2,38 @@ import Foundation
 import XCTest
 import MLX
 import MLXLMCommon
+#if canImport(MLXLLM)
+import MLXLLM
+#endif
 
 final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
+    func testLinkedMLXLLMRegistryAdvertisesProfileBackedTurboQuantFamilies() throws {
+        #if canImport(MLXLLM)
+        let expectedThrowingModelTypes = [
+            "qwen3_5",
+            "qwen3_5_text",
+            "gemma3_text",
+            "llama",
+            "mistral3",
+            "mistral4",
+        ]
+        for modelType in expectedThrowingModelTypes {
+            XCTAssertTrue(
+                MLXLLM.MLXTurboQuantRuntimeCapabilityRegistry.supportsThrowingTurboQuantAttention(modelType: modelType),
+                "\(modelType) must be exported by the linked MLX-LM runtime registry before Pines may select TurboQuant by default."
+            )
+        }
+        XCTAssertFalse(
+            MLXLLM.MLXTurboQuantRuntimeCapabilityRegistry.supportsThrowingTurboQuantAttention(modelType: "gemma4_assistant")
+        )
+        XCTAssertFalse(
+            MLXLLM.MLXTurboQuantRuntimeCapabilityRegistry.supportsThrowingTurboQuantAttention(modelType: "pixtral")
+        )
+        #else
+        throw XCTSkip("MLXLLM is not linked in this test build.")
+        #endif
+    }
+
     func testFixedTurboQuantPinsExposeHighBitSeedPath() throws {
         let highBitSeed = UInt64(0xDEAD_BEEF_0000_0017)
         let configuration = MLX.TurboQuantConfiguration(
@@ -136,6 +166,12 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
                 valueHeadDimension: 256
             ))
             XCTAssertEqual(profile.id, expectedProfileID)
+            if !expectedProfileID.contains("-a3b") {
+                XCTAssertEqual(profile.recommendedScheme, .turbo8)
+                XCTAssertEqual(profile.recommendedScheme.preset, .turbo8)
+                XCTAssertEqual(profile.valueBits, 8)
+                XCTAssertEqual(profile.optimizationPolicy, .conservative)
+            }
         }
 
         let rejected = registry.selection(

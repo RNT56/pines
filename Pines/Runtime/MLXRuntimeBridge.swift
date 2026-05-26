@@ -423,7 +423,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-260c8fb16df772b8c20295529fde958fffb66369+mlx-swift-lm-e4329351a4445ab686b830f2cbad34b47835c215"
+        "mlx-swift-bc3fc52e78d1bf1b2073cfc14154b8329b514587+mlx-swift-lm-905db8d4d8d894086b036c61afee5324f0d575ba"
     static var turboQuantLayoutVersion: Int {
         #if canImport(MLX)
         MLX.TurboQuantAttentionLayout.currentVersion
@@ -613,7 +613,10 @@ struct MLXRuntimeBridge: Sendable {
                 activeFallbackReason: profile.quantization.activeFallbackReason,
                 memoryCounters: memoryCounters
             ),
-            estimatedModelWeightsBytes: install?.estimatedBytes,
+            estimatedModelWeightsBytes: incrementalModelWeightBytesForGenerationAdmission(
+                install: install,
+                memoryCounters: memoryCounters
+            ),
             compressedKVBytesPerToken: Int64(legacyPlan?.compressedBytesPerToken ?? 256 * 1_024),
             rawShadowBytes: Int64(legacyPlan?.runtimeZones.rawShadowBytes ?? 0),
             packedFallbackBytesPerToken: Int64(legacyPlan?.packedFallbackBytesPerToken ?? 0),
@@ -626,6 +629,20 @@ struct MLXRuntimeBridge: Sendable {
         )
 
         return LocalRuntimeAdmissionService().admit(admissionRequest)
+    }
+
+    private static func incrementalModelWeightBytesForGenerationAdmission(
+        install: ModelInstall?,
+        memoryCounters: RuntimeMemoryCounters
+    ) -> Int64 {
+        let mlxActive = memoryCounters.mlxActiveMemoryBytes ?? 0
+        let processFootprint = memoryCounters.processPhysicalFootprintBytes ?? 0
+        let processResident = memoryCounters.processResidentMemoryBytes ?? 0
+        let modelAppearsLoaded = mlxActive > 0
+            || processFootprint > 512 * 1_024 * 1_024
+            || processResident > 512 * 1_024 * 1_024
+        guard !modelAppearsLoaded else { return 0 }
+        return install?.estimatedBytes ?? 0
     }
 
     fileprivate static func localFailureKind(from error: Error) -> LocalInferenceFailureKind {
@@ -699,11 +716,12 @@ struct MLXRuntimeBridge: Sendable {
             || speculativeTelemetry != nil
         else { return }
 
+        let turboQuantPlanned = profile.quantization.kvCacheStrategy == .turboQuant
         let snapshot = cache?.compactMap { ($0 as? TurboQuantCompressedKVCacheProtocol)?.runtimeSnapshot() }.first
         let selectedPath =
             snapshot?.lastAttentionPath.flatMap(PinesCore.TurboQuantAttentionPath.init(rawValue:))
             ?? admissionPlan?.selectedAttentionPath
-            ?? profile.quantization.activeAttentionPath
+            ?? (turboQuantPlanned ? profile.quantization.activeAttentionPath : nil)
         let fallbackReason =
             failureMessage
             ?? snapshot?.lastFailure
@@ -1013,7 +1031,8 @@ struct MLXRuntimeBridge: Sendable {
     ) -> RuntimeProfile {
         let deviceProfile = deviceMonitor.currentProfile()
         let memoryCounters = deviceMonitor.memoryCounters()
-        let hasVision = install.modalities.contains(.vision)
+        let effectiveModalities = install.effectiveTurboQuantModalities
+        let hasVision = effectiveModalities.contains(.vision)
         let isCompact = deviceProfile.memoryTier == .compact
         let isSmallTextModel = install.isSmallTextGenerationModel
         let recommendedMaxKVSize = hasVision
@@ -1047,8 +1066,17 @@ struct MLXRuntimeBridge: Sendable {
             userMode: userMode,
             backend: backend,
             defaults: turboQuantDefaults,
+            turboQuantDisabledReason: turboQuantDisabledReason,
             memoryCounters: memoryCounters
         )
+        var turboQuantProfileDiagnostics = [
+            "TurboQuant family support stored=\(install.turboQuantFamilySupport.rawValue) effective=\(install.effectiveTurboQuantFamilySupport.rawValue)",
+            "TurboQuant runtime selection=\(usesTurboQuant ? "throwing_attention" : "plain_kv")",
+        ]
+        if let turboQuantDisabledReason {
+            turboQuantProfileDiagnostics.append(turboQuantDisabledReason)
+        }
+        turboQuantProfileDiagnostics.append(contentsOf: admission.diagnostics)
         let profile = RuntimeProfile(
             name: hasVision ? "Vision \(userMode.displayName)" : "Local \(userMode.displayName)",
             quantization: QuantizationProfile(
@@ -1078,7 +1106,7 @@ struct MLXRuntimeBridge: Sendable {
                 runtimePressureReason: deviceProfile.runtimePressureReason,
                 turboQuantProfileID: admission.useTurboQuant ? turboQuantDefaults?.profileID : nil,
                 turboQuantProfileSource: turboQuantDefaults?.profileSource,
-                turboQuantProfileDiagnostics: admission.diagnostics,
+                turboQuantProfileDiagnostics: turboQuantProfileDiagnostics,
                 lastUnsupportedAttentionShape: admission.useTurboQuant ? backend.lastUnsupportedAttentionShape : nil,
                 activeFallbackReason: admission.reason ?? (linked ? fallbackReason : "MLX runtime packages are not linked in this build."),
                 memoryCounters: memoryCounters,
@@ -1089,7 +1117,7 @@ struct MLXRuntimeBridge: Sendable {
             expertStreamingMode: .disabled,
             gpuLayerCount: nil,
             mtpEnabled: false,
-            audioEnabled: install.modalities.contains(.audio),
+            audioEnabled: effectiveModalities.contains(.audio),
             dflashEnabled: false,
             prefillStepSize: hasVision || isCompact
                 ? min(deviceProfile.recommendedPrefillStepSize, 256)
@@ -1110,8 +1138,8 @@ struct MLXRuntimeBridge: Sendable {
             repository: install.repository,
             modelType: install.modelType,
             textConfigModelType: install.textConfigModelType,
-            modalities: install.modalities,
-            familySupport: install.turboQuantFamilySupport,
+            modalities: install.effectiveTurboQuantModalities,
+            familySupport: install.effectiveTurboQuantFamilySupport,
             runtimeCapabilities: Self.turboQuantRuntimeCapabilities
         )
     }
@@ -1121,8 +1149,8 @@ struct MLXRuntimeBridge: Sendable {
             repository: install.repository,
             modelType: install.modelType,
             textConfigModelType: install.textConfigModelType,
-            modalities: install.modalities,
-            familySupport: install.turboQuantFamilySupport,
+            modalities: install.effectiveTurboQuantModalities,
+            familySupport: install.effectiveTurboQuantFamilySupport,
             runtimeCapabilities: Self.turboQuantRuntimeCapabilities
         )
     }
@@ -1165,11 +1193,13 @@ struct MLXRuntimeBridge: Sendable {
             fallbackReason: String?
         ),
         defaults: TurboQuantRuntimeDefaults?,
+        turboQuantDisabledReason: String?,
         memoryCounters: RuntimeMemoryCounters
     ) -> KVCacheAdmission {
         var diagnostics = defaults?.profileDiagnostics ?? []
         guard requestedTurboQuant else {
-            let reason = "plain KV selected because this install does not advertise TurboQuant-compatible attention KV support"
+            let reason = turboQuantDisabledReason
+                ?? "plain KV selected because this install does not advertise TurboQuant-compatible attention KV support"
             diagnostics.append(reason)
             return KVCacheAdmission(
                 useTurboQuant: false,
@@ -1511,7 +1541,7 @@ struct MLXRuntimeBridge: Sendable {
         totalLayerCount: Int
     ) -> Int {
         guard install.cacheTopology == .hybridAttentionAndNativeState
-            || install.turboQuantFamilySupport == .hybridFull
+            || install.effectiveTurboQuantFamilySupport == .hybridFull
         else {
             return max(1, totalLayerCount)
         }
@@ -2069,7 +2099,7 @@ struct MLXRuntimeBridge: Sendable {
                 requestedBackend: Self.coreTurboQuantBackend(from: profile.backend),
                 groupSize: profile.groupSize,
                 valueBits: profile.valueBits,
-                optimizationPolicy: profilePolicy == .auto ? deviceOptimizationPolicy : profilePolicy,
+                optimizationPolicy: profilePolicy,
                 profileID: profile.id,
                 profileSource: "bundled",
                 profileDiagnostics: Array(selection.rejectionReasons.prefix(6))
@@ -2210,7 +2240,7 @@ struct MLXRuntimeBridge: Sendable {
     private static func turboQuantModality(
         for install: ModelInstall
     ) -> MLXLMCommon.TurboQuantModelModality {
-        if install.modalities.contains(.vision) {
+        if install.effectiveTurboQuantModalities.contains(.vision) {
             return .visionText
         }
         return .text
@@ -2221,6 +2251,7 @@ struct MLXRuntimeBridge: Sendable {
     ) -> PinesCore.TurboQuantOptimizationPolicy {
         PinesCore.TurboQuantOptimizationPolicy(rawValue: policy.rawValue) ?? .auto
     }
+
     #endif
 
     private static func parameterCountBillionScale(for install: ModelInstall) -> Double? {
@@ -2613,13 +2644,14 @@ private actor MLXRuntimeState {
         Self.configureMLXMemoryPolicy(profile: profile)
         #endif
         #if canImport(MLXLMCommon)
+        let runtimeModalities = install.effectiveTurboQuantModalities
         let matchingInstall = activeInstall?.modelID == install.modelID
             && activeInstall?.repository == install.repository
         if matchingInstall {
             let hasCompatibleContainer: Bool
-            if install.modalities.contains(.vision) || install.modalities.contains(.audio) {
+            if runtimeModalities.contains(.vision) || runtimeModalities.contains(.audio) {
                 hasCompatibleContainer = visionContainer != nil
-            } else if install.modalities.contains(.text) {
+            } else if runtimeModalities.contains(.text) {
                 hasCompatibleContainer = textContainer != nil
             } else {
                 hasCompatibleContainer = false
@@ -2658,7 +2690,7 @@ private actor MLXRuntimeState {
         #if canImport(MLX) && canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await registerModelAliasesIfNeeded()
         try Self.configureGlobalRuntimePolicy(profile: profile, install: install)
-        if install.modalities.contains(.vision) || install.modalities.contains(.audio) {
+        if runtimeModalities.contains(.vision) || runtimeModalities.contains(.audio) {
             var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .visionLanguage)
             resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
             activeStopStrings = resolvedConfiguration.hints.stopStrings
@@ -2672,7 +2704,7 @@ private actor MLXRuntimeState {
             activePartitionSummary = await Self.configureLoadedContainer(
                 visionContainer, profile: profile)
             textContainer = nil
-        } else if install.modalities.contains(.text) {
+        } else if runtimeModalities.contains(.text) {
             var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .language)
             resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
             activeStopStrings = resolvedConfiguration.hints.stopStrings
@@ -3086,9 +3118,10 @@ private actor MLXRuntimeState {
         }
         let loadedInstall = activeInstall
         let loadedInstallMatchesRequest = loadedInstall?.modelID == request.modelID
+        let loadedRuntimeModalities = loadedInstall?.effectiveTurboQuantModalities
         let loadedInstallUsesVLMRuntime = loadedInstallMatchesRequest
-            && (loadedInstall?.modalities.contains(.vision) == true
-                || loadedInstall?.modalities.contains(.audio) == true)
+            && (loadedRuntimeModalities?.contains(.vision) == true
+                || loadedRuntimeModalities?.contains(.audio) == true)
         let useVLMRuntime = requiresVLM || loadedInstallUsesVLMRuntime
         let container: MLXLMCommon.ModelContainer
         if useVLMRuntime {
@@ -3433,7 +3466,7 @@ private actor MLXRuntimeState {
                             LocalProviderMetadataKeys.runtimePrefillStepSize: String(profile.prefillStepSize),
                             LocalProviderMetadataKeys.turboQuantProfileSource: profile.quantization.turboQuantProfileSource ?? "none",
                             LocalProviderMetadataKeys.cacheTopology: install?.cacheTopology.rawValue ?? ModelCacheTopology.unsupported.rawValue,
-                            LocalProviderMetadataKeys.turboQuantFamilySupport: install?.turboQuantFamilySupport.rawValue ?? TurboQuantFamilySupport.none.rawValue,
+                            LocalProviderMetadataKeys.turboQuantFamilySupport: install?.effectiveTurboQuantFamilySupport.rawValue ?? TurboQuantFamilySupport.none.rawValue,
                             LocalProviderMetadataKeys.turboQuantAdmissionDecision: turboQuantAdmissionPlan?.admitted == false
                                 ? "refused"
                                 : (profile.quantization.kvCacheStrategy == .turboQuant ? "turboQuant" : "plain_rotating_kv"),
@@ -3490,7 +3523,7 @@ private actor MLXRuntimeState {
                         }
                         contextMetadata.merge(generationPlan.providerMetadata()) { _, new in new }
                         latestTurboQuantTelemetry.setFailureMetadata(contextMetadata)
-                        if install?.turboQuantFamilySupport == .hybridFull,
+                        if install?.effectiveTurboQuantFamilySupport == .hybridFull,
                            profile.quantization.kvCacheStrategy == .turboQuant {
                             contextMetadata[LocalProviderMetadataKeys.hybridStateExplanation] = "Attention KV caches use TurboQuant; architecture-specific native state caches remain exact."
                         }
@@ -4408,10 +4441,10 @@ private actor MLXRuntimeState {
         #if canImport(MLXLMCommon)
         if let install,
 	           let registryProfile = MLXLMCommon.TurboQuantProfileRegistry.bundled.profile(
-	               for: install.repository,
-	               modelType: install.modelType,
-	               textConfigModelType: install.textConfigModelType,
-	               modality: install.modalities.contains(.vision) ? .visionText : .text,
+               for: install.repository,
+               modelType: install.modelType,
+               textConfigModelType: install.textConfigModelType,
+               modality: install.effectiveTurboQuantModalities.contains(.vision) ? .visionText : .text,
 	               parameterCountB: install.resolvedParameterCount.map { Double($0) / 1_000_000_000 },
 	               routedExperts: install.routedExperts,
 	               expertsPerToken: install.expertsPerToken,
@@ -4527,25 +4560,26 @@ private actor MLXRuntimeState {
             metadata[LocalProviderMetadataKeys.turboQuantProfileDiagnostics] = quantization.turboQuantProfileDiagnostics.joined(separator: " | ")
         }
         appendRuntimeFeatureMetadata(to: &metadata, partitionSummary: partitionSummary)
-        if let preset = quantization.preset {
+        let turboQuantPlanned = quantization.kvCacheStrategy == .turboQuant
+        if turboQuantPlanned, let preset = quantization.preset {
             metadata[LocalProviderMetadataKeys.turboQuantPreset] = preset.rawValue
         }
-        if let valueBits = quantization.turboQuantValueBits {
+        if turboQuantPlanned, let valueBits = quantization.turboQuantValueBits {
             metadata[LocalProviderMetadataKeys.turboQuantValueBits] = String(valueBits)
         }
-        if let requestedBackend = quantization.requestedBackend {
+        if turboQuantPlanned, let requestedBackend = quantization.requestedBackend {
             metadata[LocalProviderMetadataKeys.turboQuantRequestedBackend] = requestedBackend.rawValue
         }
-        if let activeBackend = quantization.activeBackend {
+        if turboQuantPlanned, let activeBackend = quantization.activeBackend {
             metadata[LocalProviderMetadataKeys.turboQuantActiveBackend] = activeBackend.rawValue
         }
-        if let attentionPath = quantization.activeAttentionPath {
+        if turboQuantPlanned, let attentionPath = quantization.activeAttentionPath {
             metadata[LocalProviderMetadataKeys.turboQuantAttentionPath] = attentionPath.rawValue
         }
-        if let kernelProfile = quantization.metalKernelProfile {
+        if turboQuantPlanned, let kernelProfile = quantization.metalKernelProfile {
             metadata[LocalProviderMetadataKeys.turboQuantKernelProfile] = kernelProfile.rawValue
         }
-        if let selfTestStatus = quantization.metalSelfTestStatus {
+        if turboQuantPlanned, let selfTestStatus = quantization.metalSelfTestStatus {
             metadata[LocalProviderMetadataKeys.turboQuantSelfTestStatus] = selfTestStatus.rawValue
         }
         if let fallbackReason = quantization.activeFallbackReason {

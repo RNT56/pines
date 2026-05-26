@@ -49,12 +49,21 @@ public struct ModelPreflightClassifier: Sendable {
                     || lowerTag == "sentence-transformers"
                     || lowerTag == "embeddings"
             }
-        let hasVisionSignal = hasProcessorConfig
+        let modelTypes = Self.normalizedModelTypes(
+            from: config,
+            modelType: modelType,
+            textConfigModelType: textConfigModelType
+        )
+        let hasProcessorOnlyVisionSignal = hasProcessorConfig
             || processorClass?.localizedCaseInsensitiveContains("processor") == true
-            || input.tags.contains { tag in
-                let lowerTag = tag.lowercased()
-                return lowerTag == "image-text-to-text" || lowerTag == "any-to-any"
-            }
+        let hasExplicitVisionSignal = Self.hasExplicitVisionSignal(
+            repository: lowerRepository,
+            tags: input.tags,
+            processorClass: processorClass
+        )
+        let requiresExplicitVisionSignal = modelTypes.contains(where: Self.isQwen35Family)
+        let hasVisionSignal = hasExplicitVisionSignal
+            || (hasProcessorOnlyVisionSignal && !requiresExplicitVisionSignal)
         let hasAudioSignal = config?["audio_config"] != nil
             || config?["audio_tower"] != nil
             || lowerRepository.contains("audio")
@@ -430,6 +439,48 @@ public struct ModelPreflightClassifier: Sendable {
             || modelType == "gemma4_assistant"
     }
 
+    private static func hasExplicitVisionSignal(
+        repository: String,
+        tags: [String],
+        processorClass: String?
+    ) -> Bool {
+        if let processorClass {
+            let lower = processorClass.lowercased()
+            if lower.contains("vl")
+                || lower.contains("vision")
+                || lower.contains("visual")
+                || lower.contains("image")
+                || lower.contains("video")
+                || lower.contains("omni")
+                || lower.contains("multimodal")
+            {
+                return true
+            }
+        }
+        if repository.contains("-vl")
+            || repository.contains("_vl")
+            || repository.contains("vision")
+            || repository.contains("visual")
+            || repository.contains("image")
+            || repository.contains("video")
+            || repository.contains("omni")
+            || repository.contains("multimodal")
+        {
+            return true
+        }
+        return tags.contains { tag in
+            let lowerTag = tag.lowercased()
+            return lowerTag == "image-text-to-text"
+                || lowerTag == "visual-question-answering"
+                || lowerTag == "image-to-text"
+                || lowerTag == "video-text-to-text"
+                || lowerTag == "any-to-any"
+                || lowerTag.contains("vision")
+                || lowerTag.contains("image")
+                || lowerTag.contains("video")
+                || lowerTag.contains("multimodal")
+        }
+    }
 
     private static func hasQwen35LinearAttention(in config: [String: Any]?) -> Bool {
         guard let config else { return false }

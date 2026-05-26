@@ -166,6 +166,19 @@ struct CoreContractTests {
     }
 
     @Test
+    func turboQuantEightBitPresetRoundTripsThroughCoreContracts() throws {
+        #expect(TurboQuantPreset(rawValue: "turbo8") == .turbo8)
+        #expect(TurboQuantPreset.turbo8.effectiveBits == 8)
+        #expect(TurboQuantPreset.turbo8.baseBits == 8)
+        #expect(TurboQuantPreset.turbo8.outlierBits == 8)
+        #expect(TurboQuantPreset.turbo8.defaultValueBits == 8)
+
+        let encoded = try JSONEncoder().encode(TurboQuantPreset.turbo8)
+        let decoded = try JSONDecoder().decode(TurboQuantPreset.self, from: encoded)
+        #expect(decoded == .turbo8)
+    }
+
+    @Test
     func chatContextPackerAnchorsCurrentUserAndDropsStaleFutureTurns() {
         let anchorID = UUID()
         let staleID = UUID()
@@ -3562,6 +3575,77 @@ struct CoreContractTests {
     }
 
     @Test
+    func qwenTextModelsWithGenericProcessorConfigStillAdvertiseTurboQuant() throws {
+        let classifier = ModelPreflightClassifier()
+        let result = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+                configJSON: Data(
+                    #"{"model_type":"qwen3_5","head_dim":256,"full_attention_interval":4,"linear_num_value_heads":8,"linear_conv_kernel_dim":4}"#
+                        .utf8
+                ),
+                processorConfigJSON: Data(#"{"processor_class":"QwenProcessor"}"#.utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 700_000_000),
+                ],
+                tags: ["mlx", "qwen3_5", "4bit"]
+            )
+        )
+
+        #expect(result.verification == .verified)
+        #expect(result.modalities == [.text])
+        #expect(result.cacheTopology == .hybridAttentionAndNativeState)
+        #expect(result.turboQuantFamilySupport == .hybridFull)
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: result.repository,
+                modelType: result.modelType,
+                textConfigModelType: result.textConfigModelType,
+                modalities: result.modalities,
+                familySupport: result.turboQuantFamilySupport
+            )
+        )
+    }
+
+    @Test
+    func qwenVisionModelsRemainGatedUntilVLMTurboQuantTopologyIsExplicit() throws {
+        let classifier = ModelPreflightClassifier()
+        let result = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen3.5-VL-2B-Instruct-4bit",
+                configJSON: Data(
+                    #"{"model_type":"qwen3_5","head_dim":256,"full_attention_interval":4,"linear_num_value_heads":8,"linear_conv_kernel_dim":4}"#
+                        .utf8
+                ),
+                processorConfigJSON: Data(#"{"processor_class":"Qwen2VLProcessor"}"#.utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 1_550_000_000),
+                ],
+                tags: ["mlx", "qwen3_5", "image-text-to-text", "4bit"]
+            )
+        )
+
+        #expect(result.modalities == [.text, .vision])
+        #expect(result.cacheTopology == .hybridAttentionAndNativeState)
+        #expect(result.turboQuantFamilySupport == .none)
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: result.repository,
+                modelType: result.modelType,
+                textConfigModelType: result.textConfigModelType,
+                modalities: result.modalities,
+                familySupport: result.turboQuantFamilySupport
+            )
+        )
+    }
+
+    @Test
     func qwenTurboQuantResourcePolicyKeepsLargeModelsBehindDownloadGates() throws {
         let compactPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 3_800_000_000)
         let proPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 5_500_000_000)
@@ -3659,6 +3743,73 @@ struct CoreContractTests {
         #expect(!llama3B.isSmallTextGenerationModel)
         #expect(gemma1B.resolvedParameterCount == 1_000_000_000)
         #expect(gemma1B.isSmallTextGenerationModel)
+    }
+
+    @Test
+    func modelInstallRepairsStaleTurboQuantFamilySupportForAdmittedTextModels() {
+        let staleQwen08 = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Qwen3.5-0.8B-MLX-4bit"),
+            displayName: "Qwen3.5 0.8B",
+            repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+            modalities: [.text, .vision],
+            verification: .installable,
+            modelType: "qwen3_5",
+            textConfigModelType: "qwen3_5_text",
+            processorClass: "QwenProcessor",
+            keyHeadDimension: 256,
+            valueHeadDimension: 256,
+            cacheTopology: .hybridAttentionAndNativeState,
+            turboQuantFamilySupport: .none
+        )
+        let staleLlama3B = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Llama-3.2-3B-Instruct-4bit"),
+            displayName: "Llama 3.2 3B",
+            repository: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            modalities: [.text],
+            verification: .installable,
+            modelType: "llama",
+            keyHeadDimension: 128,
+            valueHeadDimension: 128,
+            cacheTopology: .standardAttention,
+            turboQuantFamilySupport: .none
+        )
+        let qwenVL = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Qwen3.5-VL-2B-Instruct-4bit"),
+            displayName: "Qwen3.5 VL 2B",
+            repository: "mlx-community/Qwen3.5-VL-2B-Instruct-4bit",
+            modalities: [.text, .vision],
+            verification: .installable,
+            modelType: "qwen3_5",
+            processorClass: "Qwen2VLProcessor",
+            keyHeadDimension: 256,
+            valueHeadDimension: 256,
+            cacheTopology: .hybridAttentionAndNativeState,
+            turboQuantFamilySupport: .none
+        )
+
+        #expect(staleQwen08.effectiveTurboQuantModalities == [.text])
+        #expect(staleQwen08.effectiveTurboQuantFamilySupport == .hybridFull)
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: staleQwen08.repository,
+                modelType: staleQwen08.modelType,
+                textConfigModelType: staleQwen08.textConfigModelType,
+                modalities: staleQwen08.effectiveTurboQuantModalities,
+                familySupport: staleQwen08.effectiveTurboQuantFamilySupport
+            )
+        )
+        #expect(staleLlama3B.effectiveTurboQuantFamilySupport == .attentionKVFull)
+        #expect(qwenVL.effectiveTurboQuantModalities == [.text, .vision])
+        #expect(qwenVL.effectiveTurboQuantFamilySupport == .none)
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: qwenVL.repository,
+                modelType: qwenVL.modelType,
+                textConfigModelType: qwenVL.textConfigModelType,
+                modalities: qwenVL.effectiveTurboQuantModalities,
+                familySupport: qwenVL.effectiveTurboQuantFamilySupport
+            )
+        )
     }
 
     @Test
@@ -4541,7 +4692,17 @@ struct CoreContractTests {
 
     @Test
     func localGenerationPipelinePlanDoesNotClampOrdinaryLoadedModelHeadroom() {
-        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let profile = RuntimeProfile(
+            quantization: QuantizationProfile(
+                maxKVSize: 4_096,
+                algorithm: .none,
+                kvCacheStrategy: .none,
+                preset: nil,
+                requestedBackend: nil,
+                activeBackend: nil,
+                activeAttentionPath: nil
+            )
+        )
         let safety = LocalRuntimeSafetyPolicy.assess(
             snapshot: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 8_000_000_000,
@@ -4588,10 +4749,64 @@ struct CoreContractTests {
             initialAvailableMemoryBytes: 1_800_000_000
         )
 
-        #expect(plan.pressureCompletionTokenLimit == nil)
+        #expect(plan.pressureCompletionTokenLimit == 512)
         #expect(plan.reservedCompletionTokens == 20)
         #expect(plan.effectiveMaxTokens == 20)
         #expect(!plan.maxTokensClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanCapsTurboQuantCompletionForLoadedModelHeadroom() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 16_384))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_533_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 2_533_000_000
+        )
+
+        #expect(safety.pressureReason == .none)
+        #expect(plan.pressureCompletionTokenLimit == 512)
+        #expect(plan.reservedCompletionTokens == 512)
+        #expect(plan.effectiveMaxTokens == 512)
+        #expect(plan.maxTokensClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanCapsHybridTurboQuantCompletionForNativeStateHeadroom() {
+        let profile = RuntimeProfile(
+            quantization: QuantizationProfile(
+                maxKVSize: 16_384,
+                turboQuantProfileID: "qwen3.5-0.8b",
+                turboQuantProfileSource: "bundled"
+            )
+        )
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_900_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 2_900_000_000
+        )
+
+        #expect(safety.pressureReason == .none)
+        #expect(plan.pressureCompletionTokenLimit == 256)
+        #expect(plan.reservedCompletionTokens == 256)
+        #expect(plan.effectiveMaxTokens == 256)
+        #expect(plan.maxTokensClamped)
     }
 
     @Test
@@ -4659,7 +4874,7 @@ struct CoreContractTests {
         let safety = LocalRuntimeSafetyPolicy.assess(
             snapshot: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 8_000_000_000,
-                availableMemoryBytes: 1_800_000_000,
+                availableMemoryBytes: 3_200_000_000,
                 thermalState: "nominal"
             )
         )
@@ -4667,7 +4882,7 @@ struct CoreContractTests {
             requestedCompletionTokens: 2_048,
             profile: profile,
             safety: safety,
-            initialAvailableMemoryBytes: 1_800_000_000
+            initialAvailableMemoryBytes: 3_200_000_000
         )
 
         let fitsContext = plan.fitPreparedPrompt(promptTokenCount: 47, maxContextTokens: 4_096)

@@ -66,7 +66,7 @@ Machine-readable compatibility-pair files:
 Current status:
 
 - The active compatibility pair is green for local release gates.
-- Pines pins `mlx-swift` `260c8fb16df772b8c20295529fde958fffb66369` and `mlx-swift-lm` `13d3b35a9f6207fbf342c40ff7ff77cd6f0b9b5e`.
+- Pines pins `mlx-swift` `bc3fc52e78d1bf1b2073cfc14154b8329b514587` and `mlx-swift-lm` `905db8d4d8d894086b036c61afee5324f0d575ba`.
 - Layout V5 is the default TurboQuant layout on this pair; Layout V4 remains supported for legacy and comparison runs.
 - Full local Xcode validation has passed for the pair.
 - Real-device model/device/mode evidence is still required before any product surface may claim `Verified` or `Certified` compatibility.

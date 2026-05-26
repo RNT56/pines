@@ -2879,13 +2879,19 @@ final class PinesAppModel: ObservableObject {
                     providerMetadata: runProviderMetadata
                 )
             }
+            let maxWallTimeSeconds: Int
+            if isLocalRun {
+                maxWallTimeSeconds = isAgentMode ? 600 : 420
+            } else {
+                maxWallTimeSeconds = isAgentMode ? 180 : 120
+            }
             let session = AgentSession(
                 title: isAgentMode ? "Agent" : "Chat",
                 policy: AgentPolicy(
                     executionMode: settings?.executionMode ?? executionMode,
                     maxSteps: isAgentMode ? 10 : 1,
                     maxToolCalls: isAgentMode ? 8 : 0,
-                    maxWallTimeSeconds: isAgentMode ? 180 : 120,
+                    maxWallTimeSeconds: maxWallTimeSeconds,
                     requiresConsentForNetwork: false,
                     requiresConsentForBrowser: false,
                     allowsCloudContext: includePrivateContext,
@@ -2971,7 +2977,7 @@ final class PinesAppModel: ObservableObject {
                         case .cancelled:
                             status = .cancelled
                         case .length:
-                            status = .failed
+                            status = .complete
                         case .stop, .toolCall:
                             status = .complete
                         case .error:
@@ -2991,13 +2997,8 @@ final class PinesAppModel: ObservableObject {
                         } else {
                             try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata, toolCalls: completedToolCalls)
                             if finish.reason == .length {
-                                let message = messageWithProviderDiagnostics(
-                                    finish.message ?? "Local generation stopped before the model emitted a stop sequence.",
-                                    metadata: finalProviderMetadata
-                                )
-                                failureMessage = message
-                                setChatError(message)
-                                emitHaptic(.runFailed)
+                                clearChatError()
+                                emitHaptic(.runCompleted)
                             } else {
                                 clearChatError()
                                 emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
