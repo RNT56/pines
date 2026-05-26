@@ -2297,9 +2297,36 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
         } else {
             headroomLimit = nil
         }
-        return [headroomLimit, hybridTurboQuantCompletionLimit(profile: profile, availableMemoryBytes: availableMemoryBytes)]
+        return [
+            headroomLimit,
+            hybridTurboQuantCompletionLimit(profile: profile, availableMemoryBytes: availableMemoryBytes),
+            qualityGuardedTurboQuantCompletionLimit(profile: profile, availableMemoryBytes: availableMemoryBytes),
+        ]
             .compactMap { $0 }
             .min()
+    }
+
+    private static func qualityGuardedTurboQuantCompletionLimit(
+        profile: RuntimeProfile,
+        availableMemoryBytes: Int64
+    ) -> Int? {
+        guard profile.quantization.kvCacheStrategy == .turboQuant else { return nil }
+        let profileID = profile.quantization.turboQuantProfileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let profileID, !profileID.isEmpty else { return nil }
+
+        if profileID == "gemma-3-1b" {
+            return availableMemoryBytes < 3_000_000_000 ? 256 : 384
+        }
+        if profileID == "llama-3.2-3b" {
+            return availableMemoryBytes < 2_000_000_000 ? 128 : 192
+        }
+        if (profileID.hasPrefix("qwen3.5-") || profileID.hasPrefix("qwen3.6-")),
+           profileID != "qwen3.5-0.8b" {
+            return availableMemoryBytes < 3_200_000_000 ? 192 : 256
+        }
+        return nil
     }
 
     private static func hybridTurboQuantCompletionLimit(

@@ -88,6 +88,7 @@ public enum LocalProviderMetadataKeys {
     public static let generationPrepareElapsedSeconds = "local.generation.prepare_elapsed_seconds"
     public static let generationCacheCreateElapsedSeconds = "local.generation.cache_create_elapsed_seconds"
     public static let generationPreflightAttempts = "local.generation.preflight_attempts"
+    public static let generationRepetitionPenalty = "local.generation.repetition_penalty"
     public static let generationRequestedMaxTokens = "local.generation.requested_max_tokens"
     public static let generationEffectiveMaxTokens = "local.generation.effective_max_tokens"
     public static let generationMaxTokensClamped = "local.generation.max_tokens_clamped"

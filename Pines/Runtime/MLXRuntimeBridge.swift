@@ -423,7 +423,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-bc3fc52e78d1bf1b2073cfc14154b8329b514587+mlx-swift-lm-905db8d4d8d894086b036c61afee5324f0d575ba"
+        "mlx-swift-bc3fc52e78d1bf1b2073cfc14154b8329b514587+mlx-swift-lm-1af28b79449a95b471b3805926aef1347afd7423"
     static var turboQuantLayoutVersion: Int {
         #if canImport(MLX)
         MLX.TurboQuantAttentionLayout.currentVersion
@@ -3478,6 +3478,10 @@ private actor MLXRuntimeState {
                             LocalProviderMetadataKeys.generationPrepareElapsedSeconds: String(prepareElapsedSeconds),
                             LocalProviderMetadataKeys.generationPreflightAttempts: String(preflightAttempts),
                         ]
+                        if let repetitionPenalty = parameters.repetitionPenalty {
+                            contextMetadata[LocalProviderMetadataKeys.generationRepetitionPenalty] =
+                                String(repetitionPenalty)
+                        }
                         if let admission = profile.quantization.turboQuantAdmission {
                             contextMetadata[LocalProviderMetadataKeys.turboQuantSelectedMode] = admission.selectedMode.rawValue
                             contextMetadata[LocalProviderMetadataKeys.turboQuantAdmittedContext] = String(admission.admittedContextLength)
@@ -4273,6 +4277,10 @@ private actor MLXRuntimeState {
                 maxKVSizeOverride ?? profile.quantization.maxKVSize
             }
 
+        let resolvedRepetitionPenalty =
+            request.sampling.repetitionPenalty
+            ?? Self.localTurboQuantDefaultRepetitionPenalty(for: install, profile: profile)
+
         return GenerateParameters(
             maxTokens: maxTokensOverride ?? request.sampling.maxTokens,
             maxKVSize: resolvedMaxKVSize,
@@ -4301,10 +4309,36 @@ private actor MLXRuntimeState {
             turboQuantFallbackPolicy: turboQuantFallbackPolicy,
             temperature: request.sampling.temperature,
             topP: request.sampling.topP,
-            repetitionPenalty: request.sampling.repetitionPenalty,
+            repetitionPenalty: resolvedRepetitionPenalty,
             repetitionContextSize: profile.repetitionContextSize,
             prefillStepSize: profile.prefillStepSize
         )
+    }
+
+    private static func localTurboQuantDefaultRepetitionPenalty(
+        for install: ModelInstall?,
+        profile: RuntimeProfile
+    ) -> Float? {
+        guard profile.quantization.kvCacheStrategy == .turboQuant else { return nil }
+        let identifiers = [
+            profile.quantization.turboQuantProfileID,
+            install?.repository,
+            install?.modelID.rawValue,
+            install?.modelType,
+            install?.textConfigModelType,
+        ]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+
+        if identifiers.contains("qwen3.5") || identifiers.contains("qwen3_5")
+            || identifiers.contains("qwen3.6") || identifiers.contains("qwen3_6") {
+            return 1.12
+        }
+        if identifiers.contains("llama") || identifiers.contains("gemma") {
+            return 1.08
+        }
+        return nil
     }
 
     #if canImport(MLX) && canImport(MLXLMCommon)

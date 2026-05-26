@@ -4810,6 +4810,43 @@ struct CoreContractTests {
     }
 
     @Test
+    func localGenerationPipelinePlanCapsQualitySensitiveTurboQuantFamilies() {
+        let cases: [(String, Int64, Int)] = [
+            ("gemma-3-1b", 2_900_000_000, 256),
+            ("llama-3.2-3b", 1_600_000_000, 128),
+            ("qwen3.5-2b", 2_900_000_000, 192),
+        ]
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_900_000_000,
+                thermalState: "nominal"
+            )
+        )
+
+        for (profileID, availableMemoryBytes, expectedLimit) in cases {
+            let profile = RuntimeProfile(
+                quantization: QuantizationProfile(
+                    maxKVSize: 16_384,
+                    turboQuantProfileID: profileID,
+                    turboQuantProfileSource: "bundled"
+                )
+            )
+            let plan = LocalGenerationPipelinePlan(
+                requestedCompletionTokens: 2_048,
+                profile: profile,
+                safety: safety,
+                initialAvailableMemoryBytes: availableMemoryBytes
+            )
+
+            #expect(plan.pressureCompletionTokenLimit == expectedLimit)
+            #expect(plan.reservedCompletionTokens == expectedLimit)
+            #expect(plan.effectiveMaxTokens == expectedLimit)
+            #expect(plan.maxTokensClamped)
+        }
+    }
+
+    @Test
     func localGenerationPipelinePlanFitsCompletionBudgetToContextAfterTokenization() {
         let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
         let safety = LocalRuntimeSafetyPolicy.assess(
