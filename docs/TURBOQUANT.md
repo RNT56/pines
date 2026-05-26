@@ -5,7 +5,7 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 The current compatibility pair is green for local release gates. Pines can build, test, resolve the pinned MLX packages through Xcode, run simulator smoke tests, and enforce pin drift checks on:
 
 - `RNT56/mlx-swift`: `c96dd8c7b374fa50d64b35bf8c5d7739df7d9984`
-- `RNT56/mlx-swift-lm`: `110bc26b4124df915ee2eb89f9774d1d617977ab`
+- `RNT56/mlx-swift-lm`: `c8a544503bcdad21ee736feec68f0ed7e07a9b29`
 
 This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
 
@@ -23,7 +23,7 @@ The pinned pair makes Layout V5 the default TurboQuant attention layout for devi
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
   - `RNT56/mlx-swift`: `c96dd8c7b374fa50d64b35bf8c5d7739df7d9984`
-  - `RNT56/mlx-swift-lm`: `110bc26b4124df915ee2eb89f9774d1d617977ab`
+  - `RNT56/mlx-swift-lm`: `c8a544503bcdad21ee736feec68f0ed7e07a9b29`
   - Nested `mlx` inside `RNT56/mlx-swift`: `75b756717154890033209aaba4ffc89b113c5998`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, direct compressed `QK^T`, direct compressed `AV`, `turbo8` high-precision KV-cache mode, a device-profile-gated tiled online fused decode path, runtime device capabilities, selected kernel profiles, tiny latency probes, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
@@ -63,7 +63,7 @@ Latest real-device smoke validation for the active compatibility pair ran on `iP
 | `mlx-community/Llama-3.2-3B-Instruct-4bit` | `ios-freeze-stress-20260526T110703Z` | Completed | `turbo8`, exact raw shadow, baseline attention | Coherent stop, no repeated bigram/trigram issue, `0.90 tok/s`; active KV window fell to 2048 under low-memory/thermal pressure. |
 | `mlx-community/Qwen3.5-0.8B-MLX-4bit` | `ios-freeze-stress-20260526T110824Z` | Completed | `turbo8`, exact raw shadow, baseline attention | Coherent stop, no repeated bigram/trigram issue, `2.62 tok/s`, first token `1.32s`; context was thermally constrained to 4096. |
 
-Current conclusion: the exact raw-shadow baseline preserved correctness but caused unacceptable throughput. The active LM pin keeps exact initial prefill for Qwen3.5/Qwen3.6 Turbo8 and routes decode through raw-free two-stage compressed QK/AV, which passed the synthetic Qwen proof release matrix at 8K/16K with `float16`, `twoStageCompressed`, 10/10 cases, and minimum measured compressed decode throughput of `23.93 tok/s`. The 32K context remains a stress gate until it clears the configured throughput threshold on target devices. Lower-bit `turbo4v2`, `turbo4`, `turbo3_5`, and `turbo2_5` remain guarded because earlier real-device compressed attention runs produced repetitive or degraded text; promotion from `guarded` to `Verified` requires per-model evidence that the active compressed attention path passes repetition, stop, memory, and throughput gates.
+Current conclusion: the exact raw-shadow baseline preserved correctness but caused unacceptable throughput. The active LM pin keeps exact initial prefill for Qwen3.5/Qwen3.6 Turbo8 and routes decode through raw-free two-stage compressed QK/AV, which passed the synthetic Qwen proof release matrix at 8K/16K with `float16`, `twoStageCompressed`, 10/10 cases, and minimum measured compressed decode throughput of `25.45 tok/s`. It also hardens normal transposed attention layouts, compressed-update fallback, packed fallback residency, and rotating single-token window masks. The 32K context remains a stress gate until it clears the configured throughput threshold on target devices. Lower-bit `turbo4v2`, `turbo4`, `turbo3_5`, and `turbo2_5` remain guarded because earlier real-device compressed attention runs produced repetitive or degraded text; promotion from `guarded` to `Verified` requires per-model evidence that the active compressed attention path passes repetition, stop, memory, and throughput gates.
 
 ## Fork Maintenance
 

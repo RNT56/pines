@@ -423,7 +423,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-c96dd8c7b374fa50d64b35bf8c5d7739df7d9984+mlx-swift-lm-110bc26b4124df915ee2eb89f9774d1d617977ab"
+        "mlx-swift-c96dd8c7b374fa50d64b35bf8c5d7739df7d9984+mlx-swift-lm-c8a544503bcdad21ee736feec68f0ed7e07a9b29"
     private static let shortContextPlainKVTokenThreshold = 4_096
     private static let forceTurboQuantShortContextEnvironmentKey =
         "PINES_FORCE_TURBOQUANT_SHORT_CONTEXT"

@@ -50,7 +50,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RNT56/mlx-swift-lm",
       "state" : {
-        "revision" : "110bc26b4124df915ee2eb89f9774d1d617977ab"
+        "revision" : "c8a544503bcdad21ee736feec68f0ed7e07a9b29"
       }
     },
     {
