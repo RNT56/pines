@@ -10,13 +10,13 @@
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "165bcd456aa1e6599be60bbe66cdd393c5e8438e",
+    "commit": "e60a719ea85c4284c2619ba0523b21956f70a0f0",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "777e75a02b6c723e4de67f5c3e3ade88712de3ae",
+    "commit": "6ef60007409b316cefbc7760cb500f40ffb127c1",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -40,7 +40,7 @@
     "OpenKVFormat": 1,
     "PlatformEvidenceDimensions": 1
   },
-  "validatedAt": "2026-05-26T17:50:44Z",
+  "validatedAt": "2026-05-26T21:26:42Z",
   "validationCommands": [
     {
       "repo": "pines",
@@ -244,7 +244,7 @@
       "repo": "pines",
       "command": "bash scripts/ci/check-mlx-package-pins.sh",
       "result": "passed",
-      "notes": "Pin guard passed after promoting Pines to mlx-swift 165bcd456aa1e6599be60bbe66cdd393c5e8438e and mlx-swift-lm 777e75a02b6c723e4de67f5c3e3ade88712de3ae."
+      "notes": "Pin guard passed after promoting Pines to mlx-swift e60a719ea85c4284c2619ba0523b21956f70a0f0 and mlx-swift-lm 6ef60007409b316cefbc7760cb500f40ffb127c1."
     },
     {
       "repo": "pines",
@@ -262,7 +262,7 @@
       "repo": "pines",
       "command": "bash scripts/ci/run-xcode-validation.sh prepare && bash scripts/ci/run-xcode-validation.sh resolve",
       "result": "passed",
-      "notes": "Locked Xcode package resolution checked out mlx-swift 165bcd4 and mlx-swift-lm 777e75a with no package-lock drift."
+      "notes": "Locked Xcode package resolution checked out mlx-swift e60a719 and mlx-swift-lm 6ef6000 with no package-lock drift."
     },
     {
       "repo": "mlx-swift",
@@ -280,7 +280,7 @@
       "repo": "mlx-swift-lm",
       "command": "swift run -c release TurboQuantQwenProof --profiles qwen3.5-2b --schemes turbo8,turbo4v2,turbo3_5 --contexts 32768 --experimental-contexts 65536,131072 --query-lengths 1 --iterations 20 --warmup 4 --dtype float16 --min-extended-tokens-per-second 20 --reserved-capacity 131072 --strict",
       "result": "passed",
-      "notes": "Strict Mac proof passed 3/3 32K production Qwen-shaped fused cases with 128K reserved capacity. Reserved-capacity p95 rates at 32K were Turbo8 31.11 tok/s, Turbo4V2 33.76 tok/s, and Turbo3.5 31.52 tok/s. Turbo3.5 cleared the 64K experiment p95 floor at 20.81 tok/s; Turbo4V2 and Turbo8 remain experiment-only at 64K in this run, and all 128K rows remain below production speed."
+      "notes": "Strict Mac proof passed 3/3 32K production Qwen-shaped fused cases with 128K reserved capacity. Reserved-capacity p95 rates at 32K were Turbo8 28.89 tok/s, Turbo4V2 30.84 tok/s, and Turbo3.5 31.44 tok/s. All 64K and 128K rows passed quality but remain experiment-only below the 20 tok/s p95 production floor in this run."
     },
     {
       "repo": "mlx-swift-lm",
@@ -319,16 +319,16 @@
     "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
     "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
     "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only.",
-    "mlx-swift 165bcd456aa1e6599be60bbe66cdd393c5e8438e optimizes the Mac-gated Qwen GQA fused kernel with four-repeat key reuse, rolling mixed-bit key offsets, aligned affine value reads, cached sign bitset words, hoisted value seeds, reduce-width tuning, active-block dispatch for reserved larger caches, and Qwen-shaped core benchmark controls.",
-    "mlx-swift-lm 777e75a02b6c723e4de67f5c3e3ade88712de3ae pins the optimized grouped-query fused core and adds reserved-capacity reporting to TurboQuantQwenProof.",
-    "TurboQuantQwenProof strict Mac release proof passed locally with fp16 Qwen3.5 2B shape, 16 query heads, 4 KV heads, 32K production context, 128K reserved capacity, query length 1, and Turbo8/Turbo4V2/Turbo3.5: 3/3 ok. Reserved-capacity p95 rates at 32K were Turbo8 31.11 tok/s, Turbo4V2 33.76 tok/s, and Turbo3.5 31.52 tok/s. Turbo3.5 reached 20.81 tok/s p95 at 64K; Turbo4V2 and Turbo8 remain experiment-only at 64K in this run, and all 128K rows remain below production speed."
+    "mlx-swift e60a719ea85c4284c2619ba0523b21956f70a0f0 keeps the Mac-gated Qwen GQA fused optimizations and adds a measured block-parallel token-block tuning surface to the core attention API and benchmark reports. The forced 256-token block shape helps some 32K/64K p95 cases but remains an explicit tuning option, not the default, because it falls back at 128K.",
+    "mlx-swift-lm 6ef60007409b316cefbc7760cb500f40ffb127c1 pins the tunable grouped-query fused core, removes duplicate decode canonicalization/redundant steady-state compressed validation, and records block-size overrides in TurboQuantQwenProof schema v4.",
+    "TurboQuantQwenProof strict Mac release proof passed locally with fp16 Qwen3.5 2B shape, 16 query heads, 4 KV heads, 32K production context, 128K reserved capacity, query length 1, and Turbo8/Turbo4V2/Turbo3.5: 3/3 ok. Reserved-capacity p95 rates at 32K were Turbo8 28.89 tok/s, Turbo4V2 30.84 tok/s, and Turbo3.5 31.44 tok/s. All 64K and 128K rows passed quality but remain experiment-only below the 20 tok/s p95 production floor in this run."
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
     "status": "release-green-local-qwen-proof-gates-passed",
-    "pinnedMLXSwift": "165bcd456aa1e6599be60bbe66cdd393c5e8438e",
-    "pinnedMLXSwiftLM": "777e75a02b6c723e4de67f5c3e3ade88712de3ae",
-    "compatibilityPairID": "mlx-swift-165bcd456aa1e6599be60bbe66cdd393c5e8438e+mlx-swift-lm-777e75a02b6c723e4de67f5c3e3ade88712de3ae",
+    "pinnedMLXSwift": "e60a719ea85c4284c2619ba0523b21956f70a0f0",
+    "pinnedMLXSwiftLM": "6ef60007409b316cefbc7760cb500f40ffb127c1",
+    "compatibilityPairID": "mlx-swift-e60a719ea85c4284c2619ba0523b21956f70a0f0+mlx-swift-lm-6ef60007409b316cefbc7760cb500f40ffb127c1",
     "releaseGate": "closed for local Qwen proof and focused compatibility gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }
