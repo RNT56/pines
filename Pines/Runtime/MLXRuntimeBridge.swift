@@ -423,8 +423,8 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-425d765aa7fa2b2cf111b9c43430054d82d02d07+mlx-swift-lm-d1465b7e7156355acda6fd063e5a5b93f9efb903"
-    private static let shortContextPlainKVTokenThreshold = 4_096
+        "mlx-swift-425d765aa7fa2b2cf111b9c43430054d82d02d07+mlx-swift-lm-6335ec8a2e25cff94c93992cb921d7a0345b4a22"
+    private static let shortContextPlainKVTokenThreshold = 16_384
     private static let forceTurboQuantShortContextEnvironmentKey =
         "PINES_FORCE_TURBOQUANT_SHORT_CONTEXT"
     static var turboQuantLayoutVersion: Int {
@@ -569,31 +569,23 @@ struct MLXRuntimeBridge: Sendable {
         }
 
         var profile = baseProfile
-        profile.name = "\(baseProfile.name) Short Context Plain KV"
+        profile.name = "\(baseProfile.name) Adaptive Raw-First KV"
         profile.promptCacheIdentifier = [
             baseProfile.promptCacheIdentifier,
-            "plain-short-context-v1",
+            "adaptive-raw-first-v1",
         ]
         .compactMap { $0 }
         .joined(separator: "|")
-        profile.quantization.algorithm = .none
-        profile.quantization.kvCacheStrategy = .none
         profile.quantization.kvBits = nil
+        profile.quantization.quantizedKVStart = shortContextPlainKVTokenThreshold
         profile.quantization.maxKVSize = min(
             baseProfile.quantization.maxKVSize ?? shortContextPlainKVTokenThreshold,
             shortContextPlainKVTokenThreshold
         )
-        profile.quantization.preset = nil
-        profile.quantization.requestedBackend = nil
-        profile.quantization.activeBackend = nil
-        profile.quantization.activeAttentionPath = nil
-        profile.quantization.rawFallbackAllocated = nil
-        profile.quantization.turboQuantValueBits = nil
-        profile.quantization.turboQuantAdmission = nil
         profile.quantization.activeFallbackReason =
-            "Plain KV selected for short local request (\(requestTokens) tokens <= \(shortContextPlainKVTokenThreshold)); TurboQuant remains reserved for extended context."
+            "Adaptive raw-first routing selected for short local request (\(requestTokens) tokens <= \(shortContextPlainKVTokenThreshold)); MLX uses raw SDPA when admitted and compressed TurboQuant if raw KV does not fit."
         profile.quantization.turboQuantProfileDiagnostics.append(
-            "Short-context router selected plain KV because request_tokens=\(requestTokens) <= \(shortContextPlainKVTokenThreshold)."
+            "Short-context router selected adaptive raw-first TurboQuant because request_tokens=\(requestTokens) <= \(shortContextPlainKVTokenThreshold)."
         )
         return profile
     }
@@ -4338,6 +4330,13 @@ private actor MLXRuntimeState {
         let resolvedRepetitionPenalty =
             request.sampling.repetitionPenalty
             ?? Self.localTurboQuantDefaultRepetitionPenalty(for: install, profile: profile)
+        let resolvedMLXKVCacheStrategy =
+            if profile.quantization.kvCacheStrategy == .turboQuant,
+               ProcessInfo.processInfo.environment[forceTurboQuantShortContextEnvironmentKey] != "1" {
+                MLXLMCommon.KVCacheStrategy.adaptiveTurboQuant
+            } else {
+                Self.mlxKVCacheStrategy(from: profile.quantization.kvCacheStrategy)
+            }
 
         return GenerateParameters(
             maxTokens: maxTokensOverride ?? request.sampling.maxTokens,
@@ -4345,7 +4344,7 @@ private actor MLXRuntimeState {
             kvBits: profile.quantization.kvCacheStrategy == .turboQuant ? nil : profile.quantization.kvBits,
             kvGroupSize: profile.quantization.kvGroupSize,
             quantizedKVStart: profile.quantization.quantizedKVStart,
-            kvCacheStrategy: Self.mlxKVCacheStrategy(from: profile.quantization.kvCacheStrategy),
+            kvCacheStrategy: resolvedMLXKVCacheStrategy,
             turboQuantPreset: Self.mlxTurboQuantPreset(from: profile.quantization.preset),
             turboQuantBackend: Self.mlxTurboQuantBackend(from: profile.quantization.requestedBackend),
             turboQuantOptimizationPolicy: Self.mlxTurboQuantOptimizationPolicy(
@@ -4358,6 +4357,7 @@ private actor MLXRuntimeState {
             turboQuantPerCacheResidentBudgetBytes: turboQuantPerCacheResidentBudgetBytes(),
             turboQuantAdmissionProfile: turboQuantAdmissionProfile,
             turboQuantRequestedContextLength: turboQuantRequestedContextLength,
+            turboQuantRawSDPAThreshold: Self.shortContextPlainKVTokenThreshold,
             turboQuantPromptTokenCount: promptTokenCount,
             turboQuantUserMode: turboQuantUserMode(
                 from: turboQuantAdmissionPlan?.selectedMode
