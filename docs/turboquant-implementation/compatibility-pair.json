@@ -10,13 +10,13 @@
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "776aaf9520ae4b506781d32b674b56f8a18dc165",
+    "commit": "425d765aa7fa2b2cf111b9c43430054d82d02d07",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "fbaf2df6218acf2b6a21f69ae49d28ed87a301b6",
+    "commit": "d1465b7e7156355acda6fd063e5a5b93f9efb903",
     "dirtyAtValidation": false
   },
   "schemaSet": {
@@ -40,7 +40,7 @@
     "OpenKVFormat": 1,
     "PlatformEvidenceDimensions": 1
   },
-  "validatedAt": "2026-05-27T00:10:00Z",
+  "validatedAt": "2026-05-27T09:12:00Z",
   "validationCommands": [
     {
       "repo": "pines",
@@ -347,6 +347,66 @@
       "command": "python3 -m json.tool docs/turboquant-implementation/compatibility-pair.json && git diff --check -- project.yml Pines.xcodeproj/project.pbxproj Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved Pines/Runtime/MLXRuntimeBridge.swift docs/TURBOQUANT.md docs/turboquant-implementation/compatibility-pair.json",
       "result": "passed",
       "notes": "Compatibility manifest parses and edited files pass whitespace checks."
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Focused TurboQuant suite passed 87 XCTest cases after automatic block-token planning and fp16/bf16 block-partial value storage."
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift build --product TurboQuantBenchmark -c release",
+      "result": "passed",
+      "notes": "Release benchmark runner built after fused-partial block-planning changes."
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 65536,131072 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1 --preset turbo8,turbo4v2,turbo3_5",
+      "result": "passed",
+      "notes": "Mac core sweep kept online fused routing and quality-compatible execution. 64K p95 was Turbo8 25.39, Turbo4V2 27.78, Turbo3.5 28.05 tok/s; 128K p95 was Turbo8 13.77, Turbo4V2 15.00, Turbo3.5 14.93 tok/s. Artifact: /Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-fused-partials-mac-20260527T085819Z."
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "TurboQuant cache/profile/runtime tests passed locally against mlx-swift 425d765: 109 Swift Testing/XCTest cases."
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift build -c release --product TurboQuantQwenProof",
+      "result": "passed",
+      "notes": "Release Qwen proof runner built against mlx-swift 425d765 and mlx-swift-lm d1465b7."
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "TurboQuantQwenProof --profiles qwen3.5-2b,qwen3.6-27b,qwen3.6-35b-a3b --schemes turbo8,turbo4v2,turbo3_5 --contexts 32768 --experimental-contexts 65536,131072 --query-lengths 1 --iterations 8 --warmup 2 --strict --reserved-capacity 131072 --min-extended-tokens-per-second 20",
+      "result": "passed",
+      "notes": "Schema-v5 strict Mac proof passed 9/9 32K production rows with automatic 512-token block planning. 64K experiment rows passed the 20 tok/s p95 floor; 128K rows kept valid quality and online fused routing but remained below the 20 tok/s production floor. Artifact: /Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-fused-partials-mac-20260527T085819Z/qwen-proof-32k-64k-128k.json."
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Pin guard passed for project.yml, generated Xcode package references, Xcode Package.resolved, docs/TURBOQUANT.md, compatibility-pair.json, and MLXRuntimeBridge on mlx-swift 425d765 plus mlx-swift-lm d1465b7."
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Focused Pines TurboQuant control-plane suite passed 69 Swift Testing cases on the fused-partial compatibility pair."
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": "PinesCoreTestRunner passed on the fused-partial compatibility pair."
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh prepare && bash scripts/ci/run-xcode-validation.sh resolve",
+      "result": "passed",
+      "notes": "Locked Xcode package resolution checked out mlx-swift 425d765 and mlx-swift-lm d1465b7 with no package-lock drift."
     }
   ],
   "signoffs": {
@@ -384,14 +444,18 @@
     "TurboQuantQwenProof strict Mac release proof passed locally with fp16 Qwen3.5 2B shape, 16 query heads, 4 KV heads, 32K production context, 128K reserved capacity, query length 1, and Turbo8/Turbo4V2/Turbo3.5: 3/3 ok. Reserved-capacity p95 rates at 32K were Turbo8 28.89 tok/s, Turbo4V2 30.84 tok/s, and Turbo3.5 31.44 tok/s. All 64K and 128K rows passed quality but remain experiment-only below the 20 tok/s p95 production floor in this run.",
     "mlx-swift 776aaf9520ae4b506781d32b674b56f8a18dc165 promotes Layout V6 with fixed-tail split-magnitude key storage for Turbo3.5/Turbo2.5, derived high-lane membership, compact key high/residual masks, and no variable prefix-scan in the fused attention read path.",
     "mlx-swift-lm fbaf2df6218acf2b6a21f69ae49d28ed87a301b6 pins the Layout V6 core and adds direct initial compressed cache commits, lightweight compressed update checkpoints, compact v6 append/expand/snapshot restore handling, and packed-fallback guards for invalid group-size dimensions.",
-    "TurboQuantQwenProof strict Mac release proof passed locally for Qwen3.5 2B, Qwen3.6 27B, and Qwen3.6 35B-A3B representative shapes with fp16, 16 query heads, 4 KV heads, 32K production context, 128K reserved capacity, query length 1, and Turbo8/Turbo4V2/Turbo3.5: 9/9 production ok. 32K p95 rates were Turbo8 43.53-44.61 tok/s, Turbo4V2 46.97-47.41 tok/s, and Turbo3.5 46.87-47.31 tok/s. 64K experiment p95 rates were 25.25-28.01 tok/s; 128K experiment p95 rates were 13.55-15.04 tok/s."
+    "TurboQuantQwenProof strict Mac release proof passed locally for Qwen3.5 2B, Qwen3.6 27B, and Qwen3.6 35B-A3B representative shapes with fp16, 16 query heads, 4 KV heads, 32K production context, 128K reserved capacity, query length 1, and Turbo8/Turbo4V2/Turbo3.5: 9/9 production ok. 32K p95 rates were Turbo8 43.53-44.61 tok/s, Turbo4V2 46.97-47.41 tok/s, and Turbo3.5 46.87-47.31 tok/s. 64K experiment p95 rates were 25.25-28.01 tok/s; 128K experiment p95 rates were 13.55-15.04 tok/s.",
+    "mlx-swift 425d765aa7fa2b2cf111b9c43430054d82d02d07 adds automatic block-parallel token planning and stores block-parallel fused value partials in fp16/bf16 for non-float32 decode while preserving float32 stats and final reduction accumulation.",
+    "mlx-swift-lm d1465b7e7156355acda6fd063e5a5b93f9efb903 pins the fused-partial core and promotes TurboQuantQwenProof schema v5 with recommended/effective block-token planning metadata.",
+    "TurboQuantQwenProof strict Mac release proof passed locally for Qwen3.5 2B, Qwen3.6 27B, and Qwen3.6 35B-A3B representative shapes with fp16, 16 query heads, 4 KV heads, 32K production context, 128K reserved capacity, query length 1, automatic 512-token block planning, and Turbo8/Turbo4V2/Turbo3.5: 9/9 production ok. 32K p95 rates were Turbo8 44.43-44.64 tok/s, Turbo4V2 46.63-47.32 tok/s, and Turbo3.5 46.98-47.28 tok/s. 64K experiment p95 rates were 25.38-27.80 tok/s; 128K experiment p95 rates were 13.61-15.07 tok/s.",
+    "Pines pins the fused-partial compatibility pair mlx-swift 425d765aa7fa2b2cf111b9c43430054d82d02d07 plus mlx-swift-lm d1465b7e7156355acda6fd063e5a5b93f9efb903 after local pin guard, focused TurboQuant tests, core runner, and locked Xcode package resolution passed."
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
-    "status": "release-green-local-qwen-proof-gates-passed-layout-v6",
-    "pinnedMLXSwift": "776aaf9520ae4b506781d32b674b56f8a18dc165",
-    "pinnedMLXSwiftLM": "fbaf2df6218acf2b6a21f69ae49d28ed87a301b6",
-    "compatibilityPairID": "mlx-swift-776aaf9520ae4b506781d32b674b56f8a18dc165+mlx-swift-lm-fbaf2df6218acf2b6a21f69ae49d28ed87a301b6",
-    "releaseGate": "closed for local Qwen proof and focused compatibility gates; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
+    "status": "release-green-local-qwen-proof-gates-passed-layout-v6-fused-partials",
+    "pinnedMLXSwift": "425d765aa7fa2b2cf111b9c43430054d82d02d07",
+    "pinnedMLXSwiftLM": "d1465b7e7156355acda6fd063e5a5b93f9efb903",
+    "compatibilityPairID": "mlx-swift-425d765aa7fa2b2cf111b9c43430054d82d02d07+mlx-swift-lm-d1465b7e7156355acda6fd063e5a5b93f9efb903",
+    "releaseGate": "closed for local Qwen proof and focused compatibility gates; 128K remains experiment-only below the 20 tok/s p95 production floor on this Mac; real-device profile evidence is still required before Verified or Certified model/device/mode claims"
   }
 }
