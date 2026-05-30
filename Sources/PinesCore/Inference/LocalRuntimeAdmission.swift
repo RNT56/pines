@@ -20,6 +20,10 @@ public struct LocalRuntimeAdmissionRequest: Hashable, Codable, Sendable {
     public var calibration: RuntimeMemoryCalibration?
     public var estimatedModelWeightsBytes: Int64?
     public var compressedKVBytesPerToken: Int64
+    /// Per-token KV bytes if the cache were kept in plain FP16 (summed across all layers).
+    /// When > 0, admission tries FP16 first and only falls to TurboQuant if the FP16 cache
+    /// would not fit the live memory budget. 0 means "FP16 cost unknown" → FP16 is skipped.
+    public var fp16KVBytesPerToken: Int64
     public var rawShadowBytes: Int64
     public var packedFallbackBytesPerToken: Int64
     public var decodedFallbackScratchBytes: Int64
@@ -49,6 +53,7 @@ public struct LocalRuntimeAdmissionRequest: Hashable, Codable, Sendable {
         calibration: RuntimeMemoryCalibration? = nil,
         estimatedModelWeightsBytes: Int64? = nil,
         compressedKVBytesPerToken: Int64,
+        fp16KVBytesPerToken: Int64 = 0,
         rawShadowBytes: Int64 = 0,
         packedFallbackBytesPerToken: Int64 = 0,
         decodedFallbackScratchBytes: Int64 = 0,
@@ -77,6 +82,7 @@ public struct LocalRuntimeAdmissionRequest: Hashable, Codable, Sendable {
         self.calibration = calibration
         self.estimatedModelWeightsBytes = estimatedModelWeightsBytes.map { max(0, $0) }
         self.compressedKVBytesPerToken = max(0, compressedKVBytesPerToken)
+        self.fp16KVBytesPerToken = max(0, fp16KVBytesPerToken)
         self.rawShadowBytes = max(0, rawShadowBytes)
         self.packedFallbackBytesPerToken = max(0, packedFallbackBytesPerToken)
         self.decodedFallbackScratchBytes = max(0, decodedFallbackScratchBytes)
@@ -171,28 +177,81 @@ public struct LocalRuntimeAdmissionPlan: Hashable, Codable, Sendable {
     }
 }
 
+/// The KV representation a candidate admission plan would run with.
+/// `plainFP16` maps to `KVCacheStrategy.none` (uncompressed, fastest, highest quality);
+/// `turboQuant` maps to the compressed codec used only when FP16 will not fit.
+private enum CandidateKVScheme: Sendable, Equatable {
+    case plainFP16
+    case turboQuant
+
+    var kvStrategy: KVCacheStrategy { self == .plainFP16 ? .none : .turboQuant }
+}
+
 public struct LocalRuntimeAdmissionService: Sendable {
     public init() {}
 
+    /// Chooses the KV representation by a memory-feasibility ladder rather than a static
+    /// token threshold. FP16 is strictly faster and higher-quality whenever it fits, so it
+    /// leads; TurboQuant is only selected when the FP16 cache would exceed the live budget.
+    ///
+    /// Order of candidates (first that fits wins):
+    ///   1. FP16 @ full requested context                 — fastest, full length
+    ///   2. (.fastest only) FP16 @ a shorter window        — never compress; cap length instead
+    ///   3. TurboQuant @ full requested context            — keep length, accept slower decode
+    ///   4. TurboQuant @ downgraded context (existing path) — last resort
     public func admit(_ request: LocalRuntimeAdmissionRequest) -> LocalRuntimeAdmissionPlan {
         let availableMemory = max(0, request.memoryCounters.availableMemoryBytes ?? 0)
         let calibration = request.calibration?.isStale() == false ? request.calibration : nil
         let calibrationMultiplier = calibration?.admissionMultiplier ?? 1
         let calibrationSummary = calibration.map(RuntimeMemoryCalibrationSummary.init)
 
-        let primary = candidatePlan(
-            request: request,
-            mode: request.userMode,
-            contextTokens: request.requestedContextTokens,
-            fallbackContract: request.fallbackContract,
-            availableMemory: availableMemory,
-            calibrationMultiplier: calibrationMultiplier,
-            calibrationSummary: calibrationSummary,
-            downgradeReason: nil
-        )
-        if primary.admitted {
-            return primary
+        struct Candidate {
+            var scheme: CandidateKVScheme
+            var mode: TurboQuantUserMode
+            var contextTokens: Int
+            var fallbackContract: TurboQuantFallbackContract
+            var downgradeReason: String?
         }
+        var candidates: [Candidate] = []
+
+        // FP16 is only a candidate when its per-token cost is known. It leads for every mode
+        // except .maxContext, where the user has explicitly asked to reach as far as possible
+        // (compression is the point) — there FP16 is still tried, but after compressed full.
+        let fp16Known = request.fp16KVBytesPerToken > 0
+        if fp16Known, request.userMode != .maxContext {
+            candidates.append(Candidate(
+                scheme: .plainFP16, mode: request.userMode,
+                contextTokens: request.requestedContextTokens,
+                fallbackContract: request.fallbackContract, downgradeReason: nil))
+        }
+        if fp16Known, request.userMode == .fastest {
+            // .fastest never compresses: prefer a shorter FP16 window over switching to TurboQuant.
+            candidates.append(Candidate(
+                scheme: .plainFP16, mode: .fastest,
+                contextTokens: downgradedContextTokens(request.requestedContextTokens, for: .fastest),
+                fallbackContract: request.fallbackContract,
+                downgradeReason: "fp16_context_capped_to_fit"))
+        }
+
+        // TurboQuant @ full requested context — the primary compressed option (and the canonical
+        // rejection plan if nothing fits, preserving prior semantics).
+        let primary = candidatePlan(
+            request: request, scheme: .turboQuant, mode: request.userMode,
+            contextTokens: request.requestedContextTokens,
+            fallbackContract: request.fallbackContract, availableMemory: availableMemory,
+            calibrationMultiplier: calibrationMultiplier, calibrationSummary: calibrationSummary,
+            downgradeReason: nil)
+
+        for candidate in candidates {
+            let plan = candidatePlan(
+                request: request, scheme: candidate.scheme, mode: candidate.mode,
+                contextTokens: candidate.contextTokens,
+                fallbackContract: candidate.fallbackContract, availableMemory: availableMemory,
+                calibrationMultiplier: calibrationMultiplier, calibrationSummary: calibrationSummary,
+                downgradeReason: candidate.downgradeReason)
+            if plan.admitted { return plan }
+        }
+        if primary.admitted { return primary }
 
         for downgrade in request.fallbackContract.shorterContextDowngradePath() {
             let context = downgradedContextTokens(request.requestedContextTokens, for: downgrade.mode)
@@ -202,6 +261,7 @@ public struct LocalRuntimeAdmissionService: Sendable {
             )
             let plan = candidatePlan(
                 request: request,
+                scheme: .turboQuant,
                 mode: downgrade.mode,
                 contextTokens: context,
                 fallbackContract: fallback,
@@ -220,6 +280,7 @@ public struct LocalRuntimeAdmissionService: Sendable {
 
     private func candidatePlan(
         request: LocalRuntimeAdmissionRequest,
+        scheme: CandidateKVScheme,
         mode: TurboQuantUserMode,
         contextTokens: Int,
         fallbackContract: TurboQuantFallbackContract,
@@ -230,6 +291,7 @@ public struct LocalRuntimeAdmissionService: Sendable {
     ) -> LocalRuntimeAdmissionPlan {
         let zones = memoryZones(
             request: request,
+            scheme: scheme,
             contextTokens: contextTokens,
             fallbackContract: fallbackContract,
             availableMemory: availableMemory,
@@ -252,7 +314,7 @@ public struct LocalRuntimeAdmissionService: Sendable {
             admittedContextTokens: admitted ? contextTokens : 0,
             reservedCompletionTokens: request.reservedCompletionTokens,
             selectedMode: mode,
-            selectedKVStrategy: admitted ? .turboQuant : .none,
+            selectedKVStrategy: admitted ? scheme.kvStrategy : .none,
             selectedAttentionPath: selectedPath,
             fallbackContract: fallbackContract,
             memoryZones: zones,
@@ -271,6 +333,7 @@ public struct LocalRuntimeAdmissionService: Sendable {
 
     private func memoryZones(
         request: LocalRuntimeAdmissionRequest,
+        scheme: CandidateKVScheme,
         contextTokens: Int,
         fallbackContract: TurboQuantFallbackContract,
         availableMemory: Int64,
@@ -282,14 +345,22 @@ public struct LocalRuntimeAdmissionService: Sendable {
             ?? request.memoryCounters.processResidentMemoryBytes
             ?? request.memoryCounters.processPhysicalFootprintBytes
             ?? 0
-        let compressedKV = Int64(contextTokens) * request.compressedKVBytesPerToken
+        // FP16 keeps the KV cache uncompressed (fp16 bytes/token) and carries none of the
+        // codec's shadow / packed-fallback / decoded-scratch overhead zones. TurboQuant uses
+        // the compressed bytes/token and all of its fallback reserves.
+        let isCompressed = scheme == .turboQuant
+        let kvBytesPerToken =
+            isCompressed ? request.compressedKVBytesPerToken : request.fp16KVBytesPerToken
+        let compressedKV = Int64(contextTokens) * kvBytesPerToken
         let packedFallback =
-            fallbackContract.allowPackedFallback
+            isCompressed && fallbackContract.allowPackedFallback
       ? max(
         fallbackContract.reserveBytes, Int64(contextTokens) * request.packedFallbackBytesPerToken)
             : 0
         let decodedScratch =
-            (fallbackContract.allowDecodedLayerLocalFallback || fallbackContract.allowFullDecodedFallback)
+            isCompressed
+                && (fallbackContract.allowDecodedLayerLocalFallback
+                    || fallbackContract.allowFullDecodedFallback)
       ? max(
         request.decodedFallbackScratchBytes,
         Int64(
@@ -300,7 +371,7 @@ public struct LocalRuntimeAdmissionService: Sendable {
         return RuntimeMemoryZones(
             modelWeightsBytes: modelWeights,
             compressedKVBytes: compressedKV,
-            rawShadowBytes: request.rawShadowBytes,
+            rawShadowBytes: isCompressed ? request.rawShadowBytes : 0,
             packedFallbackBytes: packedFallback,
             decodedFallbackScratchBytes: decodedScratch,
             vaultIndexBytes: request.vaultIndexBytes,

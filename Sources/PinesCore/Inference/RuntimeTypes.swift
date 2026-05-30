@@ -390,6 +390,7 @@ public enum TurboQuantKernelProfile: String, Codable, Sendable, CaseIterable {
     case portableA16A17
     case wideA18A19
     case sustainedA19Pro
+    case macAppleSilicon
     case mlxPackedFallback
 
     public var displayName: String {
@@ -400,6 +401,8 @@ public enum TurboQuantKernelProfile: String, Codable, Sendable, CaseIterable {
             "Wide A18/A19"
         case .sustainedA19Pro:
             "Sustained A19 Pro"
+        case .macAppleSilicon:
+            "Mac Apple Silicon"
         case .mlxPackedFallback:
             "MLX packed fallback"
         }
@@ -709,6 +712,9 @@ public struct TurboQuantAdmission: Hashable, Codable, Sendable {
     public var admitted: Bool
     public var requestedContextLength: Int
     public var admittedContextLength: Int
+    /// When true, the admitted context fits an uncompressed FP16 KV cache within the live memory
+    /// budget — the runtime should use plain SDPA (faster, higher quality) instead of TurboQuant.
+    public var recommendsPlainKVCache: Bool
     public var requestedMode: TurboQuantUserMode
     public var selectedMode: TurboQuantUserMode
     public var memoryPlan: TurboQuantMemoryPlan?
@@ -729,11 +735,13 @@ public struct TurboQuantAdmission: Hashable, Codable, Sendable {
         memoryPlan: TurboQuantMemoryPlan? = nil,
         downgradeReasons: [TurboQuantAdmissionDowngrade] = [],
         rejectedPaths: [RejectedPath] = [],
-        userMessage: String
+        userMessage: String,
+        recommendsPlainKVCache: Bool = false
     ) {
         self.admitted = admitted
         self.requestedContextLength = requestedContextLength
         self.admittedContextLength = admittedContextLength
+        self.recommendsPlainKVCache = recommendsPlainKVCache
         self.requestedMode = requestedMode
         self.selectedMode = selectedMode
         self.memoryPlan = memoryPlan

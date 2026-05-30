@@ -424,8 +424,8 @@ private actor LocalRuntimeSupervisor {
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
         "mlx-swift-425d765aa7fa2b2cf111b9c43430054d82d02d07+mlx-swift-lm-6335ec8a2e25cff94c93992cb921d7a0345b4a22"
-    private static let shortContextPlainKVTokenThreshold = 16_384
-    private static let forceTurboQuantShortContextEnvironmentKey =
+    fileprivate static let shortContextPlainKVTokenThreshold = 16_384
+    fileprivate static let forceTurboQuantShortContextEnvironmentKey =
         "PINES_FORCE_TURBOQUANT_SHORT_CONTEXT"
     static var turboQuantLayoutVersion: Int {
         #if canImport(MLX)
@@ -1276,6 +1276,21 @@ struct MLXRuntimeBridge: Sendable {
             )
         }
 
+        // Memory-driven FP16↔TurboQuant: when the admission planner determined the requested
+        // context fits an uncompressed FP16 KV cache, run plain SDPA (faster + higher quality) at
+        // the FULL admitted length — replacing the legacy static 8K plain-KV cap with a real
+        // budget decision. TurboQuant remains for the contexts that would otherwise not fit RAM.
+        if productAdmission.recommendsPlainKVCache {
+            diagnostics.append("Plain FP16 KV admitted (fits memory budget) — faster than compressed")
+            return KVCacheAdmission(
+                useTurboQuant: false,
+                maxKVSize: productAdmission.admittedContextLength,
+                reason: productAdmission.userMessage,
+                diagnostics: diagnostics,
+                admission: productAdmission
+            )
+        }
+
         let smallDenseOrHybridModel = (install.resolvedParameterCount ?? Int64.max) <= 2_500_000_000
         if backend.metalAttentionAvailable == false,
            smallDenseOrHybridModel {
@@ -1970,7 +1985,8 @@ struct MLXRuntimeBridge: Sendable {
             rejectedPaths: admission.rejectedPaths.map {
                 PinesCore.RejectedPath(path: $0.path, reason: $0.reason)
             },
-            userMessage: admission.userMessage
+            userMessage: admission.userMessage,
+            recommendsPlainKVCache: admission.recommendsPlainKVCache
         )
     }
 
@@ -2261,6 +2277,8 @@ struct MLXRuntimeBridge: Sendable {
             .wideA18A19
         case .sustainedA19Pro:
             .sustainedA19Pro
+        case .macAppleSilicon:
+            .macAppleSilicon
         case .mlxPackedFallback:
             .mlxPackedFallback
         }
@@ -4332,7 +4350,7 @@ private actor MLXRuntimeState {
             ?? Self.localTurboQuantDefaultRepetitionPenalty(for: install, profile: profile)
         let resolvedMLXKVCacheStrategy =
             if profile.quantization.kvCacheStrategy == .turboQuant,
-               ProcessInfo.processInfo.environment[forceTurboQuantShortContextEnvironmentKey] != "1" {
+               ProcessInfo.processInfo.environment[MLXRuntimeBridge.forceTurboQuantShortContextEnvironmentKey] != "1" {
                 MLXLMCommon.KVCacheStrategy.adaptiveTurboQuant
             } else {
                 Self.mlxKVCacheStrategy(from: profile.quantization.kvCacheStrategy)
@@ -4357,7 +4375,7 @@ private actor MLXRuntimeState {
             turboQuantPerCacheResidentBudgetBytes: turboQuantPerCacheResidentBudgetBytes(),
             turboQuantAdmissionProfile: turboQuantAdmissionProfile,
             turboQuantRequestedContextLength: turboQuantRequestedContextLength,
-            turboQuantRawSDPAThreshold: Self.shortContextPlainKVTokenThreshold,
+            turboQuantRawSDPAThreshold: MLXRuntimeBridge.shortContextPlainKVTokenThreshold,
             turboQuantPromptTokenCount: promptTokenCount,
             turboQuantUserMode: turboQuantUserMode(
                 from: turboQuantAdmissionPlan?.selectedMode
