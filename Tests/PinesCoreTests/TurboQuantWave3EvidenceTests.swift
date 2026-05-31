@@ -28,7 +28,7 @@ struct TurboQuantWave3EvidenceTests {
         #expect(result.evidence.evidenceLevel == .smokeTested)
         #expect(result.evidence.compatibilityPairID == report.compatibilityPairID)
         #expect(result.evidence.fallbackContractHash == report.runtime.fallbackContractHash)
-        #expect(result.evidence.qualityGate.benchmarkSuiteID == TurboQuantBenchmarkSuiteID.mobileMemoryAcceptanceV1.rawValue)
+        #expect(result.evidence.qualityGate.benchmarkSuiteID == TurboQuantBenchmarkSuiteID.realModelInferenceV1.rawValue)
     }
 
     @Test func benchmarkImporterRejectsUnknownSchemaAndMissingFallbackHash() throws {
@@ -112,6 +112,31 @@ struct TurboQuantWave3EvidenceTests {
         #expect(
             throws: TurboQuantBenchmarkImportFailure.qualityGateFailed(
                 "Verified low-bit K evidence requires an explicit K/V precision policy."
+            )
+        ) {
+            _ = try TurboQuantBenchmarkImporter().importReport(
+                report,
+                policy: TurboQuantBenchmarkImportPolicy(
+                    acceptedCompatibilityPairIDs: [report.compatibilityPairID],
+                    acceptedFallbackContractHashes: [report.runtime.fallbackContractHash],
+                    acceptedLayoutVersions: [report.runtime.layoutVersion ?? 0],
+                    requestedEvidenceLevel: .verified,
+                    allowVerifiedEvidence: true
+                )
+            )
+        }
+    }
+
+    @Test func benchmarkImporterRejectsSyntheticAttentionForVerifiedEvidence() throws {
+        var report = Self.report()
+        report.model.id = "synthetic-qwen3.5-2b-attention-shape"
+        report.qualityGate.benchmarkSuiteID = TurboQuantBenchmarkSuiteID.mobileMemoryAcceptanceV1.rawValue
+        report.qualityGate.perplexityDeltaPercent = nil
+        report.qualityGate.taskEvalDeltaPercent = nil
+
+        #expect(
+            throws: TurboQuantBenchmarkImportFailure.qualityGateFailed(
+                "Verified evidence requires real model inference comparison; synthetic attention-shape benchmarks are smoke-only."
             )
         ) {
             _ = try TurboQuantBenchmarkImporter().importReport(
@@ -483,10 +508,10 @@ struct TurboQuantWave3EvidenceTests {
                 thermalState: "nominal"
             ),
             model: TurboQuantBenchmarkModel(
-                id: "model",
-                revision: "rev",
-                tokenizerHash: "tok",
-                profileHash: "profile",
+                id: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
+                revision: "real-model-revision",
+                tokenizerHash: "tokenizer-sha256",
+                profileHash: "profile-sha256",
                 architecture: "qwen",
                 layers: 24,
                 kvHeads: 8,
@@ -529,10 +554,12 @@ struct TurboQuantWave3EvidenceTests {
                 jetsamObserved: false
             ),
             qualityGate: TurboQuantQualityGate(
-                benchmarkSuiteID: .mobileMemoryAcceptanceV1,
+                benchmarkSuiteID: .realModelInferenceV1,
                 deterministicTop1MatchRate: 0.99,
                 logitKLDivergenceMean: 0.01,
                 logitMaxAbsErrorP95: 0.1,
+                perplexityDeltaPercent: 1.0,
+                taskEvalDeltaPercent: 0.5,
                 noNaNOrInf: true,
                 fallbackEquivalent: true,
                 prefillExact: true,

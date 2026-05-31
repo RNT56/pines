@@ -69,6 +69,7 @@ struct TurboQuantPinDriftTests {
             )
         )
         #expect(compatibility.releaseReadiness.requiredEvidenceForGreen.contains("performance_parity"))
+        #expect(compatibility.releaseReadiness.requiredEvidenceForGreen.contains("real_model_inference"))
         #expect(
             compatibility.releaseReadiness.currentBlockers.contains {
                 $0.contains("native segmented performance parity")
@@ -80,6 +81,7 @@ struct TurboQuantPinDriftTests {
             }
         )
         #expect(compatibility.statusReason.contains("Exact-pin physical-device app-host smoke completed"))
+        #expect(compatibility.statusReason.contains("Release comparisons now require real model inference"))
         #expect(compatibility.productionPinPromotion?.releaseGate.contains("non-green") == true)
         #expect(compatibility.productionPinPromotion?.releaseGate.contains("Verified or Certified") == true)
         Self.assertGreenStatusReleaseGates(compatibility)
@@ -106,6 +108,7 @@ struct TurboQuantPinDriftTests {
                 && $0.result == "passed"
                 && $0.runID == "ios-turboquant-bench-20260531T132622Z"
                 && ($0.notes ?? "").contains("hybridNativeDiagnostics")
+                && ($0.notes ?? "").contains("realModelInferenceEvidence=missing")
                 && ($0.notes ?? "").contains("not-proven")
         })
         #expect(compatibility.historicalValidationCommands.contains {
@@ -134,6 +137,8 @@ struct TurboQuantPinDriftTests {
         #expect(diagnostics.contains("PINES_TQ_BENCH_PRECISION_POLICIES"))
         #expect(diagnostics.contains("PINES_TQ_BENCH_SPARSE_V"))
         #expect(diagnostics.contains("matrixExecution"))
+        #expect(diagnostics.contains("comparisonBasis"))
+        #expect(diagnostics.contains("real-model-inference-v1"))
         #expect(diagnostics.contains("TurboQuantBench.sweep"))
         #expect(diagnostics.contains("pines-turboquant-bench-status.json"))
         #expect(diagnostics.contains("hybridNativeDiagnostics"))
@@ -143,6 +148,7 @@ struct TurboQuantPinDriftTests {
         #expect(diagnostics.contains("requestedNativeBackend"))
         #expect(diagnostics.contains("nativeBackendPerformanceEvidence"))
         #expect(diagnostics.contains("performanceParityEvidence"))
+        #expect(diagnostics.contains("realModelInferenceEvidence"))
         #expect(script.contains("PINES_TURBOQUANT_BENCH"))
         #expect(script.contains("PINES_TQ_BENCH_DEVICE_ID"))
         #expect(script.contains("PINES_TQ_BENCH_PINES_COMMIT"))
@@ -184,6 +190,7 @@ struct TurboQuantPinDriftTests {
         #expect(schema.contains("releaseReadiness"))
         #expect(schema.contains("native_backend_performance"))
         #expect(schema.contains("performance_parity"))
+        #expect(schema.contains("real_model_inference"))
         #expect(schema.contains("appHostHybridNativeDiagnosticsRequired"))
     }
 

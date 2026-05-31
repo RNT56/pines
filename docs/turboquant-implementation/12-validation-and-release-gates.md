@@ -41,7 +41,8 @@ xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform
 `docs/turboquant-implementation/compatibility-pair.json` is the machine-readable source for pair status. A pair must stay `failed` or `pending` unless `releaseReadiness.greenAllowed` is true and current evidence passes all of these gates:
 
 - native backend performance evidence for the production compressed-attention backend;
-- compressed-vs-plain performance parity evidence on the current pair;
+- compressed-vs-plain performance parity evidence from real model inference on the current pair;
+- `real-model-inference-v1` quality evidence from actual model generation/inference comparisons;
 - physical-device app-host evidence with hybrid/native cache diagnostics;
 - benchmark matrix coverage for release contexts;
 - quality, memory, and fallback gates for the exact model/device/mode tuple.

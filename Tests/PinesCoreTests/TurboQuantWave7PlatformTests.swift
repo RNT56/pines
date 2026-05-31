@@ -231,10 +231,10 @@ struct TurboQuantWave7PlatformTests {
         thermalState: "nominal"
       ),
       model: TurboQuantBenchmarkModel(
-        id: "model",
-        revision: "rev",
-        tokenizerHash: "tok",
-        profileHash: "profile",
+        id: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
+        revision: "real-model-revision",
+        tokenizerHash: "tokenizer-sha256",
+        profileHash: "profile-sha256",
         architecture: "qwen",
         layers: 24,
         kvHeads: 8,
@@ -279,10 +279,12 @@ struct TurboQuantWave7PlatformTests {
         jetsamObserved: false
       ),
       qualityGate: TurboQuantQualityGate(
-        benchmarkSuiteID: .mobileMemoryAcceptanceV1,
+        benchmarkSuiteID: .realModelInferenceV1,
         deterministicTop1MatchRate: 0.99,
         logitKLDivergenceMean: 0.01,
         logitMaxAbsErrorP95: 0.1,
+        perplexityDeltaPercent: 1.0,
+        taskEvalDeltaPercent: 0.5,
         noNaNOrInf: true,
         fallbackEquivalent: true,
         prefillExact: true,

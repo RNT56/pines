@@ -68,6 +68,7 @@
             "enum": [
               "native_backend_performance",
               "performance_parity",
+              "real_model_inference",
               "real_device_app_host",
               "benchmark_matrix",
               "quality_memory_fallback"

@@ -106,6 +106,7 @@ private struct PinesTurboQuantBenchPayload: Codable, Sendable {
     var precisionPolicies: [String]
     var sparseValuePolicies: [String]
     var matrixExecution: String
+    var comparisonBasis: String
     var iterations: Int
     var warmupIterations: Int
     var compatibilityPairID: String
@@ -156,6 +157,7 @@ private struct PinesTurboQuantBenchHybridNativeDiagnostics: Codable, Sendable {
     var requestedNativeBackend: String
     var nativeBackendPerformanceEvidence: String
     var performanceParityEvidence: String
+    var realModelInferenceEvidence: String
     var productClaimLevel: String
 
     static func qwen35AppHostCurrent() -> PinesTurboQuantBenchHybridNativeDiagnostics {
@@ -167,6 +169,7 @@ private struct PinesTurboQuantBenchHybridNativeDiagnostics: Codable, Sendable {
             requestedNativeBackend: TurboQuantRuntimeBackend.metalPolarQJL.rawValue,
             nativeBackendPerformanceEvidence: "not-proven",
             performanceParityEvidence: "not-proven",
+            realModelInferenceEvidence: "missing",
             productClaimLevel: RuntimeEvidenceLevel.unverified.rawValue
         )
     }
@@ -262,6 +265,7 @@ private enum PinesTurboQuantBenchRunner {
             precisionPolicies: configuration.precisionPolicies,
             sparseValuePolicies: configuration.sparseValuePolicies,
             matrixExecution: matrixExecution,
+            comparisonBasis: "synthetic-attention-shape-smoke; release comparisons require real-model-inference-v1",
             iterations: configuration.iterations,
             warmupIterations: configuration.warmupIterations,
             compatibilityPairID: MLXRuntimeBridge.turboQuantCompatibilityPairID,

@@ -59,6 +59,9 @@ Initial suites:
 | `long-context-needle-v1` | smoke long-context retrieval stability |
 | `snapshot-roundtrip-v1` | verify restored KV produces matching next-token logits |
 | `mobile-memory-acceptance-v1` | pair quality with no-jetsam memory run |
+| `real-model-inference-v1` | release/parity comparison using actual model inference, not synthetic attention-shape kernels |
+
+Synthetic attention-shape suites can remain smoke and kernel-regression diagnostics, but they cannot promote a pair to `Verified`, `Certified`, or parity-complete. Product evidence must use `real-model-inference-v1` with a concrete model revision, tokenizer hash, profile hash, architecture metadata, and a real-model quality delta such as perplexity, task-eval, or needle-pass change.
 
 ## Evidence levels
 

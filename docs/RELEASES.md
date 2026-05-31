@@ -63,7 +63,7 @@ Until signing and App Store Connect automation are configured, releases publish 
 
 Do not publish an unsigned `.ipa`.
 
-Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed. The current TurboQuant compatibility pair is non-green: focused local gates and exact-pin physical-device smoke pass, but native backend performance parity and full benchmark/quality/fallback evidence remain incomplete.
+Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed. The current TurboQuant compatibility pair is non-green: focused local gates and exact-pin physical-device smoke pass, but that smoke is synthetic attention-shape evidence. Native backend performance parity and full real-model-inference benchmark/quality/fallback evidence remain incomplete.
 
 ## v0.1.0 Preview Readiness
 
@@ -81,7 +81,7 @@ Before pushing the tag, verify:
 - `bash scripts/ci/run-xcode-validation.sh all`
 - `bash scripts/ci/package-release.sh v0.1.0`
 
-For TurboQuant-related release candidates, also verify that `docs/turboquant-implementation/compatibility-pair.json` is synchronized with `project.yml`, `Pines.xcodeproj`, the Xcode `Package.resolved`, and `MLXRuntimeBridge.turboQuantCompatibilityPairID`. A green compatibility pair requires native backend performance, performance parity, current real-device app-host evidence, benchmark matrix coverage, and quality/memory/fallback gates; real-device profile evidence is still required before product compatibility labels can become `Verified` or `Certified`.
+For TurboQuant-related release candidates, also verify that `docs/turboquant-implementation/compatibility-pair.json` is synchronized with `project.yml`, `Pines.xcodeproj`, the Xcode `Package.resolved`, and `MLXRuntimeBridge.turboQuantCompatibilityPairID`. A green compatibility pair requires native backend performance, real-model-inference performance parity, current real-device app-host evidence, benchmark matrix coverage, and quality/memory/fallback gates; real-device profile evidence is still required before product compatibility labels can become `Verified` or `Certified`.
 
 ## Future TestFlight Pipeline
 

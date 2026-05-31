@@ -1,6 +1,6 @@
 # Implementation Status
 
-This repository is a working foundation for `pines`, not a signed App Store distribution yet. The current TurboQuant compatibility pair is non-green: local gates and exact-pin physical-device smoke pass, but native backend performance parity and full release benchmark/quality/fallback evidence are not complete. Model/device/mode `Verified` and `Certified` claims remain gated on accepted real-device evidence.
+This repository is a working foundation for `pines`, not a signed App Store distribution yet. The current TurboQuant compatibility pair is non-green: local gates and exact-pin physical-device smoke pass, but that smoke is synthetic attention-shape evidence. Native backend performance parity and full real-model-inference release benchmark/quality/fallback evidence are not complete. Model/device/mode `Verified` and `Certified` claims remain gated on accepted real-device evidence.
 
 ## Implemented
 
@@ -82,4 +82,4 @@ For a direct generic iOS build:
 xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform=iOS' build
 ```
 
-The current TurboQuant compatibility pair has passing focused local gates and exact-pin iOS app-host smoke evidence, but it is still non-green until the native backend performance, benchmark matrix, quality, memory, and fallback gates pass.
+The current TurboQuant compatibility pair has passing focused local gates and exact-pin iOS app-host smoke evidence, but it is still non-green until the native backend performance, real-model-inference benchmark matrix, quality, memory, and fallback gates pass.

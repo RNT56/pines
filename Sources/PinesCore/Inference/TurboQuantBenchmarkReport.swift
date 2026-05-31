@@ -744,6 +744,7 @@ public struct TurboQuantBenchmarkImporter: Sendable {
             "Platform unlock evidence import is disabled by policy.")
                 }
             }
+            try Self.requireRealModelInferenceEvidence(report)
         }
     }
 
@@ -808,6 +809,60 @@ public struct TurboQuantBenchmarkImporter: Sendable {
         guard missing.isEmpty else {
             throw TurboQuantBenchmarkImportFailure.qualityGateFailed(
                 "Verified evidence requires exact runtime dimensions: \(missing.joined(separator: ", "))."
+            )
+        }
+    }
+
+    private static func requireRealModelInferenceEvidence(
+        _ report: TurboQuantBenchmarkReport
+    ) throws {
+        guard report.qualityGate.benchmarkSuiteID == TurboQuantBenchmarkSuiteID.realModelInferenceV1.rawValue else {
+            throw TurboQuantBenchmarkImportFailure.qualityGateFailed(
+                "Verified evidence requires real model inference comparison; synthetic attention-shape benchmarks are smoke-only."
+            )
+        }
+
+        var missing: [String] = []
+        if report.model.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            missing.append("model ID")
+        }
+        if report.model.revision?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            missing.append("model revision")
+        }
+        if report.model.tokenizerHash?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            missing.append("tokenizer hash")
+        }
+        if report.model.profileHash?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            missing.append("profile hash")
+        }
+        if report.model.architecture?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            missing.append("architecture")
+        }
+        if report.model.layers == nil {
+            missing.append("layer count")
+        }
+        if report.model.kvHeads == nil {
+            missing.append("KV head count")
+        }
+        if report.model.headDim == nil {
+            missing.append("head dimension")
+        }
+        if report.qualityGate.perplexityDeltaPercent == nil,
+           report.qualityGate.taskEvalDeltaPercent == nil,
+           report.qualityGate.retrievalNeedlePassRate == nil {
+            missing.append("real-model quality delta")
+        }
+
+        let lowercasedModelID = report.model.id.lowercased()
+        if lowercasedModelID == "model"
+            || lowercasedModelID.contains("synthetic")
+            || lowercasedModelID.contains("attention-shape") {
+            missing.append("non-synthetic model ID")
+        }
+
+        guard missing.isEmpty else {
+            throw TurboQuantBenchmarkImportFailure.qualityGateFailed(
+                "Verified real-model inference evidence requires: \(missing.joined(separator: ", "))."
             )
         }
     }
