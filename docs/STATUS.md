@@ -1,6 +1,6 @@
 # Implementation Status
 
-This repository is a working foundation for `pines`, not a signed App Store distribution yet. The local release gates for the current TurboQuant compatibility pair are green; model/device/mode `Verified` and `Certified` claims remain gated on real-device evidence.
+This repository is a working foundation for `pines`, not a signed App Store distribution yet. The current TurboQuant compatibility pair is non-green: local gates and exact-pin physical-device smoke pass, but native backend performance parity and full release benchmark/quality/fallback evidence are not complete. Model/device/mode `Verified` and `Certified` claims remain gated on accepted real-device evidence.
 
 ## Implemented
 
@@ -82,4 +82,4 @@ For a direct generic iOS build:
 xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform=iOS' build
 ```
 
-The current TurboQuant compatibility pair passed `bash scripts/ci/run-xcode-validation.sh all`, including locked package resolution, unsigned iOS build, build-for-testing, simulator unit smoke tests, simulator UI smoke tests, and final generated-project/package drift checks.
+The current TurboQuant compatibility pair has passing focused local gates and exact-pin iOS app-host smoke evidence, but it is still non-green until the native backend performance, benchmark matrix, quality, memory, and fallback gates pass.

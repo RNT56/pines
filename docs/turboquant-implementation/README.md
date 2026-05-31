@@ -66,9 +66,9 @@ Machine-readable compatibility-pair files:
 Current status:
 
 - The active compatibility pair is failed/non-green after the Wave 0 baseline `turboquant-wave0-20260531T024557Z`.
-- Pines pins `mlx-swift` `b187523536c6923562e3a81613e169da9321f812` and `mlx-swift-lm` `1bf1cc246e17c48527a32c99fffcde41b84cd725`.
+- Pines pins `mlx-swift` `7a662770e0279d2693d4e3e93cb1b52cde34a321` and `mlx-swift-lm` `152911cd84e439ace44d807535aabbca6621c760`.
 - Layout V6 is the default TurboQuant layout on this pair; Layout V4 and V5 remain supported for legacy and comparison runs.
-- Current Wave 0 evidence includes passing Pines pin/build gates and Mac benchmark artifacts, but `mlx-swift` TurboQuant tests failed and the app-hosted iOS smoke ended `failed_environmental` before install/launch.
+- Current continuation evidence includes passing local TurboQuant gates and exact-pin physical-device app-host smoke on `iPhone16,2`, but native backend performance parity and the full release benchmark/quality/fallback matrix remain incomplete.
 - Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only and cannot make the current pair green.
 - Real-device model/device/mode evidence is still required before any product surface may claim `Verified` or `Certified` compatibility.
 

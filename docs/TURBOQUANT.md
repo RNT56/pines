@@ -4,10 +4,10 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 
 The current MLX fork pins are:
 
-- `RNT56/mlx-swift`: `b187523536c6923562e3a81613e169da9321f812`
-- `RNT56/mlx-swift-lm`: `1bf1cc246e17c48527a32c99fffcde41b84cd725`
+- `RNT56/mlx-swift`: `7a662770e0279d2693d4e3e93cb1b52cde34a321`
+- `RNT56/mlx-swift-lm`: `152911cd84e439ace44d807535aabbca6621c760`
 
-The latest Wave 0 baseline for this pair is intentionally non-green. It captured the current truth across the MLX forks and Pines: the Mac benchmark matrix completed, Pines pin/build gates passed, `mlx-swift` full TurboQuant tests currently fail lower-bit QK reference checks, and the current physical-device app-host smoke did not reach install/launch because device code signing stalled. Previous local release gates and the earlier app-hosted iPhone smoke remain useful evidence, but they do not override the Wave 0 guardrail status.
+The current pair is intentionally non-green. Wave 0 captured the baseline failures, and the continuation pass now has passing local TurboQuant gates plus an exact-pin physical-device app-host smoke on `iPhone16,2`, but compressed equal-context throughput remains far below raw FP16 and native backend performance parity is not proven. Previous local release gates and earlier app-hosted iPhone smoke remain useful historical evidence, but they do not override the current guardrail status.
 
 This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
 
@@ -24,9 +24,9 @@ The pinned pair makes Layout V6 the default TurboQuant attention layout for devi
 - iOS memory warnings soft-recover through the runtime bridge while active generation still has emergency headroom; otherwise they stop the active local run and unload transient MLX containers.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `b187523536c6923562e3a81613e169da9321f812`
-  - `RNT56/mlx-swift-lm`: `1bf1cc246e17c48527a32c99fffcde41b84cd725`
-  - Nested `mlx` inside `RNT56/mlx-swift`: `edc0fb23d1a384fe846ef5a8093f2d43001be8d2`
+  - `RNT56/mlx-swift`: `7a662770e0279d2693d4e3e93cb1b52cde34a321`
+  - `RNT56/mlx-swift-lm`: `152911cd84e439ace44d807535aabbca6621c760`
+  - Nested `mlx` inside `RNT56/mlx-swift`: `5d0ee35ddc84922c1d69801aae765dbe3ff76eed`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `0b9e4c23eb5b64e4ddc0f44ff45ba37832370d2d`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, runtime-layout direct compressed `QK^T`, runtime-layout direct compressed `AV`, runtime-layout compressed decode, `turbo8` high-precision KV-cache mode, device-profile-gated online fused decode, block-parallel fused partial/reduce kernels for long-context decode, automatic block-token planning for 32K/64K/128K/256K decode, fp16/bf16 block-partial value storage with float32 stats/reduce accumulation, a Mac Apple silicon kernel profile, Mac-gated grouped-query block fused decode for Qwen-style GQA, grouped GQA softmax reductions, four-repeat Qwen GQA key reuse, fixed-tail split-magnitude Turbo3.5/Turbo2.5 key reads without prefix scans, compact derived high-lane masks, aligned affine value reads, active-block dispatch for reserved larger caches, reduce-width tuning for block-parallel reductions, Qwen-shaped benchmark head-count and block-token controls, p50/p95 benchmark reporting, word-level packed bit read/write helpers for fixed and mixed TurboQuant schemes, runtime device capabilities, selected kernel profiles, tiny latency probes, opt-in long-context fused warmup, cooperative coalesced QK decode behind `TQ_COOP=1` for A-series validation, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
 - `mlx-swift-lm` exposes `KVCacheStrategy.turboQuant`, `KVCacheStrategy.adaptiveTurboQuant`, `TurboQuantKVCache`, a physical-slot `RotatingTurboQuantKVCache` for supported `.metalPolarQJL` `maxKVSize` paths, a shared packed quantized-attention fallback before raw decode, typed throwing TurboQuant generation paths and an exported runtime capability registry for the profile-backed Llama, Gemma, Qwen, Mistral, Phi, Granite, Exaone4, SmolLM3, LFM2, and GLM4 MoE Lite families, prepared-prefix generation, prompt-cache serialization hooks, `TurboQuantCompressedKVCacheProtocol`, the bundled `TurboQuantProfileRegistry`, corrected profile/exported JSON bit metadata, direct initial compressed-cache commits, lightweight compressed update checkpoints, compact v6 state restore/snapshot validation, guarded throughput routing for lower-bit `turbo4v2` and `turbo3_5` profiles, Qwen3.5/Qwen3.6 adaptive raw-first grouped-query fused compressed decode policies, duplicate decode-copy/validation trimming, Qwen production and large-context experiment p50/p95 proof modes, reserved-capacity proof reporting, schema-v6 production-route/recommended/effective block-token proof reporting, the `TurboQuantBench` app-hostable A-series attention harness, and `GenerateParameters` fields for cache strategy, preset, requested backend selection, value bits, fallback policy, raw SDPA threshold, device-adaptive optimization policy, model metadata, KV head dimensions, and compressed-attention diagnostics.
@@ -73,10 +73,11 @@ Wave 0 parity verdict: `performanceParity=false`, `stabilityParity=partial`, `su
 
 ## Physical Device Evidence
 
-Earlier current-pair app-hosted attention smoke validation ran on `iPhone16,2` / A17 Pro / iPhone 15 Pro Max (`7BFB7B72-C40C-58A7-B2C6-F075BDE21116`) on 2026-05-31 before the Wave 0 baseline failed. The Pines Debug app launched `--pines-turboquant-bench` and wrote `artifacts/ios-turboquant-bench-20260531T020455Z`. This result is historical evidence only and cannot make the current compatibility pair green.
+Current-pair app-hosted attention smoke validation ran on `iPhone16,2` / A17 Pro / iPhone 15 Pro Max (`7BFB7B72-C40C-58A7-B2C6-F075BDE21116`) on 2026-05-31 after the continuation pins were applied. The Pines Debug app launched `--pines-turboquant-bench` and wrote `artifacts/ios-turboquant-bench-20260531T132622Z`. This proves the exact-pin app-host path still runs on a real iPhone, but it is smoke evidence only and cannot make the current compatibility pair green.
 
 | Model | Artifact | Result | Active profile/path | Observed result |
 | --- | --- | --- | --- | --- |
+| synthetic `qwen3.5-2b` attention shape | `ios-turboquant-bench-20260531T132622Z` | Completed, exact current pair | `turbo4v2`, 8K context, app-hosted physical-device benchmark | Compressed `48.95 tok/s`, plain FP16 `643.10 tok/s`, speed ratio `0.0761`, cosine `0.999992`, KV memory reduction `2.21x`; app diagnostics report `productClaimLevel=unverified` and native backend performance `not-proven`. |
 | synthetic `qwen3.5-2b` attention shape | `ios-turboquant-bench-20260531T020455Z` | Completed, historical/superseded | `turbo4v2`, 8K context, app-hosted physical-device benchmark | Compressed `22.22 tok/s`, plain FP16 `634.54 tok/s`, speed ratio `0.0350`, cosine `0.999824`, KV memory reduction `3.05x`. |
 
 Earlier imported real-device smoke validation ran on `iPhone16,2` / A17 Pro (`7BFB7B72-C40C-58A7-B2C6-F075BDE21116`) on 2026-05-26 before the block-parallel fused pair was promoted. These runs are retained as raw-shadow recovery evidence for the exact local artifact tuple only; they do not certify the current fused path or lower-bit compressed attention paths.

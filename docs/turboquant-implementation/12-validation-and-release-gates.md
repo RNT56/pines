@@ -36,6 +36,18 @@ Full iOS verification:
 xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform=iOS' build
 ```
 
+## Compatibility-pair green gate
+
+`docs/turboquant-implementation/compatibility-pair.json` is the machine-readable source for pair status. A pair must stay `failed` or `pending` unless `releaseReadiness.greenAllowed` is true and current evidence passes all of these gates:
+
+- native backend performance evidence for the production compressed-attention backend;
+- compressed-vs-plain performance parity evidence on the current pair;
+- physical-device app-host evidence with hybrid/native cache diagnostics;
+- benchmark matrix coverage for release contexts;
+- quality, memory, and fallback gates for the exact model/device/mode tuple.
+
+API contract tests, package-pin checks, simulator or generic iOS builds, and historical/superseded proofs do not make a pair green by themselves.
+
 ## MVP 0 gate
 
 Required:
@@ -48,7 +60,7 @@ Required:
 - W1 core public contracts exist;
 - W7 Pines local shims build;
 - W24 mode/fallback contract exists;
-- compatibility-pair JSON is present and pending or green.
+- compatibility-pair JSON is present and honestly `pending` or `failed` unless all green gates pass.
 
 Validation:
 

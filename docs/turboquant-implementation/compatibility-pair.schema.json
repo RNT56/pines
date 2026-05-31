@@ -10,6 +10,7 @@
     "statusReason",
     "compatibilityPairID",
     "claimPolicy",
+    "releaseReadiness",
     "pines",
     "mlxSwift",
     "mlxSwiftLM",
@@ -43,6 +44,49 @@
         },
         "verifiedOrCertifiedProductClaimsAllowed": { "type": "boolean" },
         "requiresRealDeviceEvidence": { "type": "boolean" },
+        "notes": { "type": "string" }
+      }
+    },
+    "releaseReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "greenAllowed",
+        "requiredEvidenceForGreen",
+        "nativeBackendEvidence",
+        "performanceParityEvidence",
+        "appHostHybridNativeDiagnosticsRequired",
+        "currentBlockers",
+        "notes"
+      ],
+      "properties": {
+        "greenAllowed": { "type": "boolean" },
+        "requiredEvidenceForGreen": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "native_backend_performance",
+              "performance_parity",
+              "real_device_app_host",
+              "benchmark_matrix",
+              "quality_memory_fallback"
+            ]
+          }
+        },
+        "nativeBackendEvidence": {
+          "type": "string",
+          "enum": ["missing", "api_contract_only", "failed", "passed"]
+        },
+        "performanceParityEvidence": {
+          "type": "string",
+          "enum": ["missing", "failed", "passed"]
+        },
+        "appHostHybridNativeDiagnosticsRequired": { "type": "boolean" },
+        "currentBlockers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "notes": { "type": "string" }
       }
     },

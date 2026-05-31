@@ -59,21 +59,36 @@ struct TurboQuantPinDriftTests {
         #expect(compatibility.claimPolicy.pinsOnlyEvidenceLevel == "unverified")
         #expect(compatibility.claimPolicy.verifiedOrCertifiedProductClaimsAllowed == false)
         #expect(compatibility.claimPolicy.requiresRealDeviceEvidence == true)
+        #expect(compatibility.releaseReadiness.greenAllowed == false)
+        #expect(compatibility.releaseReadiness.nativeBackendEvidence == "api_contract_only")
+        #expect(compatibility.releaseReadiness.performanceParityEvidence == "failed")
+        #expect(compatibility.releaseReadiness.appHostHybridNativeDiagnosticsRequired == true)
+        #expect(
+            compatibility.releaseReadiness.requiredEvidenceForGreen.contains(
+                "native_backend_performance"
+            )
+        )
+        #expect(compatibility.releaseReadiness.requiredEvidenceForGreen.contains("performance_parity"))
+        #expect(
+            compatibility.releaseReadiness.currentBlockers.contains {
+                $0.contains("native segmented performance parity")
+            }
+        )
+        #expect(
+            compatibility.releaseReadiness.currentBlockers.contains {
+                $0.contains("Full release benchmark-matrix")
+            }
+        )
+        #expect(compatibility.statusReason.contains("Exact-pin physical-device app-host smoke completed"))
         #expect(compatibility.productionPinPromotion?.releaseGate.contains("non-green") == true)
         #expect(compatibility.productionPinPromotion?.releaseGate.contains("Verified or Certified") == true)
+        Self.assertGreenStatusReleaseGates(compatibility)
 
         #expect(compatibility.validationCommands.contains {
             $0.repo == "mlx-swift"
                 && $0.command == "swift test --filter TurboQuant"
                 && $0.result == "passed"
                 && $0.runID != compatibility.wave0Baseline.runID
-        })
-        #expect(compatibility.validationCommands.contains {
-            $0.repo == "pines"
-                && $0.command.contains("run-ios-turboquant-bench.sh")
-                && $0.result == "passed"
-                && $0.runID != compatibility.wave0Baseline.runID
-                && ($0.notes ?? "").contains("speed ratio 0.0183")
         })
         #expect(compatibility.historicalValidationCommands.contains {
             $0.repo == "pines"
@@ -84,6 +99,14 @@ struct TurboQuantPinDriftTests {
         #expect(!compatibility.validationCommands.contains {
             $0.result == "passed"
                 && ($0.notes ?? "").contains("Verified or Certified")
+        })
+        #expect(compatibility.validationCommands.contains {
+            $0.repo == "pines"
+                && $0.command.contains("run-ios-turboquant-bench.sh")
+                && $0.result == "passed"
+                && $0.runID == "ios-turboquant-bench-20260531T132622Z"
+                && ($0.notes ?? "").contains("hybridNativeDiagnostics")
+                && ($0.notes ?? "").contains("not-proven")
         })
         #expect(compatibility.historicalValidationCommands.contains {
             $0.result == "passed"
@@ -113,6 +136,13 @@ struct TurboQuantPinDriftTests {
         #expect(diagnostics.contains("matrixExecution"))
         #expect(diagnostics.contains("TurboQuantBench.sweep"))
         #expect(diagnostics.contains("pines-turboquant-bench-status.json"))
+        #expect(diagnostics.contains("hybridNativeDiagnostics"))
+        #expect(diagnostics.contains("PinesTurboQuantBenchHybridNativeDiagnostics"))
+        #expect(diagnostics.contains("hybridAttentionKVPolicy"))
+        #expect(diagnostics.contains("nativeStateCachePolicy"))
+        #expect(diagnostics.contains("requestedNativeBackend"))
+        #expect(diagnostics.contains("nativeBackendPerformanceEvidence"))
+        #expect(diagnostics.contains("performanceParityEvidence"))
         #expect(script.contains("PINES_TURBOQUANT_BENCH"))
         #expect(script.contains("PINES_TQ_BENCH_DEVICE_ID"))
         #expect(script.contains("PINES_TQ_BENCH_PINES_COMMIT"))
@@ -121,6 +151,8 @@ struct TurboQuantPinDriftTests {
         #expect(script.contains("PINES_TQ_BENCH_SPARSE_V"))
         #expect(script.contains("devicectl device process launch"))
         #expect(script.contains("pines-turboquant-bench-status.json"))
+        #expect(script.contains("hybridNativeDiagnostics"))
+        #expect(script.contains("appHost"))
     }
 
     @Test func wave0CaptureHarnessStaysWired() throws {
@@ -149,6 +181,10 @@ struct TurboQuantPinDriftTests {
         #expect(schema.contains("historicalValidationCommands"))
         #expect(schema.contains("pinsOnlyEvidenceLevel"))
         #expect(schema.contains("verifiedOrCertifiedProductClaimsAllowed"))
+        #expect(schema.contains("releaseReadiness"))
+        #expect(schema.contains("native_backend_performance"))
+        #expect(schema.contains("performance_parity"))
+        #expect(schema.contains("appHostHybridNativeDiagnosticsRequired"))
     }
 
     private static func repoRoot() throws -> URL {
@@ -194,6 +230,34 @@ struct TurboQuantPinDriftTests {
             throw PinDriftError.invalidSHA(label, value)
         }
     }
+
+    private static func assertGreenStatusReleaseGates(_ compatibility: CompatibilityPair) {
+        if compatibility.status == "green" {
+            #expect(compatibility.releaseReadiness.greenAllowed)
+            #expect(compatibility.releaseReadiness.nativeBackendEvidence == "passed")
+            #expect(compatibility.releaseReadiness.performanceParityEvidence == "passed")
+            #expect(compatibility.wave0Baseline.performanceParity)
+            #expect(
+                compatibility.validationCommands.contains {
+                    $0.result == "passed"
+                        && ($0.notes ?? "").localizedCaseInsensitiveContains("native")
+                        && ($0.notes ?? "").localizedCaseInsensitiveContains("performance")
+                }
+            )
+            #expect(
+                compatibility.validationCommands.contains {
+                    $0.result == "passed"
+                        && ($0.notes ?? "").localizedCaseInsensitiveContains("performance parity")
+                }
+            )
+        } else {
+            #expect(!compatibility.releaseReadiness.greenAllowed)
+            #expect(
+                compatibility.releaseReadiness.nativeBackendEvidence != "passed"
+                    || compatibility.releaseReadiness.performanceParityEvidence != "passed"
+            )
+        }
+    }
 }
 
 private struct PackageResolved: Decodable {
@@ -219,6 +283,7 @@ private struct CompatibilityPair: Decodable {
     var compatibilityPairID: String
     var wave0Baseline: Wave0Baseline
     var claimPolicy: ClaimPolicy
+    var releaseReadiness: ReleaseReadiness
     var mlxSwift: RepoRef
     var mlxSwiftLM: RepoRef
     var validationCommands: [ValidationCommand]
@@ -227,6 +292,7 @@ private struct CompatibilityPair: Decodable {
 
     struct Wave0Baseline: Decodable {
         var runID: String
+        var performanceParity: Bool
     }
 
     struct ClaimPolicy: Decodable {
@@ -237,6 +303,15 @@ private struct CompatibilityPair: Decodable {
 
     struct RepoRef: Decodable {
         var commit: String
+    }
+
+    struct ReleaseReadiness: Decodable {
+        var greenAllowed: Bool
+        var requiredEvidenceForGreen: [String]
+        var nativeBackendEvidence: String
+        var performanceParityEvidence: String
+        var appHostHybridNativeDiagnosticsRequired: Bool
+        var currentBlockers: [String]
     }
 
     struct ProductionPinPromotion: Decodable {

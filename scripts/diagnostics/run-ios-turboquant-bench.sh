@@ -89,6 +89,10 @@ status = None
 if status_file and os.path.exists(status_file):
     with open(status_file, "r", encoding="utf-8") as handle:
         status = json.load(handle)
+result_payload = None
+if result_file and os.path.exists(result_file):
+    with open(result_file, "r", encoding="utf-8") as handle:
+        result_payload = json.load(handle)
 
 summary = {
     "result": result,
@@ -99,6 +103,8 @@ summary = {
     "appPath": app_path or None,
     "status": status,
     "resultFile": result_file or None,
+    "appHost": result_payload.get("appHost") if isinstance(result_payload, dict) else None,
+    "hybridNativeDiagnostics": result_payload.get("hybridNativeDiagnostics") if isinstance(result_payload, dict) else None,
     "updatedAt": datetime.now(timezone.utc).isoformat(),
 }
 with open(summary_path, "w", encoding="utf-8") as handle:

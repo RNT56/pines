@@ -110,6 +110,7 @@ private struct PinesTurboQuantBenchPayload: Codable, Sendable {
     var warmupIterations: Int
     var compatibilityPairID: String
     var appHost: PinesTurboQuantBenchAppHost
+    var hybridNativeDiagnostics: PinesTurboQuantBenchHybridNativeDiagnostics
     var table: String
     var results: [TurboQuantBenchResult]
     var createdAt: Date
@@ -144,6 +145,30 @@ private struct PinesTurboQuantBenchAppHost: Codable, Sendable {
             guard let value = element.value as? Int8, value != 0 else { return }
             result.append(Character(UnicodeScalar(UInt8(value))))
         }
+    }
+}
+
+private struct PinesTurboQuantBenchHybridNativeDiagnostics: Codable, Sendable {
+    var benchmarkModelType: String
+    var cacheTopology: String
+    var hybridAttentionKVPolicy: String
+    var nativeStateCachePolicy: String
+    var requestedNativeBackend: String
+    var nativeBackendPerformanceEvidence: String
+    var performanceParityEvidence: String
+    var productClaimLevel: String
+
+    static func qwen35AppHostCurrent() -> PinesTurboQuantBenchHybridNativeDiagnostics {
+        PinesTurboQuantBenchHybridNativeDiagnostics(
+            benchmarkModelType: "qwen3_5",
+            cacheTopology: PinesTurboQuantCacheTopology.hybridAttentionKVAndNativeState.rawValue,
+            hybridAttentionKVPolicy: "turboquant-attention-kv",
+            nativeStateCachePolicy: "exact-mlx-native-state",
+            requestedNativeBackend: TurboQuantRuntimeBackend.metalPolarQJL.rawValue,
+            nativeBackendPerformanceEvidence: "not-proven",
+            performanceParityEvidence: "not-proven",
+            productClaimLevel: RuntimeEvidenceLevel.unverified.rawValue
+        )
     }
 }
 
@@ -241,6 +266,7 @@ private enum PinesTurboQuantBenchRunner {
             warmupIterations: configuration.warmupIterations,
             compatibilityPairID: MLXRuntimeBridge.turboQuantCompatibilityPairID,
             appHost: PinesTurboQuantBenchAppHost.current(),
+            hybridNativeDiagnostics: .qwen35AppHostCurrent(),
             table: TurboQuantBench.renderTable(results),
             results: results,
             createdAt: Date()

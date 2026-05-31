@@ -6,15 +6,15 @@ This document records the observed local repository state at the start of the im
 
 After the Wave 0 baseline capture on 2026-05-31, the active local compatibility pair is failed/non-green:
 
-| Repo | Branch | Current pair commit |
+| Repo | Branch | Validation commit/pin |
 | --- | --- | --- |
-| `pines` | `tq/real-device-evidence-acceptance` | `e4d9e99b77b652be089be325e41a509eeb6cb033` with dirty work present during validation |
-| `mlx-swift` | `tq/layout-v5-default-device-tests` | `b187523536c6923562e3a81613e169da9321f812` with dirty work present during validation |
-| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `1bf1cc246e17c48527a32c99fffcde41b84cd725` with dirty work present during validation |
+| `pines` | `tq/real-device-evidence-acceptance` | `1f3cbc43289f3b4035fff2276c1f01206d616647` dirty validation base before this evidence update |
+| `mlx-swift` | `tq/layout-v5-default-device-tests` | `7a662770e0279d2693d4e3e93cb1b52cde34a321` pushed continuation pin |
+| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `152911cd84e439ace44d807535aabbca6621c760` pushed continuation pin |
 
-Pines pins `MLXSwift` to `b187523536c6923562e3a81613e169da9321f812` and `MLXSwiftLM` to `1bf1cc246e17c48527a32c99fffcde41b84cd725` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
+Pines pins `MLXSwift` to `7a662770e0279d2693d4e3e93cb1b52cde34a321` and `MLXSwiftLM` to `152911cd84e439ace44d807535aabbca6621c760` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
 
-Wave 0 current-pair evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, but `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the app-hosted iOS smoke ended `failed_environmental` before install/launch. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V6 is the default MLX layout on this pair, with Layout V4 and V5 still supported for legacy/comparison runs. Exact pins alone are unverified and real-device model/device/mode evidence remains required before any `Verified` or `Certified` product claim.
+Wave 0 current-pair evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, while `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the Wave 0 app-hosted iOS smoke ended `failed_environmental` before install/launch. The continuation pass resolves the local TurboQuant test blocker and records exact-pin physical-device app-host smoke on `iPhone16,2`, but compressed equal-context throughput remains far below raw FP16 and native backend performance parity is not proven. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V6 is the default MLX layout on this pair, with Layout V4 and V5 still supported for legacy/comparison runs. Exact pins plus smoke evidence remain unverified and real-device model/device/mode evidence remains required before any `Verified` or `Certified` product claim.
 
 ## Observed workspace
 

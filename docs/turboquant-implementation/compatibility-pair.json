@@ -4,20 +4,20 @@
   "pines": {
     "repo": "pines",
     "branch": "tq/real-device-evidence-acceptance",
-    "commit": "e4d9e99b77b652be089be325e41a509eeb6cb033",
+    "commit": "1f3cbc43289f3b4035fff2276c1f01206d616647",
     "dirtyAtValidation": true
   },
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "b187523536c6923562e3a81613e169da9321f812",
-    "dirtyAtValidation": true
+    "commit": "7a662770e0279d2693d4e3e93cb1b52cde34a321",
+    "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "1bf1cc246e17c48527a32c99fffcde41b84cd725",
-    "dirtyAtValidation": true
+    "commit": "152911cd84e439ace44d807535aabbca6621c760",
+    "dirtyAtValidation": false
   },
   "wave0Baseline": {
     "runID": "turboquant-wave0-20260531T024557Z",
@@ -55,7 +55,7 @@
     "OpenKVFormat": 1,
     "PlatformEvidenceDimensions": 1
   },
-  "validatedAt": "2026-05-31T12:58:06Z",
+  "validatedAt": "2026-05-31T13:21:18Z",
   "validationCommands": [
     {
       "repo": "mlx-swift",
@@ -139,13 +139,13 @@
     },
     {
       "repo": "pines",
-      "command": "PINES_TQ_BENCH_CONTEXTS=8192 PINES_TQ_BENCH_SCHEMES=turbo4v2 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 bash scripts/diagnostics/run-ios-turboquant-bench.sh",
+      "command": "PINES_TQ_BENCH_CONTEXTS=8192 PINES_TQ_BENCH_SCHEMES=turbo4v2 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 PINES_TQ_BENCH_TIMEOUT_SECONDS=900 PINES_TQ_BENCH_BUILD_TIMEOUT_SECONDS=900 bash scripts/diagnostics/run-ios-turboquant-bench.sh",
       "result": "passed",
-      "artifactPath": "/Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T125227Z/summary.json",
-      "runID": "ios-turboquant-bench-20260531T125227Z",
-      "startedAt": "2026-05-31T12:52:27Z",
-      "finishedAt": "2026-05-31T12:55:00Z",
-      "notes": "App-hosted physical-device smoke completed on iPhone16,2 / iPhone 15 Pro Max for the current pair. Artifact: /Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T125227Z. 8K qwen3.5-2b turbo4v2 result: compressed 11.01 tok/s, plain 600.99 tok/s, speed ratio 0.0183, cosine 0.999992, memory reduction 2.21x. This is real-device smoke evidence, not a green parity result."
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T132622Z/summary.json",
+      "runID": "ios-turboquant-bench-20260531T132622Z",
+      "startedAt": "2026-05-31T13:26:22Z",
+      "finishedAt": "2026-05-31T13:31:09Z",
+      "notes": "App-hosted physical-device smoke completed on iPhone16,2 / iPhone 15 Pro Max running iOS 26.5 for the exact current pair. Artifact: /Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T132622Z. 8K qwen3.5-2b turbo4v2 result: compressed 48.95 tok/s, plain 643.10 tok/s, speed ratio 0.0761, cosine 0.999992, memory reduction 2.21x. hybridNativeDiagnostics reports productClaimLevel=unverified and nativeBackendPerformanceEvidence=not-proven. This is real-device smoke evidence, not a green parity result."
     },
     {
       "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/logs/mlx-swift-build-turboquantbenchmark.log",
@@ -559,8 +559,11 @@
     }
   },
   "notes": [
+    "Continuation pins mlx-swift 7a662770e0279d2693d4e3e93cb1b52cde34a321, which includes native segmented backend identity reporting and the nested mlx 5d0ee35ddc84922c1d69801aae765dbe3ff76eed native TurboQuant Metal backend probe.",
+    "Continuation pins mlx-swift-lm 152911cd84e439ace44d807535aabbca6621c760, which bounds hybrid hot residency, preserves selector diagnostics across checkpoints, and records selected segmented-vs-decoded fallback routes.",
+    "The current continuation pair remains failed/non-green until native-performance, full benchmark-matrix, performance-parity, quality-memory, and fallback evidence pass; historical app-host smoke from earlier pins is retained only as prior evidence.",
     "Post-Wave0 stabilization updated the current pair with passing mlx-swift TurboQuant tests, passing mlx-swift-lm TurboQuant tests, passing Pines pin/TurboQuant tests, and a passing app-hosted physical-device iOS smoke on iPhone16,2 for the exact pins.",
-    "The current physical-device smoke artifact is /Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T125227Z. It reports 8K qwen3.5-2b turbo4v2 compressed 11.01 tok/s, plain 600.99 tok/s, speed ratio 0.0183, cosine 0.999992, and 2.21x KV memory reduction.",
+    "The current physical-device smoke artifact is /Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T132622Z. It reports 8K qwen3.5-2b turbo4v2 compressed 48.95 tok/s, plain 643.10 tok/s, speed ratio 0.0761, cosine 0.999992, and 2.21x KV memory reduction. The app-host diagnostics explicitly keep productClaimLevel=unverified and nativeBackendPerformanceEvidence=not-proven.",
     "The pair remains failed/non-green because compressed equal-context throughput is far below raw FP16 and production native MLX fused compressed-domain attention is still not available by default. TurboQuant remains a capacity route until later evidence proves parity.",
     "Authoritative current-pair status is failed/non-green. Historical pass, smoke, simulator, and Mac proof evidence remains retained below but is superseded by the Wave 0 baseline and cannot green the current pair.",
     "Pins alone establish only an unverified compatibility identity. Verified and Certified product labels require accepted real-device evidence for the exact model/device/mode tuple plus passing quality, memory, throughput, and fallback gates.",
@@ -568,7 +571,7 @@
     "The Pines commit recorded here is the committed production pin and runtime-bridge integration commit validated before this metadata-only manifest update.",
     "Wave 0 blockers resolved: core contracts are in explicit files, LM typed errors are present, product TurboQuant generation requires throwing models, Pines reuses existing TurboQuant DTOs, and fallback-contract hashes are implemented.",
     "Wave 1 prerequisites validated: core contracts/router, LM runtime failures/cache snapshots/admission planner, and PinesCore control-plane tests passed.",
-    "Full Xcode validation is green on the final production pin pair. The previous xcodebuild package-resolution stall was resolved by removing ignored generated build artifacts and using locked package-resolution flags.",
+    "Earlier full Xcode validation was green on a prior production pin pair. The previous xcodebuild package-resolution stall was resolved by removing ignored generated build artifacts and using locked package-resolution flags, but that historical result does not make the current pair green.",
     "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
     "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
     "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only.",
@@ -597,18 +600,37 @@
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
-    "pinnedMLXSwift": "b187523536c6923562e3a81613e169da9321f812",
-    "pinnedMLXSwiftLM": "1bf1cc246e17c48527a32c99fffcde41b84cd725",
-    "compatibilityPairID": "mlx-swift-b187523536c6923562e3a81613e169da9321f812+mlx-swift-lm-1bf1cc246e17c48527a32c99fffcde41b84cd725",
-    "releaseGate": "non-green after post-Wave0 stabilization: mlx-swift, mlx-swift-lm, Pines pin guard, Pines TurboQuant tests, and one physical-device app-hosted iOS smoke passed on the current pins, but compressed equal-context throughput is still far below raw FP16 and the production native MLX fused compressed-attention backend is not enabled by default. TurboQuant remains a capacity route; no Verified or Certified model/device/mode claim is promoted."
+    "pinnedMLXSwift": "7a662770e0279d2693d4e3e93cb1b52cde34a321",
+    "pinnedMLXSwiftLM": "152911cd84e439ace44d807535aabbca6621c760",
+    "compatibilityPairID": "mlx-swift-7a662770e0279d2693d4e3e93cb1b52cde34a321+mlx-swift-lm-152911cd84e439ace44d807535aabbca6621c760",
+    "releaseGate": "non-green after native-probe continuation: Pines pins mlx-swift 7a662770e0279d2693d4e3e93cb1b52cde34a321 plus mlx-swift-lm 152911cd84e439ace44d807535aabbca6621c760. Local gates and exact-pin physical-device smoke have passed, but compressed equal-context throughput remains below raw FP16, native backend performance parity is not proven, and full release benchmark/quality/fallback evidence is incomplete before any Verified or Certified claim."
   },
-  "statusReason": "Authoritative current-pair status is failed/non-green. Post-Wave0 gates now include passing mlx-swift TurboQuant tests, passing mlx-swift-lm TurboQuant tests, passing Pines pin/TurboQuant tests, and a passing physical-device app-hosted smoke for the exact pins, but performance parity is not achieved (8K iPhone turbo4v2 ratio 0.0183 versus raw FP16) and production native fused compressed attention remains unavailable by default. Status must remain failed until performance, native-backend, benchmark-matrix, and release gates all have current evidence.",
-  "compatibilityPairID": "mlx-swift-b187523536c6923562e3a81613e169da9321f812+mlx-swift-lm-1bf1cc246e17c48527a32c99fffcde41b84cd725",
+  "statusReason": "Authoritative current-pair status is failed/non-green. The continuation pair pins mlx-swift 7a662770e0279d2693d4e3e93cb1b52cde34a321 and mlx-swift-lm 152911cd84e439ace44d807535aabbca6621c760, adding native backend identity reporting plus bounded hybrid selected-attention diagnostics. Exact-pin physical-device app-host smoke completed on iPhone16,2, but performance parity is not achieved, native backend performance evidence is not complete, and full release benchmark/quality/fallback evidence is still incomplete.",
+  "compatibilityPairID": "mlx-swift-7a662770e0279d2693d4e3e93cb1b52cde34a321+mlx-swift-lm-152911cd84e439ace44d807535aabbca6621c760",
   "claimPolicy": {
     "pinsOnlyEvidenceLevel": "unverified",
     "verifiedOrCertifiedProductClaimsAllowed": false,
     "requiresRealDeviceEvidence": true,
     "notes": "Exact MLX pins are necessary for reproducibility, but pins, smoke tests, simulator builds, and historical pass evidence are not sufficient for Verified or Certified product claims."
+  },
+  "releaseReadiness": {
+    "greenAllowed": false,
+    "requiredEvidenceForGreen": [
+      "native_backend_performance",
+      "performance_parity",
+      "real_device_app_host",
+      "benchmark_matrix",
+      "quality_memory_fallback"
+    ],
+    "nativeBackendEvidence": "api_contract_only",
+    "performanceParityEvidence": "failed",
+    "appHostHybridNativeDiagnosticsRequired": true,
+    "currentBlockers": [
+      "Native backend capability identity is now pinned through mlx-swift, but native segmented performance parity is not proven by a current benchmark matrix.",
+      "Full release benchmark-matrix plus quality, memory, and fallback evidence is still incomplete for the current pair.",
+      "Compressed equal-context throughput remains far below raw FP16 in exact-pin app-host evidence, so TurboQuant remains a capacity route."
+    ],
+    "notes": "Status cannot become green until current-pair evidence explicitly passes native backend performance, compressed-vs-plain performance parity, full benchmark-matrix, and real-device app-host gates. App-host benchmark artifacts must carry hybrid/native cache diagnostics."
   },
   "historicalValidationCommands": [
     {
