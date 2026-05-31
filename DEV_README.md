@@ -224,8 +224,8 @@ The iOS app links exact maintained MLX fork revisions through `project.yml` and 
 
 - `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `c96dd8c7b374fa50d64b35bf8c5d7739df7d9984`
 - `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `c8a544503bcdad21ee736feec68f0ed7e07a9b29`
-- Nested `mlx` inside `MLXSwift`: `75b756717154890033209aaba4ffc89b113c5998`
-- Nested `mlx-c` inside `MLXSwift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
+- Nested `mlx` inside `MLXSwift`: `edc0fb23d1a384fe846ef5a8093f2d43001be8d2`
+- Nested `mlx-c` inside `MLXSwift`: `0b9e4c23eb5b64e4ddc0f44ff45ba37832370d2d`
 
 These pins are intentional because Pines consumes additive TurboQuant and compatibility APIs not assumed to exist in upstream package releases yet.
 

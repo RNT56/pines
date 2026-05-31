@@ -178,6 +178,7 @@ struct PinesRootView: View {
                 }
                 #endif
                 #if DEBUG
+                await appModel.runLaunchTurboQuantBenchIfNeeded()
                 await appModel.runLaunchStressModeIfNeeded(services: services)
                 #endif
                 haptics.prepare()

@@ -423,7 +423,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-425d765aa7fa2b2cf111b9c43430054d82d02d07+mlx-swift-lm-6335ec8a2e25cff94c93992cb921d7a0345b4a22"
+        "mlx-swift-b187523536c6923562e3a81613e169da9321f812+mlx-swift-lm-1bf1cc246e17c48527a32c99fffcde41b84cd725"
     fileprivate static let shortContextPlainKVTokenThreshold = 16_384
     fileprivate static let forceTurboQuantShortContextEnvironmentKey =
         "PINES_FORCE_TURBOQUANT_SHORT_CONTEXT"
@@ -584,6 +584,10 @@ struct MLXRuntimeBridge: Sendable {
         )
         profile.quantization.activeFallbackReason =
             "Adaptive raw-first routing selected for short local request (\(requestTokens) tokens <= \(shortContextPlainKVTokenThreshold)); MLX uses raw SDPA when admitted and compressed TurboQuant if raw KV does not fit."
+        profile.quantization.turboQuantRuntimeMode = .auto
+        profile.quantization.turboQuantResolvedRuntimeMode = .rawPreferred
+        profile.quantization.turboQuantSparseValuePolicy = .off
+        profile.quantization.turboQuantEffectiveBackend = .rawSDPA
         profile.quantization.turboQuantProfileDiagnostics.append(
             "Short-context router selected adaptive raw-first TurboQuant because request_tokens=\(requestTokens) <= \(shortContextPlainKVTokenThreshold)."
         )
@@ -650,6 +654,15 @@ struct MLXRuntimeBridge: Sendable {
                 devicePerformanceClass: profile.quantization.devicePerformanceClass,
                 turboQuantOptimizationPolicy: profile.quantization.turboQuantOptimizationPolicy,
                 turboQuantValueBits: profile.quantization.turboQuantValueBits,
+                turboQuantRuntimeMode: profile.quantization.turboQuantRuntimeMode,
+                turboQuantResolvedRuntimeMode: profile.quantization.turboQuantResolvedRuntimeMode,
+                turboQuantKeyPrecision: profile.quantization.turboQuantKeyPrecision,
+                turboQuantValuePrecision: profile.quantization.turboQuantValuePrecision,
+                turboQuantPrecisionPolicy: profile.quantization.turboQuantPrecisionPolicy,
+                turboQuantSparseValuePolicy: profile.quantization.turboQuantSparseValuePolicy,
+                turboQuantEffectiveBackend: profile.quantization.turboQuantEffectiveBackend,
+                turboQuantNativeBackendVersion: profile.quantization.turboQuantNativeBackendVersion,
+                turboQuantDecodedActiveKVBytes: profile.quantization.turboQuantDecodedActiveKVBytes,
                 thermalDownshiftActive: profile.quantization.thermalDownshiftActive,
                 runtimePressureReason: profile.quantization.runtimePressureReason,
                 turboQuantProfileID: profile.quantization.turboQuantProfileID,
@@ -785,6 +798,29 @@ struct MLXRuntimeBridge: Sendable {
         let estimatedScratchBytes = admissionPlan?.memoryZones.metalScratchReserveBytes ?? 0
         let actualCompressedBytes = snapshot.map { Int64($0.keyBytes + $0.valueBytes) }
         let actualFallbackBytes = snapshot?.packedFallbackAllocated == true ? estimatedFallbackBytes : nil
+        #if PINES_TQ_WAVE6_API
+        let snapshotPrecisionPolicy = pinesTurboQuantPrecisionPolicy(
+            from: snapshot?.precisionPolicy
+        )
+        let snapshotRequestedRuntimeMode = pinesTurboQuantRuntimeMode(
+            from: snapshot?.requestedRuntimeMode
+        )
+        let snapshotResolvedRuntimeMode = pinesTurboQuantRuntimeMode(
+            from: snapshot?.resolvedRuntimeMode
+        )
+        let snapshotSparseValuePolicy = pinesTurboQuantSparseValuePolicy(
+            from: snapshot?.sparseValuePolicy
+        )
+        let snapshotDecodedActiveKVBytes = snapshot.map {
+            Int64($0.decodedActiveKeyBytes + $0.decodedActiveValueBytes)
+        }
+        #else
+        let snapshotPrecisionPolicy: PinesCore.TurboQuantKVPrecisionPolicy? = nil
+        let snapshotRequestedRuntimeMode: PinesCore.TurboQuantRuntimeMode? = nil
+        let snapshotResolvedRuntimeMode: PinesCore.TurboQuantRuntimeMode? = nil
+        let snapshotSparseValuePolicy: PinesCore.TurboQuantSparseValuePolicy? = nil
+        let snapshotDecodedActiveKVBytes: Int64? = profile.quantization.turboQuantDecodedActiveKVBytes
+        #endif
         let calibrationSample = RuntimeMemoryCalibrationSample(
             compatibilityPairID: Self.turboQuantCompatibilityPairID,
             runOutcome: outcome,
@@ -819,6 +855,21 @@ struct MLXRuntimeBridge: Sendable {
             compatibilityPairID: Self.turboQuantCompatibilityPairID,
             admission: admissionPlan,
             selectedAttentionPath: selectedPath,
+            requestedRuntimeMode: snapshotRequestedRuntimeMode
+                ?? profile.quantization.turboQuantRuntimeMode,
+            resolvedRuntimeMode: snapshotResolvedRuntimeMode
+                ?? profile.quantization.turboQuantResolvedRuntimeMode,
+            keyPrecision: snapshotPrecisionPolicy?.key
+                ?? profile.quantization.turboQuantKeyPrecision,
+            valuePrecision: snapshotPrecisionPolicy?.value
+                ?? profile.quantization.turboQuantValuePrecision,
+            precisionPolicy: snapshotPrecisionPolicy
+                ?? profile.quantization.turboQuantPrecisionPolicy,
+            sparseValuePolicy: snapshotSparseValuePolicy
+                ?? profile.quantization.turboQuantSparseValuePolicy,
+            effectiveBackend: Self.pinesTurboQuantBackendEngine(for: selectedPath)
+                ?? profile.quantization.turboQuantEffectiveBackend,
+            nativeBackendVersion: profile.quantization.turboQuantNativeBackendVersion,
             rejectedPaths: failureKind.map {
                 [RejectedPath(path: selectedPath?.rawValue ?? "local-runtime", reason: $0.rawValue)]
             } ?? [],
@@ -830,6 +881,7 @@ struct MLXRuntimeBridge: Sendable {
             packedFallbackAllocated: snapshot?.packedFallbackAllocated,
             compressedKeyBytes: snapshot.map { Int64($0.keyBytes) },
             compressedValueBytes: snapshot.map { Int64($0.valueBytes) },
+            decodedActiveKVBytes: snapshotDecodedActiveKVBytes,
             inputTokens: inputTokens ?? contextPlan?.exactInputTokens,
             outputTokens: outputTokens,
             speculativeTelemetry: speculativeTelemetry,
@@ -864,6 +916,38 @@ struct MLXRuntimeBridge: Sendable {
                     admissionPlan.memoryZones.packedFallbackBytes
                     + admissionPlan.memoryZones.decodedFallbackScratchBytes
                 )
+        }
+        if let requestedMode = decision.requestedRuntimeMode {
+            metadata[LocalProviderMetadataKeys.turboQuantRuntimeMode] = requestedMode.rawValue
+        }
+        if let resolvedMode = decision.resolvedRuntimeMode {
+            metadata[LocalProviderMetadataKeys.turboQuantResolvedRuntimeMode] = resolvedMode.rawValue
+        }
+        if let keyPrecision = decision.keyPrecision {
+            metadata[LocalProviderMetadataKeys.turboQuantKeyPrecision] = keyPrecision.rawValue
+        }
+        if let valuePrecision = decision.valuePrecision {
+            metadata[LocalProviderMetadataKeys.turboQuantValuePrecision] = valuePrecision.rawValue
+        }
+        if let precisionPolicy = decision.precisionPolicy {
+            metadata[LocalProviderMetadataKeys.turboQuantPrecisionPolicyJSON] =
+                metadataJSON(precisionPolicy)
+        }
+        if let sparseValuePolicy = decision.sparseValuePolicy {
+            metadata[LocalProviderMetadataKeys.turboQuantSparseValuePolicyJSON] =
+                metadataJSON(sparseValuePolicy)
+        }
+        if let effectiveBackend = decision.effectiveBackend {
+            metadata[LocalProviderMetadataKeys.turboQuantEffectiveBackend] =
+                effectiveBackend.rawValue
+        }
+        if let nativeBackendVersion = decision.nativeBackendVersion {
+            metadata[LocalProviderMetadataKeys.turboQuantNativeBackendVersion] =
+                nativeBackendVersion
+        }
+        if let decodedActive = decision.decodedActiveKVBytes {
+            metadata[LocalProviderMetadataKeys.turboQuantDecodedActiveKVBytes] =
+                String(decodedActive)
         }
         if let speculativeTelemetry {
             appendSpeculativeMetadata(
@@ -1055,6 +1139,18 @@ struct MLXRuntimeBridge: Sendable {
                 ? nil
                 : deviceMonitor.currentProfile().turboQuantOptimizationPolicy,
             turboQuantValueBits: PinesCore.TurboQuantPreset.defaultGeneration.defaultValueBits,
+            turboQuantRuntimeMode: .auto,
+            turboQuantResolvedRuntimeMode: nil,
+            turboQuantKeyPrecision: .fp16OrQ8,
+            turboQuantValuePrecision: .turbo4v2,
+            turboQuantPrecisionPolicy: PinesCore.TurboQuantKVPrecisionPolicy(
+                key: .fp16OrQ8,
+                value: .turbo4v2
+            ),
+            turboQuantSparseValuePolicy: .productDefault,
+            turboQuantEffectiveBackend: Self.pinesTurboQuantBackendEngine(
+                for: linked ? backend.activeAttentionPath : .baseline
+            ),
             thermalDownshiftActive: memoryCounters.thermalDownshiftActive,
             runtimePressureReason: memoryCounters.runtimePressureReason,
             lastUnsupportedAttentionShape: backend.lastUnsupportedAttentionShape,
@@ -1146,6 +1242,24 @@ struct MLXRuntimeBridge: Sendable {
                 turboQuantOptimizationPolicy: turboQuantDefaults?.optimizationPolicy
                     ?? deviceProfile.turboQuantOptimizationPolicy,
                 turboQuantValueBits: admission.useTurboQuant ? turboQuantDefaults?.valueBits : nil,
+                turboQuantRuntimeMode: admission.useTurboQuant
+                    ? turboQuantDefaults?.runtimeMode ?? .auto
+                    : .auto,
+                turboQuantKeyPrecision: admission.useTurboQuant
+                    ? turboQuantDefaults?.precisionPolicy.key
+                    : nil,
+                turboQuantValuePrecision: admission.useTurboQuant
+                    ? turboQuantDefaults?.precisionPolicy.value
+                    : nil,
+                turboQuantPrecisionPolicy: admission.useTurboQuant
+                    ? turboQuantDefaults?.precisionPolicy
+                    : nil,
+                turboQuantSparseValuePolicy: admission.useTurboQuant
+                    ? turboQuantDefaults?.sparseValuePolicy ?? .productDefault
+                    : .off,
+                turboQuantEffectiveBackend: admission.useTurboQuant && linked
+                    ? Self.pinesTurboQuantBackendEngine(for: backend.activeAttentionPath)
+                    : .rawSDPA,
                 turboQuantLayoutVersion: admission.useTurboQuant ? Self.turboQuantLayoutVersion : nil,
                 thermalDownshiftActive: deviceProfile.thermalDownshiftActive,
                 runtimePressureReason: deviceProfile.runtimePressureReason,
@@ -1205,6 +1319,9 @@ struct MLXRuntimeBridge: Sendable {
         var requestedBackend: PinesCore.TurboQuantRuntimeBackend
         var groupSize: Int
         var valueBits: Int?
+        var runtimeMode: PinesCore.TurboQuantRuntimeMode
+        var precisionPolicy: PinesCore.TurboQuantKVPrecisionPolicy
+        var sparseValuePolicy: PinesCore.TurboQuantSparseValuePolicy
         var optimizationPolicy: PinesCore.TurboQuantOptimizationPolicy
         var profileID: String?
         var profileSource: String
@@ -1842,6 +1959,56 @@ struct MLXRuntimeBridge: Sendable {
         from plan: PinesCore.TurboQuantMemoryPlan
     ) -> MLXLMCommon.TurboQuantMemoryPlan? {
         guard let footprint = plan.layerFootprint else { return nil }
+        let layerFootprint = MLXLMCommon.TurboQuantLayerCacheFootprint(
+            layerCount: footprint.layerCount,
+            kvHeadCount: footprint.kvHeadCount,
+            headDimension: footprint.headDimension,
+            groupSize: footprint.groupSize,
+            preset: mlxTurboQuantAdmissionPreset(from: footprint.preset),
+            valueBits: footprint.valueBits
+        )
+        let runtimeZones = MLXLMCommon.TurboQuantRuntimeMemoryZones(
+            availableAppMemoryBytes: plan.runtimeZones.availableAppMemoryBytes,
+            runtimeBudgetBytes: plan.runtimeZones.runtimeBudgetBytes,
+            mlxActiveBytes: plan.runtimeZones.mlxActiveBytes,
+            mlxCacheBytes: plan.runtimeZones.mlxCacheBytes,
+            modelResidentBytes: plan.runtimeZones.modelResidentBytes,
+            compressedKVBytes: plan.runtimeZones.compressedKVBytes,
+            rawShadowBytes: plan.runtimeZones.rawShadowBytes,
+            fallbackReserveBytes: plan.runtimeZones.fallbackReserveBytes,
+            scratchBytes: plan.runtimeZones.scratchBytes,
+            promptAndTokenizerBytes: plan.runtimeZones.promptAndTokenizerBytes,
+            uiReserveBytes: plan.runtimeZones.uiReserveBytes,
+            safetyReserveBytes: plan.runtimeZones.safetyReserveBytes,
+            rollingSummaryBytes: plan.runtimeZones.rollingSummaryBytes
+        )
+        #if PINES_TQ_WAVE6_API
+        return MLXLMCommon.TurboQuantMemoryPlan(
+            requestedContextLength: plan.requestedContextLength,
+            admittedContextLength: plan.admittedContextLength,
+            requestedMode: mlxTurboQuantUserMode(from: plan.requestedMode),
+            effectiveMode: mlxTurboQuantUserMode(from: plan.effectiveMode),
+            preset: mlxTurboQuantAdmissionPreset(from: plan.preset),
+            valueBits: plan.valueBits,
+            groupSize: plan.groupSize,
+            fallbackPolicy: mlxTurboQuantFallbackPolicy(from: plan.fallbackPolicy),
+            requestedRuntimeMode: mlxTurboQuantRuntimeMode(from: plan.requestedRuntimeMode),
+            resolvedRuntimeMode: mlxTurboQuantRuntimeMode(from: plan.resolvedRuntimeMode),
+            precisionPolicy: plan.precisionPolicy.map { mlxTurboQuantPrecisionPolicy(from: $0) },
+            runtimeFallbackReason: plan.runtimeFallbackReason,
+            rawBytesPerToken: plan.rawBytesPerToken,
+            packedFallbackBytesPerToken: plan.packedFallbackBytesPerToken,
+            compressedBytesPerToken: plan.compressedBytesPerToken,
+            compressedKeyBytes: plan.compressedKeyBytes,
+            compressedValueBytes: plan.compressedValueBytes,
+            decodedActiveKVBytes: plan.decodedActiveKVBytes ?? 0,
+            layerFootprint: layerFootprint,
+            usesRawShadow: plan.usesRawShadow,
+            packedFallbackEnabled: plan.packedFallbackEnabled,
+            usesRollingSummaryMemory: plan.usesRollingSummaryMemory,
+            runtimeZones: runtimeZones
+        )
+        #else
         return MLXLMCommon.TurboQuantMemoryPlan(
             requestedContextLength: plan.requestedContextLength,
             admittedContextLength: plan.admittedContextLength,
@@ -1854,33 +2021,13 @@ struct MLXRuntimeBridge: Sendable {
             rawBytesPerToken: plan.rawBytesPerToken,
             packedFallbackBytesPerToken: plan.packedFallbackBytesPerToken,
             compressedBytesPerToken: plan.compressedBytesPerToken,
-            layerFootprint: MLXLMCommon.TurboQuantLayerCacheFootprint(
-                layerCount: footprint.layerCount,
-                kvHeadCount: footprint.kvHeadCount,
-                headDimension: footprint.headDimension,
-                groupSize: footprint.groupSize,
-                preset: mlxTurboQuantAdmissionPreset(from: footprint.preset),
-                valueBits: footprint.valueBits
-            ),
+            layerFootprint: layerFootprint,
             usesRawShadow: plan.usesRawShadow,
             packedFallbackEnabled: plan.packedFallbackEnabled,
             usesRollingSummaryMemory: plan.usesRollingSummaryMemory,
-            runtimeZones: MLXLMCommon.TurboQuantRuntimeMemoryZones(
-                availableAppMemoryBytes: plan.runtimeZones.availableAppMemoryBytes,
-                runtimeBudgetBytes: plan.runtimeZones.runtimeBudgetBytes,
-                mlxActiveBytes: plan.runtimeZones.mlxActiveBytes,
-                mlxCacheBytes: plan.runtimeZones.mlxCacheBytes,
-                modelResidentBytes: plan.runtimeZones.modelResidentBytes,
-                compressedKVBytes: plan.runtimeZones.compressedKVBytes,
-                rawShadowBytes: plan.runtimeZones.rawShadowBytes,
-                fallbackReserveBytes: plan.runtimeZones.fallbackReserveBytes,
-                scratchBytes: plan.runtimeZones.scratchBytes,
-                promptAndTokenizerBytes: plan.runtimeZones.promptAndTokenizerBytes,
-                uiReserveBytes: plan.runtimeZones.uiReserveBytes,
-                safetyReserveBytes: plan.runtimeZones.safetyReserveBytes,
-                rollingSummaryBytes: plan.runtimeZones.rollingSummaryBytes
-            )
+            runtimeZones: runtimeZones
         )
+        #endif
     }
 
     private static func mlxTurboQuantAdmissionDowngrades(
@@ -1919,21 +2066,33 @@ struct MLXRuntimeBridge: Sendable {
     ) -> MLXLMCommon.TurboQuantAdmissionDowngradeReason {
         switch reason {
         case .releasedRawShadow:
-            .releasedRawShadow
+            return .releasedRawShadow
         case .disabledPackedFallback:
-            .disabledPackedFallback
+            return .disabledPackedFallback
         case .loweredValueBits:
-            .loweredValueBits
+            return .loweredValueBits
+        case .loweredValuePrecision:
+            #if PINES_TQ_WAVE6_API
+            return .loweredValuePrecision
+            #else
+            return .loweredValueBits
+            #endif
+        case .keyPrecisionEvidenceRequired:
+            #if PINES_TQ_WAVE6_API
+            return .keyPrecisionEvidenceRequired
+            #else
+            return .loweredValueBits
+            #endif
         case .movedBalancedToMaxContext:
-            .movedBalancedToMaxContext
+            return .movedBalancedToMaxContext
         case .reducedContext:
-            .reducedContext
+            return .reducedContext
         case .rollingSummaryMemory:
-            .rollingSummaryMemory
+            return .rollingSummaryMemory
         case .thermalOrBatterySaver:
-            .thermalOrBatterySaver
+            return .thermalOrBatterySaver
         case .refusedInsufficientMemory:
-            .refusedInsufficientMemory
+            return .refusedInsufficientMemory
         }
     }
 
@@ -1993,7 +2152,36 @@ struct MLXRuntimeBridge: Sendable {
     private static func coreTurboQuantMemoryPlan(
         from plan: MLXLMCommon.TurboQuantMemoryPlan
     ) -> PinesCore.TurboQuantMemoryPlan {
-        PinesCore.TurboQuantMemoryPlan(
+        let layerFootprint = coreTurboQuantLayerCacheFootprint(from: plan.layerFootprint)
+        let runtimeZones = coreTurboQuantRuntimeMemoryZones(from: plan.runtimeZones)
+        #if PINES_TQ_WAVE6_API
+        return PinesCore.TurboQuantMemoryPlan(
+            requestedContextLength: plan.requestedContextLength,
+            admittedContextLength: plan.admittedContextLength,
+            requestedMode: coreTurboQuantUserMode(from: plan.requestedMode),
+            effectiveMode: coreTurboQuantUserMode(from: plan.effectiveMode),
+            preset: coreTurboQuantPreset(from: plan.preset),
+            valueBits: plan.valueBits,
+            groupSize: plan.groupSize,
+            fallbackPolicy: coreTurboQuantFallbackPolicy(from: plan.fallbackPolicy),
+            requestedRuntimeMode: pinesTurboQuantRuntimeMode(from: plan.requestedRuntimeMode),
+            resolvedRuntimeMode: pinesTurboQuantRuntimeMode(from: plan.resolvedRuntimeMode),
+            precisionPolicy: pinesTurboQuantPrecisionPolicy(from: plan.precisionPolicy),
+            runtimeFallbackReason: plan.runtimeFallbackReason,
+            rawBytesPerToken: plan.rawBytesPerToken,
+            packedFallbackBytesPerToken: plan.packedFallbackBytesPerToken,
+            compressedBytesPerToken: plan.compressedBytesPerToken,
+            compressedKeyBytes: plan.compressedKeyBytes,
+            compressedValueBytes: plan.compressedValueBytes,
+            decodedActiveKVBytes: plan.decodedActiveKVBytes,
+            layerFootprint: layerFootprint,
+            usesRawShadow: plan.usesRawShadow,
+            packedFallbackEnabled: plan.packedFallbackEnabled,
+            usesRollingSummaryMemory: plan.usesRollingSummaryMemory,
+            runtimeZones: runtimeZones
+        )
+        #else
+        return PinesCore.TurboQuantMemoryPlan(
             requestedContextLength: plan.requestedContextLength,
             admittedContextLength: plan.admittedContextLength,
             requestedMode: coreTurboQuantUserMode(from: plan.requestedMode),
@@ -2005,12 +2193,13 @@ struct MLXRuntimeBridge: Sendable {
             rawBytesPerToken: plan.rawBytesPerToken,
             packedFallbackBytesPerToken: plan.packedFallbackBytesPerToken,
             compressedBytesPerToken: plan.compressedBytesPerToken,
-            layerFootprint: coreTurboQuantLayerCacheFootprint(from: plan.layerFootprint),
+            layerFootprint: layerFootprint,
             usesRawShadow: plan.usesRawShadow,
             packedFallbackEnabled: plan.packedFallbackEnabled,
             usesRollingSummaryMemory: plan.usesRollingSummaryMemory,
-            runtimeZones: coreTurboQuantRuntimeMemoryZones(from: plan.runtimeZones)
+            runtimeZones: runtimeZones
         )
+        #endif
     }
 
     private static func coreTurboQuantLayerCacheFootprint(
@@ -2112,6 +2301,10 @@ struct MLXRuntimeBridge: Sendable {
             .disabledPackedFallback
         case .loweredValueBits:
             .loweredValueBits
+        case .loweredValuePrecision:
+            .loweredValuePrecision
+        case .keyPrecisionEvidenceRequired:
+            .keyPrecisionEvidenceRequired
         case .movedBalancedToMaxContext:
             .movedBalancedToMaxContext
         case .reducedContext:
@@ -2155,11 +2348,29 @@ struct MLXRuntimeBridge: Sendable {
             }
             guard let profile = selection.profile else { continue }
             let profilePolicy = Self.coreTurboQuantOptimizationPolicy(from: profile.optimizationPolicy)
+            #if PINES_TQ_WAVE6_API
+            let precisionPolicy =
+                profile.isQwen35Or36Family
+                ? PinesCore.TurboQuantKVPrecisionPolicy(key: .fp16OrQ8, value: .turbo4v2)
+                : Self.coreTurboQuantPrecisionPolicy(from: profile.turboQuant.precisionPolicy)
+            let runtimeMode =
+                PinesCore.TurboQuantRuntimeMode(rawValue: profile.turboQuant.runtimeMode.rawValue)
+                ?? .auto
+            #else
+            let precisionPolicy = PinesCore.TurboQuantKVPrecisionPolicy(
+                key: .fp16OrQ8,
+                value: profile.valueBits == 8 ? .turbo8 : .turbo4v2
+            )
+            let runtimeMode = PinesCore.TurboQuantRuntimeMode.auto
+            #endif
             return TurboQuantRuntimeDefaults(
                 preset: Self.coreTurboQuantPreset(from: profile.recommendedScheme.preset),
                 requestedBackend: Self.coreTurboQuantBackend(from: profile.backend),
                 groupSize: profile.groupSize,
                 valueBits: profile.valueBits,
+                runtimeMode: runtimeMode,
+                precisionPolicy: precisionPolicy,
+                sparseValuePolicy: .productDefault,
                 optimizationPolicy: profilePolicy,
                 profileID: profile.id,
                 profileSource: "bundled",
@@ -2173,11 +2384,30 @@ struct MLXRuntimeBridge: Sendable {
             requestedBackend: .metalPolarQJL,
             groupSize: 64,
             valueBits: PinesCore.TurboQuantPreset.conservativeFallback.defaultValueBits,
+            runtimeMode: .auto,
+            precisionPolicy: PinesCore.TurboQuantKVPrecisionPolicy(key: .fp16OrQ8, value: .turbo4v2),
+            sparseValuePolicy: .productDefault,
             optimizationPolicy: deviceOptimizationPolicy,
             profileID: nil,
             profileSource: "generic_conservative_fallback",
             profileDiagnostics: rejectionDiagnostics
         )
+    }
+
+    private static func pinesTurboQuantBackendEngine(
+        for path: PinesCore.TurboQuantAttentionPath?
+    ) -> PinesCore.TurboQuantAttentionBackendEngine? {
+        guard let path else { return nil }
+        switch path {
+        case .baseline:
+            return .rawSDPA
+        case .onlineFused, .tiledOnlineFused, .twoStageCompressed:
+            return .swiftMetalKernel
+        case .mlxPackedFallback:
+            return .decodedReference
+        case .unavailable:
+            return .unavailable
+        }
     }
 
     private func turboQuantBackendSnapshot() -> (
@@ -2314,6 +2544,20 @@ struct MLXRuntimeBridge: Sendable {
     ) -> PinesCore.TurboQuantOptimizationPolicy {
         PinesCore.TurboQuantOptimizationPolicy(rawValue: policy.rawValue) ?? .auto
     }
+
+    #if PINES_TQ_WAVE6_API
+    private static func coreTurboQuantPrecisionPolicy(
+        from policy: MLXLMCommon.TurboQuantKVPrecisionPolicy?
+    ) -> PinesCore.TurboQuantKVPrecisionPolicy {
+        guard let policy,
+              let key = PinesCore.TurboQuantKeyPrecision(rawValue: policy.key.rawValue),
+              let value = PinesCore.TurboQuantValuePrecision(rawValue: policy.value.rawValue)
+        else {
+            return PinesCore.TurboQuantKVPrecisionPolicy(key: .fp16OrQ8, value: .turbo4v2)
+        }
+        return PinesCore.TurboQuantKVPrecisionPolicy(key: key, value: value)
+    }
+    #endif
 
     #endif
 
@@ -4356,6 +4600,48 @@ private actor MLXRuntimeState {
                 Self.mlxKVCacheStrategy(from: profile.quantization.kvCacheStrategy)
             }
 
+        #if PINES_TQ_WAVE6_API
+        return GenerateParameters(
+            maxTokens: maxTokensOverride ?? request.sampling.maxTokens,
+            maxKVSize: resolvedMaxKVSize,
+            kvBits: profile.quantization.kvCacheStrategy == .turboQuant ? nil : profile.quantization.kvBits,
+            kvGroupSize: profile.quantization.kvGroupSize,
+            quantizedKVStart: profile.quantization.quantizedKVStart,
+            kvCacheStrategy: resolvedMLXKVCacheStrategy,
+            turboQuantPreset: Self.mlxTurboQuantPreset(from: profile.quantization.preset),
+            turboQuantBackend: Self.mlxTurboQuantBackend(from: profile.quantization.requestedBackend),
+            turboQuantOptimizationPolicy: Self.mlxTurboQuantOptimizationPolicy(
+                from: profile.quantization.turboQuantOptimizationPolicy
+            ),
+            turboQuantSeed: turboQuantSeed,
+            turboQuantValueBits: Self.resolvedTurboQuantValueBits(for: profile, install: install),
+            turboQuantRuntimeMode: Self.mlxTurboQuantRuntimeMode(
+                from: profile.quantization.turboQuantRuntimeMode
+            ),
+            turboQuantPrecisionPolicy: Self.mlxTurboQuantPrecisionPolicy(from: profile.quantization),
+            turboQuantSparseValuePolicy: Self.mlxTurboQuantSparseValuePolicy(
+                from: profile.quantization.turboQuantSparseValuePolicy ?? .productDefault
+            ),
+            turboQuantAdmissionPolicy: profile.quantization.kvCacheStrategy == .turboQuant ? .required : .disabled,
+            turboQuantAdmission: turboQuantAdmission,
+            turboQuantPerCacheResidentBudgetBytes: turboQuantPerCacheResidentBudgetBytes(),
+            turboQuantAdmissionProfile: turboQuantAdmissionProfile,
+            turboQuantRequestedContextLength: turboQuantRequestedContextLength,
+            turboQuantRawSDPAThreshold: MLXRuntimeBridge.shortContextPlainKVTokenThreshold,
+            turboQuantPromptTokenCount: promptTokenCount,
+            turboQuantUserMode: turboQuantUserMode(
+                from: turboQuantAdmissionPlan?.selectedMode
+                    ?? profile.quantization.turboQuantAdmission?.selectedMode
+                    ?? profile.quantization.turboQuantUserMode
+            ),
+            turboQuantFallbackPolicy: turboQuantFallbackPolicy,
+            temperature: request.sampling.temperature,
+            topP: request.sampling.topP,
+            repetitionPenalty: resolvedRepetitionPenalty,
+            repetitionContextSize: profile.repetitionContextSize,
+            prefillStepSize: profile.prefillStepSize
+        )
+        #else
         return GenerateParameters(
             maxTokens: maxTokensOverride ?? request.sampling.maxTokens,
             maxKVSize: resolvedMaxKVSize,
@@ -4389,6 +4675,7 @@ private actor MLXRuntimeState {
             repetitionContextSize: profile.repetitionContextSize,
             prefillStepSize: profile.prefillStepSize
         )
+        #endif
     }
 
     private static func localTurboQuantDefaultRepetitionPenalty(
@@ -4576,6 +4863,135 @@ private actor MLXRuntimeState {
         return MLXLMCommon.TurboQuantBackend(rawValue: backend.rawValue) ?? .metalPolarQJL
     }
 
+    #if PINES_TQ_WAVE6_API
+    private static func mlxTurboQuantRuntimeMode(
+        from mode: PinesCore.TurboQuantRuntimeMode?
+    ) -> MLXLMCommon.TurboQuantRuntimeMode {
+        guard let mode else { return .auto }
+        return MLXLMCommon.TurboQuantRuntimeMode(rawValue: mode.rawValue) ?? .auto
+    }
+
+    private static func mlxTurboQuantPrecisionPolicy(
+        from quantization: PinesCore.QuantizationProfile
+    ) -> MLXLMCommon.TurboQuantKVPrecisionPolicy? {
+        if let policy = quantization.turboQuantPrecisionPolicy {
+            return mlxTurboQuantPrecisionPolicy(from: policy)
+        }
+        guard quantization.kvCacheStrategy == .turboQuant else { return nil }
+        let key = quantization.turboQuantKeyPrecision ?? .fp16OrQ8
+        let value =
+            quantization.turboQuantValuePrecision
+            ?? (quantization.turboQuantValueBits == 8 ? .turbo8 : .turbo4v2)
+        return mlxTurboQuantPrecisionPolicy(
+            from: PinesCore.TurboQuantKVPrecisionPolicy(key: key, value: value)
+        )
+    }
+
+    private static func mlxTurboQuantPrecisionPolicy(
+        from policy: PinesCore.TurboQuantKVPrecisionPolicy
+    ) -> MLXLMCommon.TurboQuantKVPrecisionPolicy {
+        MLXLMCommon.TurboQuantKVPrecisionPolicy(
+            key: MLXLMCommon.TurboQuantKeyPrecision(rawValue: policy.key.rawValue) ?? .fp16OrQ8,
+            value: MLXLMCommon.TurboQuantValuePrecision(rawValue: policy.value.rawValue)
+                ?? .turbo4v2,
+            boundary: mlxTurboQuantBoundaryPolicy(from: policy.boundary)
+        )
+    }
+
+    private static func mlxTurboQuantBoundaryPolicy(
+        from policy: PinesCore.TurboQuantBoundaryPolicy
+    ) -> MLXLMCommon.TurboQuantBoundaryPolicy {
+        switch policy {
+        case .profileDefault:
+            return .profileDefault
+        case .disabled:
+            return .disabled
+        case .protectedEdges(let first, let last):
+            return .protectedEdges(first: first, last: last)
+        case .custom(let layers):
+            return .custom(layers)
+        }
+    }
+
+    private static func mlxTurboQuantSparseValuePolicy(
+        from policy: PinesCore.TurboQuantSparseValuePolicy
+    ) -> MLXLMCommon.TurboQuantSparseValuePolicy {
+        switch policy {
+        case .off:
+            return .off
+        case .auto(let threshold):
+            return .auto(threshold: threshold)
+        case .force(let threshold):
+            return .force(threshold: threshold)
+        }
+    }
+
+    private static func pinesTurboQuantRuntimeMode(
+        from mode: MLXLMCommon.TurboQuantRuntimeMode?
+    ) -> PinesCore.TurboQuantRuntimeMode? {
+        mode.flatMap { PinesCore.TurboQuantRuntimeMode(rawValue: $0.rawValue) }
+    }
+
+    private static func pinesTurboQuantPrecisionPolicy(
+        from policy: MLXLMCommon.TurboQuantKVPrecisionPolicy?
+    ) -> PinesCore.TurboQuantKVPrecisionPolicy? {
+        guard let policy,
+              let key = PinesCore.TurboQuantKeyPrecision(rawValue: policy.key.rawValue),
+              let value = PinesCore.TurboQuantValuePrecision(rawValue: policy.value.rawValue)
+        else { return nil }
+        return PinesCore.TurboQuantKVPrecisionPolicy(
+            key: key,
+            value: value,
+            boundary: pinesTurboQuantBoundaryPolicy(from: policy.boundary)
+        )
+    }
+
+    private static func pinesTurboQuantBoundaryPolicy(
+        from policy: MLXLMCommon.TurboQuantBoundaryPolicy
+    ) -> PinesCore.TurboQuantBoundaryPolicy {
+        switch policy {
+        case .profileDefault:
+            return .profileDefault
+        case .disabled:
+            return .disabled
+        case .protectedEdges(let first, let last):
+            return .protectedEdges(first: first, last: last)
+        case .custom(let layers):
+            return .custom(layers)
+        }
+    }
+
+    private static func pinesTurboQuantSparseValuePolicy(
+        from policy: MLXLMCommon.TurboQuantSparseValuePolicy?
+    ) -> PinesCore.TurboQuantSparseValuePolicy? {
+        guard let policy else { return nil }
+        switch policy {
+        case .off:
+            return .off
+        case .auto(let threshold):
+            return .auto(threshold: threshold)
+        case .force(let threshold):
+            return .force(threshold: threshold)
+        }
+    }
+    #endif
+
+    private static func pinesTurboQuantBackendEngine(
+        for path: PinesCore.TurboQuantAttentionPath?
+    ) -> PinesCore.TurboQuantAttentionBackendEngine? {
+        guard let path else { return nil }
+        switch path {
+        case .baseline:
+            return .rawSDPA
+        case .onlineFused, .tiledOnlineFused, .twoStageCompressed:
+            return .swiftMetalKernel
+        case .mlxPackedFallback:
+            return .decodedReference
+        case .unavailable:
+            return .unavailable
+        }
+    }
+
     private static func turboQuantValueBits(from cache: any TurboQuantCompressedKVCacheProtocol) -> Int {
         if let cache = cache as? TurboQuantKVCache {
             return cache.valueBits
@@ -4601,6 +5017,7 @@ private actor MLXRuntimeState {
         let cacheCounts = cacheCounts(from: cache)
         if let turboQuantCache = cache.compactMap({ $0 as? TurboQuantCompressedKVCacheProtocol }).first {
             let diagnostics = turboQuantCache.attentionDiagnostics
+            let snapshot = turboQuantCache.runtimeSnapshot()
             var metadata: [String: String] = [
                 LocalProviderMetadataKeys.turboQuantPreset: turboQuantCache.preset.rawValue,
                 LocalProviderMetadataKeys.turboQuantRequestedBackend: turboQuantCache.requestedBackend.rawValue,
@@ -4621,6 +5038,73 @@ private actor MLXRuntimeState {
                 LocalProviderMetadataKeys.attentionCacheCount: String(cacheCounts.attention),
                 LocalProviderMetadataKeys.nativeStateCacheCount: String(cacheCounts.nativeState),
             ]
+            #if PINES_TQ_WAVE6_API
+            let requestedRuntimeMode: PinesCore.TurboQuantRuntimeMode? =
+                pinesTurboQuantRuntimeMode(from: snapshot.requestedRuntimeMode)
+            let resolvedRuntimeMode: PinesCore.TurboQuantRuntimeMode? =
+                pinesTurboQuantRuntimeMode(from: snapshot.resolvedRuntimeMode)
+            let precisionPolicy: PinesCore.TurboQuantKVPrecisionPolicy? =
+                pinesTurboQuantPrecisionPolicy(from: snapshot.precisionPolicy)
+            let sparseValuePolicy: PinesCore.TurboQuantSparseValuePolicy? =
+                pinesTurboQuantSparseValuePolicy(from: snapshot.sparseValuePolicy)
+            let selectedPath = PinesCore.TurboQuantAttentionPath(rawValue: snapshot.selectedPath ?? "")
+                ?? PinesCore.TurboQuantAttentionPath(rawValue: diagnostics.activeAttentionPath.rawValue)
+            let effectiveBackend =
+                diagnostics.nativeBackend == nil
+                ? pinesTurboQuantBackendEngine(for: selectedPath)
+                : PinesCore.TurboQuantAttentionBackendEngine.nativeMLX
+            let nativeBackendVersion = diagnostics.nativeBackendVersion.map(String.init)
+            let decodedActiveKVBytes = snapshot.decodedActiveKeyBytes + snapshot.decodedActiveValueBytes
+            #else
+            let requestedRuntimeMode: PinesCore.TurboQuantRuntimeMode? =
+                profile.quantization.turboQuantRuntimeMode
+            let resolvedRuntimeMode: PinesCore.TurboQuantRuntimeMode? =
+                profile.quantization.turboQuantResolvedRuntimeMode
+            let precisionPolicy: PinesCore.TurboQuantKVPrecisionPolicy? =
+                profile.quantization.turboQuantPrecisionPolicy
+            let sparseValuePolicy: PinesCore.TurboQuantSparseValuePolicy? =
+                profile.quantization.turboQuantSparseValuePolicy
+            let selectedPath = snapshot.lastAttentionPath.flatMap(PinesCore.TurboQuantAttentionPath.init(rawValue:))
+                ?? PinesCore.TurboQuantAttentionPath(rawValue: diagnostics.activeAttentionPath.rawValue)
+            let effectiveBackend = pinesTurboQuantBackendEngine(for: selectedPath)
+                ?? profile.quantization.turboQuantEffectiveBackend
+            let nativeBackendVersion = profile.quantization.turboQuantNativeBackendVersion
+            let decodedActiveKVBytes = profile.quantization.turboQuantDecodedActiveKVBytes.map {
+                Int($0)
+            } ?? 0
+            #endif
+            if let requestedRuntimeMode {
+                metadata[LocalProviderMetadataKeys.turboQuantRuntimeMode] = requestedRuntimeMode.rawValue
+            }
+            if let resolvedRuntimeMode {
+                metadata[LocalProviderMetadataKeys.turboQuantResolvedRuntimeMode] = resolvedRuntimeMode.rawValue
+            }
+            if let keyPrecision = precisionPolicy?.key ?? profile.quantization.turboQuantKeyPrecision {
+                metadata[LocalProviderMetadataKeys.turboQuantKeyPrecision] = keyPrecision.rawValue
+            }
+            if let valuePrecision = precisionPolicy?.value ?? profile.quantization.turboQuantValuePrecision {
+                metadata[LocalProviderMetadataKeys.turboQuantValuePrecision] = valuePrecision.rawValue
+            }
+            if let precisionPolicy {
+                metadata[LocalProviderMetadataKeys.turboQuantPrecisionPolicyJSON] =
+                    MLXRuntimeBridge.metadataJSON(precisionPolicy)
+            }
+            if let sparseValuePolicy {
+                metadata[LocalProviderMetadataKeys.turboQuantSparseValuePolicyJSON] =
+                    MLXRuntimeBridge.metadataJSON(sparseValuePolicy)
+            }
+            if let effectiveBackend {
+                metadata[LocalProviderMetadataKeys.turboQuantEffectiveBackend] =
+                    effectiveBackend.rawValue
+            }
+            if let nativeBackendVersion {
+                metadata[LocalProviderMetadataKeys.turboQuantNativeBackendVersion] =
+                    nativeBackendVersion
+            }
+            if decodedActiveKVBytes > 0 {
+                metadata[LocalProviderMetadataKeys.turboQuantDecodedActiveKVBytes] =
+                    String(decodedActiveKVBytes)
+            }
             if let maxKVSize = profile.quantization.maxKVSize {
                 metadata[LocalProviderMetadataKeys.runtimeMaxKVSize] = String(maxKVSize)
             }
@@ -4676,6 +5160,40 @@ private actor MLXRuntimeState {
         }
         if turboQuantPlanned, let valueBits = quantization.turboQuantValueBits {
             metadata[LocalProviderMetadataKeys.turboQuantValueBits] = String(valueBits)
+        }
+        if turboQuantPlanned {
+            metadata[LocalProviderMetadataKeys.turboQuantRuntimeMode] =
+                quantization.turboQuantRuntimeMode.rawValue
+        }
+        if turboQuantPlanned, let resolvedRuntimeMode = quantization.turboQuantResolvedRuntimeMode {
+            metadata[LocalProviderMetadataKeys.turboQuantResolvedRuntimeMode] =
+                resolvedRuntimeMode.rawValue
+        }
+        if turboQuantPlanned, let keyPrecision = quantization.turboQuantKeyPrecision {
+            metadata[LocalProviderMetadataKeys.turboQuantKeyPrecision] = keyPrecision.rawValue
+        }
+        if turboQuantPlanned, let valuePrecision = quantization.turboQuantValuePrecision {
+            metadata[LocalProviderMetadataKeys.turboQuantValuePrecision] = valuePrecision.rawValue
+        }
+        if turboQuantPlanned, let precisionPolicy = quantization.turboQuantPrecisionPolicy {
+            metadata[LocalProviderMetadataKeys.turboQuantPrecisionPolicyJSON] =
+                MLXRuntimeBridge.metadataJSON(precisionPolicy)
+        }
+        if turboQuantPlanned, let sparseValuePolicy = quantization.turboQuantSparseValuePolicy {
+            metadata[LocalProviderMetadataKeys.turboQuantSparseValuePolicyJSON] =
+                MLXRuntimeBridge.metadataJSON(sparseValuePolicy)
+        }
+        if turboQuantPlanned, let effectiveBackend = quantization.turboQuantEffectiveBackend {
+            metadata[LocalProviderMetadataKeys.turboQuantEffectiveBackend] =
+                effectiveBackend.rawValue
+        }
+        if turboQuantPlanned, let nativeBackendVersion = quantization.turboQuantNativeBackendVersion {
+            metadata[LocalProviderMetadataKeys.turboQuantNativeBackendVersion] =
+                nativeBackendVersion
+        }
+        if turboQuantPlanned, let decodedActive = quantization.turboQuantDecodedActiveKVBytes {
+            metadata[LocalProviderMetadataKeys.turboQuantDecodedActiveKVBytes] =
+                String(decodedActive)
         }
         if turboQuantPlanned, let requestedBackend = quantization.requestedBackend {
             metadata[LocalProviderMetadataKeys.turboQuantRequestedBackend] = requestedBackend.rawValue

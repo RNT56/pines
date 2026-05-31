@@ -30,6 +30,15 @@ public struct RuntimeProfileEvidence: Hashable, Codable, Sendable, Identifiable 
     public var userMode: TurboQuantUserMode
     public var turboQuantPreset: String?
     public var valueBits: Int?
+    public var requestedRuntimeMode: TurboQuantRuntimeMode?
+    public var resolvedRuntimeMode: TurboQuantRuntimeMode?
+    public var keyPrecision: TurboQuantKeyPrecision?
+    public var valuePrecision: TurboQuantValuePrecision?
+    public var precisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var sparseValuePolicy: TurboQuantSparseValuePolicy?
+    public var effectiveBackend: TurboQuantAttentionBackendEngine?
+    public var nativeBackendVersion: String?
+    public var decodedActiveKVBytes: Int64?
     public var groupSize: Int?
     public var layoutVersion: Int?
     public var activeAttentionPath: TurboQuantAttentionPath?
@@ -64,6 +73,15 @@ public struct RuntimeProfileEvidence: Hashable, Codable, Sendable, Identifiable 
         userMode: TurboQuantUserMode,
         turboQuantPreset: String? = nil,
         valueBits: Int? = nil,
+        requestedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        resolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        keyPrecision: TurboQuantKeyPrecision? = nil,
+        valuePrecision: TurboQuantValuePrecision? = nil,
+        precisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        sparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
+        effectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        nativeBackendVersion: String? = nil,
+        decodedActiveKVBytes: Int64? = nil,
         groupSize: Int? = nil,
         layoutVersion: Int? = nil,
         activeAttentionPath: TurboQuantAttentionPath? = nil,
@@ -97,6 +115,15 @@ public struct RuntimeProfileEvidence: Hashable, Codable, Sendable, Identifiable 
         self.userMode = userMode
         self.turboQuantPreset = turboQuantPreset
         self.valueBits = valueBits
+        self.requestedRuntimeMode = requestedRuntimeMode
+        self.resolvedRuntimeMode = resolvedRuntimeMode
+        self.keyPrecision = keyPrecision
+        self.valuePrecision = valuePrecision
+        self.precisionPolicy = precisionPolicy
+        self.sparseValuePolicy = sparseValuePolicy
+        self.effectiveBackend = effectiveBackend
+        self.nativeBackendVersion = nativeBackendVersion
+        self.decodedActiveKVBytes = decodedActiveKVBytes.map { max(0, $0) }
         self.groupSize = groupSize
         self.layoutVersion = layoutVersion
         self.activeAttentionPath = activeAttentionPath
@@ -186,6 +213,10 @@ public actor ProfileEvidenceStore {
         mode: TurboQuantUserMode,
         fallbackContractHash: String,
         layoutVersion: Int?,
+        runtimeMode: TurboQuantRuntimeMode? = nil,
+        effectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        precisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        sparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
         speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions? = nil,
     platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions? = nil,
         minimumContextTokens: Int
@@ -203,6 +234,10 @@ public actor ProfileEvidenceStore {
                     && $0.userMode == mode
                     && $0.fallbackContractHash == fallbackContractHash
                     && $0.layoutVersion == layoutVersion
+                    && (runtimeMode == nil || ($0.resolvedRuntimeMode ?? $0.requestedRuntimeMode) == runtimeMode)
+                    && (effectiveBackend == nil || $0.effectiveBackend == effectiveBackend)
+                    && (precisionPolicy == nil || $0.precisionPolicy == precisionPolicy)
+                    && (sparseValuePolicy == nil || ($0.sparseValuePolicy ?? .off) == sparseValuePolicy)
                     && ($0.speculativeDimensions ?? .disabled).matches(speculativeDimensions)
           && ($0.platformEvidenceDimensions ?? .disabled).matches(platformEvidenceDimensions)
                     && $0.admittedContextTokens >= minimumContextTokens
@@ -285,6 +320,14 @@ public actor ProfileEvidenceStore {
             && lhs.compatibilityPairID == rhs.compatibilityPairID
             && lhs.layoutVersion == rhs.layoutVersion
             && lhs.activeAttentionPath == rhs.activeAttentionPath
+            && lhs.requestedRuntimeMode == rhs.requestedRuntimeMode
+            && lhs.resolvedRuntimeMode == rhs.resolvedRuntimeMode
+            && lhs.keyPrecision == rhs.keyPrecision
+            && lhs.valuePrecision == rhs.valuePrecision
+            && lhs.precisionPolicy == rhs.precisionPolicy
+            && lhs.sparseValuePolicy == rhs.sparseValuePolicy
+            && lhs.effectiveBackend == rhs.effectiveBackend
+            && lhs.nativeBackendVersion == rhs.nativeBackendVersion
             && (lhs.speculativeDimensions ?? .disabled).matches(rhs.speculativeDimensions)
       && (lhs.platformEvidenceDimensions ?? .disabled).matches(rhs.platformEvidenceDimensions)
             && lhs.admittedContextTokens == rhs.admittedContextTokens
@@ -306,6 +349,10 @@ public protocol TurboQuantEvidenceRepository: Sendable {
         mode: TurboQuantUserMode,
         fallbackContractHash: String?,
         layoutVersion: Int?,
+        runtimeMode: TurboQuantRuntimeMode?,
+        effectiveBackend: TurboQuantAttentionBackendEngine?,
+        precisionPolicy: TurboQuantKVPrecisionPolicy?,
+        sparseValuePolicy: TurboQuantSparseValuePolicy?,
         speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions?,
     platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions?,
         minimumContextTokens: Int

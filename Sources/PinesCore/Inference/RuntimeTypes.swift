@@ -486,10 +486,208 @@ public enum TurboQuantFallbackPolicy: String, Codable, Sendable, CaseIterable {
     }
 }
 
+public enum TurboQuantRuntimeMode: String, Codable, Sendable, CaseIterable {
+    case auto
+    case rawPreferred
+    case throughputTurboQuant
+    case capacityTurboQuant
+}
+
+public enum TurboQuantKeyPrecision: String, Codable, Sendable, CaseIterable {
+    case fp16OrQ8
+    case fp16
+    case affineQ8
+    case turbo8
+    case turbo4v2
+    case turbo3_5
+    case turbo2_5
+}
+
+public enum TurboQuantValuePrecision: String, Codable, Sendable, CaseIterable {
+    case fp16
+    case turbo8
+    case turbo4v2
+    case turbo3_5
+    case turbo2_5
+}
+
+public enum TurboQuantBoundaryPolicy: Hashable, Codable, Sendable {
+    case profileDefault
+    case disabled
+    case protectedEdges(first: Int, last: Int)
+    case custom([Int])
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case first
+        case last
+        case layers
+    }
+
+    private enum Kind: String, Codable {
+        case profileDefault
+        case disabled
+        case protectedEdges
+        case custom
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(),
+           let legacy = try? single.decode(String.self) {
+            switch legacy {
+            case "profileDefault":
+                self = .profileDefault
+            case "disabled":
+                self = .disabled
+            default:
+                self = .custom([])
+            }
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(Kind.self, forKey: .kind)
+        switch kind {
+        case .profileDefault:
+            self = .profileDefault
+        case .disabled:
+            self = .disabled
+        case .protectedEdges:
+            self = .protectedEdges(
+                first: try container.decodeIfPresent(Int.self, forKey: .first) ?? 0,
+                last: try container.decodeIfPresent(Int.self, forKey: .last) ?? 0
+            )
+        case .custom:
+            self = .custom(try container.decodeIfPresent([Int].self, forKey: .layers) ?? [])
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .profileDefault:
+            try container.encode(Kind.profileDefault, forKey: .kind)
+        case .disabled:
+            try container.encode(Kind.disabled, forKey: .kind)
+        case .protectedEdges(let first, let last):
+            try container.encode(Kind.protectedEdges, forKey: .kind)
+            try container.encode(max(0, first), forKey: .first)
+            try container.encode(max(0, last), forKey: .last)
+        case .custom(let layers):
+            try container.encode(Kind.custom, forKey: .kind)
+            try container.encode(layers.map { max(0, $0) }, forKey: .layers)
+        }
+    }
+}
+
+public enum TurboQuantSparseValuePolicy: Hashable, Codable, Sendable {
+    case off
+    case auto(threshold: Float)
+    case force(threshold: Float)
+
+    public static let defaultAutoThreshold: Float = 1e-6
+    public static let productDefault = TurboQuantSparseValuePolicy.auto(
+        threshold: defaultAutoThreshold
+    )
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case threshold
+    }
+
+    private enum Kind: String, Codable {
+        case off
+        case auto
+        case force
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(Kind.self, forKey: .kind)
+        let threshold =
+            try container.decodeIfPresent(Float.self, forKey: .threshold)
+            ?? Self.defaultAutoThreshold
+        switch kind {
+        case .off:
+            self = .off
+        case .auto:
+            self = .auto(threshold: max(0, threshold))
+        case .force:
+            self = .force(threshold: max(0, threshold))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .off:
+            try container.encode(Kind.off, forKey: .kind)
+        case .auto(let threshold):
+            try container.encode(Kind.auto, forKey: .kind)
+            try container.encode(max(0, threshold), forKey: .threshold)
+        case .force(let threshold):
+            try container.encode(Kind.force, forKey: .kind)
+            try container.encode(max(0, threshold), forKey: .threshold)
+        }
+    }
+
+    public var threshold: Float? {
+        switch self {
+        case .off:
+            nil
+        case .auto(let threshold), .force(let threshold):
+            max(0, threshold)
+        }
+    }
+
+    public func resolvedThreshold(
+        runtimeMode: TurboQuantRuntimeMode,
+        contextLength: Int,
+        minimumAutoContextLength: Int = 16_384
+    ) -> Float? {
+        switch self {
+        case .off:
+            nil
+        case .auto(let threshold):
+            runtimeMode == .capacityTurboQuant && contextLength >= minimumAutoContextLength
+                ? max(0, threshold)
+                : nil
+        case .force(let threshold):
+            runtimeMode == .capacityTurboQuant ? max(0, threshold) : nil
+        }
+    }
+}
+
+public enum TurboQuantAttentionBackendEngine: String, Codable, Sendable, CaseIterable {
+    case rawSDPA
+    case swiftMetalKernel
+    case nativeMLX
+    case decodedReference
+    case unavailable
+}
+
+public struct TurboQuantKVPrecisionPolicy: Hashable, Codable, Sendable {
+    public var key: TurboQuantKeyPrecision
+    public var value: TurboQuantValuePrecision
+    public var boundary: TurboQuantBoundaryPolicy
+
+    public init(
+        key: TurboQuantKeyPrecision = .fp16OrQ8,
+        value: TurboQuantValuePrecision = .turbo4v2,
+        boundary: TurboQuantBoundaryPolicy = .profileDefault
+    ) {
+        self.key = key
+        self.value = value
+        self.boundary = boundary
+    }
+}
+
 public enum TurboQuantAdmissionDowngradeReason: String, Codable, Sendable, CaseIterable {
     case releasedRawShadow
     case disabledPackedFallback
     case loweredValueBits
+    case loweredValuePrecision
+    case keyPrecisionEvidenceRequired
     case movedBalancedToMaxContext
     case reducedContext
     case rollingSummaryMemory
@@ -504,6 +702,10 @@ public enum TurboQuantAdmissionDowngradeReason: String, Codable, Sendable, CaseI
             "Disabled packed fallback"
         case .loweredValueBits:
             "Lowered value bits"
+        case .loweredValuePrecision:
+            "Lowered value precision"
+        case .keyPrecisionEvidenceRequired:
+            "Key precision evidence required"
         case .movedBalancedToMaxContext:
             "Balanced moved to Max Context"
         case .reducedContext:
@@ -662,9 +864,16 @@ public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
     public var valueBits: Int
     public var groupSize: Int
     public var fallbackPolicy: TurboQuantFallbackPolicy
+    public var requestedRuntimeMode: TurboQuantRuntimeMode?
+    public var resolvedRuntimeMode: TurboQuantRuntimeMode?
+    public var precisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var runtimeFallbackReason: String?
     public var rawBytesPerToken: Int
     public var packedFallbackBytesPerToken: Int
     public var compressedBytesPerToken: Int
+    public var compressedKeyBytes: Int?
+    public var compressedValueBytes: Int?
+    public var decodedActiveKVBytes: Int?
     public var layerFootprint: TurboQuantLayerCacheFootprint?
     public var usesRawShadow: Bool
     public var packedFallbackEnabled: Bool
@@ -680,9 +889,16 @@ public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
         valueBits: Int,
         groupSize: Int,
         fallbackPolicy: TurboQuantFallbackPolicy,
+        requestedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        resolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        precisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        runtimeFallbackReason: String? = nil,
         rawBytesPerToken: Int,
         packedFallbackBytesPerToken: Int,
         compressedBytesPerToken: Int,
+        compressedKeyBytes: Int? = nil,
+        compressedValueBytes: Int? = nil,
+        decodedActiveKVBytes: Int? = nil,
         layerFootprint: TurboQuantLayerCacheFootprint? = nil,
         usesRawShadow: Bool,
         packedFallbackEnabled: Bool,
@@ -697,9 +913,16 @@ public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
         self.valueBits = valueBits
         self.groupSize = groupSize
         self.fallbackPolicy = fallbackPolicy
+        self.requestedRuntimeMode = requestedRuntimeMode
+        self.resolvedRuntimeMode = resolvedRuntimeMode
+        self.precisionPolicy = precisionPolicy
+        self.runtimeFallbackReason = runtimeFallbackReason
         self.rawBytesPerToken = rawBytesPerToken
         self.packedFallbackBytesPerToken = packedFallbackBytesPerToken
         self.compressedBytesPerToken = compressedBytesPerToken
+        self.compressedKeyBytes = compressedKeyBytes
+        self.compressedValueBytes = compressedValueBytes
+        self.decodedActiveKVBytes = decodedActiveKVBytes
         self.layerFootprint = layerFootprint
         self.usesRawShadow = usesRawShadow
         self.packedFallbackEnabled = packedFallbackEnabled
@@ -942,6 +1165,15 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
     public var devicePerformanceClass: DevicePerformanceClass?
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy?
     public var turboQuantValueBits: Int?
+    public var turboQuantRuntimeMode: TurboQuantRuntimeMode?
+    public var turboQuantResolvedRuntimeMode: TurboQuantRuntimeMode?
+    public var turboQuantKeyPrecision: TurboQuantKeyPrecision?
+    public var turboQuantValuePrecision: TurboQuantValuePrecision?
+    public var turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy?
+    public var turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine?
+    public var turboQuantNativeBackendVersion: String?
+    public var turboQuantDecodedActiveKVBytes: Int64?
     public var thermalDownshiftActive: Bool?
     public var runtimePressureReason: RuntimePressureReason?
     public var turboQuantProfileID: String?
@@ -976,6 +1208,15 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         devicePerformanceClass: DevicePerformanceClass? = nil,
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy? = nil,
         turboQuantValueBits: Int? = nil,
+        turboQuantRuntimeMode: TurboQuantRuntimeMode? = nil,
+        turboQuantResolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        turboQuantKeyPrecision: TurboQuantKeyPrecision? = nil,
+        turboQuantValuePrecision: TurboQuantValuePrecision? = nil,
+        turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
+        turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        turboQuantNativeBackendVersion: String? = nil,
+        turboQuantDecodedActiveKVBytes: Int64? = nil,
         thermalDownshiftActive: Bool? = nil,
         runtimePressureReason: RuntimePressureReason? = nil,
         turboQuantProfileID: String? = nil,
@@ -1009,6 +1250,15 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         self.devicePerformanceClass = devicePerformanceClass
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
         self.turboQuantValueBits = turboQuantValueBits
+        self.turboQuantRuntimeMode = turboQuantRuntimeMode
+        self.turboQuantResolvedRuntimeMode = turboQuantResolvedRuntimeMode
+        self.turboQuantKeyPrecision = turboQuantKeyPrecision
+        self.turboQuantValuePrecision = turboQuantValuePrecision
+        self.turboQuantPrecisionPolicy = turboQuantPrecisionPolicy
+        self.turboQuantSparseValuePolicy = turboQuantSparseValuePolicy
+        self.turboQuantEffectiveBackend = turboQuantEffectiveBackend
+        self.turboQuantNativeBackendVersion = turboQuantNativeBackendVersion
+        self.turboQuantDecodedActiveKVBytes = turboQuantDecodedActiveKVBytes.map { max(0, $0) }
         self.thermalDownshiftActive = thermalDownshiftActive
         self.runtimePressureReason = runtimePressureReason
         self.turboQuantProfileID = turboQuantProfileID
@@ -1050,6 +1300,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var devicePerformanceClass: DevicePerformanceClass?
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy
     public var turboQuantValueBits: Int?
+    public var turboQuantRuntimeMode: TurboQuantRuntimeMode
+    public var turboQuantResolvedRuntimeMode: TurboQuantRuntimeMode?
+    public var turboQuantKeyPrecision: TurboQuantKeyPrecision?
+    public var turboQuantValuePrecision: TurboQuantValuePrecision?
+    public var turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy?
+    public var turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine?
+    public var turboQuantNativeBackendVersion: String?
+    public var turboQuantDecodedActiveKVBytes: Int64?
     public var turboQuantLayoutVersion: Int?
     public var thermalDownshiftActive: Bool
     public var runtimePressureReason: RuntimePressureReason
@@ -1087,6 +1346,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case devicePerformanceClass
         case turboQuantOptimizationPolicy
         case turboQuantValueBits
+        case turboQuantRuntimeMode
+        case turboQuantResolvedRuntimeMode
+        case turboQuantKeyPrecision
+        case turboQuantValuePrecision
+        case turboQuantPrecisionPolicy
+        case turboQuantSparseValuePolicy
+        case turboQuantEffectiveBackend
+        case turboQuantNativeBackendVersion
+        case turboQuantDecodedActiveKVBytes
         case turboQuantLayoutVersion
         case thermalDownshiftActive
         case runtimePressureReason
@@ -1125,6 +1393,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         devicePerformanceClass: DevicePerformanceClass? = nil,
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy = .auto,
         turboQuantValueBits: Int? = nil,
+        turboQuantRuntimeMode: TurboQuantRuntimeMode = .auto,
+        turboQuantResolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        turboQuantKeyPrecision: TurboQuantKeyPrecision? = nil,
+        turboQuantValuePrecision: TurboQuantValuePrecision? = nil,
+        turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
+        turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        turboQuantNativeBackendVersion: String? = nil,
+        turboQuantDecodedActiveKVBytes: Int64? = nil,
         turboQuantLayoutVersion: Int? = nil,
         thermalDownshiftActive: Bool = false,
         runtimePressureReason: RuntimePressureReason = .none,
@@ -1161,6 +1438,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.devicePerformanceClass = devicePerformanceClass
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
         self.turboQuantValueBits = turboQuantValueBits
+        self.turboQuantRuntimeMode = turboQuantRuntimeMode
+        self.turboQuantResolvedRuntimeMode = turboQuantResolvedRuntimeMode
+        self.turboQuantKeyPrecision = turboQuantKeyPrecision
+        self.turboQuantValuePrecision = turboQuantValuePrecision
+        self.turboQuantPrecisionPolicy = turboQuantPrecisionPolicy
+        self.turboQuantSparseValuePolicy = turboQuantSparseValuePolicy
+        self.turboQuantEffectiveBackend = turboQuantEffectiveBackend
+        self.turboQuantNativeBackendVersion = turboQuantNativeBackendVersion
+        self.turboQuantDecodedActiveKVBytes = turboQuantDecodedActiveKVBytes.map { max(0, $0) }
         self.turboQuantLayoutVersion = turboQuantLayoutVersion
         self.thermalDownshiftActive = thermalDownshiftActive
         self.runtimePressureReason = runtimePressureReason
@@ -1200,6 +1486,15 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         devicePerformanceClass = try container.decodeIfPresent(DevicePerformanceClass.self, forKey: .devicePerformanceClass)
         turboQuantOptimizationPolicy = try container.decodeIfPresent(TurboQuantOptimizationPolicy.self, forKey: .turboQuantOptimizationPolicy) ?? .auto
         turboQuantValueBits = try container.decodeIfPresent(Int.self, forKey: .turboQuantValueBits)
+        turboQuantRuntimeMode = try container.decodeIfPresent(TurboQuantRuntimeMode.self, forKey: .turboQuantRuntimeMode) ?? .auto
+        turboQuantResolvedRuntimeMode = try container.decodeIfPresent(TurboQuantRuntimeMode.self, forKey: .turboQuantResolvedRuntimeMode)
+        turboQuantKeyPrecision = try container.decodeIfPresent(TurboQuantKeyPrecision.self, forKey: .turboQuantKeyPrecision)
+        turboQuantValuePrecision = try container.decodeIfPresent(TurboQuantValuePrecision.self, forKey: .turboQuantValuePrecision)
+        turboQuantPrecisionPolicy = try container.decodeIfPresent(TurboQuantKVPrecisionPolicy.self, forKey: .turboQuantPrecisionPolicy)
+        turboQuantSparseValuePolicy = try container.decodeIfPresent(TurboQuantSparseValuePolicy.self, forKey: .turboQuantSparseValuePolicy)
+        turboQuantEffectiveBackend = try container.decodeIfPresent(TurboQuantAttentionBackendEngine.self, forKey: .turboQuantEffectiveBackend)
+        turboQuantNativeBackendVersion = try container.decodeIfPresent(String.self, forKey: .turboQuantNativeBackendVersion)
+        turboQuantDecodedActiveKVBytes = try container.decodeIfPresent(Int64.self, forKey: .turboQuantDecodedActiveKVBytes)
         turboQuantLayoutVersion = try container.decodeIfPresent(Int.self, forKey: .turboQuantLayoutVersion)
         thermalDownshiftActive = try container.decodeIfPresent(Bool.self, forKey: .thermalDownshiftActive) ?? false
         runtimePressureReason = try container.decodeIfPresent(RuntimePressureReason.self, forKey: .runtimePressureReason) ?? .none

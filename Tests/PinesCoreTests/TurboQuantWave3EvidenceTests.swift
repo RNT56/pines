@@ -103,6 +103,97 @@ struct TurboQuantWave3EvidenceTests {
         }
     }
 
+    @Test func benchmarkImporterRejectsVerifiedLowBitKWithoutExplicitPolicy() throws {
+        var report = Self.report()
+        report.runtime.keyPrecision = .turbo4v2
+        report.runtime.valuePrecision = .turbo4v2
+        report.runtime.precisionPolicy = nil
+
+        #expect(
+            throws: TurboQuantBenchmarkImportFailure.qualityGateFailed(
+                "Verified low-bit K evidence requires an explicit K/V precision policy."
+            )
+        ) {
+            _ = try TurboQuantBenchmarkImporter().importReport(
+                report,
+                policy: TurboQuantBenchmarkImportPolicy(
+                    acceptedCompatibilityPairIDs: [report.compatibilityPairID],
+                    acceptedFallbackContractHashes: [report.runtime.fallbackContractHash],
+                    acceptedLayoutVersions: [report.runtime.layoutVersion ?? 0],
+                    requestedEvidenceLevel: .verified,
+                    allowVerifiedEvidence: true
+                )
+            )
+        }
+    }
+
+    @Test func benchmarkImporterRejectsVerifiedEvidenceMissingRuntimeTupleDimensions() throws {
+        var report = Self.report()
+        report.runtime.resolvedRuntimeMode = nil
+
+        #expect(
+            throws: TurboQuantBenchmarkImportFailure.qualityGateFailed(
+                "Verified evidence requires exact runtime dimensions: resolved runtime mode."
+            )
+        ) {
+            _ = try TurboQuantBenchmarkImporter().importReport(
+                report,
+                policy: TurboQuantBenchmarkImportPolicy(
+                    acceptedCompatibilityPairIDs: [report.compatibilityPairID],
+                    acceptedFallbackContractHashes: [report.runtime.fallbackContractHash],
+                    acceptedLayoutVersions: [report.runtime.layoutVersion ?? 0],
+                    requestedEvidenceLevel: .verified,
+                    allowVerifiedEvidence: true
+                )
+            )
+        }
+    }
+
+    @Test func benchmarkImporterRequiresExplicitCertifiedPolicy() throws {
+        let report = Self.report()
+
+        #expect(throws: TurboQuantBenchmarkImportFailure.certifiedEvidenceDisabled) {
+            _ = try TurboQuantBenchmarkImporter().importReport(
+                report,
+                policy: TurboQuantBenchmarkImportPolicy(
+                    acceptedCompatibilityPairIDs: [report.compatibilityPairID],
+                    acceptedFallbackContractHashes: [report.runtime.fallbackContractHash],
+                    acceptedLayoutVersions: [report.runtime.layoutVersion ?? 0],
+                    requestedEvidenceLevel: .certified,
+                    allowVerifiedEvidence: true
+                )
+            )
+        }
+    }
+
+    @Test func benchmarkImporterAcceptsVerifiedHighPrecisionKPolicy() throws {
+        var report = Self.report()
+        report.runtime.requestedRuntimeMode = .auto
+        report.runtime.resolvedRuntimeMode = .throughputTurboQuant
+        report.runtime.keyPrecision = .fp16OrQ8
+        report.runtime.valuePrecision = .turbo4v2
+        report.runtime.precisionPolicy = TurboQuantKVPrecisionPolicy(
+            key: .fp16OrQ8,
+            value: .turbo4v2
+        )
+        report.metrics.compressedKeyBytes = 1
+        report.metrics.compressedValueBytes = 1
+        report.metrics.decodedActiveKVBytes = 2
+
+        let imported = try TurboQuantBenchmarkImporter().importReport(
+            report,
+            policy: TurboQuantBenchmarkImportPolicy(
+                acceptedCompatibilityPairIDs: [report.compatibilityPairID],
+                acceptedFallbackContractHashes: [report.runtime.fallbackContractHash],
+                acceptedLayoutVersions: [report.runtime.layoutVersion ?? 0],
+                requestedEvidenceLevel: .verified,
+                allowVerifiedEvidence: true
+            )
+        )
+
+        #expect(imported.evidence.evidenceLevel == .verified)
+    }
+
     @Test func profileEvidenceStoreRevokesConflictingEvidence() async throws {
         let store = ProfileEvidenceStore()
         let first = try await store.importBenchmarkReport(
@@ -149,6 +240,10 @@ struct TurboQuantWave3EvidenceTests {
             mode: report.runtime.userMode,
             fallbackContractHash: report.runtime.fallbackContractHash,
             layoutVersion: report.runtime.layoutVersion,
+            runtimeMode: report.runtime.resolvedRuntimeMode,
+            effectiveBackend: report.runtime.effectiveBackend,
+            precisionPolicy: report.runtime.precisionPolicy,
+            sparseValuePolicy: report.runtime.sparseValuePolicy,
             minimumContextTokens: report.runtime.admittedContextTokens
         )
         let wrongMode = await store.evidence(
@@ -163,6 +258,10 @@ struct TurboQuantWave3EvidenceTests {
             mode: .batterySaver,
             fallbackContractHash: report.runtime.fallbackContractHash,
             layoutVersion: report.runtime.layoutVersion,
+            runtimeMode: report.runtime.resolvedRuntimeMode,
+            effectiveBackend: report.runtime.effectiveBackend,
+            precisionPolicy: report.runtime.precisionPolicy,
+            sparseValuePolicy: report.runtime.sparseValuePolicy,
             minimumContextTokens: report.runtime.admittedContextTokens
         )
 
@@ -181,6 +280,10 @@ struct TurboQuantWave3EvidenceTests {
             mode: report.runtime.userMode,
             fallbackContractHash: report.runtime.fallbackContractHash,
             layoutVersion: 5,
+            runtimeMode: report.runtime.resolvedRuntimeMode,
+            effectiveBackend: report.runtime.effectiveBackend,
+            precisionPolicy: report.runtime.precisionPolicy,
+            sparseValuePolicy: report.runtime.sparseValuePolicy,
             minimumContextTokens: report.runtime.admittedContextTokens
         )
         #expect(wrongLayout == nil)
@@ -198,6 +301,10 @@ struct TurboQuantWave3EvidenceTests {
             mode: report.runtime.userMode,
             fallbackContractHash: report.runtime.fallbackContractHash,
             layoutVersion: report.runtime.layoutVersion,
+            runtimeMode: report.runtime.resolvedRuntimeMode,
+            effectiveBackend: report.runtime.effectiveBackend,
+            precisionPolicy: report.runtime.precisionPolicy,
+            sparseValuePolicy: report.runtime.sparseValuePolicy,
             minimumContextTokens: report.runtime.admittedContextTokens
         )
         #expect(revoked == nil)
@@ -390,6 +497,16 @@ struct TurboQuantWave3EvidenceTests {
                 fallbackContractHash: fallbackContract.contractHash,
                 preset: "turbo4v2",
                 valueBits: 4,
+                requestedRuntimeMode: .auto,
+                resolvedRuntimeMode: .capacityTurboQuant,
+                keyPrecision: .fp16OrQ8,
+                valuePrecision: .turbo4v2,
+                precisionPolicy: TurboQuantKVPrecisionPolicy(
+                    key: .fp16OrQ8,
+                    value: .turbo4v2
+                ),
+                sparseValuePolicy: .off,
+                effectiveBackend: .swiftMetalKernel,
                 groupSize: 64,
                 layoutVersion: 4,
                 attentionPath: .twoStageCompressed,
@@ -405,6 +522,8 @@ struct TurboQuantWave3EvidenceTests {
                 decodeTokensPerSecondP95: 21,
                 peakMemoryBytes: 2_100_000_000,
                 compressedKVBytes: 128_000_000,
+                compressedKeyBytes: 64_000_000,
+                compressedValueBytes: 64_000_000,
                 memoryWarningsSeen: 0,
                 fallbackUsed: false,
                 jetsamObserved: false

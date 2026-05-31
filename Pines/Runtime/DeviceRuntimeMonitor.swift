@@ -237,6 +237,8 @@ struct DeviceRuntimeMonitor: Sendable {
             .wideA18A19
         case .sustainedA19Pro:
             .sustainedA19Pro
+        case .macAppleSilicon:
+            .macAppleSilicon
         case .mlxPackedFallback:
             .mlxPackedFallback
         }

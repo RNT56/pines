@@ -384,6 +384,37 @@ extension PinesAppModel {
                        evidence.valueBits != valueBits {
                         return false
                     }
+                    guard let resolvedRuntimeMode = quantization.turboQuantResolvedRuntimeMode,
+                          evidence.resolvedRuntimeMode == resolvedRuntimeMode else {
+                        return false
+                    }
+                    guard evidence.requestedRuntimeMode == quantization.turboQuantRuntimeMode else {
+                        return false
+                    }
+                    if let precisionPolicy = quantization.turboQuantPrecisionPolicy,
+                       evidence.precisionPolicy != precisionPolicy {
+                        return false
+                    }
+                    if let keyPrecision = quantization.turboQuantKeyPrecision,
+                       evidence.keyPrecision != keyPrecision {
+                        return false
+                    }
+                    if let valuePrecision = quantization.turboQuantValuePrecision,
+                       evidence.valuePrecision != valuePrecision {
+                        return false
+                    }
+                    let sparseValuePolicy = quantization.turboQuantSparseValuePolicy ?? .off
+                    guard (evidence.sparseValuePolicy ?? .off) == sparseValuePolicy else {
+                        return false
+                    }
+                    guard let effectiveBackend = quantization.turboQuantEffectiveBackend,
+                          evidence.effectiveBackend == effectiveBackend else {
+                        return false
+                    }
+                    if effectiveBackend == .nativeMLX,
+                       evidence.nativeBackendVersion != quantization.turboQuantNativeBackendVersion {
+                        return false
+                    }
                     if evidence.groupSize != quantization.kvGroupSize {
                         return false
                     }

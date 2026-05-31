@@ -1101,14 +1101,17 @@ actor GRDBPinesStore:
                     (id, schema_version, evidence_level, compatibility_pair_id, model_id,
                      model_revision, tokenizer_hash, profile_hash, fallback_contract_hash,
                      device_class, hardware_model, os_build, user_mode, turboquant_preset,
-                     value_bits, group_size, layout_version, active_attention_path,
+                     value_bits, requested_runtime_mode, resolved_runtime_mode,
+                     key_precision, value_precision, precision_policy_json,
+                     sparse_value_policy_json, effective_backend, native_backend_version,
+                     decoded_active_kv_bytes, group_size, layout_version, active_attention_path,
                      speculative_dimensions_json, speculative_telemetry_json, speculative_auto_disable_json,
                      platform_evidence_dimensions_json,
                      admitted_context_tokens, peak_memory_bytes, prompt_tokens_per_second,
                      decode_tokens_per_second_p50, decode_tokens_per_second_p95,
                      first_token_latency_ms, quality_gate_json, memory_calibration_sample_id,
                      revoked_reason, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     evidence_level = excluded.evidence_level,
                     compatibility_pair_id = excluded.compatibility_pair_id,
@@ -1123,6 +1126,15 @@ actor GRDBPinesStore:
                     user_mode = excluded.user_mode,
                     turboquant_preset = excluded.turboquant_preset,
                     value_bits = excluded.value_bits,
+                    requested_runtime_mode = excluded.requested_runtime_mode,
+                    resolved_runtime_mode = excluded.resolved_runtime_mode,
+                    key_precision = excluded.key_precision,
+                    value_precision = excluded.value_precision,
+                    precision_policy_json = excluded.precision_policy_json,
+                    sparse_value_policy_json = excluded.sparse_value_policy_json,
+                    effective_backend = excluded.effective_backend,
+                    native_backend_version = excluded.native_backend_version,
+                    decoded_active_kv_bytes = excluded.decoded_active_kv_bytes,
                     group_size = excluded.group_size,
                     layout_version = excluded.layout_version,
                     active_attention_path = excluded.active_attention_path,
@@ -1157,6 +1169,15 @@ actor GRDBPinesStore:
                     evidence.userMode.rawValue,
                     evidence.turboQuantPreset,
                     evidence.valueBits,
+                    evidence.requestedRuntimeMode?.rawValue,
+                    evidence.resolvedRuntimeMode?.rawValue,
+                    evidence.keyPrecision?.rawValue,
+                    evidence.valuePrecision?.rawValue,
+                    Self.encodeJSON(evidence.precisionPolicy),
+                    Self.encodeJSON(evidence.sparseValuePolicy),
+                    evidence.effectiveBackend?.rawValue,
+                    evidence.nativeBackendVersion,
+                    evidence.decodedActiveKVBytes,
                     evidence.groupSize,
                     evidence.layoutVersion,
                     evidence.activeAttentionPath?.rawValue,
@@ -1191,6 +1212,10 @@ actor GRDBPinesStore:
         mode: TurboQuantUserMode,
         fallbackContractHash: String? = nil,
         layoutVersion: Int? = nil,
+        runtimeMode: TurboQuantRuntimeMode? = nil,
+        effectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        precisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        sparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
         speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions? = nil,
         platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions? = nil,
         minimumContextTokens: Int = 0
@@ -1239,6 +1264,24 @@ actor GRDBPinesStore:
                 _ = arguments.append(contentsOf: StatementArguments([layoutVersion]))
             } else {
                 conditions.append("layout_version IS NULL")
+            }
+            if let runtimeMode {
+                conditions.append("(resolved_runtime_mode = ? OR (resolved_runtime_mode IS NULL AND requested_runtime_mode = ?))")
+                _ = arguments.append(contentsOf: StatementArguments([runtimeMode.rawValue, runtimeMode.rawValue]))
+            }
+            if let effectiveBackend {
+                conditions.append("effective_backend = ?")
+                _ = arguments.append(contentsOf: StatementArguments([effectiveBackend.rawValue]))
+            }
+            if let precisionPolicy {
+                conditions.append("precision_policy_json = ?")
+                _ = arguments.append(contentsOf: StatementArguments([Self.encodeJSON(precisionPolicy) ?? "null"]))
+            }
+            if let sparseValuePolicy {
+                conditions.append("(sparse_value_policy_json = ? OR (sparse_value_policy_json IS NULL AND ? = ?))")
+                let encoded = Self.encodeJSON(sparseValuePolicy) ?? "null"
+                let off = Self.encodeJSON(TurboQuantSparseValuePolicy.off) ?? "null"
+                _ = arguments.append(contentsOf: StatementArguments([encoded, encoded, off]))
             }
             if let speculativeDimensions {
                 conditions.append("speculative_dimensions_json = ?")

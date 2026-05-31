@@ -109,8 +109,8 @@ The app links MLX through exact fork pins in `project.yml`:
 
 - `https://github.com/RNT56/mlx-swift` at `c96dd8c7b374fa50d64b35bf8c5d7739df7d9984`
 - `https://github.com/RNT56/mlx-swift-lm` at `c8a544503bcdad21ee736feec68f0ed7e07a9b29`
-- Nested `mlx` inside `RNT56/mlx-swift` at `75b756717154890033209aaba4ffc89b113c5998`
-- Nested `mlx-c` inside `RNT56/mlx-swift` at `2abc34daff6ded246054d9e15b98870b5cd08b97`
+- Nested `mlx` inside `RNT56/mlx-swift` at `edc0fb23d1a384fe846ef5a8093f2d43001be8d2`
+- Nested `mlx-c` inside `RNT56/mlx-swift` at `0b9e4c23eb5b64e4ddc0f44ff45ba37832370d2d`
 
 Compatibility implementations for model families not yet present in linked MLX packages are split into `MLXCompatibleModels+Llama4.swift` and `MLXCompatibleModels+DeepseekV4.swift`.
 

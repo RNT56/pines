@@ -2647,7 +2647,8 @@ private struct ArtifactsResearchChatWorkspace: View {
         PinesComposerBar(
             kind: .chrome,
             maxWidth: 860,
-            padding: theme.spacing.small,
+            padding: 0,
+            showsSurface: false,
             supplementary: {
                 if let clarificationDraft {
                 ArtifactsResearchClarificationPanel(
@@ -2700,7 +2701,6 @@ private struct ArtifactsResearchChatWorkspace: View {
         .padding(.horizontal, theme.spacing.large)
         .padding(.vertical, theme.spacing.small)
         .frame(maxWidth: .infinity)
-        .background(theme.colors.chromeBackground)
     }
 
     private var researchSettingsButton: some View {

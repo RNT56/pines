@@ -88,6 +88,99 @@ struct TurboQuantWave1ControlPlaneTests {
         #expect(valid.validationErrors.isEmpty)
     }
 
+    @Test func wave1RuntimePolicyDTOsRoundTripCodable() throws {
+        let precisionPolicy = TurboQuantKVPrecisionPolicy(
+            key: .fp16OrQ8,
+            value: .turbo4v2,
+            boundary: .profileDefault
+        )
+        let quantization = QuantizationProfile(
+            turboQuantRuntimeMode: .auto,
+            turboQuantResolvedRuntimeMode: .throughputTurboQuant,
+            turboQuantKeyPrecision: .fp16OrQ8,
+            turboQuantValuePrecision: .turbo4v2,
+            turboQuantPrecisionPolicy: precisionPolicy,
+            turboQuantSparseValuePolicy: .productDefault,
+            turboQuantEffectiveBackend: .swiftMetalKernel,
+            turboQuantDecodedActiveKVBytes: 4096
+        )
+        let decision = TurboQuantRunDecision(
+            requestedRuntimeMode: .auto,
+            resolvedRuntimeMode: .throughputTurboQuant,
+            keyPrecision: .fp16OrQ8,
+            valuePrecision: .turbo4v2,
+            precisionPolicy: precisionPolicy,
+            compressedKeyBytes: 512,
+            compressedValueBytes: 256,
+            decodedActiveKVBytes: 4096
+        )
+        let fallbackContract = TurboQuantFallbackContract.productDefault(for: .balanced)
+        let runtime = TurboQuantBenchmarkRuntime(
+            userMode: .balanced,
+            fallbackContractHash: fallbackContract.contractHash,
+            preset: "turbo8",
+            valueBits: 4,
+            requestedRuntimeMode: .auto,
+            resolvedRuntimeMode: .throughputTurboQuant,
+            keyPrecision: .fp16OrQ8,
+            valuePrecision: .turbo4v2,
+            precisionPolicy: precisionPolicy,
+            sparseValuePolicy: .productDefault,
+            effectiveBackend: .swiftMetalKernel,
+            admittedContextTokens: 8192,
+            reservedCompletionTokens: 512
+        )
+        let metrics = TurboQuantBenchmarkMetrics(
+            contextTokens: 8192,
+            compressedKVBytes: 1024,
+            compressedKeyBytes: 512,
+            compressedValueBytes: 512,
+            decodedActiveKVBytes: 4096,
+            memoryWarningsSeen: 0,
+            fallbackUsed: false,
+            jetsamObserved: false
+        )
+
+        try roundTrip(precisionPolicy)
+        try roundTrip(quantization)
+        try roundTrip(decision)
+        try roundTrip(runtime)
+        try roundTrip(metrics)
+    }
+
+    @Test func wave1ProviderMetadataKeysAreStable() {
+        #expect(LocalProviderMetadataKeys.turboQuantRuntimeMode == "local.turboquant.runtime_mode")
+        #expect(
+            LocalProviderMetadataKeys.turboQuantResolvedRuntimeMode
+                == "local.turboquant.resolved_runtime_mode"
+        )
+        #expect(LocalProviderMetadataKeys.turboQuantKeyPrecision == "local.turboquant.key_precision")
+        #expect(
+            LocalProviderMetadataKeys.turboQuantValuePrecision
+                == "local.turboquant.value_precision"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantPrecisionPolicyJSON
+                == "local.turboquant.precision_policy_json"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantSparseValuePolicyJSON
+                == "local.turboquant.sparse_value_policy_json"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantEffectiveBackend
+                == "local.turboquant.effective_backend"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantNativeBackendVersion
+                == "local.turboquant.native_backend_version"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantDecodedActiveKVBytes
+                == "local.turboquant.decoded_active_kv_bytes"
+        )
+    }
+
     @Test func streamFailureCarriesWave2ProviderMetadata() throws {
         let contextPlan = ContextAssemblyPlan(
             strategy: "mlx-exact-token-preflight-v1",

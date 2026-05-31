@@ -65,10 +65,11 @@ Machine-readable compatibility-pair files:
 
 Current status:
 
-- The active compatibility pair is green for local release gates.
-- Pines pins `mlx-swift` `c96dd8c7b374fa50d64b35bf8c5d7739df7d9984` and `mlx-swift-lm` `c8a544503bcdad21ee736feec68f0ed7e07a9b29`.
-- Layout V5 is the default TurboQuant layout on this pair; Layout V4 remains supported for legacy and comparison runs.
-- Full local Xcode validation has passed for the pair.
+- The active compatibility pair is failed/non-green after the Wave 0 baseline `turboquant-wave0-20260531T024557Z`.
+- Pines pins `mlx-swift` `b187523536c6923562e3a81613e169da9321f812` and `mlx-swift-lm` `1bf1cc246e17c48527a32c99fffcde41b84cd725`.
+- Layout V6 is the default TurboQuant layout on this pair; Layout V4 and V5 remain supported for legacy and comparison runs.
+- Current Wave 0 evidence includes passing Pines pin/build gates and Mac benchmark artifacts, but `mlx-swift` TurboQuant tests failed and the app-hosted iOS smoke ended `failed_environmental` before install/launch.
+- Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only and cannot make the current pair green.
 - Real-device model/device/mode evidence is still required before any product surface may claim `Verified` or `Certified` compatibility.
 
 Wave handoff logs:
@@ -111,7 +112,7 @@ These apply to all repos and all branches.
 Wave 7 implements W29+/MVP 6 platform contracts end to end while keeping every
 platform feature disabled by default, kill-switched, and evidence-required.
 
-Compatibility-pair `green` closes the local runtime-pair validation gate only. Evidence-backed model claims still require real hardware benchmark import through the evidence pipeline.
+Compatibility-pair `green` closes the local runtime-pair validation gate only. Exact pins alone establish an unverified compatibility identity; evidence-backed model claims still require real hardware benchmark import through the evidence pipeline.
 
 ## Implementation principle
 

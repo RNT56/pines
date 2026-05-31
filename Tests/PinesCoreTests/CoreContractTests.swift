@@ -2632,7 +2632,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-    #expect(PinesDatabaseSchema.currentVersion == 23)
+    #expect(PinesDatabaseSchema.currentVersion == 24)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
     let genericProviderMigration = try #require(
       PinesDatabaseSchema.migrations.first { $0.version == 15 })
@@ -2748,6 +2748,25 @@ struct CoreContractTests {
     #expect(
       platformSQL.contains(
         "ALTER TABLE turboquant_profile_evidence ADD COLUMN platform_evidence_dimensions_json"))
+
+    let runtimeEvidenceMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 24 })
+    let runtimeEvidenceSQL = runtimeEvidenceMigration.sql.joined(separator: "\n")
+    for column in [
+      "requested_runtime_mode",
+      "resolved_runtime_mode",
+      "key_precision",
+      "value_precision",
+      "precision_policy_json",
+      "sparse_value_policy_json",
+      "effective_backend",
+      "native_backend_version",
+      "decoded_active_kv_bytes",
+    ] {
+      #expect(
+        runtimeEvidenceSQL.contains(
+          "ALTER TABLE turboquant_profile_evidence ADD COLUMN \(column)"))
+    }
     }
 
     @Test

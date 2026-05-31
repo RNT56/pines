@@ -2,19 +2,19 @@
 
 This document records the observed local repository state at the start of the implementation-doc pass. It is intentionally factual and was used by W25 before implementation branches began.
 
-## Current release-green status
+## Current failed status
 
-After the Layout V5 default device-test closeout, the active local compatibility pair is green:
+After the Wave 0 baseline capture on 2026-05-31, the active local compatibility pair is failed/non-green:
 
-| Repo | Branch | Release-green commit |
+| Repo | Branch | Current pair commit |
 | --- | --- | --- |
-| `pines` | `tq/real-device-evidence-acceptance` | branch head |
-| `mlx-swift` | `tq/layout-v5-default-device-tests` | `c96dd8c7b374fa50d64b35bf8c5d7739df7d9984` |
-| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `c8a544503bcdad21ee736feec68f0ed7e07a9b29` |
+| `pines` | `tq/real-device-evidence-acceptance` | `e4d9e99b77b652be089be325e41a509eeb6cb033` with dirty work present during validation |
+| `mlx-swift` | `tq/layout-v5-default-device-tests` | `b187523536c6923562e3a81613e169da9321f812` with dirty work present during validation |
+| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `1bf1cc246e17c48527a32c99fffcde41b84cd725` with dirty work present during validation |
 
-Pines pins `MLXSwift` to `c96dd8c7b374fa50d64b35bf8c5d7739df7d9984` and `MLXSwiftLM` to `c8a544503bcdad21ee736feec68f0ed7e07a9b29` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
+Pines pins `MLXSwift` to `b187523536c6923562e3a81613e169da9321f812` and `MLXSwiftLM` to `1bf1cc246e17c48527a32c99fffcde41b84cd725` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
 
-Local release gates are green, including full SwiftPM validation and `bash scripts/ci/run-xcode-validation.sh all`. Layout V5 is the default MLX layout on this pair, with Layout V4 still supported for legacy/comparison runs. Real-device model/device/mode evidence remains pending and is still required before any `Verified` or `Certified` product claim.
+Wave 0 current-pair evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, but `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the app-hosted iOS smoke ended `failed_environmental` before install/launch. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V6 is the default MLX layout on this pair, with Layout V4 and V5 still supported for legacy/comparison runs. Exact pins alone are unverified and real-device model/device/mode evidence remains required before any `Verified` or `Certified` product claim.
 
 ## Observed workspace
 
@@ -118,13 +118,12 @@ long-context target:
 - final privacy-manifest validation against the resolved package graph;
 - encrypted KV snapshot persistence and restore.
 
-After the Wave 7 production closeout, the local runtime-pair gates listed above
-are complete except for real-device model/device/mode evidence and signed App
-Store distribution. Runtime admission, memory zones, memory calibration records,
-typed failure mapping, RunDecision metadata, compatibility UI states, privacy
-manifest validation against the local resolved graph, and encrypted snapshot
-storage are implemented. `Verified` and `Certified` product labels still require
-matching imported real-device evidence.
+After the Wave 7 production closeout, runtime admission, memory zones, memory
+calibration records, typed failure mapping, RunDecision metadata, compatibility
+UI states, privacy manifest validation against the local resolved graph, and
+encrypted snapshot storage are implemented. The current Wave 0 pair remains
+failed/non-green until all required gates have current evidence. `Verified` and
+`Certified` product labels still require matching imported real-device evidence.
 
 ## Immediate implementation blockers
 
@@ -136,7 +135,8 @@ Closed Wave 0 blockers:
 4. Pines type-family decision: reuse existing `TurboQuant*` DTOs.
 5. Mode/fallback contract hashing in Pines.
 
-Wave 1+ implementation work is now closed through the production pin closeout:
+Wave 1+ implementation work is implemented through the production pin closeout,
+but release status remains failed/non-green for the current pair:
 
 1. Admission service.
 2. RunDecision ledger integration.

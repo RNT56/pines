@@ -103,6 +103,14 @@ public struct TurboQuantBenchmarkRuntime: Hashable, Codable, Sendable {
     public var fallbackContractHash: String
     public var preset: String?
     public var valueBits: Int?
+    public var requestedRuntimeMode: TurboQuantRuntimeMode?
+    public var resolvedRuntimeMode: TurboQuantRuntimeMode?
+    public var keyPrecision: TurboQuantKeyPrecision?
+    public var valuePrecision: TurboQuantValuePrecision?
+    public var precisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var sparseValuePolicy: TurboQuantSparseValuePolicy?
+    public var effectiveBackend: TurboQuantAttentionBackendEngine?
+    public var nativeBackendVersion: String?
     public var groupSize: Int?
     public var layoutVersion: Int?
     public var attentionPath: TurboQuantAttentionPath?
@@ -117,6 +125,14 @@ public struct TurboQuantBenchmarkRuntime: Hashable, Codable, Sendable {
         fallbackContractHash: String,
         preset: String? = nil,
         valueBits: Int? = nil,
+        requestedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        resolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        keyPrecision: TurboQuantKeyPrecision? = nil,
+        valuePrecision: TurboQuantValuePrecision? = nil,
+        precisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        sparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
+        effectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        nativeBackendVersion: String? = nil,
         groupSize: Int? = nil,
         layoutVersion: Int? = nil,
         attentionPath: TurboQuantAttentionPath? = nil,
@@ -130,6 +146,14 @@ public struct TurboQuantBenchmarkRuntime: Hashable, Codable, Sendable {
         self.fallbackContractHash = fallbackContractHash
         self.preset = preset
         self.valueBits = valueBits
+        self.requestedRuntimeMode = requestedRuntimeMode
+        self.resolvedRuntimeMode = resolvedRuntimeMode
+        self.keyPrecision = keyPrecision
+        self.valuePrecision = valuePrecision
+        self.precisionPolicy = precisionPolicy
+        self.sparseValuePolicy = sparseValuePolicy
+        self.effectiveBackend = effectiveBackend
+        self.nativeBackendVersion = nativeBackendVersion
         self.groupSize = groupSize
         self.layoutVersion = layoutVersion
         self.attentionPath = attentionPath
@@ -149,6 +173,9 @@ public struct TurboQuantBenchmarkMetrics: Hashable, Codable, Sendable {
     public var decodeTokensPerSecondP95: Double?
     public var peakMemoryBytes: Int64?
     public var compressedKVBytes: Int64?
+    public var compressedKeyBytes: Int64?
+    public var compressedValueBytes: Int64?
+    public var decodedActiveKVBytes: Int64?
     public var rawShadowBytes: Int64?
     public var packedFallbackBytes: Int64?
     public var decodedFallbackScratchBytes: Int64?
@@ -166,6 +193,9 @@ public struct TurboQuantBenchmarkMetrics: Hashable, Codable, Sendable {
         decodeTokensPerSecondP95: Double? = nil,
         peakMemoryBytes: Int64? = nil,
         compressedKVBytes: Int64? = nil,
+        compressedKeyBytes: Int64? = nil,
+        compressedValueBytes: Int64? = nil,
+        decodedActiveKVBytes: Int64? = nil,
         rawShadowBytes: Int64? = nil,
         packedFallbackBytes: Int64? = nil,
         decodedFallbackScratchBytes: Int64? = nil,
@@ -182,6 +212,9 @@ public struct TurboQuantBenchmarkMetrics: Hashable, Codable, Sendable {
         self.decodeTokensPerSecondP95 = decodeTokensPerSecondP95
         self.peakMemoryBytes = peakMemoryBytes.map { max(0, $0) }
         self.compressedKVBytes = compressedKVBytes.map { max(0, $0) }
+        self.compressedKeyBytes = compressedKeyBytes.map { max(0, $0) }
+        self.compressedValueBytes = compressedValueBytes.map { max(0, $0) }
+        self.decodedActiveKVBytes = decodedActiveKVBytes.map { max(0, $0) }
         self.rawShadowBytes = rawShadowBytes.map { max(0, $0) }
         self.packedFallbackBytes = packedFallbackBytes.map { max(0, $0) }
         self.decodedFallbackScratchBytes = decodedFallbackScratchBytes.map { max(0, $0) }
@@ -206,6 +239,7 @@ public enum TurboQuantBenchmarkImportFailure: Error, Hashable, LocalizedError, S
     case speculativeGateFailed(String)
   case platformGateFailed(String)
     case verifiedEvidenceDisabled
+    case certifiedEvidenceDisabled
 
     public var errorDescription: String? {
         switch self {
@@ -233,6 +267,8 @@ public enum TurboQuantBenchmarkImportFailure: Error, Hashable, LocalizedError, S
       reason
         case .verifiedEvidenceDisabled:
             "Verified evidence import is disabled by policy."
+        case .certifiedEvidenceDisabled:
+            "Certified evidence import is disabled by policy."
         }
     }
 }
@@ -243,6 +279,7 @@ public struct TurboQuantBenchmarkImportPolicy: Hashable, Codable, Sendable {
     public var acceptedLayoutVersions: Set<Int>
     public var requestedEvidenceLevel: RuntimeEvidenceLevel
     public var allowVerifiedEvidence: Bool
+    public var allowCertifiedEvidence: Bool
     public var allowMemoryWarningsForVerified: Bool
     public var speculativeAutoDisablePolicy: TurboQuantSpeculativeAutoDisablePolicy
   public var allowPlatformUnlockEvidence: Bool
@@ -253,6 +290,7 @@ public struct TurboQuantBenchmarkImportPolicy: Hashable, Codable, Sendable {
         acceptedLayoutVersions: Set<Int> = [],
         requestedEvidenceLevel: RuntimeEvidenceLevel = .smokeTested,
         allowVerifiedEvidence: Bool = false,
+        allowCertifiedEvidence: Bool = false,
         allowMemoryWarningsForVerified: Bool = false,
     speculativeAutoDisablePolicy: TurboQuantSpeculativeAutoDisablePolicy = .productDefault,
     allowPlatformUnlockEvidence: Bool = false
@@ -262,6 +300,7 @@ public struct TurboQuantBenchmarkImportPolicy: Hashable, Codable, Sendable {
         self.acceptedLayoutVersions = acceptedLayoutVersions
         self.requestedEvidenceLevel = requestedEvidenceLevel
         self.allowVerifiedEvidence = allowVerifiedEvidence
+        self.allowCertifiedEvidence = allowCertifiedEvidence
         self.allowMemoryWarningsForVerified = allowMemoryWarningsForVerified
         self.speculativeAutoDisablePolicy = speculativeAutoDisablePolicy
     self.allowPlatformUnlockEvidence = allowPlatformUnlockEvidence
@@ -499,6 +538,10 @@ public struct TurboQuantCoreBenchmarkAdapter: Sendable {
         runtime.groupSize = runtime.groupSize ?? coreReport.metrics.groupSize
         runtime.layoutVersion = runtime.layoutVersion ?? coreReport.metrics.layoutVersion
         runtime.attentionPath = runtime.attentionPath ?? coreReport.pathDecision?.selectedPath
+        runtime.effectiveBackend = runtime.effectiveBackend
+            ?? coreReport.pathDecision.map {
+                Self.backendEngine(for: $0.selectedPath)
+            }
 
         return TurboQuantBenchmarkReport(
             compatibilityPairID: context.compatibilityPairID,
@@ -514,6 +557,8 @@ public struct TurboQuantCoreBenchmarkAdapter: Sendable {
                 decodeTokensPerSecondP95: coreReport.metrics.decodeTokensPerSecondP95,
                 peakMemoryBytes: coreReport.metrics.peakMemoryBytes.map(Int64.init),
                 compressedKVBytes: Int64(coreReport.metrics.compressedKVBytes),
+                compressedKeyBytes: Int64(coreReport.metrics.compressedKVBytes / 2),
+                compressedValueBytes: Int64(coreReport.metrics.compressedKVBytes - coreReport.metrics.compressedKVBytes / 2),
         decodedFallbackScratchBytes: coreReport.pathDecision.map {
           Int64($0.estimatedScratchBytes)
         },
@@ -526,6 +571,21 @@ public struct TurboQuantCoreBenchmarkAdapter: Sendable {
             memoryCalibrationSample: context.memoryCalibrationSample,
             createdAt: context.createdAt
         )
+    }
+
+    private static func backendEngine(
+        for path: TurboQuantAttentionPath
+    ) -> TurboQuantAttentionBackendEngine {
+        switch path {
+        case .baseline:
+            .rawSDPA
+        case .onlineFused, .tiledOnlineFused, .twoStageCompressed:
+            .swiftMetalKernel
+        case .mlxPackedFallback:
+            .decodedReference
+        case .unavailable:
+            .unavailable
+        }
     }
 }
 
@@ -552,6 +612,15 @@ public struct TurboQuantBenchmarkImporter: Sendable {
             userMode: report.runtime.userMode,
             turboQuantPreset: report.runtime.preset,
             valueBits: report.runtime.valueBits,
+            requestedRuntimeMode: report.runtime.requestedRuntimeMode,
+            resolvedRuntimeMode: report.runtime.resolvedRuntimeMode,
+            keyPrecision: report.runtime.keyPrecision,
+            valuePrecision: report.runtime.valuePrecision,
+            precisionPolicy: report.runtime.precisionPolicy,
+            sparseValuePolicy: report.runtime.sparseValuePolicy,
+            effectiveBackend: report.runtime.effectiveBackend,
+            nativeBackendVersion: report.runtime.nativeBackendVersion,
+            decodedActiveKVBytes: report.metrics.decodedActiveKVBytes,
             groupSize: report.runtime.groupSize,
             layoutVersion: report.runtime.layoutVersion,
             activeAttentionPath: report.runtime.attentionPath,
@@ -605,6 +674,9 @@ public struct TurboQuantBenchmarkImporter: Sendable {
             guard policy.allowVerifiedEvidence else {
                 throw TurboQuantBenchmarkImportFailure.verifiedEvidenceDisabled
             }
+            if policy.requestedEvidenceLevel == .certified && !policy.allowCertifiedEvidence {
+                throw TurboQuantBenchmarkImportFailure.certifiedEvidenceDisabled
+            }
             guard policy.acceptedCompatibilityPairIDs.contains(report.compatibilityPairID) else {
         throw TurboQuantBenchmarkImportFailure.unknownCompatibilityPairID(
           report.compatibilityPairID)
@@ -624,6 +696,17 @@ public struct TurboQuantBenchmarkImporter: Sendable {
             }
             guard report.qualityGate.passed else {
                 throw TurboQuantBenchmarkImportFailure.qualityGateFailed(report.qualityGate.gateReason)
+            }
+            if Self.usesLowPrecisionKey(report.runtime.keyPrecision),
+               (report.runtime.precisionPolicy == nil || report.runtime.valuePrecision == nil)
+            {
+                throw TurboQuantBenchmarkImportFailure.qualityGateFailed(
+                    "Verified low-bit K evidence requires an explicit K/V precision policy."
+                )
+            }
+            try Self.requireProductEvidenceDimensions(report)
+            if policy.requestedEvidenceLevel == .certified {
+                try Self.requireCertifiedEvidenceMetrics(report)
             }
             guard !report.metrics.jetsamObserved else {
         throw TurboQuantBenchmarkImportFailure.memoryGateFailed(
@@ -679,5 +762,84 @@ public struct TurboQuantBenchmarkImporter: Sendable {
             return policy.requestedEvidenceLevel
         }
         return .smokeTested
+    }
+
+    private static func usesLowPrecisionKey(_ keyPrecision: TurboQuantKeyPrecision?) -> Bool {
+        switch keyPrecision {
+        case .turbo4v2, .turbo3_5, .turbo2_5:
+            return true
+        case .fp16OrQ8, .fp16, .affineQ8, .turbo8, nil:
+            return false
+        }
+    }
+
+    private static func requireProductEvidenceDimensions(
+        _ report: TurboQuantBenchmarkReport
+    ) throws {
+        var missing: [String] = []
+        if report.runtime.resolvedRuntimeMode == nil {
+            missing.append("resolved runtime mode")
+        }
+        if report.runtime.keyPrecision == nil {
+            missing.append("K precision")
+        }
+        if report.runtime.valuePrecision == nil {
+            missing.append("V precision")
+        }
+        if report.runtime.precisionPolicy == nil {
+            missing.append("K/V precision policy")
+        }
+        if report.runtime.sparseValuePolicy == nil {
+            missing.append("Sparse V policy")
+        }
+        if report.runtime.effectiveBackend == nil {
+            missing.append("effective backend")
+        }
+        if report.runtime.effectiveBackend == .nativeMLX,
+           report.runtime.nativeBackendVersion?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            missing.append("native backend version")
+        }
+        if report.metrics.compressedKeyBytes == nil {
+            missing.append("compressed key bytes")
+        }
+        if report.metrics.compressedValueBytes == nil {
+            missing.append("compressed value bytes")
+        }
+        guard missing.isEmpty else {
+            throw TurboQuantBenchmarkImportFailure.qualityGateFailed(
+                "Verified evidence requires exact runtime dimensions: \(missing.joined(separator: ", "))."
+            )
+        }
+    }
+
+    private static func requireCertifiedEvidenceMetrics(
+        _ report: TurboQuantBenchmarkReport
+    ) throws {
+        var missing: [String] = []
+        if report.metrics.firstTokenLatencyMS == nil {
+            missing.append("first-token latency")
+        }
+        if report.metrics.prefillTokensPerSecond == nil {
+            missing.append("prefill throughput")
+        }
+        if report.metrics.decodeTokensPerSecondP50 == nil {
+            missing.append("p50 decode throughput")
+        }
+        if report.metrics.decodeTokensPerSecondP95 == nil {
+            missing.append("p95 decode throughput")
+        }
+        if report.metrics.peakMemoryBytes == nil {
+            missing.append("peak memory")
+        }
+        if report.metrics.fallbackUsed {
+            throw TurboQuantBenchmarkImportFailure.qualityGateFailed(
+                "Certified evidence cannot include runtime fallback."
+            )
+        }
+        guard missing.isEmpty else {
+            throw TurboQuantBenchmarkImportFailure.qualityGateFailed(
+                "Certified evidence requires complete performance metrics: \(missing.joined(separator: ", "))."
+            )
+        }
     }
 }

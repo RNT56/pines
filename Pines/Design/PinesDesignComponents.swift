@@ -2114,6 +2114,7 @@ struct PinesComposerBar<Supplementary: View, Leading: View, Field: View, Trailin
     var kind: PinesSurfaceKind = .chrome
     var maxWidth: CGFloat?
     var padding: CGFloat?
+    var showsSurface = true
     @ViewBuilder var supplementary: () -> Supplementary
     @ViewBuilder var leading: () -> Leading
     @ViewBuilder var field: () -> Field
@@ -2123,6 +2124,7 @@ struct PinesComposerBar<Supplementary: View, Leading: View, Field: View, Trailin
         kind: PinesSurfaceKind = .chrome,
         maxWidth: CGFloat? = nil,
         padding: CGFloat? = nil,
+        showsSurface: Bool = true,
         @ViewBuilder supplementary: @escaping () -> Supplementary,
         @ViewBuilder leading: @escaping () -> Leading,
         @ViewBuilder field: @escaping () -> Field,
@@ -2131,6 +2133,7 @@ struct PinesComposerBar<Supplementary: View, Leading: View, Field: View, Trailin
         self.kind = kind
         self.maxWidth = maxWidth
         self.padding = padding
+        self.showsSurface = showsSurface
         self.supplementary = supplementary
         self.leading = leading
         self.field = field
@@ -2138,6 +2141,16 @@ struct PinesComposerBar<Supplementary: View, Leading: View, Field: View, Trailin
     }
 
     var body: some View {
+        if showsSurface {
+            composerLayout
+                .pinesSurface(kind, padding: padding ?? theme.spacing.small)
+        } else {
+            composerLayout
+                .padding(padding ?? theme.spacing.small)
+        }
+    }
+
+    private var composerLayout: some View {
         VStack(alignment: .leading, spacing: theme.spacing.small) {
             supplementary()
 
@@ -2148,7 +2161,6 @@ struct PinesComposerBar<Supplementary: View, Leading: View, Field: View, Trailin
             }
         }
         .frame(maxWidth: maxWidth ?? .infinity)
-        .pinesSurface(kind, padding: padding ?? theme.spacing.small)
     }
 }
 
@@ -2157,6 +2169,7 @@ extension PinesComposerBar where Supplementary == EmptyView {
         kind: PinesSurfaceKind = .chrome,
         maxWidth: CGFloat? = nil,
         padding: CGFloat? = nil,
+        showsSurface: Bool = true,
         @ViewBuilder leading: @escaping () -> Leading,
         @ViewBuilder field: @escaping () -> Field,
         @ViewBuilder trailing: @escaping () -> Trailing
@@ -2164,6 +2177,7 @@ extension PinesComposerBar where Supplementary == EmptyView {
         self.kind = kind
         self.maxWidth = maxWidth
         self.padding = padding
+        self.showsSurface = showsSurface
         self.supplementary = { EmptyView() }
         self.leading = leading
         self.field = field

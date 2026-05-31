@@ -10,10 +10,10 @@ packages:
     path: .
   MLXSwift:
     url: https://github.com/RNT56/mlx-swift
-    revision: 425d765aa7fa2b2cf111b9c43430054d82d02d07
+    revision: b187523536c6923562e3a81613e169da9321f812
   MLXSwiftLM:
     url: https://github.com/RNT56/mlx-swift-lm
-    revision: 6335ec8a2e25cff94c93992cb921d7a0345b4a22
+    revision: 1bf1cc246e17c48527a32c99fffcde41b84cd725
   SwiftTransformers:
     url: https://github.com/huggingface/swift-transformers
     from: 1.3.0
@@ -82,6 +82,8 @@ targets:
         product: MLXEmbedders
       - package: MLXSwiftLM
         product: MLXLMCommon
+      - package: MLXSwiftLM
+        product: TurboQuantBench
       - package: SwiftTransformers
         product: Tokenizers
       - package: GRDB

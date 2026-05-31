@@ -245,6 +245,16 @@ struct TurboQuantWave7PlatformTests {
         fallbackContractHash: fallbackContract.contractHash,
         preset: "turbo4v2",
         valueBits: 4,
+        requestedRuntimeMode: .auto,
+        resolvedRuntimeMode: .capacityTurboQuant,
+        keyPrecision: .fp16OrQ8,
+        valuePrecision: .turbo4v2,
+        precisionPolicy: TurboQuantKVPrecisionPolicy(
+          key: .fp16OrQ8,
+          value: .turbo4v2
+        ),
+        sparseValuePolicy: .off,
+        effectiveBackend: .swiftMetalKernel,
         groupSize: 64,
         layoutVersion: 4,
         attentionPath: .twoStageCompressed,
@@ -262,6 +272,8 @@ struct TurboQuantWave7PlatformTests {
         decodeTokensPerSecondP95: 21,
         peakMemoryBytes: 2_100_000_000,
         compressedKVBytes: 128_000_000,
+        compressedKeyBytes: 64_000_000,
+        compressedValueBytes: 64_000_000,
         memoryWarningsSeen: 0,
         fallbackUsed: false,
         jetsamObserved: false

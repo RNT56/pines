@@ -81,6 +81,8 @@
 		94D8D54C00245868BA413E0C /* MLXCompatibleModels+Llama4.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC9FA9E25B03EF1B185466EA /* MLXCompatibleModels+Llama4.swift */; };
 		9C997FA62CFD3FF3DFBA6FC7 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 392E0E75023B6010705E840E /* MLXLLM */; };
 		9CAF8AA54EE5B61702B8103C /* MLXTurboQuantRuntimeSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF525EBBEA1C9D3330E352F3 /* MLXTurboQuantRuntimeSmokeTests.swift */; };
+		9D77D80450E0718D4B9E6A22 /* TurboQuantBench in Frameworks */ = {isa = PBXBuildFile; productRef = 9D77D80450E0718D4B9E6A21 /* TurboQuantBench */; };
+		9D77D80450E0718D4B9E6A23 /* PinesTurboQuantBenchmarkDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D77D80450E0718D4B9E6A24 /* PinesTurboQuantBenchmarkDiagnostics.swift */; };
 		9CECC9E8AE585A1BF20F4580 /* ArtifactsRowsAndPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A280B4F77BD2A69B5309A7D /* ArtifactsRowsAndPanels.swift */; };
 		A0A48EBC76AEB91E70E85138 /* ModelDownloadSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CB6251B36A1F706D8884A9E /* ModelDownloadSupport.swift */; };
 		A23582944454AFA76540B625 /* ModelsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500C1CF070133DCF6885979F /* ModelsView.swift */; };
@@ -245,9 +247,10 @@
 		95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppState.swift; sourceTree = "<group>"; };
 		989263AE706043656C31B580 /* CoreSurfaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSurfaceTests.swift; sourceTree = "<group>"; };
 		99ABB45AA2309B6667A25016 /* PinesAppModel+OpenAIProviderStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+OpenAIProviderStorage.swift"; sourceTree = "<group>"; };
-		9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
-		9C6FF18172BCCD1C796B34F4 /* ArtifactsWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactsWorkspaceView.swift; sourceTree = "<group>"; };
-		9CB6251B36A1F706D8884A9E /* ModelDownloadSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadSupport.swift; sourceTree = "<group>"; };
+			9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
+			9C6FF18172BCCD1C796B34F4 /* ArtifactsWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactsWorkspaceView.swift; sourceTree = "<group>"; };
+			9CB6251B36A1F706D8884A9E /* ModelDownloadSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadSupport.swift; sourceTree = "<group>"; };
+			9D77D80450E0718D4B9E6A24 /* PinesTurboQuantBenchmarkDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesTurboQuantBenchmarkDiagnostics.swift; sourceTree = "<group>"; };
 		A13BF92952B097508CCADE95 /* PinesAppModel+DeepResearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+DeepResearch.swift"; sourceTree = "<group>"; };
 		A577E1122CE291EF5ECF16D2 /* GeminiLiveSessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLiveSessionService.swift; sourceTree = "<group>"; };
 		A613D7E3096A52A53E3F9BC1 /* WatchHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchHaptics.swift; sourceTree = "<group>"; };
@@ -297,10 +300,11 @@
 				62BBB7D1AE85A01EA319E717 /* MLX in Frameworks */,
 				BAF84E40F21C59F00422283F /* MLXNN in Frameworks */,
 				9C997FA62CFD3FF3DFBA6FC7 /* MLXLLM in Frameworks */,
-				7C1B3D61D81211AD1F0FBCF7 /* MLXVLM in Frameworks */,
-				515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */,
-				E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */,
-				8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */,
+					7C1B3D61D81211AD1F0FBCF7 /* MLXVLM in Frameworks */,
+					515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */,
+					E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */,
+					9D77D80450E0718D4B9E6A22 /* TurboQuantBench in Frameworks */,
+					8EE7C1B1695A1BAB21575CBD /* Tokenizers in Frameworks */,
 				C3A8E8F1D7ADC06A8E2EBA43 /* GRDB in Frameworks */,
 				74762C61D2E73B7909039286 /* SQLCipher in Frameworks */,
 				51F0003C051BEA5B35753F1D /* Markdown in Frameworks */,
@@ -599,10 +603,11 @@
 				DD3E7E5D4E7D39C6BCD7C151 /* PinesAppModel+Stress.swift */,
 				0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */,
 				DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */,
-				95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */,
-				77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */,
-				BD7A1C3BB2F375BB75558DEF /* PinesStressDiagnostics.swift */,
-				42338086683D67DAAB5A0244 /* PinesUITestInferenceProvider.swift */,
+					95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */,
+					77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */,
+					BD7A1C3BB2F375BB75558DEF /* PinesStressDiagnostics.swift */,
+					9D77D80450E0718D4B9E6A24 /* PinesTurboQuantBenchmarkDiagnostics.swift */,
+					42338086683D67DAAB5A0244 /* PinesUITestInferenceProvider.swift */,
 				4E14D0CA724B74DAE144184C /* PinesUITestLaunchConfiguration.swift */,
 			);
 			path = App;
@@ -697,10 +702,11 @@
 				94F08BBEEA508DB04384B5C9 /* MLX */,
 				97ADD97B0749021A162048FE /* MLXNN */,
 				392E0E75023B6010705E840E /* MLXLLM */,
-				D445A834A842FDF08C100D34 /* MLXVLM */,
-				85E4D304B541EE6A90CEFD6F /* MLXEmbedders */,
-				9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */,
-				79248E6D82F6B41C4A99016B /* Tokenizers */,
+					D445A834A842FDF08C100D34 /* MLXVLM */,
+					85E4D304B541EE6A90CEFD6F /* MLXEmbedders */,
+					9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */,
+					9D77D80450E0718D4B9E6A21 /* TurboQuantBench */,
+					79248E6D82F6B41C4A99016B /* Tokenizers */,
 				7CB37824DF7BF3CFC294142D /* GRDB */,
 				47290C155F603BA3AA043C93 /* SQLCipher */,
 				79453BB5651564170C3A0B1C /* Markdown */,
@@ -927,10 +933,11 @@
 				38B759D4F9C428922E0CBE72 /* PinesManagedCloudService.swift in Sources */,
 				1280CC834227C905E3AD4423 /* PinesProEntitlementService.swift in Sources */,
 				87777CD59861247F27DE9C34 /* PinesRefreshRateSupport.swift in Sources */,
-				57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */,
-				FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */,
-				148670557457CDC793E77B74 /* PinesStressDiagnostics.swift in Sources */,
-				5BEDAE409D8D0BE9350E4A92 /* PinesUITestInferenceProvider.swift in Sources */,
+					57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */,
+					FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */,
+					148670557457CDC793E77B74 /* PinesStressDiagnostics.swift in Sources */,
+					9D77D80450E0718D4B9E6A23 /* PinesTurboQuantBenchmarkDiagnostics.swift in Sources */,
+					5BEDAE409D8D0BE9350E4A92 /* PinesUITestInferenceProvider.swift in Sources */,
 				338E625EF11210ABD3D670AC /* PinesUITestLaunchConfiguration.swift in Sources */,
 				FF7A2AF24CE204653E49DD36 /* SecureKeyStore.swift in Sources */,
 				8876615E142B278FD678F6A4 /* SecurityResetCoordinator.swift in Sources */,
@@ -1441,7 +1448,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift";
 			requirement = {
 				kind = revision;
-				revision = aa4a07156913d1738555a39064bc9728dde56266;
+				revision = b187523536c6923562e3a81613e169da9321f812;
 			};
 		};
 		A43A495519F824800780FBF4 /* XCRemoteSwiftPackageReference "SQLCipher.swift" */ = {
@@ -1457,7 +1464,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift-lm";
 			requirement = {
 				kind = revision;
-				revision = 3118d5bb271d8fdaf8506b15ba51d233be13e006;
+				revision = 1bf1cc246e17c48527a32c99fffcde41b84cd725;
 			};
 		};
 		ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
@@ -1524,11 +1531,16 @@
 			package = 82C15679A79285F6F8F33DE7 /* XCRemoteSwiftPackageReference "mlx-swift" */;
 			productName = MLXNN;
 		};
-		9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
-			productName = MLXLMCommon;
-		};
+			9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */ = {
+				isa = XCSwiftPackageProductDependency;
+				package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+				productName = MLXLMCommon;
+			};
+			9D77D80450E0718D4B9E6A21 /* TurboQuantBench */ = {
+				isa = XCSwiftPackageProductDependency;
+				package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+				productName = TurboQuantBench;
+			};
 		B3571EDBCC217B75591214B9 /* PinesWatchSupport */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PinesWatchSupport;

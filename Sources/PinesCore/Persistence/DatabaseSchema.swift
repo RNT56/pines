@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-  public static let currentVersion = 23
+  public static let currentVersion = 24
 
     public static let migrations: [DatabaseMigration] = [
     DatabaseMigration(
@@ -1304,6 +1304,20 @@ public enum PinesDatabaseSchema {
       sql: [
         "ALTER TABLE turboquant_profile_evidence ADD COLUMN platform_evidence_dimensions_json TEXT;",
         "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_platform ON turboquant_profile_evidence(model_id, user_mode, layout_version, created_at DESC);",
+      ]),
+    DatabaseMigration(
+      version: 24, name: "turboquant-runtime-evidence-dimensions",
+      sql: [
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN requested_runtime_mode TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN resolved_runtime_mode TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN key_precision TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN value_precision TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN precision_policy_json TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN sparse_value_policy_json TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN effective_backend TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN native_backend_version TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN decoded_active_kv_bytes INTEGER;",
+        "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_runtime_tuple ON turboquant_profile_evidence(model_id, compatibility_pair_id, resolved_runtime_mode, effective_backend, key_precision, value_precision, layout_version, created_at DESC);",
       ]),
     ]
 }
