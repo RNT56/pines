@@ -10,13 +10,13 @@
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "d2586a242d456d8ef69d185e5e33f13b9f1dd4ad",
+    "commit": "609e8333671419ee1dbe928eeee7f48a24682631",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "5d4e58f41b574c6900b32055e48e2b9c1c8883d5",
+    "commit": "725add5dd15ef6c1c01073ce9f81412957fa5c6d",
     "dirtyAtValidation": false
   },
   "wave0Baseline": {
@@ -559,8 +559,8 @@
     }
   },
   "notes": [
-    "Continuation pins mlx-swift d2586a242d456d8ef69d185e5e33f13b9f1dd4ad, which includes native affine K8/V4 mixed quantized SDPA wrappers, production native TurboQuant backend identity reporting, nested mlx 5dce5710abcc6e56953682505b71d5edb83d11f3, and nested mlx-c 17a9ae217816c4ad45673237dfee55a5e7992ce0.",
-    "Continuation pins mlx-swift-lm 5d4e58f41b574c6900b32055e48e2b9c1c8883d5, which routes Qwen throughput profiles to affine K8/V4, quantizes eligible prompt caches before steady-state decode, records active K8/V4 attention paths in runtime snapshots, and exposes the real-model-inference-v1 evidence suite.",
+    "Continuation pins mlx-swift 609e8333671419ee1dbe928eeee7f48a24682631, which includes native affine K8/V4 mixed quantized SDPA wrappers, production native TurboQuant backend identity reporting, nested mlx 6e140e7a4442febe14de38adb46206f6d6b21384, and nested mlx-c 17a9ae217816c4ad45673237dfee55a5e7992ce0.",
+    "Continuation pins mlx-swift-lm 725add5dd15ef6c1c01073ce9f81412957fa5c6d, which routes Qwen throughput profiles to affine K8/V4, quantizes eligible prompt caches before steady-state decode, records active K8/V4 attention paths in runtime snapshots, and exposes the real-model-inference-v1 evidence suite.",
     "The current continuation pair remains failed/non-green until native-performance, real-model-inference, full benchmark-matrix, performance-parity, quality-memory, and fallback evidence pass; historical app-host smoke from earlier pins is retained only as prior evidence.",
     "Post-Wave0 stabilization updated the current pair with passing mlx-swift TurboQuant tests, passing mlx-swift-lm TurboQuant tests, passing Pines pin/TurboQuant tests, and a passing app-hosted physical-device iOS smoke on iPhone16,2 for the exact pins.",
     "The current physical-device smoke artifact is /Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T132622Z. It reports 8K qwen3.5-2b turbo4v2 synthetic attention-shape smoke: compressed 48.95 tok/s, plain 643.10 tok/s, speed ratio 0.0761, cosine 0.999992, and 2.21x KV memory reduction. The manifest classifies this smoke-only evidence as productClaimLevel=unverified, realModelInferenceEvidence=missing, and nativeBackendPerformanceEvidence=not-proven; future app-host reruns emit that classification directly in diagnostics.",
@@ -601,13 +601,13 @@
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
-    "pinnedMLXSwift": "d2586a242d456d8ef69d185e5e33f13b9f1dd4ad",
-    "pinnedMLXSwiftLM": "5d4e58f41b574c6900b32055e48e2b9c1c8883d5",
-    "compatibilityPairID": "mlx-swift-d2586a242d456d8ef69d185e5e33f13b9f1dd4ad+mlx-swift-lm-5d4e58f41b574c6900b32055e48e2b9c1c8883d5",
-    "releaseGate": "non-green after affine K8/V4 continuation: Pines pins mlx-swift d2586a242d456d8ef69d185e5e33f13b9f1dd4ad plus mlx-swift-lm 5d4e58f41b574c6900b32055e48e2b9c1c8883d5. Local gates pass and Mac real-model inference evidence exists, but compressed equal-context throughput remains below raw FP16, exact-pin physical-device evidence is still synthetic smoke only, and full release benchmark/quality/fallback evidence is incomplete before any Verified or Certified claim."
+    "pinnedMLXSwift": "609e8333671419ee1dbe928eeee7f48a24682631",
+    "pinnedMLXSwiftLM": "725add5dd15ef6c1c01073ce9f81412957fa5c6d",
+    "compatibilityPairID": "mlx-swift-609e8333671419ee1dbe928eeee7f48a24682631+mlx-swift-lm-725add5dd15ef6c1c01073ce9f81412957fa5c6d",
+    "releaseGate": "non-green after affine K8/V4 continuation: Pines pins mlx-swift 609e8333671419ee1dbe928eeee7f48a24682631 plus mlx-swift-lm 725add5dd15ef6c1c01073ce9f81412957fa5c6d. Local gates pass and Mac real-model inference evidence exists, but compressed equal-context throughput remains below raw FP16, exact-pin physical-device evidence is still synthetic smoke only, and full release benchmark/quality/fallback evidence is incomplete before any Verified or Certified claim."
   },
-  "statusReason": "Authoritative current-pair status is failed/non-green. The continuation pair pins mlx-swift d2586a242d456d8ef69d185e5e33f13b9f1dd4ad and mlx-swift-lm 5d4e58f41b574c6900b32055e48e2b9c1c8883d5, adding native affine K8/V4 mixed quantized SDPA and LM prompt-cache routing. Exact-pin physical-device app-host smoke completed on iPhone16,2, but it is synthetic attention-shape smoke only. Release comparisons now require real model inference. Mac real-model inference evidence exists, performance parity is not achieved, and full release benchmark/quality/fallback evidence is still incomplete.",
-  "compatibilityPairID": "mlx-swift-d2586a242d456d8ef69d185e5e33f13b9f1dd4ad+mlx-swift-lm-5d4e58f41b574c6900b32055e48e2b9c1c8883d5",
+  "statusReason": "Authoritative current-pair status is failed/non-green. The continuation pair pins mlx-swift 609e8333671419ee1dbe928eeee7f48a24682631 and mlx-swift-lm 725add5dd15ef6c1c01073ce9f81412957fa5c6d, adding native affine K8/V4 mixed quantized SDPA and LM prompt-cache routing. Exact-pin physical-device app-host smoke completed on iPhone16,2, but it is synthetic attention-shape smoke only. Release comparisons now require real model inference. Mac real-model inference evidence exists, performance parity is not achieved, and full release benchmark/quality/fallback evidence is still incomplete.",
+  "compatibilityPairID": "mlx-swift-609e8333671419ee1dbe928eeee7f48a24682631+mlx-swift-lm-725add5dd15ef6c1c01073ce9f81412957fa5c6d",
   "claimPolicy": {
     "pinsOnlyEvidenceLevel": "unverified",
     "verifiedOrCertifiedProductClaimsAllowed": false,

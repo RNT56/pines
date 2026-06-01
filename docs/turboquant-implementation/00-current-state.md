@@ -9,10 +9,10 @@ After the Wave 0 baseline capture on 2026-05-31, the active local compatibility 
 | Repo | Branch | Validation commit/pin |
 | --- | --- | --- |
 | `pines` | `tq/real-device-evidence-acceptance` | `1f3cbc43289f3b4035fff2276c1f01206d616647` dirty validation base before this evidence update |
-| `mlx-swift` | `tq/layout-v5-default-device-tests` | `d2586a242d456d8ef69d185e5e33f13b9f1dd4ad` pushed continuation pin |
-| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `5d4e58f41b574c6900b32055e48e2b9c1c8883d5` pushed continuation pin |
+| `mlx-swift` | `tq/layout-v5-default-device-tests` | `609e8333671419ee1dbe928eeee7f48a24682631` pushed continuation pin |
+| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `725add5dd15ef6c1c01073ce9f81412957fa5c6d` pushed continuation pin |
 
-Pines pins `MLXSwift` to `d2586a242d456d8ef69d185e5e33f13b9f1dd4ad` and `MLXSwiftLM` to `5d4e58f41b574c6900b32055e48e2b9c1c8883d5` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
+Pines pins `MLXSwift` to `609e8333671419ee1dbe928eeee7f48a24682631` and `MLXSwiftLM` to `725add5dd15ef6c1c01073ce9f81412957fa5c6d` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
 
 Wave 0 current-pair evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, while `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the Wave 0 app-hosted iOS smoke ended `failed_environmental` before install/launch. The continuation pass resolves the local TurboQuant test blocker, wires native affine K8/V4 mixed quantized SDPA through the MLX Swift LM cache path, and records exact-pin physical-device app-host smoke on `iPhone16,2`, but that smoke is a synthetic attention-shape benchmark. Mac real-model inference evidence exists for Qwen3.5-2B at 32K and 64K, but compressed equal-context throughput remains below raw FP16 and parity is not achieved. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V6 is the default MLX layout on this pair, with Layout V4 and V5 still supported for legacy/comparison runs. Exact pins plus smoke evidence remain unverified and real-device model/device/mode evidence remains required before any `Verified` or `Certified` product claim.
 
