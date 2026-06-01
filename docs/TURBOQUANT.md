@@ -4,10 +4,10 @@ Pine requests TurboQuant as the default local KV-cache strategy and stores vault
 
 The current MLX fork pins are:
 
-- `RNT56/mlx-swift`: `7a662770e0279d2693d4e3e93cb1b52cde34a321`
-- `RNT56/mlx-swift-lm`: `65fd39b3c8f02585fbcd62cf9d46eec893ca0328`
+- `RNT56/mlx-swift`: `d2586a242d456d8ef69d185e5e33f13b9f1dd4ad`
+- `RNT56/mlx-swift-lm`: `5d4e58f41b574c6900b32055e48e2b9c1c8883d5`
 
-The current pair is intentionally non-green. Wave 0 captured the baseline failures, and the continuation pass now has passing local TurboQuant gates plus an exact-pin physical-device app-host smoke on `iPhone16,2`, but that smoke is a synthetic attention-shape benchmark. Release comparisons now require real model inference; compressed equal-context throughput remains far below raw FP16 and native backend performance parity is not proven. Previous local release gates and earlier app-hosted iPhone smoke remain useful historical evidence, but they do not override the current guardrail status.
+The current pair is intentionally non-green. Wave 0 captured the baseline failures, and the continuation pass now has passing local TurboQuant gates plus an exact-pin physical-device app-host smoke on `iPhone16,2`, but that smoke is a synthetic attention-shape benchmark. The Mac real-model K8/V4 speed route is wired and measured, but it is still below FP16 equal-context throughput at long dense attention. Previous local release gates and earlier app-hosted iPhone smoke remain useful historical evidence, but they do not override the current guardrail status.
 
 This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
 
@@ -24,10 +24,10 @@ The pinned pair makes Layout V6 the default TurboQuant attention layout for devi
 - iOS memory warnings soft-recover through the runtime bridge while active generation still has emergency headroom; otherwise they stop the active local run and unload transient MLX containers.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `7a662770e0279d2693d4e3e93cb1b52cde34a321`
-  - `RNT56/mlx-swift-lm`: `65fd39b3c8f02585fbcd62cf9d46eec893ca0328`
-  - Nested `mlx` inside `RNT56/mlx-swift`: `5d0ee35ddc84922c1d69801aae765dbe3ff76eed`
-  - Nested `mlx-c` inside `RNT56/mlx-swift`: `0b9e4c23eb5b64e4ddc0f44ff45ba37832370d2d`
+  - `RNT56/mlx-swift`: `d2586a242d456d8ef69d185e5e33f13b9f1dd4ad`
+  - `RNT56/mlx-swift-lm`: `5d4e58f41b574c6900b32055e48e2b9c1c8883d5`
+  - Nested `mlx` inside `RNT56/mlx-swift`: `5dce5710abcc6e56953682505b71d5edb83d11f3`
+  - Nested `mlx-c` inside `RNT56/mlx-swift`: `17a9ae217816c4ad45673237dfee55a5e7992ce0`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, runtime-layout direct compressed `QK^T`, runtime-layout direct compressed `AV`, runtime-layout compressed decode, `turbo8` high-precision KV-cache mode, device-profile-gated online fused decode, block-parallel fused partial/reduce kernels for long-context decode, automatic block-token planning for 32K/64K/128K/256K decode, fp16/bf16 block-partial value storage with float32 stats/reduce accumulation, a Mac Apple silicon kernel profile, Mac-gated grouped-query block fused decode for Qwen-style GQA, grouped GQA softmax reductions, four-repeat Qwen GQA key reuse, fixed-tail split-magnitude Turbo3.5/Turbo2.5 key reads without prefix scans, compact derived high-lane masks, aligned affine value reads, active-block dispatch for reserved larger caches, reduce-width tuning for block-parallel reductions, Qwen-shaped benchmark head-count and block-token controls, p50/p95 benchmark reporting, word-level packed bit read/write helpers for fixed and mixed TurboQuant schemes, runtime device capabilities, selected kernel profiles, tiny latency probes, opt-in long-context fused warmup, cooperative coalesced QK decode behind `TQ_COOP=1` for A-series validation, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
 - `mlx-swift-lm` exposes `KVCacheStrategy.turboQuant`, `KVCacheStrategy.adaptiveTurboQuant`, `TurboQuantKVCache`, a physical-slot `RotatingTurboQuantKVCache` for supported `.metalPolarQJL` `maxKVSize` paths, a shared packed quantized-attention fallback before raw decode, typed throwing TurboQuant generation paths and an exported runtime capability registry for the profile-backed Llama, Gemma, Qwen, Mistral, Phi, Granite, Exaone4, SmolLM3, LFM2, and GLM4 MoE Lite families, prepared-prefix generation, prompt-cache serialization hooks, `TurboQuantCompressedKVCacheProtocol`, the bundled `TurboQuantProfileRegistry`, corrected profile/exported JSON bit metadata, direct initial compressed-cache commits, lightweight compressed update checkpoints, compact v6 state restore/snapshot validation, guarded throughput routing for lower-bit `turbo4v2` and `turbo3_5` profiles, Qwen3.5/Qwen3.6 adaptive raw-first grouped-query fused compressed decode policies, duplicate decode-copy/validation trimming, Qwen production and large-context experiment p50/p95 proof modes, reserved-capacity proof reporting, schema-v6 production-route/recommended/effective block-token proof reporting, the `TurboQuantBench` app-hostable A-series attention harness, and `GenerateParameters` fields for cache strategy, preset, requested backend selection, value bits, fallback policy, raw SDPA threshold, device-adaptive optimization policy, model metadata, KV head dimensions, and compressed-attention diagnostics.
 - Pines keeps a local prompt KV cache for text-only MLX turns. Cache entries are keyed by model/runtime/tokenizer and quantization shape, reused only on token-prefix match, trimmed after successful generation, and evicted before model unload under memory pressure or thermal downshift.
@@ -70,6 +70,15 @@ Wave 0 artifact set: `turboquant-wave0-20260531T024557Z`.
 | Pines app-hosted iOS smoke | `failed_environmental`; device build stalled during code signing before install/launch | `/Users/mt/Programming/Schtack/pines/artifacts/turboquant-wave0-20260531T024557Z/logs/ios-smoke.log` |
 
 Wave 0 parity verdict: `performanceParity=false`, `stabilityParity=partial`, `supportParity=partial`. This is expected for the current architecture: compressed equal-context throughput is below raw FP16, and TurboQuant remains a capacity route until later hybrid/native-backend waves prove otherwise.
+
+## Mac Real-Model Evidence
+
+The current pins add the native affine K8/V4 speed route: keys stay affine K8, values use affine V4, and QK/softmax/AV execute through the mixed quantized SDPA path instead of the older quantized-matmul fallback. The route is production-wired in the MLX Swift LM cache and benchmark surfaces, but it is not a parity claim.
+
+| Model | Artifact | Context | Result |
+| --- | --- | ---: | --- |
+| `mlx-community/Qwen3.5-2B-4bit` | `/Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm/artifacts/real-model-k8v4-idle-32k-20260601T101644Z/qwen35-2b-real-model-32k.log` | 32K | FP16 `42.74 tok/s`; affine K8/V4 `33.20 tok/s` (`0.777x`); affine q8 `18.01 tok/s` (`0.421x`); affine int4 `24.42 tok/s` (`0.571x`). |
+| `mlx-community/Qwen3.5-2B-4bit` | `/Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm/artifacts/real-model-k8v4-idle-64k-20260601T102000Z/qwen35-2b-real-model-64k.log` | 64K | FP16 `32.31 tok/s`; affine K8/V4 `17.57 tok/s` (`0.544x`). |
 
 ## Physical Device Evidence
 
