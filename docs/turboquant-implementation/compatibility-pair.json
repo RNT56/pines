@@ -4,7 +4,7 @@
   "pines": {
     "repo": "pines",
     "branch": "tq/real-device-evidence-acceptance",
-    "commit": "7184d0efe776550e772c1b36f113d1c179d690a0",
+    "commit": "d336b81d79c2f41840811f7c12657c57ae306dd6",
     "dirtyAtValidation": false
   },
   "mlxSwift": {
