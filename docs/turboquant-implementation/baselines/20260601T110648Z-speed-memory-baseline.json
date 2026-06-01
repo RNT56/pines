@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-06-01T11:06:48Z",
+  "createdLocal": "2026-06-01 13:06:48 CEST",
+  "purpose": "Current TurboQuant/K8V4 speed and KV-memory baseline for future comparison.",
+  "repoHeads": {
+    "mlx": {
+      "branch": "codex/mlx-core-distributed-autodiff-backends",
+      "commit": "2b37f4ec24d9653ee1efc29256d5b8cc2bda565e"
+    },
+    "mlx-c": {
+      "branch": "codex/mlx-c-quantized-sdpa-parity",
+      "commit": "c270c9ef3b8cae2b92861aa8fca9345484d29c26"
+    },
+    "mlx-swift": {
+      "branch": "tq/layout-v5-default-device-tests",
+      "commit": "609e8333671419ee1dbe928eeee7f48a24682631"
+    },
+    "mlx-swift-lm": {
+      "branch": "tq/lm-layout-v5-default-device-tests",
+      "commit": "725add5dd15ef6c1c01073ce9f81412957fa5c6d"
+    },
+    "pines": {
+      "branch": "tq/real-device-evidence-acceptance",
+      "commit": "e7125308e3253d46447d2b61b46a194b4096605f"
+    }
+  },
+  "speed": {
+    "model": "/Users/mt/.cache/huggingface/hub/models--mlx-community--Qwen3.5-2B-4bit/snapshots/674aaa7240b91e8012fcad5d791b7dfe5ba90207",
+    "runType": "real-model-inference",
+    "deviceClass": "mac-local",
+    "sourceLogs": [
+      "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm/artifacts/real-model-k8v4-idle-32k-20260601T101644Z/qwen35-2b-real-model-32k.log",
+      "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm/artifacts/real-model-k8v4-idle-64k-20260601T102000Z/qwen35-2b-real-model-64k.log"
+    ],
+    "measurements": [
+      {
+        "contextTokens": 32768,
+        "contextLabel": "32K",
+        "config": "fp16",
+        "decodeTokensPerSecond": 42.74,
+        "prefillTokensPerSecond": 716.1,
+        "generatedTokens": 32,
+        "ratioVsFP16": 1.0
+      },
+      {
+        "contextTokens": 32768,
+        "contextLabel": "32K",
+        "config": "affineK8V4",
+        "decodeTokensPerSecond": 33.2,
+        "prefillTokensPerSecond": 738.2,
+        "generatedTokens": 32,
+        "ratioVsFP16": 0.777
+      },
+      {
+        "contextTokens": 32768,
+        "contextLabel": "32K",
+        "config": "mlxAffine-q8",
+        "decodeTokensPerSecond": 18.01,
+        "prefillTokensPerSecond": 733.1,
+        "generatedTokens": 32,
+        "ratioVsFP16": 0.421
+      },
+      {
+        "contextTokens": 32768,
+        "contextLabel": "32K",
+        "config": "affineInt4",
+        "decodeTokensPerSecond": 24.42,
+        "prefillTokensPerSecond": 747.9,
+        "generatedTokens": 32,
+        "ratioVsFP16": 0.571
+      },
+      {
+        "contextTokens": 65536,
+        "contextLabel": "64K",
+        "config": "fp16",
+        "decodeTokensPerSecond": 32.31,
+        "prefillTokensPerSecond": 615.2,
+        "generatedTokens": 16,
+        "ratioVsFP16": 1.0
+      },
+      {
+        "contextTokens": 65536,
+        "contextLabel": "64K",
+        "config": "affineK8V4",
+        "decodeTokensPerSecond": 17.57,
+        "prefillTokensPerSecond": 610.4,
+        "generatedTokens": 16,
+        "ratioVsFP16": 0.544
+      }
+    ]
+  },
+  "memory": {
+    "scope": "kv-cache-only",
+    "assumptions": {
+      "layers": 32,
+      "kvHeads": 4,
+      "headDim": 256,
+      "tensors": [
+        "key",
+        "value"
+      ],
+      "fp16BytesPerScalar": 2,
+      "affineK8V4": {
+        "keyBits": 8,
+        "keyGroupSize": 64,
+        "valueBits": 4,
+        "valueGroupSize": 32,
+        "scaleBiasDType": "fp16"
+      },
+      "turbo4v2": {
+        "basis": "current planning ratio, approximately 2.63 GiB at 64K"
+      }
+    },
+    "measurementsGiB": [
+      {
+        "contextTokens": 16384,
+        "contextLabel": "16K",
+        "fp16": 2.0,
+        "affineK8V4": 0.84,
+        "turbo4v2": 0.66
+      },
+      {
+        "contextTokens": 32768,
+        "contextLabel": "32K",
+        "fp16": 4.0,
+        "affineK8V4": 1.69,
+        "turbo4v2": 1.32
+      },
+      {
+        "contextTokens": 65536,
+        "contextLabel": "64K",
+        "fp16": 8.0,
+        "affineK8V4": 3.38,
+        "turbo4v2": 2.63
+      },
+      {
+        "contextTokens": 131072,
+        "contextLabel": "128K",
+        "fp16": 16.0,
+        "affineK8V4": 6.75,
+        "turbo4v2": 5.26
+      }
+    ],
+    "relativeToFP16": {
+      "fp16": {
+        "sizeRatio": 1.0,
+        "reduction": "baseline"
+      },
+      "affineK8V4": {
+        "sizeRatio": 0.422,
+        "reduction": "2.37x smaller"
+      },
+      "turbo4v2": {
+        "sizeRatio": 0.329,
+        "reduction": "3.04x smaller"
+      }
+    }
+  },
+  "notes": [
+    "FP16 remains the speed baseline when memory fits.",
+    "affine K8/V4 is the current best production compressed speed route.",
+    "affine K8/V4 is not yet performance-parity with FP16 at equal dense context.",
+    "Turbo4V2 remains documented here as a capacity route unless later real-model benchmarks prove otherwise.",
+    "Synthetic attention-shape smoke tests are not performance parity evidence."
+  ]
+}
