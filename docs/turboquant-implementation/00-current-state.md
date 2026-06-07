@@ -16,6 +16,25 @@ Pines pins `MLXSwift` to `609e8333671419ee1dbe928eeee7f48a24682631` and `MLXSwif
 
 Wave 0 current-pair evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, while `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the Wave 0 app-hosted iOS smoke ended `failed_environmental` before install/launch. The continuation pass resolves the local TurboQuant test blocker, wires native affine K8/V4 mixed quantized SDPA through the MLX Swift LM cache path, and records exact-pin physical-device app-host smoke on `iPhone16,2`, but that smoke is a synthetic attention-shape benchmark. Mac real-model inference evidence exists for Qwen3.5-2B at 32K and 64K, but compressed equal-context throughput remains below raw FP16 and parity is not achieved. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V4 is the production default for new MLX attention layout requests; Layout V5/V6 remain supported for explicit experimental, benchmark, and compatibility runs only. Exact pins plus smoke evidence remain unverified and real-device model/device/mode evidence remains required before any `Verified` or `Certified` product claim.
 
+### Pending upstream adoption: N2 self-speculation (lever ①) + N4 codec
+
+`mlx-swift-lm` `295e66bef0b3d85be70290b5c1adea83d694660c` now exposes
+draft-model-free self-speculation as a product API: `GenerateParameters.selfSpeculationMode`
+(`.off` default | `.promptLookup`) routed via `makeGenerationIterator(...)`, bit-exact for
+greedy/no-processor and falling back to exact decode otherwise (incl. non-trimmable hybrid
+caches). It pairs with the validated N7 async-prefetch path (16K long-doc 1.43→1.76×). `mlx-swift`
+`6bfa04e…`/`4a83f63…` also adds the data-free Gaussian Lloyd-Max payload codec format
+(`TurboQuantReferenceFormat.gaussianLloydMax`, 3.2× at equal quality), pending a Metal decode kernel.
+
+**This is NOT yet pinned here.** Adopting it requires advancing the MLX pin pair to
+mlx-swift `6bfa04e2924152c52c56eac5c3420a7cc7e8d720` + mlx-swift-lm
+`295e66bef0b3d85be70290b5c1adea83d694660c` across all six pin sites AND regenerating
+`compatibility-pair.json` via the wave0 validation harness (the evidence artifact must be
+harness-generated, not hand-edited) plus wiring `selfSpeculationMode` into
+`MLXRuntimeBridge.GenerateParameters`. The harness's full evidence needs the deferred A-series
+device run, so the pair would advance as `failed`/`unverified` until that lands. Self-speculation
+ships default-off, so it is inert (no behavior change) until explicitly enabled + device-validated.
+
 Current continuation work adds explicit benchmark coverage and labels for
 `affineK8V4`, `affineK8V3`, `affineK8V2`, `mlxAffine-q8`, `affineInt4`,
 `turbo4v2`, `turbo3_5`, and `turbo8`; long-context scheduling/chunking fixes for
