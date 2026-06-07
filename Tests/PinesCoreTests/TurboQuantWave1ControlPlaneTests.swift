@@ -89,6 +89,8 @@ struct TurboQuantWave1ControlPlaneTests {
     }
 
     @Test func wave1RuntimePolicyDTOsRoundTripCodable() throws {
+        #expect(TurboQuantSparseValuePolicy.productDefault == .off)
+
         let precisionPolicy = TurboQuantKVPrecisionPolicy(
             key: .fp16OrQ8,
             value: .turbo4v2,

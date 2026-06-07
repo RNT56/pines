@@ -361,21 +361,39 @@ public enum TurboQuantRuntimeBackend: String, Codable, Sendable, CaseIterable {
 }
 
 public enum TurboQuantAttentionPath: String, Codable, Sendable, CaseIterable {
+    case nativeMLXCompressed
     case onlineFused
     case tiledOnlineFused
+    case sparseValueTwoStageCompressed
     case twoStageCompressed
+    case affineInt4Native
+    case affineK8V4Native
+    case affineK8VxNative
+    case affineK8VxResidual
     case mlxPackedFallback
     case baseline
     case unavailable
 
     public var displayName: String {
         switch self {
+        case .nativeMLXCompressed:
+            "Native MLX compressed"
         case .onlineFused:
             "Online fused compressed"
         case .tiledOnlineFused:
             "Tiled online fused compressed"
+        case .sparseValueTwoStageCompressed:
+            "Sparse-V two-stage compressed"
         case .twoStageCompressed:
             "Two-stage compressed"
+        case .affineInt4Native:
+            "Native affine int4"
+        case .affineK8V4Native:
+            "Native affine K8/V4"
+        case .affineK8VxNative:
+            "Native affine K8/Vx"
+        case .affineK8VxResidual:
+            "Native affine K8/Vx residual"
         case .mlxPackedFallback:
             "MLX packed fallback"
         case .baseline:
@@ -586,9 +604,7 @@ public enum TurboQuantSparseValuePolicy: Hashable, Codable, Sendable {
     case force(threshold: Float)
 
     public static let defaultAutoThreshold: Float = 1e-6
-    public static let productDefault = TurboQuantSparseValuePolicy.auto(
-        threshold: defaultAutoThreshold
-    )
+    public static let productDefault = TurboQuantSparseValuePolicy.off
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -868,6 +884,8 @@ public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
     public var resolvedRuntimeMode: TurboQuantRuntimeMode?
     public var precisionPolicy: TurboQuantKVPrecisionPolicy?
     public var runtimeFallbackReason: String?
+    public var kvLayerPolicyHash: String?
+    public var kvLayerPolicySummary: String?
     public var rawBytesPerToken: Int
     public var packedFallbackBytesPerToken: Int
     public var compressedBytesPerToken: Int
@@ -893,6 +911,8 @@ public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
         resolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
         precisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
         runtimeFallbackReason: String? = nil,
+        kvLayerPolicyHash: String? = nil,
+        kvLayerPolicySummary: String? = nil,
         rawBytesPerToken: Int,
         packedFallbackBytesPerToken: Int,
         compressedBytesPerToken: Int,
@@ -917,6 +937,8 @@ public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
         self.resolvedRuntimeMode = resolvedRuntimeMode
         self.precisionPolicy = precisionPolicy
         self.runtimeFallbackReason = runtimeFallbackReason
+        self.kvLayerPolicyHash = kvLayerPolicyHash
+        self.kvLayerPolicySummary = kvLayerPolicySummary
         self.rawBytesPerToken = rawBytesPerToken
         self.packedFallbackBytesPerToken = packedFallbackBytesPerToken
         self.compressedBytesPerToken = compressedBytesPerToken
@@ -978,6 +1000,172 @@ public enum KVCacheStrategy: String, Codable, Sendable, CaseIterable {
     case none
     case mlxAffine
     case turboQuant
+}
+
+public enum KVLayerCodec: Hashable, Codable, Sendable {
+    case inherit
+    case rawFP16
+    case mlxAffine(bits: Int, groupSize: Int)
+    case affineK8V4
+    case affineInt4
+    case turboQuant(
+        preset: TurboQuantPreset,
+        valueBits: Int?,
+        groupSize: Int,
+        backend: TurboQuantRuntimeBackend
+    )
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case bits
+        case groupSize
+        case preset
+        case valueBits
+        case backend
+    }
+
+    private enum Kind: String, Codable {
+        case inherit
+        case rawFP16
+        case mlxAffine
+        case affineK8V4
+        case affineInt4
+        case turboQuant
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .inherit:
+            self = .inherit
+        case .rawFP16:
+            self = .rawFP16
+        case .mlxAffine:
+            self = .mlxAffine(
+                bits: try container.decode(Int.self, forKey: .bits),
+                groupSize: try container.decodeIfPresent(Int.self, forKey: .groupSize) ?? 64
+            )
+        case .affineK8V4:
+            self = .affineK8V4
+        case .affineInt4:
+            self = .affineInt4
+        case .turboQuant:
+            self = .turboQuant(
+                preset: try container.decode(TurboQuantPreset.self, forKey: .preset),
+                valueBits: try container.decodeIfPresent(Int.self, forKey: .valueBits),
+                groupSize: try container.decodeIfPresent(Int.self, forKey: .groupSize) ?? 64,
+                backend: try container.decodeIfPresent(TurboQuantRuntimeBackend.self, forKey: .backend)
+                    ?? .metalPolarQJL
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .inherit:
+            try container.encode(Kind.inherit, forKey: .kind)
+        case .rawFP16:
+            try container.encode(Kind.rawFP16, forKey: .kind)
+        case .mlxAffine(let bits, let groupSize):
+            try container.encode(Kind.mlxAffine, forKey: .kind)
+            try container.encode(bits, forKey: .bits)
+            try container.encode(groupSize, forKey: .groupSize)
+        case .affineK8V4:
+            try container.encode(Kind.affineK8V4, forKey: .kind)
+        case .affineInt4:
+            try container.encode(Kind.affineInt4, forKey: .kind)
+        case .turboQuant(let preset, let valueBits, let groupSize, let backend):
+            try container.encode(Kind.turboQuant, forKey: .kind)
+            try container.encode(preset, forKey: .preset)
+            try container.encodeIfPresent(valueBits, forKey: .valueBits)
+            try container.encode(groupSize, forKey: .groupSize)
+            try container.encode(backend, forKey: .backend)
+        }
+    }
+
+    public var summary: String {
+        switch self {
+        case .inherit:
+            "inherit"
+        case .rawFP16:
+            "rawFP16"
+        case .mlxAffine(let bits, let groupSize):
+            "mlxAffine\(bits)g\(groupSize)"
+        case .affineK8V4:
+            "affineK8V4"
+        case .affineInt4:
+            "affineInt4"
+        case .turboQuant(let preset, let valueBits, let groupSize, let backend):
+            "turboQuant(\(preset.rawValue),v\(valueBits.map(String.init) ?? "default"),g\(groupSize),\(backend.rawValue))"
+        }
+    }
+
+    fileprivate var canonicalString: String {
+        switch self {
+        case .inherit:
+            "inherit"
+        case .rawFP16:
+            "rawFP16"
+        case .mlxAffine(let bits, let groupSize):
+            "mlxAffine(bits:\(bits),groupSize:\(groupSize))"
+        case .affineK8V4:
+            "affineK8V4"
+        case .affineInt4:
+            "affineInt4"
+        case .turboQuant(let preset, let valueBits, let groupSize, let backend):
+            "turboQuant(preset:\(preset.rawValue),valueBits:\(valueBits.map(String.init) ?? "nil"),groupSize:\(groupSize),backend:\(backend.rawValue))"
+        }
+    }
+}
+
+public struct KVLayerRule: Hashable, Codable, Sendable {
+    public var layerIndex: Int
+    public var codec: KVLayerCodec
+
+    public init(layerIndex: Int, codec: KVLayerCodec) {
+        self.layerIndex = layerIndex
+        self.codec = codec
+    }
+}
+
+public struct KVLayerPolicy: Hashable, Codable, Sendable {
+    public var defaultCodec: KVLayerCodec?
+    public var rules: [KVLayerRule]
+
+    public init(defaultCodec: KVLayerCodec? = nil, rules: [KVLayerRule] = []) {
+        self.defaultCodec = defaultCodec
+        self.rules = rules
+    }
+
+    public var stableHash: String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in canonicalString.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x0000_0100_0000_01b3
+        }
+        return String(format: "%016llx", hash)
+    }
+
+    public func summary(maxRules: Int = 8) -> String {
+        let visible = rules.sorted { $0.layerIndex < $1.layerIndex }
+            .prefix(max(0, maxRules))
+            .map { "\($0.layerIndex):\($0.codec.summary)" }
+        let suffix = rules.count > visible.count ? ",+\(rules.count - visible.count)" : ""
+        return "default=\(defaultCodec?.summary ?? "inherit");layers=[\(visible.joined(separator: ","))\(suffix)]"
+    }
+
+    private var canonicalString: String {
+        var parts = ["default:\(defaultCodec?.canonicalString ?? "nil")"]
+        for rule in rules.sorted(by: { lhs, rhs in
+            lhs.layerIndex == rhs.layerIndex
+                ? lhs.codec.canonicalString < rhs.codec.canonicalString
+                : lhs.layerIndex < rhs.layerIndex
+        }) {
+            parts.append("\(rule.layerIndex):\(rule.codec.canonicalString)")
+        }
+        return parts.joined(separator: "|")
+    }
 }
 
 public enum DevicePerformanceClass: String, Codable, Sendable, CaseIterable {
@@ -1305,6 +1493,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var turboQuantKeyPrecision: TurboQuantKeyPrecision?
     public var turboQuantValuePrecision: TurboQuantValuePrecision?
     public var turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var turboQuantKVLayerPolicy: KVLayerPolicy?
     public var turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy?
     public var turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine?
     public var turboQuantNativeBackendVersion: String?
@@ -1351,6 +1540,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case turboQuantKeyPrecision
         case turboQuantValuePrecision
         case turboQuantPrecisionPolicy
+        case turboQuantKVLayerPolicy
         case turboQuantSparseValuePolicy
         case turboQuantEffectiveBackend
         case turboQuantNativeBackendVersion
@@ -1398,6 +1588,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         turboQuantKeyPrecision: TurboQuantKeyPrecision? = nil,
         turboQuantValuePrecision: TurboQuantValuePrecision? = nil,
         turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        turboQuantKVLayerPolicy: KVLayerPolicy? = nil,
         turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
         turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine? = nil,
         turboQuantNativeBackendVersion: String? = nil,
@@ -1443,6 +1634,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.turboQuantKeyPrecision = turboQuantKeyPrecision
         self.turboQuantValuePrecision = turboQuantValuePrecision
         self.turboQuantPrecisionPolicy = turboQuantPrecisionPolicy
+        self.turboQuantKVLayerPolicy = turboQuantKVLayerPolicy
         self.turboQuantSparseValuePolicy = turboQuantSparseValuePolicy
         self.turboQuantEffectiveBackend = turboQuantEffectiveBackend
         self.turboQuantNativeBackendVersion = turboQuantNativeBackendVersion
@@ -1491,6 +1683,7 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         turboQuantKeyPrecision = try container.decodeIfPresent(TurboQuantKeyPrecision.self, forKey: .turboQuantKeyPrecision)
         turboQuantValuePrecision = try container.decodeIfPresent(TurboQuantValuePrecision.self, forKey: .turboQuantValuePrecision)
         turboQuantPrecisionPolicy = try container.decodeIfPresent(TurboQuantKVPrecisionPolicy.self, forKey: .turboQuantPrecisionPolicy)
+        turboQuantKVLayerPolicy = try container.decodeIfPresent(KVLayerPolicy.self, forKey: .turboQuantKVLayerPolicy)
         turboQuantSparseValuePolicy = try container.decodeIfPresent(TurboQuantSparseValuePolicy.self, forKey: .turboQuantSparseValuePolicy)
         turboQuantEffectiveBackend = try container.decodeIfPresent(TurboQuantAttentionBackendEngine.self, forKey: .turboQuantEffectiveBackend)
         turboQuantNativeBackendVersion = try container.decodeIfPresent(String.self, forKey: .turboQuantNativeBackendVersion)

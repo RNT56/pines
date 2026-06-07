@@ -184,6 +184,7 @@ public struct TurboQuantBenchmarkMetrics: Hashable, Codable, Sendable {
     public var fallbackReason: String?
     public var jetsamObserved: Bool
     public var speculativeTelemetry: TurboQuantSpeculativeTelemetry?
+    public var lowerVAndSparseV: TurboQuantLowerVAndSparseVReport?
 
     public init(
         contextTokens: Int,
@@ -203,7 +204,8 @@ public struct TurboQuantBenchmarkMetrics: Hashable, Codable, Sendable {
         fallbackUsed: Bool = false,
         fallbackReason: String? = nil,
         jetsamObserved: Bool = false,
-        speculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil
+        speculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
+        lowerVAndSparseV: TurboQuantLowerVAndSparseVReport? = nil
     ) {
         self.contextTokens = max(0, contextTokens)
         self.firstTokenLatencyMS = firstTokenLatencyMS
@@ -223,6 +225,151 @@ public struct TurboQuantBenchmarkMetrics: Hashable, Codable, Sendable {
         self.fallbackReason = fallbackReason
         self.jetsamObserved = jetsamObserved
         self.speculativeTelemetry = speculativeTelemetry
+        self.lowerVAndSparseV = lowerVAndSparseV
+    }
+}
+
+public enum TurboQuantValueBitPolicy: String, Hashable, Codable, Sendable {
+    case denseV4
+    case calibratedV3
+    case calibratedV2
+    case residualVx
+}
+
+public enum TurboQuantSparseVSelectionMode: Hashable, Sendable {
+    case threshold
+    case topK
+    case cumulativeMass
+    case hybridCumulativeMassTopK
+
+    public var rawValue: String {
+        switch self {
+        case .threshold:
+            "threshold"
+        case .topK:
+            "topK"
+        case .cumulativeMass:
+            "cumulativeMass"
+        case .hybridCumulativeMassTopK:
+            "hybridCumulativeMassTopK"
+        }
+    }
+
+    public init?(rawValue: String) {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: "-")
+            .lowercased()
+        {
+        case "threshold":
+            self = .threshold
+        case "topk", "top-k":
+            self = .topK
+        case "cumulativemass", "cumulative-mass", "mass":
+            self = .cumulativeMass
+        case "hybrid", "hybrid-cumulative", "hybrid-cumulative-mass-top-k",
+             "hybridcumulativemasstopk":
+            self = .hybridCumulativeMassTopK
+        default:
+            return nil
+        }
+    }
+}
+
+extension TurboQuantSparseVSelectionMode: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        guard let mode = Self(rawValue: raw) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown Sparse-V selection mode '\(raw)'."
+            )
+        }
+        self = mode
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+public struct TurboQuantLowerVAndSparseVReport: Hashable, Codable, Sendable {
+    public var referenceConfig: String
+    public var candidateConfig: String
+    public var valueBits: Int?
+    public var valueBitPolicy: TurboQuantValueBitPolicy?
+    public var sparseVMode: TurboQuantSparseVSelectionMode?
+    public var sparseVTopK: Int?
+    public var sparseVCumulativeMass: Double?
+    public var sparseVMaxTopK: Int?
+    public var selectionLatencyMS: Double?
+    public var qkMS: Double?
+    public var softmaxMS: Double?
+    public var maskOrCompactionMS: Double?
+    public var avLatencyMS: Double?
+    public var totalMS: Double?
+    public var denseK8V4ReferenceMS: Double?
+    public var skippedValueTokens: Int?
+    public var consideredValueTokens: Int?
+    public var retainedMass: Double?
+    public var skipRatio: Double?
+    public var fallbackCount: Int
+    public var fallbackReason: String?
+    public var actualMixedBitsPerValue: Double?
+    public var layerIndex: Int?
+    public var headIndex: Int?
+
+    public init(
+        referenceConfig: String,
+        candidateConfig: String,
+        valueBits: Int? = nil,
+        valueBitPolicy: TurboQuantValueBitPolicy? = nil,
+        sparseVMode: TurboQuantSparseVSelectionMode? = nil,
+        sparseVTopK: Int? = nil,
+        sparseVCumulativeMass: Double? = nil,
+        sparseVMaxTopK: Int? = nil,
+        selectionLatencyMS: Double? = nil,
+        qkMS: Double? = nil,
+        softmaxMS: Double? = nil,
+        maskOrCompactionMS: Double? = nil,
+        avLatencyMS: Double? = nil,
+        totalMS: Double? = nil,
+        denseK8V4ReferenceMS: Double? = nil,
+        skippedValueTokens: Int? = nil,
+        consideredValueTokens: Int? = nil,
+        retainedMass: Double? = nil,
+        skipRatio: Double? = nil,
+        fallbackCount: Int = 0,
+        fallbackReason: String? = nil,
+        actualMixedBitsPerValue: Double? = nil,
+        layerIndex: Int? = nil,
+        headIndex: Int? = nil
+    ) {
+        self.referenceConfig = referenceConfig
+        self.candidateConfig = candidateConfig
+        self.valueBits = valueBits.map { max(0, $0) }
+        self.valueBitPolicy = valueBitPolicy
+        self.sparseVMode = sparseVMode
+        self.sparseVTopK = sparseVTopK.map { max(0, $0) }
+        self.sparseVCumulativeMass = sparseVCumulativeMass.map { max(0, min(1, $0)) }
+        self.sparseVMaxTopK = sparseVMaxTopK.map { max(0, $0) }
+        self.selectionLatencyMS = selectionLatencyMS.map { max(0, $0) }
+        self.qkMS = qkMS.map { max(0, $0) }
+        self.softmaxMS = softmaxMS.map { max(0, $0) }
+        self.maskOrCompactionMS = maskOrCompactionMS.map { max(0, $0) }
+        self.avLatencyMS = avLatencyMS.map { max(0, $0) }
+        self.totalMS = totalMS.map { max(0, $0) }
+        self.denseK8V4ReferenceMS = denseK8V4ReferenceMS.map { max(0, $0) }
+        self.skippedValueTokens = skippedValueTokens.map { max(0, $0) }
+        self.consideredValueTokens = consideredValueTokens.map { max(0, $0) }
+        self.retainedMass = retainedMass.map { max(0, min(1, $0)) }
+        self.skipRatio = skipRatio.map { max(0, min(1, $0)) }
+        self.fallbackCount = max(0, fallbackCount)
+        self.fallbackReason = fallbackReason
+        self.actualMixedBitsPerValue = actualMixedBitsPerValue.map { max(0, $0) }
+        self.layerIndex = layerIndex.map { max(0, $0) }
+        self.headIndex = headIndex.map { max(0, $0) }
     }
 }
 
@@ -238,6 +385,7 @@ public enum TurboQuantBenchmarkImportFailure: Error, Hashable, LocalizedError, S
     case memoryGateFailed(String)
     case speculativeGateFailed(String)
   case platformGateFailed(String)
+    case lowerVAndSparseVGateFailed(String)
     case verifiedEvidenceDisabled
     case certifiedEvidenceDisabled
 
@@ -265,6 +413,8 @@ public enum TurboQuantBenchmarkImportFailure: Error, Hashable, LocalizedError, S
             reason
     case .platformGateFailed(let reason):
       reason
+        case .lowerVAndSparseVGateFailed(let reason):
+            reason
         case .verifiedEvidenceDisabled:
             "Verified evidence import is disabled by policy."
         case .certifiedEvidenceDisabled:
@@ -579,9 +729,13 @@ public struct TurboQuantCoreBenchmarkAdapter: Sendable {
         switch path {
         case .baseline:
             .rawSDPA
-        case .onlineFused, .tiledOnlineFused, .twoStageCompressed:
+        case .nativeMLXCompressed, .affineK8V4Native, .affineK8VxNative,
+            .affineK8VxResidual:
+            .nativeMLX
+        case .onlineFused, .tiledOnlineFused, .sparseValueTwoStageCompressed,
+            .twoStageCompressed:
             .swiftMetalKernel
-        case .mlxPackedFallback:
+        case .affineInt4Native, .mlxPackedFallback:
             .decodedReference
         case .unavailable:
             .unavailable
@@ -705,6 +859,7 @@ public struct TurboQuantBenchmarkImporter: Sendable {
                 )
             }
             try Self.requireProductEvidenceDimensions(report)
+            try Self.requireLowerVAndSparseVEvidence(report)
             if policy.requestedEvidenceLevel == .certified {
                 try Self.requireCertifiedEvidenceMetrics(report)
             }
@@ -771,6 +926,98 @@ public struct TurboQuantBenchmarkImporter: Sendable {
             return true
         case .fp16OrQ8, .fp16, .affineQ8, .turbo8, nil:
             return false
+        }
+    }
+
+    private static func valueBits(_ valuePrecision: TurboQuantValuePrecision?) -> Int? {
+        switch valuePrecision {
+        case .fp16:
+            nil
+        case .turbo8:
+            8
+        case .turbo4v2:
+            4
+        case .turbo3_5:
+            3
+        case .turbo2_5:
+            2
+        case nil:
+            nil
+        }
+    }
+
+    private static func sparseVEnabled(_ policy: TurboQuantSparseValuePolicy?) -> Bool {
+        switch policy {
+        case .auto, .force:
+            true
+        case .off, nil:
+            false
+        }
+    }
+
+    private static func requireLowerVAndSparseVEvidence(
+        _ report: TurboQuantBenchmarkReport
+    ) throws {
+        let resolvedValueBits =
+            valueBits(report.runtime.precisionPolicy?.value)
+            ?? valueBits(report.runtime.valuePrecision)
+            ?? report.runtime.valueBits
+        let lowerVActive = resolvedValueBits.map { $0 < 4 } ?? false
+        let sparseVActive = sparseVEnabled(report.runtime.sparseValuePolicy)
+        let lowerSectionActive =
+            (report.metrics.lowerVAndSparseV?.valueBits.map { $0 < 4 } ?? false)
+            || report.metrics.lowerVAndSparseV?.sparseVMode != nil
+
+        guard lowerVActive || sparseVActive || lowerSectionActive else { return }
+        guard let evidence = report.metrics.lowerVAndSparseV else {
+            throw TurboQuantBenchmarkImportFailure.lowerVAndSparseVGateFailed(
+                "Verified lower-V or Sparse-V evidence requires a lowerVAndSparseV section with dense-reference diagnostics."
+            )
+        }
+
+        var missing: [String] = []
+        if evidence.referenceConfig.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            missing.append("reference config")
+        }
+        if evidence.candidateConfig.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            missing.append("candidate config")
+        }
+        if lowerVActive && evidence.valueBitPolicy == nil {
+            missing.append("value-bit policy")
+        }
+        if sparseVActive || evidence.sparseVMode != nil {
+            if evidence.retainedMass == nil {
+                missing.append("retained mass")
+            }
+            if evidence.skippedValueTokens == nil || evidence.consideredValueTokens == nil {
+                missing.append("Sparse-V token counts")
+            }
+            if evidence.denseK8V4ReferenceMS == nil {
+                missing.append("dense K8/V4 reference latency")
+            }
+            if evidence.selectionLatencyMS == nil {
+                missing.append("selection latency")
+            }
+            if evidence.avLatencyMS == nil {
+                missing.append("AV latency")
+            }
+        }
+        if evidence.fallbackCount > 0,
+           evidence.fallbackReason?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            missing.append("fallback reason")
+        }
+
+        guard missing.isEmpty else {
+            throw TurboQuantBenchmarkImportFailure.lowerVAndSparseVGateFailed(
+                "Verified lower-V or Sparse-V evidence requires: \(missing.joined(separator: ", "))."
+            )
+        }
+        if evidence.fallbackCount > 0
+            || evidence.fallbackReason?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        {
+            throw TurboQuantBenchmarkImportFailure.lowerVAndSparseVGateFailed(
+                "Verified lower-V or Sparse-V evidence must be fallback-free."
+            )
         }
     }
 

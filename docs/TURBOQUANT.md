@@ -11,7 +11,30 @@ The current pair is intentionally non-green. Wave 0 captured the baseline failur
 
 This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
 
-The pinned pair makes Layout V6 the default TurboQuant attention layout for device testing. Layout V6 uses a fixed-tail split-magnitude key layout for lower-bit Qwen precision candidates, while Layout V4 and V5 remain supported for legacy and A/B comparison runs until real-device evidence decides the production promotion surface.
+The pinned pair supports Layout V6 for explicit device testing. Layout V6 uses a fixed-tail split-magnitude key layout for lower-bit Qwen precision candidates, while Layout V4 remains the production default for new attention layout requests until real-device evidence decides the promotion surface.
+
+Current testable runtime paths are documented in
+`docs/turboquant-implementation/16-current-paths-and-benchmarks.md`. The short
+version is:
+
+| Path | Label / strategy | Current role |
+| --- | --- | --- |
+| FP16 raw SDPA | `fp16`, `KVCacheStrategy.none` | Baseline and short-context production route when memory fits. |
+| Affine K8/V4 | `affineK8V4`, `.affineK8V4` | Main compressed speed/quality candidate. |
+| Affine K8/V3 | `affineK8V3`, `.affineK8Vx`, value bits `3` | Guarded lower-V experiment. |
+| Affine K8/V2 | `affineK8V2`, `.affineK8Vx`, value bits `2` | Guarded lower-V experiment. |
+| MLX affine Q8 | `mlxAffine-q8`, `.mlxAffine` | MLX-native affine comparison route. |
+| Affine int4 | `affineInt4`, `.affineInt4` | Fast comparison route; quality-gated per model. |
+| Polar/QJL TurboQuant | `turbo8`, `turbo4v2`, `turbo3_5`, `.turboQuant` | Capacity/diagnostic routes. |
+| Hybrid selector | `.hybridTurboQuant` | Hot/cold cache and selector diagnostics; product promotion still requires real fused selected-block evidence. |
+| Sparse-V | threshold/top-k/cumulative/hybrid | Native value-skip diagnostics are wired, but disabled by default until real-model quality and throughput gates pass. |
+
+The current benchmark runner for these paths is:
+
+```bash
+cd /Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm
+TQ_MODEL_DIR=/path/to/mlx-model scripts/run-turboquant-current-benchmarks.sh
+```
 
 ## Runtime Strategy
 
@@ -73,12 +96,19 @@ Wave 0 parity verdict: `performanceParity=false`, `stabilityParity=partial`, `su
 
 ## Mac Real-Model Evidence
 
-The current pins add the native affine K8/V4 speed route: keys stay affine K8, values use affine V4, and QK/softmax/AV execute through the mixed quantized SDPA path instead of the older quantized-matmul fallback. The route is production-wired in the MLX Swift LM cache and benchmark surfaces, but it is not a parity claim.
+The current pins add the native affine K8/Vx route family: keys stay affine K8,
+values use V4, V3, or V2 affine lanes, and QK/softmax/AV execute through the
+mixed quantized SDPA path. Sparse-V threshold, top-k, cumulative-mass, and
+hybrid selection modes are also wired for diagnostics. None of these rows is a
+parity claim until the real-model and device gates pass.
 
 | Model | Artifact | Context | Result |
 | --- | --- | ---: | --- |
-| `mlx-community/Qwen3.5-2B-4bit` | `/Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm/artifacts/real-model-k8v4-idle-32k-20260601T101644Z/qwen35-2b-real-model-32k.log` | 32K | FP16 `42.74 tok/s`; affine K8/V4 `33.20 tok/s` (`0.777x`); affine q8 `18.01 tok/s` (`0.421x`); affine int4 `24.42 tok/s` (`0.571x`). |
-| `mlx-community/Qwen3.5-2B-4bit` | `/Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm/artifacts/real-model-k8v4-idle-64k-20260601T102000Z/qwen35-2b-real-model-64k.log` | 64K | FP16 `32.31 tok/s`; affine K8/V4 `17.57 tok/s` (`0.544x`). |
+| `mlx-community/Qwen3.5-2B-4bit` | `/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-k8vx-realmodel-20260601T144308Z/k8vx-quality-speed-summary.md` | 32K speed | FP16 `20.50 tok/s`; K8/V4 `32.40 tok/s` (`1.581x`); K8/V3 `14.16 tok/s` (`0.691x`); K8/V2 `15.54 tok/s` (`0.758x`). |
+| `mlx-community/Qwen3.5-2B-4bit` | `/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-k8vx-realmodel-20260601T144308Z/k8vx-quality-speed-summary.md` | 64K speed | FP16 `43.06 tok/s`; K8/V4 `21.54 tok/s` (`0.500x`); K8/V3 `21.39 tok/s` (`0.497x`); K8/V2 `21.36 tok/s` (`0.496x`). |
+| `mlx-community/Qwen3.5-2B-4bit` | `/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-k8vx-realmodel-20260601T144308Z/k8vx-quality-speed-summary.md` | 128K speed | K8/V4 `15.72 tok/s`; K8/V3 `13.24 tok/s`; K8/V2 `8.54 tok/s`. FP16 was not run because raw KV alone is about `16 GiB` at this shape before weights and runtime overhead. |
+| `mlx-community/Qwen3.5-2B-4bit` | `/Users/mt/Programming/Schtack/pines/docs/turboquant-implementation/baselines/20260601T144308Z-k8vx-realmodel-quality-speed.md` | 32K/64K quality | K8/V4 passes current FP16-referenced real-model gates. K8/V3 and K8/V2 preserve top-1 but fail the P95 max-logit-error gate. |
+| `mlx-community/Qwen3.5-2B-4bit` | `/Users/mt/Programming/Schtack/pines/docs/turboquant-implementation/baselines/20260601T144308Z-k8vx-realmodel-quality-speed.md` | 128K quality | K8/V3 and K8/V2 fail against dense K8/V4 under the current P95 max-logit-error gate. Dense K8/V4 remains the 128K compressed reference on this 16 GB Mac. |
 
 ## Physical Device Evidence
 
@@ -98,7 +128,7 @@ Earlier imported real-device smoke validation ran on `iPhone16,2` / A17 Pro (`7B
 | `mlx-community/Llama-3.2-3B-Instruct-4bit` | `ios-freeze-stress-20260526T110703Z` | Completed | `turbo8`, exact raw shadow, baseline attention | Coherent stop, no repeated bigram/trigram issue, `0.90 tok/s`; active KV window fell to 2048 under low-memory/thermal pressure. |
 | `mlx-community/Qwen3.5-0.8B-MLX-4bit` | `ios-freeze-stress-20260526T110824Z` | Completed | `turbo8`, exact raw shadow, baseline attention | Coherent stop, no repeated bigram/trigram issue, `2.62 tok/s`, first token `1.32s`; context was thermally constrained to 4096. |
 
-Current conclusion: short-context parity is handled by adaptive routing rather than by forcing compressed attention to beat raw SDPA. The latest compressed-vs-plain attention evidence still shows TurboQuant below FP16 equal-context throughput, while preserving strong memory reduction and high output similarity. Pines therefore treats TurboQuant as a context-capacity path: raw/FP16 SDPA remains the short-context route when admitted, and compressed TurboQuant is selected when raw KV would not fit or when the request exceeds the raw window. Lower-bit `turbo4v2`, `turbo4`, `turbo3_5`, and `turbo2_5` remain guarded for product `Verified` or `Certified` claims until real-device compressed attention passes repetition, stop, memory, and throughput gates for the exact model/device/profile tuple.
+Current conclusion: short-context parity is handled by adaptive routing rather than by forcing compressed attention to beat raw SDPA. Dense K8/V4 is the best current compressed long-context reference and passes the active 32K/64K real-model logit gate on this Mac. K8/V3, K8/V2, Sparse-V, and lower-bit Polar/QJL modes remain guarded for product `Verified` or `Certified` claims until real-device compressed attention passes speed, memory, quality, fallback, repetition, stop, NIAH/retrieval, and deterministic task gates for the exact model/device/profile tuple.
 
 ## Fork Maintenance
 

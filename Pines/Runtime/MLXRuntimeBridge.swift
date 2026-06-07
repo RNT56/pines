@@ -1254,6 +1254,9 @@ struct MLXRuntimeBridge: Sendable {
                 turboQuantPrecisionPolicy: admission.useTurboQuant
                     ? turboQuantDefaults?.precisionPolicy
                     : nil,
+                turboQuantKVLayerPolicy: admission.useTurboQuant
+                    ? turboQuantDefaults?.kvLayerPolicy
+                    : nil,
                 turboQuantSparseValuePolicy: admission.useTurboQuant
                     ? turboQuantDefaults?.sparseValuePolicy ?? .productDefault
                     : .off,
@@ -1321,6 +1324,7 @@ struct MLXRuntimeBridge: Sendable {
         var valueBits: Int?
         var runtimeMode: PinesCore.TurboQuantRuntimeMode
         var precisionPolicy: PinesCore.TurboQuantKVPrecisionPolicy
+        var kvLayerPolicy: PinesCore.KVLayerPolicy?
         var sparseValuePolicy: PinesCore.TurboQuantSparseValuePolicy
         var optimizationPolicy: PinesCore.TurboQuantOptimizationPolicy
         var profileID: String?
@@ -2168,6 +2172,8 @@ struct MLXRuntimeBridge: Sendable {
             resolvedRuntimeMode: pinesTurboQuantRuntimeMode(from: plan.resolvedRuntimeMode),
             precisionPolicy: pinesTurboQuantPrecisionPolicy(from: plan.precisionPolicy),
             runtimeFallbackReason: plan.runtimeFallbackReason,
+            kvLayerPolicyHash: plan.kvLayerPolicyHash,
+            kvLayerPolicySummary: plan.kvLayerPolicySummary,
             rawBytesPerToken: plan.rawBytesPerToken,
             packedFallbackBytesPerToken: plan.packedFallbackBytesPerToken,
             compressedBytesPerToken: plan.compressedBytesPerToken,
@@ -2370,6 +2376,7 @@ struct MLXRuntimeBridge: Sendable {
                 valueBits: profile.valueBits,
                 runtimeMode: runtimeMode,
                 precisionPolicy: precisionPolicy,
+                kvLayerPolicy: Self.coreKVLayerPolicy(from: profile.turboQuant.kvLayerPolicy),
                 sparseValuePolicy: .productDefault,
                 optimizationPolicy: profilePolicy,
                 profileID: profile.id,
@@ -2386,6 +2393,7 @@ struct MLXRuntimeBridge: Sendable {
             valueBits: PinesCore.TurboQuantPreset.conservativeFallback.defaultValueBits,
             runtimeMode: .auto,
             precisionPolicy: PinesCore.TurboQuantKVPrecisionPolicy(key: .fp16OrQ8, value: .turbo4v2),
+            kvLayerPolicy: nil,
             sparseValuePolicy: .productDefault,
             optimizationPolicy: deviceOptimizationPolicy,
             profileID: nil,
@@ -2496,6 +2504,47 @@ struct MLXRuntimeBridge: Sendable {
             .metalPolarQJL
         }
     }
+
+    #if canImport(MLXLMCommon)
+    private static func coreKVLayerPolicy(
+        from policy: MLXLMCommon.KVLayerPolicy?
+    ) -> PinesCore.KVLayerPolicy? {
+        guard let policy else { return nil }
+        return PinesCore.KVLayerPolicy(
+            defaultCodec: policy.defaultCodec.map(coreKVLayerCodec(from:)),
+            rules: policy.rules.map {
+                PinesCore.KVLayerRule(
+                    layerIndex: $0.layerIndex,
+                    codec: coreKVLayerCodec(from: $0.codec)
+                )
+            }
+        )
+    }
+
+    private static func coreKVLayerCodec(
+        from codec: MLXLMCommon.KVLayerCodec
+    ) -> PinesCore.KVLayerCodec {
+        switch codec {
+        case .inherit:
+            return .inherit
+        case .rawFP16:
+            return .rawFP16
+        case .mlxAffine(let bits, let groupSize):
+            return .mlxAffine(bits: bits, groupSize: groupSize)
+        case .affineK8V4:
+            return .affineK8V4
+        case .affineInt4:
+            return .affineInt4
+        case .turboQuant(let preset, let valueBits, let groupSize, let backend):
+            return .turboQuant(
+                preset: coreTurboQuantPreset(from: preset),
+                valueBits: valueBits,
+                groupSize: groupSize,
+                backend: coreTurboQuantBackend(from: backend)
+            )
+        }
+    }
+    #endif
 
     private static func coreTurboQuantKernelProfile(
         from profile: MLX.TurboQuantKernelProfile
@@ -4608,6 +4657,7 @@ private actor MLXRuntimeState {
             kvGroupSize: profile.quantization.kvGroupSize,
             quantizedKVStart: profile.quantization.quantizedKVStart,
             kvCacheStrategy: resolvedMLXKVCacheStrategy,
+            kvLayerPolicy: Self.mlxKVLayerPolicy(from: profile.quantization.turboQuantKVLayerPolicy),
             turboQuantPreset: Self.mlxTurboQuantPreset(from: profile.quantization.preset),
             turboQuantBackend: Self.mlxTurboQuantBackend(from: profile.quantization.requestedBackend),
             turboQuantOptimizationPolicy: Self.mlxTurboQuantOptimizationPolicy(
@@ -4649,6 +4699,7 @@ private actor MLXRuntimeState {
             kvGroupSize: profile.quantization.kvGroupSize,
             quantizedKVStart: profile.quantization.quantizedKVStart,
             kvCacheStrategy: resolvedMLXKVCacheStrategy,
+            kvLayerPolicy: Self.mlxKVLayerPolicy(from: profile.quantization.turboQuantKVLayerPolicy),
             turboQuantPreset: Self.mlxTurboQuantPreset(from: profile.quantization.preset),
             turboQuantBackend: Self.mlxTurboQuantBackend(from: profile.quantization.requestedBackend),
             turboQuantOptimizationPolicy: Self.mlxTurboQuantOptimizationPolicy(
@@ -4861,6 +4912,45 @@ private actor MLXRuntimeState {
     ) -> MLXLMCommon.TurboQuantBackend {
         guard let backend else { return .metalPolarQJL }
         return MLXLMCommon.TurboQuantBackend(rawValue: backend.rawValue) ?? .metalPolarQJL
+    }
+
+    private static func mlxKVLayerPolicy(
+        from policy: PinesCore.KVLayerPolicy?
+    ) -> MLXLMCommon.KVLayerPolicy? {
+        guard let policy else { return nil }
+        return MLXLMCommon.KVLayerPolicy(
+            defaultCodec: policy.defaultCodec.map(mlxKVLayerCodec(from:)),
+            rules: policy.rules.map {
+                MLXLMCommon.KVLayerRule(
+                    layerIndex: $0.layerIndex,
+                    codec: mlxKVLayerCodec(from: $0.codec)
+                )
+            }
+        )
+    }
+
+    private static func mlxKVLayerCodec(
+        from codec: PinesCore.KVLayerCodec
+    ) -> MLXLMCommon.KVLayerCodec {
+        switch codec {
+        case .inherit:
+            return .inherit
+        case .rawFP16:
+            return .rawFP16
+        case .mlxAffine(let bits, let groupSize):
+            return .mlxAffine(bits: bits, groupSize: groupSize)
+        case .affineK8V4:
+            return .affineK8V4
+        case .affineInt4:
+            return .affineInt4
+        case .turboQuant(let preset, let valueBits, let groupSize, let backend):
+            return .turboQuant(
+                preset: MLXLMCommon.TurboQuantPreset(rawValue: preset.rawValue) ?? .turbo4v2,
+                valueBits: valueBits,
+                groupSize: groupSize,
+                backend: mlxTurboQuantBackend(from: backend)
+            )
+        }
     }
 
     #if PINES_TQ_WAVE6_API
@@ -5089,6 +5179,14 @@ private actor MLXRuntimeState {
                 metadata[LocalProviderMetadataKeys.turboQuantPrecisionPolicyJSON] =
                     MLXRuntimeBridge.metadataJSON(precisionPolicy)
             }
+            if let kvLayerPolicy = profile.quantization.turboQuantKVLayerPolicy {
+                metadata[LocalProviderMetadataKeys.turboQuantKVLayerPolicyJSON] =
+                    MLXRuntimeBridge.metadataJSON(kvLayerPolicy)
+                metadata[LocalProviderMetadataKeys.turboQuantKVLayerPolicyHash] =
+                    kvLayerPolicy.stableHash
+                metadata[LocalProviderMetadataKeys.turboQuantKVLayerPolicySummary] =
+                    kvLayerPolicy.summary()
+            }
             if let sparseValuePolicy {
                 metadata[LocalProviderMetadataKeys.turboQuantSparseValuePolicyJSON] =
                     MLXRuntimeBridge.metadataJSON(sparseValuePolicy)
@@ -5178,6 +5276,14 @@ private actor MLXRuntimeState {
         if turboQuantPlanned, let precisionPolicy = quantization.turboQuantPrecisionPolicy {
             metadata[LocalProviderMetadataKeys.turboQuantPrecisionPolicyJSON] =
                 MLXRuntimeBridge.metadataJSON(precisionPolicy)
+        }
+        if turboQuantPlanned, let kvLayerPolicy = quantization.turboQuantKVLayerPolicy {
+            metadata[LocalProviderMetadataKeys.turboQuantKVLayerPolicyJSON] =
+                MLXRuntimeBridge.metadataJSON(kvLayerPolicy)
+            metadata[LocalProviderMetadataKeys.turboQuantKVLayerPolicyHash] =
+                kvLayerPolicy.stableHash
+            metadata[LocalProviderMetadataKeys.turboQuantKVLayerPolicySummary] =
+                kvLayerPolicy.summary()
         }
         if turboQuantPlanned, let sparseValuePolicy = quantization.turboQuantSparseValuePolicy {
             metadata[LocalProviderMetadataKeys.turboQuantSparseValuePolicyJSON] =

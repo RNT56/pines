@@ -1,6 +1,6 @@
 # Implementation Status
 
-This repository is a working foundation for `pines`, not a signed App Store distribution yet. The current TurboQuant compatibility pair is non-green: local gates and exact-pin physical-device smoke pass, but that smoke is synthetic attention-shape evidence. Native backend performance parity and full real-model-inference release benchmark/quality/fallback evidence are not complete. Model/device/mode `Verified` and `Certified` claims remain gated on accepted real-device evidence.
+This repository is a working foundation for `pines`, not a signed App Store distribution yet. The current TurboQuant compatibility pair is non-green: local gates and exact-pin physical-device smoke pass, but that smoke is synthetic attention-shape evidence. The latest Mac real-model K8/Vx matrix shows dense K8/V4 passing current 32K/64K logit gates, while K8/V3 and K8/V2 still fail P95 max-logit-error gates. Native Sparse-V threshold/top-k/cumulative/hybrid modes are implemented but not promoted. Model/device/mode `Verified` and `Certified` claims remain gated on accepted real-device evidence.
 
 ## Implemented
 
@@ -82,4 +82,4 @@ For a direct generic iOS build:
 xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform=iOS' build
 ```
 
-The current TurboQuant compatibility pair has passing focused local gates and exact-pin iOS app-host smoke evidence, but it is still non-green until the native backend performance, real-model-inference benchmark matrix, quality, memory, and fallback gates pass.
+The current TurboQuant compatibility pair has passing focused local gates and exact-pin iOS app-host smoke evidence, but it is still non-green until native backend performance, real-model-inference benchmark matrix, quality, memory, Sparse-V/lower-V fallback, and physical-device gates pass.

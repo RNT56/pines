@@ -30,6 +30,39 @@ swift run TurboQuantBenchmark --json
 swift run TurboQuantModelBenchmark --json
 ```
 
+Current TurboQuant benchmark matrix:
+
+```bash
+cd /Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm
+TQ_MODEL_DIR=/path/to/mlx-model scripts/run-turboquant-current-benchmarks.sh
+```
+
+Focused real-model quality gate:
+
+```bash
+swift build --product TurboQuantInferenceParity -c release
+.build/release/TurboQuantInferenceParity \
+  --model-dir /path/to/mlx-model \
+  --contexts 32768,65536 \
+  --generate-tokens 16 \
+  --configs fp16,affineK8V4,affineK8V3,affineK8V2,mlxAffine-q8,affineInt4,turbo4v2,turbo3_5,turbo8 \
+  --quality-gates \
+  --quality-contexts 32768
+```
+
+Long-context lower-V comparison when FP16 does not fit:
+
+```bash
+.build/release/TurboQuantInferenceParity \
+  --model-dir /path/to/mlx-model \
+  --contexts 131072 \
+  --generate-tokens 8 \
+  --configs affineK8V4,affineK8V3,affineK8V2 \
+  --quality-gates \
+  --quality-contexts 131072 \
+  --quality-reference-config affineK8V4
+```
+
 Full iOS verification:
 
 ```bash
@@ -45,7 +78,10 @@ xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform
 - `real-model-inference-v1` quality evidence from actual model generation/inference comparisons;
 - physical-device app-host evidence with hybrid/native cache diagnostics;
 - benchmark matrix coverage for release contexts;
-- quality, memory, and fallback gates for the exact model/device/mode tuple.
+- quality, memory, and fallback gates for the exact model/device/mode tuple;
+- lower-V and Sparse-V evidence when those paths are exposed, including mode,
+  skipped/considered tokens, retained mass, dense-reference quality, and
+  fallback count.
 
 API contract tests, package-pin checks, simulator or generic iOS builds, and historical/superseded proofs do not make a pair green by themselves.
 

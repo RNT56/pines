@@ -14,7 +14,19 @@ After the Wave 0 baseline capture on 2026-05-31, the active local compatibility 
 
 Pines pins `MLXSwift` to `609e8333671419ee1dbe928eeee7f48a24682631` and `MLXSwiftLM` to `725add5dd15ef6c1c01073ce9f81412957fa5c6d` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
 
-Wave 0 current-pair evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, while `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the Wave 0 app-hosted iOS smoke ended `failed_environmental` before install/launch. The continuation pass resolves the local TurboQuant test blocker, wires native affine K8/V4 mixed quantized SDPA through the MLX Swift LM cache path, and records exact-pin physical-device app-host smoke on `iPhone16,2`, but that smoke is a synthetic attention-shape benchmark. Mac real-model inference evidence exists for Qwen3.5-2B at 32K and 64K, but compressed equal-context throughput remains below raw FP16 and parity is not achieved. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V6 is the default MLX layout on this pair, with Layout V4 and V5 still supported for legacy/comparison runs. Exact pins plus smoke evidence remain unverified and real-device model/device/mode evidence remains required before any `Verified` or `Certified` product claim.
+Wave 0 current-pair evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, while `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the Wave 0 app-hosted iOS smoke ended `failed_environmental` before install/launch. The continuation pass resolves the local TurboQuant test blocker, wires native affine K8/V4 mixed quantized SDPA through the MLX Swift LM cache path, and records exact-pin physical-device app-host smoke on `iPhone16,2`, but that smoke is a synthetic attention-shape benchmark. Mac real-model inference evidence exists for Qwen3.5-2B at 32K and 64K, but compressed equal-context throughput remains below raw FP16 and parity is not achieved. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V4 is the production default for new MLX attention layout requests; Layout V5/V6 remain supported for explicit experimental, benchmark, and compatibility runs only. Exact pins plus smoke evidence remain unverified and real-device model/device/mode evidence remains required before any `Verified` or `Certified` product claim.
+
+Current continuation work adds explicit benchmark coverage and labels for
+`affineK8V4`, `affineK8V3`, `affineK8V2`, `mlxAffine-q8`, `affineInt4`,
+`turbo4v2`, `turbo3_5`, and `turbo8`; long-context scheduling/chunking fixes for
+128K K8/Vx runs; native Sparse-V threshold, top-k, cumulative-mass, and hybrid
+diagnostics; and `real-model-inference-v1` quality gates in
+`TurboQuantInferenceParity`. The latest Mac artifact
+`turboquant-k8vx-realmodel-20260601T144308Z` shows dense K8/V4 passing current
+32K/64K FP16-referenced logit gates, while K8/V3 and K8/V2 preserve top-1 but
+fail P95 max-logit-error gates. This is useful evidence, but it is still Mac
+evidence and does not change the non-green compatibility status without the
+required iOS real-model tuple.
 
 ## Observed workspace
 

@@ -184,6 +184,37 @@ Pines debug benchmark runner should:
 - export BenchmarkReport.v1 JSON;
 - import the report into ProfileEvidenceStore.
 
+## Current benchmark surfaces
+
+The current fork pair exposes three runnable benchmark layers:
+
+| Layer | Location | Purpose | Product claim value |
+| --- | --- | --- | --- |
+| Core operator JSON | `/Users/mt/Programming/Schtack/mlx-forks/mlx-swift` `TurboQuantBenchmark` | Path/capability/storage/hidden-copy regression for raw, native affine, fused, tiled, two-stage, and fallback paths. | Smoke/regression only. |
+| LM synthetic attention | `/Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm` `TurboQuantBenchSuite` | App-hostable Qwen-shaped attention throughput, Sparse-V diagnostics, hybrid selector diagnostics. | Smoke/regression only unless paired with real-model evidence. |
+| Real-model inference parity | `/Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm` `TurboQuantInferenceParity` | Full model decode throughput plus real-model logit quality gates after cache conversion. | Required for parity and release evidence. |
+
+The canonical local runner is:
+
+```bash
+cd /Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm
+TQ_MODEL_DIR=/path/to/mlx-model scripts/run-turboquant-current-benchmarks.sh
+```
+
+It records the currently implemented paths: FP16, `affineK8V4`, `affineK8V3`,
+`affineK8V2`, `mlxAffine-q8`, `affineInt4`, `turbo4v2`, `turbo3_5`, and
+`turbo8`, plus the core operator path matrix. See
+[Current Paths and Benchmark Matrix](16-current-paths-and-benchmarks.md) for the
+full command catalogue.
+
+Latest local Mac real-model K8/Vx evidence is recorded in
+[20260601T144308Z K8/Vx real-model quality and speed](baselines/20260601T144308Z-k8vx-realmodel-quality-speed.md).
+Dense K8/V4 passes the current 32K/64K FP16-referenced logit gate on that run.
+K8/V3 and K8/V2 preserve top-1 but fail P95 max-logit-error thresholds, so they
+remain guarded experiments. Native Sparse-V threshold, top-k, cumulative-mass,
+and hybrid modes are implemented and report diagnostics, but they require the
+same real-model and real-device evidence before promotion.
+
 ## Product UI states
 
 | State | Evidence condition |

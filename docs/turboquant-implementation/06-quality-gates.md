@@ -45,6 +45,39 @@ public struct TurboQuantQualityGate: Codable, Sendable {
 
 Thresholds are defaults, not global truth. Model profiles may require stricter thresholds or justified overrides. Overrides must be named and recorded in the evidence.
 
+The current `TurboQuantInferenceParity --quality-gates` implementation uses a
+focused `real-model-inference-v1` single-token decode gate after cache
+conversion. Its current thresholds are stricter on deterministic top-1 and wider
+on logit scale:
+
+| Metric | Current real-model inference gate |
+| --- | --- |
+| No NaN/Inf | required |
+| Prefill exactness | required |
+| Fallback equivalence | required |
+| Deterministic top-1 match | `1.0` |
+| Mean logit KL divergence | `<= 0.10` |
+| P95 max logit abs error | `<= 2.0` |
+| Attention/logit cosine | reported, not currently thresholded |
+
+This gate is intended to catch semantic divergence in the active compressed
+decode path. It is not a replacement for perplexity, retrieval, deterministic
+JSON/tool-call, or longer decode-sequence gates before product promotion.
+
+The latest K8/Vx real-model run,
+[20260601T144308Z](baselines/20260601T144308Z-k8vx-realmodel-quality-speed.md),
+uses this gate. Dense K8/V4 passes at 32K and 64K versus FP16. K8/V3 and K8/V2
+preserve deterministic top-1 but fail the P95 max-logit-error threshold, and
+therefore cannot be promoted without either improving reconstruction quality or
+adding a named profile override backed by stronger retrieval, task, and
+perplexity evidence. At 128K, dense K8/V4 is the reference on the current 16 GB
+Mac because FP16 raw KV alone is about 16 GiB before model/runtime overhead.
+
+Sparse-V threshold, top-k, cumulative-mass, and hybrid modes must pass the same
+quality gate against dense K8/V4 or FP16 where available. Sparse-V also needs
+retained-mass, skipped-token, fallback-count, and dense-reference diagnostics in
+the evidence record.
+
 ## Benchmark suites
 
 Every quality gate names a `benchmarkSuiteID`.

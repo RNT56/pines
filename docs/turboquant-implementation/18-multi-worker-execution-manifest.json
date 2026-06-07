@@ -1,0 +1,917 @@
+{
+  "schemaVersion": 1,
+  "title": "TurboQuant Multi-Worker Execution Manifest",
+  "updatedAt": "2026-06-02",
+  "promotionPolicy": {
+    "bar": "verifiedOnly",
+    "productionCompressedBaseline": "affineK8V4",
+    "productionCompressedBackend": "affineK8V4Native",
+    "compatibilityPairMayBeGreenOnlyWhenReleaseReadinessGreenAllowed": true,
+    "productClaimEvidenceMustBeCurrent": true,
+    "historicalSyntheticSimulatorOrDenseFallbackEvidenceMayPromote": false,
+    "experimentalPaths": [
+      "affineK8V3",
+      "affineK8V2",
+      "affineK8V3Optimized",
+      "SparseV",
+      "LayoutV5",
+      "KVSnapshotRestore",
+      "SpeculativeTurboQuant",
+      "Wave7PlatformUnlocks"
+    ],
+    "defaultActivation": {
+      "affineK8V4": "mainCompressedCandidate",
+      "affineK8V3": "disabledUntilVerified",
+      "affineK8V2": "disabledUntilVerified",
+      "affineK8V3Optimized": "disabledUntilVerified",
+      "SparseV": "disabledUntilVerified",
+      "LayoutV5": "disabledUntilVerified",
+      "KVSnapshotRestore": "disabledUntilVerified",
+      "SpeculativeTurboQuant": "disabledUntilVerified",
+      "Wave7PlatformUnlocks": "disabledUntilVerified"
+    }
+  },
+  "repoRoots": {
+    "pines": "/Users/mt/Programming/Schtack/pines",
+    "mlx-swift": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift",
+    "mlx-swift-lm": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift-lm"
+  },
+  "integrationBranches": {
+    "pines": "codex/local-runtime-hardening",
+    "mlx-swift": "codex/turboquant-core-completion",
+    "mlx-swift-lm": "codex/turboquant-completion-hardening"
+  },
+  "serializedOwnership": [
+    {
+      "area": "pines/project.yml, Package.resolved, generated Xcode project",
+      "owners": ["INT-2A", "INT-2B"]
+    },
+    {
+      "area": "Pines/Runtime/MLXRuntimeBridge.swift",
+      "owners": ["INT-1"]
+    },
+    {
+      "area": "TurboQuant kernel source and layout implementation",
+      "owners": ["W13"]
+    },
+    {
+      "area": "LM product attention error behavior",
+      "owners": ["W4"]
+    },
+    {
+      "area": "release train and compatibility-pair state",
+      "owners": ["W0"]
+    }
+  ],
+  "globalWorkerRules": [
+    "Audit existing implementation first and close only the discovered gap.",
+    "Do not revert or overwrite unrelated dirty worktree changes.",
+    "Keep product activation disabled unless this manifest and the release gates explicitly allow promotion.",
+    "Never mark lower-V, Sparse-V, speculative, snapshot, Layout V5, or platform-unlock paths verified without exact current tuple evidence.",
+    "Every worker output must include owned files, intentionally untouched files, gates run, artifacts, activation state, and compatibility-pair impact."
+  ],
+  "waves": [
+    {
+      "id": "wave-0",
+      "name": "Freeze Contracts And Repair Current State",
+      "parallel": true,
+      "exitCriteria": [
+        "No product-facing zero output.",
+        "No product-facing fatal path.",
+        "Core contracts compile and test.",
+        "Pines MLX-free DTO shims build.",
+        "Schema registry and failure matrix remain reviewable.",
+        "Compatibility pair remains failed or pending unless all green gates pass."
+      ],
+      "workers": ["W25", "W0", "W20", "W21", "W4", "W1", "W7", "W24"]
+    },
+    {
+      "id": "wave-1",
+      "name": "Admission, Cache Lifecycle, And Evidence Plumbing",
+      "parallel": true,
+      "dependsOn": ["wave-0"],
+      "exitCriteria": [
+        "Bad compressed layouts fail before Metal dispatch.",
+        "Admission produces deterministic admitted or rejected plans before generation.",
+        "LM cache lifecycle snapshot is queryable.",
+        "RunDecision serializes selected path, fallback, lifecycle, and byte fields.",
+        "Evidence, quality, and calibration skeletons compile."
+      ],
+      "workers": ["W2", "W5", "W8", "W9", "W10-skeleton", "W22-skeleton", "W23-skeleton"]
+    },
+    {
+      "id": "wave-2",
+      "name": "Serialized Pines Integration",
+      "parallel": false,
+      "dependsOn": ["wave-1"],
+      "exitCriteria": [
+        "Unsafe local runs reject before generation.",
+        "Successful local runs emit RunDecision metadata.",
+        "Typed local failures reach the stream/UI.",
+        "Cloud route is never used without explicit route policy.",
+        "Compatibility-branch validation is recorded without product promotion."
+      ],
+      "workers": ["INT-1", "INT-2A"]
+    },
+    {
+      "id": "wave-3",
+      "name": "Verified Evidence And Baseline Promotion",
+      "parallel": true,
+      "dependsOn": ["wave-2"],
+      "exitCriteria": [
+        "Benchmark JSON imports successfully.",
+        "QualityGate passes for any Verified claim.",
+        "Memory calibration sample and hidden-copy audit exist.",
+        "Evidence includes compatibility-pair ID and fallback-contract hash.",
+        "At least one exact physical iPhone real-model tuple is verified.",
+        "K8/V4 is the only production compressed baseline unless another path independently passes the same bar."
+      ],
+      "workers": ["W3", "W6", "W10-full", "W22-full", "W23-full", "W12", "REAL-DEVICE"]
+    },
+    {
+      "id": "wave-3.5",
+      "name": "Production Pin Promotion",
+      "parallel": false,
+      "dependsOn": ["wave-3"],
+      "exitCriteria": [
+        "Production pins match the verified compatibility pair.",
+        "project.yml, Package.resolved, generated Xcode project, and status docs are synchronized.",
+        "Compatibility pair status is green only when releaseReadiness.greenAllowed is true."
+      ],
+      "workers": ["INT-2B"]
+    },
+    {
+      "id": "wave-4",
+      "name": "Runtime Hardening",
+      "parallel": true,
+      "dependsOn": ["wave-3"],
+      "exitCriteria": [
+        "RunDecision, codec/layout, fallback reason, and evidence IDs are observable.",
+        "Snapshots remain disabled or fail closed until verified.",
+        "iOS lifecycle, memory pressure, cancellation, and reset behavior are covered."
+      ],
+      "workers": ["W11", "W14A", "W14B", "W17", "IOS-LIFECYCLE"]
+    },
+    {
+      "id": "wave-5",
+      "name": "Optimization Train",
+      "parallel": true,
+      "dependsOn": ["wave-3"],
+      "exitCriteria": [
+        "Native K8/V4 refinements preserve quality and fallback behavior.",
+        "V3-optimized promotion requires full 32K/64K/128K quality and throughput evidence.",
+        "Sparse-V promotion requires real-model quality, throughput, retained-mass, and fallback-count evidence.",
+        "Synthetic/operator rows remain regression evidence only."
+      ],
+      "workers": ["W13", "V3-OPT", "SPARSE-V", "HARNESS"]
+    },
+    {
+      "id": "wave-6",
+      "name": "Speculative And Advanced Runtime Paths",
+      "parallel": true,
+      "dependsOn": ["wave-4"],
+      "exitCriteria": [
+        "Speculative verifier proves rollback safety.",
+        "Speculative product integration remains disabled until verifier and evidence gates pass.",
+        "Speculative combinations with lower-V or Sparse-V require separate evidence."
+      ],
+      "workers": ["W15A", "W15B"]
+    },
+    {
+      "id": "wave-7",
+      "name": "Platform Unlocks",
+      "parallel": true,
+      "dependsOn": ["wave-6"],
+      "exitCriteria": [
+        "Platform contracts are exposed but disabled by default.",
+        "Kill switches and evidence gates are present.",
+        "Final integration updates release state only after all required evidence rows pass."
+      ],
+      "workers": ["W29-core", "W29-lm", "W29-pines"]
+    }
+  ],
+  "workers": [
+    {
+      "id": "W25",
+      "wave": "wave-0",
+      "repo": "all",
+      "branch": "tq/current-state-reconciliation",
+      "targetBranch": "repo integration branch",
+      "task": "Reconcile current repo heads, dirty state, pins, blockers, and already-implemented surfaces.",
+      "owns": ["docs/turboquant-implementation/00-current-state.md"],
+      "mustNotTouch": ["Pines/Runtime/MLXRuntimeBridge.swift", "project.yml", "Package.resolved", "generated Xcode project"],
+      "requiredGates": ["json-diff-check"],
+      "activationStatus": "documentationOnly"
+    },
+    {
+      "id": "W0",
+      "wave": "wave-0",
+      "repo": "all",
+      "branch": "tq/release-train",
+      "targetBranch": "repo integration branch",
+      "task": "Own release train, compatibility-pair state, final green decision, signoffs, and merge order.",
+      "owns": ["docs/turboquant-implementation/compatibility-pair.json", "docs/turboquant-implementation/01-release-train.md", "docs/turboquant-implementation/12-validation-and-release-gates.md"],
+      "mustNotTouch": ["Pines/Runtime/MLXRuntimeBridge.swift except release metadata references"],
+      "requiredGates": ["compatibility-json", "release-green-policy"],
+      "activationStatus": "failedOrPendingUntilVerified"
+    },
+    {
+      "id": "W20",
+      "wave": "wave-0",
+      "repo": "all",
+      "branch": "tq/schema-registry",
+      "targetBranch": "repo integration branch",
+      "task": "Verify schema constants, envelope rules, and migration stubs.",
+      "owns": ["docs/turboquant-implementation/02-schema-registry.md", "schema registry types/tests"],
+      "requiredGates": ["schema-tests"],
+      "activationStatus": "contractOnly"
+    },
+    {
+      "id": "W21",
+      "wave": "wave-0",
+      "repo": "all",
+      "branch": "tq/failure-matrix",
+      "targetBranch": "repo integration branch",
+      "task": "Verify typed failure matrix and behavior map.",
+      "owns": ["docs/turboquant-implementation/03-failure-matrix.md", "failure DTOs/tests"],
+      "requiredGates": ["failure-contract-tests"],
+      "activationStatus": "contractOnly"
+    },
+    {
+      "id": "W4",
+      "wave": "wave-0",
+      "repo": "mlx-swift-lm",
+      "branch": "tq/lm-typed-errors-no-zero",
+      "targetBranch": "codex/turboquant-completion-hardening",
+      "task": "Ensure Pines-facing LM product paths throw typed failures and never return silent zero/fatal output.",
+      "owns": ["Libraries/MLXLMCommon/AttentionUtils.swift", "Libraries/MLXLMCommon/TurboQuantRuntimeFailure.swift", "LM product attention error behavior"],
+      "requiredGates": ["mlx-lm-turboquant-runtime-failure-tests"],
+      "activationStatus": "safetyRequired"
+    },
+    {
+      "id": "W1",
+      "wave": "wave-0",
+      "repo": "mlx-swift",
+      "branch": "tq/core-contracts",
+      "targetBranch": "codex/turboquant-core-completion",
+      "task": "Verify codec IDs, layout contracts, benchmark schemas, admission contracts, and native-kernel metadata.",
+      "owns": ["Source/MLX/TurboQuantContracts.swift", "Source/MLX/TurboQuantStorageEstimate.swift", "core contract tests"],
+      "requiredGates": ["mlx-core-contract-tests"],
+      "activationStatus": "contractOnly"
+    },
+    {
+      "id": "W7",
+      "wave": "wave-0",
+      "repo": "pines",
+      "branch": "tq/pines-contract-shims",
+      "targetBranch": "codex/local-runtime-hardening",
+      "task": "Verify MLX-independent Pines DTO shims.",
+      "owns": ["Sources/PinesCore/Inference/RuntimeTypes.swift"],
+      "mustNotTouch": ["Pines/Runtime/MLXRuntimeBridge.swift"],
+      "requiredGates": ["pines-turboquant-control-plane-tests"],
+      "activationStatus": "contractOnly"
+    },
+    {
+      "id": "W24",
+      "wave": "wave-0",
+      "repo": "pines",
+      "branch": "tq/mode-fallback-contract",
+      "targetBranch": "codex/local-runtime-hardening",
+      "task": "Verify user modes and fallback contract hash semantics.",
+      "owns": ["TurboQuant user mode and fallback contract types/tests"],
+      "mustNotTouch": ["Pines/Runtime/MLXRuntimeBridge.swift"],
+      "requiredGates": ["pines-fallback-contract-tests"],
+      "activationStatus": "contractOnly"
+    },
+    {
+      "id": "W2",
+      "wave": "wave-1",
+      "repo": "mlx-swift",
+      "branch": "tq/core-validation-router",
+      "targetBranch": "codex/turboquant-core-completion",
+      "dependsOn": ["W1"],
+      "task": "Verify validators and router reject invalid layouts before Metal and choose budgeted fallback only when allowed.",
+      "owns": ["Source/MLX/TurboQuantValidation.swift", "Source/MLX/TurboQuantAttentionRouter.swift"],
+      "requiredGates": ["mlx-validation-router-tests"],
+      "activationStatus": "contractOnly"
+    },
+    {
+      "id": "W5",
+      "wave": "wave-1",
+      "repo": "mlx-swift-lm",
+      "branch": "tq/lm-cache-lifecycle",
+      "targetBranch": "codex/turboquant-completion-hardening",
+      "dependsOn": ["W4"],
+      "task": "Verify cache lifecycle, runtime snapshots, reset, fallback, and error propagation.",
+      "owns": ["Libraries/MLXLMCommon/TurboQuantKVCache.swift", "Libraries/MLXLMCommon/TurboQuantCacheRuntimeSnapshot.swift"],
+      "requiredGates": ["mlx-lm-cache-runtime-snapshot-tests"],
+      "activationStatus": "contractOnly"
+    },
+    {
+      "id": "W8",
+      "wave": "wave-1",
+      "repo": "pines",
+      "branch": "tq/pines-admission",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W7", "W24"],
+      "task": "Verify admission service, memory zones, and unsafe context rejection before generation.",
+      "owns": ["Local runtime admission service", "Runtime memory zones"],
+      "mustNotTouch": ["Pines/Runtime/MLXRuntimeBridge.swift"],
+      "requiredGates": ["pines-admission-tests"],
+      "activationStatus": "conservative"
+    },
+    {
+      "id": "W9",
+      "wave": "wave-1",
+      "repo": "pines",
+      "branch": "tq/pines-run-decision",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W7", "W8"],
+      "task": "Verify RunDecision ledger serialization, fallback reason, lifecycle, and bytes fields.",
+      "owns": ["TurboQuantRunDecision DTOs/tests"],
+      "mustNotTouch": ["Pines/Runtime/MLXRuntimeBridge.swift"],
+      "requiredGates": ["pines-run-decision-tests"],
+      "activationStatus": "conservative"
+    },
+    {
+      "id": "W10-skeleton",
+      "wave": "wave-1",
+      "repo": "pines",
+      "branch": "tq/pines-evidence-store",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W20", "W7"],
+      "task": "Verify ProfileEvidenceStore schema skeleton and versioned envelope.",
+      "owns": ["Profile evidence persistence skeleton"],
+      "requiredGates": ["pines-evidence-schema-tests"],
+      "activationStatus": "schemaOnly"
+    },
+    {
+      "id": "W22-skeleton",
+      "wave": "wave-1",
+      "repo": "mlx-swift-lm,pines",
+      "branch": "tq/quality-gates",
+      "targetBranch": "repo integration branch",
+      "dependsOn": ["W20"],
+      "task": "Verify QualityGate type and suite IDs.",
+      "owns": ["Quality gate DTOs/tests"],
+      "requiredGates": ["quality-schema-tests"],
+      "activationStatus": "schemaOnly"
+    },
+    {
+      "id": "W23-skeleton",
+      "wave": "wave-1",
+      "repo": "pines",
+      "branch": "tq/memory-calibration",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W8"],
+      "task": "Verify memory calibration sample schema.",
+      "owns": ["RuntimeMemoryCalibration DTOs/tests"],
+      "requiredGates": ["memory-calibration-schema-tests"],
+      "activationStatus": "schemaOnly"
+    },
+    {
+      "id": "INT-1",
+      "wave": "wave-2",
+      "repo": "pines",
+      "branch": "tq/integration-runtime-bridge",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W4", "W7", "W8", "W9"],
+      "task": "Wire admission before generation, typed error mapping, explicit route policy, and RunDecision metadata.",
+      "owns": ["Pines/Runtime/MLXRuntimeBridge.swift"],
+      "requiredGates": ["pines-turboquant-bridge-tests"],
+      "activationStatus": "conservative"
+    },
+    {
+      "id": "INT-2A",
+      "wave": "wave-2",
+      "repo": "pines",
+      "branch": "tq/integration-pin-mlx-validation",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["INT-1", "W1", "W4"],
+      "task": "Validate exact candidate MLX pair on a compatibility branch without production promotion.",
+      "owns": ["project.yml", "Package.resolved", "generated Xcode project", "pin validation docs"],
+      "requiredGates": ["pines-pin-validation"],
+      "activationStatus": "unverified"
+    },
+    {
+      "id": "W3",
+      "wave": "wave-3",
+      "repo": "mlx-swift",
+      "branch": "tq/core-benchmark-json",
+      "targetBranch": "codex/turboquant-core-completion",
+      "dependsOn": ["W1", "W2"],
+      "task": "Verify core benchmark JSON and hidden-copy audit.",
+      "owns": ["Source/MLX/TurboQuantBenchmarkReport.swift", "Source/TurboQuantBenchmark/main.swift", "benchmark hidden-copy docs/tests"],
+      "requiredGates": ["mlx-core-benchmark-json-tests"],
+      "activationStatus": "evidenceProducer"
+    },
+    {
+      "id": "W6",
+      "wave": "wave-3",
+      "repo": "mlx-swift-lm",
+      "branch": "tq/lm-profile-v2",
+      "targetBranch": "codex/turboquant-completion-hardening",
+      "dependsOn": ["W4"],
+      "task": "Verify model profile v2, exact tuple identity, mismatch reasons, and fallback fingerprints.",
+      "owns": ["Libraries/MLXLMCommon/TurboQuantProfiles.swift", "TurboQuantProfiles/*.json", "profile-v2 tests"],
+      "requiredGates": ["mlx-lm-profile-tests"],
+      "activationStatus": "evidenceProducer"
+    },
+    {
+      "id": "W10-full",
+      "wave": "wave-3",
+      "repo": "pines",
+      "branch": "tq/pines-evidence-store",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W10-skeleton", "W3"],
+      "task": "Verify benchmark importer, evidence lookup, and exact compatibility-pair binding.",
+      "owns": ["Profile evidence persistence importer/tests"],
+      "requiredGates": ["pines-wave3-evidence-tests"],
+      "activationStatus": "evidenceConsumer"
+    },
+    {
+      "id": "W22-full",
+      "wave": "wave-3",
+      "repo": "mlx-swift-lm,pines",
+      "branch": "tq/quality-gates",
+      "targetBranch": "repo integration branch",
+      "dependsOn": ["W22-skeleton", "W10-full"],
+      "task": "Verify full quality metrics, evidence levels, and Verified rejection for failed quality.",
+      "owns": ["quality gate harness/importer/tests"],
+      "requiredGates": ["quality-gate-tests"],
+      "activationStatus": "evidenceGate"
+    },
+    {
+      "id": "W23-full",
+      "wave": "wave-3",
+      "repo": "pines",
+      "branch": "tq/memory-calibration",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W23-skeleton", "INT-1"],
+      "task": "Verify planned-vs-actual memory samples, p95 multiplier, and no jetsam evidence.",
+      "owns": ["memory calibration persistence/tests"],
+      "requiredGates": ["memory-calibration-tests"],
+      "activationStatus": "evidenceGate"
+    },
+    {
+      "id": "W12",
+      "wave": "wave-3",
+      "repo": "pines",
+      "branch": "tq/pines-compatibility-ui",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W8", "W9", "W10-skeleton"],
+      "task": "Verify compatibility UI states never show Verified without evidence.",
+      "owns": ["compatibility UI and technical drawer"],
+      "requiredGates": ["compatibility-ui-tests"],
+      "activationStatus": "conservative"
+    },
+    {
+      "id": "REAL-DEVICE",
+      "wave": "wave-3",
+      "repo": "pines",
+      "branch": "tq/pines-device-acceptance-runner",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["INT-1", "W10-full", "W22-full", "W23-full"],
+      "task": "Capture and import exact physical iPhone real-model evidence tuple.",
+      "owns": ["scripts/diagnostics/run-ios-turboquant-bench.sh", "device evidence artifacts"],
+      "requiredGates": ["physical-ios-real-model-evidence"],
+      "activationStatus": "requiredForVerified"
+    },
+    {
+      "id": "INT-2B",
+      "wave": "wave-3.5",
+      "repo": "pines",
+      "branch": "tq/integration-pin-mlx-production",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["INT-2A", "REAL-DEVICE"],
+      "task": "Promote production pins only after green compatibility pair and exact tuple evidence.",
+      "owns": ["project.yml", "Package.resolved", "generated Xcode project", "docs/STATUS.md", "docs/TURBOQUANT.md", "compatibility-pair.json"],
+      "requiredGates": ["full-pines-validation", "release-green-policy"],
+      "activationStatus": "verifiedOnlyIfGreen"
+    },
+    {
+      "id": "W11",
+      "wave": "wave-4",
+      "repo": "pines",
+      "branch": "tq/context-memory-v1",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["INT-1", "W8"],
+      "task": "Verify full ContextAssemblyPlan.v1 and RunDecision observability.",
+      "owns": ["context memory planner"],
+      "requiredGates": ["context-memory-tests"],
+      "activationStatus": "conservative"
+    },
+    {
+      "id": "W14A",
+      "wave": "wave-4",
+      "repo": "mlx-swift-lm",
+      "branch": "tq/lm-kv-snapshots",
+      "targetBranch": "codex/turboquant-completion-hardening",
+      "dependsOn": ["W5"],
+      "task": "Verify LM KV snapshot export/import behind disabled/default-off flags.",
+      "owns": ["Libraries/MLXLMCommon/TurboQuantKVSnapshot.swift", "snapshot tests"],
+      "requiredGates": ["mlx-lm-snapshot-tests"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "W14B",
+      "wave": "wave-4",
+      "repo": "pines",
+      "branch": "tq/pines-kv-snapshots",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W14A", "W10-full", "W11"],
+      "task": "Verify encrypted local snapshot store remains fail-closed.",
+      "owns": ["Pines KV snapshot store and persistence"],
+      "requiredGates": ["pines-kv-snapshot-tests"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "W17",
+      "wave": "wave-4",
+      "repo": "pines",
+      "branch": "tq/snapshot-security",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W14B"],
+      "task": "Verify key rotation, atomic writes, quarantine, quota, and deletion hooks.",
+      "owns": ["snapshot security policy/tests"],
+      "requiredGates": ["snapshot-security-tests"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "IOS-LIFECYCLE",
+      "wave": "wave-4",
+      "repo": "pines",
+      "branch": "tq/ios-lifecycle-turboquant",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["INT-1"],
+      "task": "Verify memory pressure, thermal, suspend/resume, cancellation, and reset behavior.",
+      "owns": ["iOS lifecycle policy/tests"],
+      "requiredGates": ["ios-lifecycle-tests"],
+      "activationStatus": "conservative"
+    },
+    {
+      "id": "W13",
+      "wave": "wave-5",
+      "repo": "mlx-swift",
+      "branch": "tq/layout-v5-kernels",
+      "targetBranch": "codex/turboquant-core-completion",
+      "dependsOn": ["W3", "W22-full", "W23-full"],
+      "task": "Refine native affine K8/V4 kernels and Layout V5 behind quality and fallback gates.",
+      "owns": ["TurboQuant kernels", "Layout V5 implementation", "hidden-copy audit"],
+      "requiredGates": ["mlx-layout-v5-kernel-tests", "quality-gate-regression"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "V3-OPT",
+      "wave": "wave-5",
+      "repo": "mlx-swift-lm",
+      "branch": "tq/v3-optimized-evidence",
+      "targetBranch": "codex/turboquant-completion-hardening",
+      "dependsOn": ["W6", "W22-full"],
+      "task": "Promote-or-kill first/last layer K8/V4 plus middle V3 only after full matrix evidence.",
+      "owns": ["V3-optimized profiles", "V3 evidence artifacts"],
+      "requiredGates": ["v3-optimized-32k-64k-128k-quality-speed"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "SPARSE-V",
+      "wave": "wave-5",
+      "repo": "mlx-swift,mlx-swift-lm,pines",
+      "branch": "tq/sparse-v-evidence",
+      "targetBranch": "repo integration branch",
+      "dependsOn": ["W3", "W6", "W22-full"],
+      "task": "Evaluate Sparse-V as a K8/V4 overlay only; dense fallback rows do not count as Sparse-V wins.",
+      "owns": ["Sparse-V benchmark rows", "Sparse-V evidence importer fields"],
+      "requiredGates": ["sparse-v-real-model-quality-speed-fallback"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "HARNESS",
+      "wave": "wave-5",
+      "repo": "all",
+      "branch": "tq/turboquant-harness-normalization",
+      "targetBranch": "repo integration branch",
+      "dependsOn": ["W3", "W10-full"],
+      "task": "Normalize benchmark names, schema versions, artifacts, and promotion scripts.",
+      "owns": ["benchmark harness docs/scripts/tests"],
+      "requiredGates": ["harness-json-tests"],
+      "activationStatus": "evidenceHygiene"
+    },
+    {
+      "id": "W15A",
+      "wave": "wave-6",
+      "repo": "mlx-swift-lm",
+      "branch": "tq/lm-speculative",
+      "targetBranch": "codex/turboquant-completion-hardening",
+      "dependsOn": ["W14A"],
+      "task": "Verify speculative target verifier, rollback, and compressed-cache safety.",
+      "owns": ["Libraries/MLXLMCommon/TurboQuantSpeculative.swift", "speculative LM tests"],
+      "requiredGates": ["mlx-lm-speculative-tests"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "W15B",
+      "wave": "wave-6",
+      "repo": "pines",
+      "branch": "tq/pines-speculative",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W15A"],
+      "task": "Wire speculative product DTOs and telemetry behind disabled gates.",
+      "owns": ["Pines speculative DTOs, admission reserves, telemetry"],
+      "requiredGates": ["pines-speculative-tests"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "W29-core",
+      "wave": "wave-7",
+      "repo": "mlx-swift",
+      "branch": "tq/wave7-core-platform",
+      "targetBranch": "codex/turboquant-core-completion",
+      "dependsOn": ["W13"],
+      "task": "Expose core platform contracts for adaptive precision/open-KV while disabled by default.",
+      "owns": ["Source/MLX/TurboQuantPlatformPolicy.swift", "core platform tests"],
+      "requiredGates": ["mlx-wave7-platform-tests"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "W29-lm",
+      "wave": "wave-7",
+      "repo": "mlx-swift-lm",
+      "branch": "tq/wave7-lm-platform",
+      "targetBranch": "codex/turboquant-completion-hardening",
+      "dependsOn": ["W15A"],
+      "task": "Expose LM platform policy/open-KV identity contracts while disabled by default.",
+      "owns": ["Libraries/MLXLMCommon/TurboQuantPlatformPolicy.swift", "LM platform tests"],
+      "requiredGates": ["mlx-lm-wave7-platform-tests"],
+      "activationStatus": "disabledUntilVerified"
+    },
+    {
+      "id": "W29-pines",
+      "wave": "wave-7",
+      "repo": "pines",
+      "branch": "tq/wave7-platform-unlocks",
+      "targetBranch": "codex/local-runtime-hardening",
+      "dependsOn": ["W29-core", "W29-lm"],
+      "task": "Expose Pines platform gates, admission reserves, and evidence dimensions while disabled by default.",
+      "owns": ["Pines platform gates, evidence dimensions, policy tests"],
+      "requiredGates": ["pines-wave7-platform-tests"],
+      "activationStatus": "disabledUntilVerified"
+    }
+  ],
+  "gates": {
+    "compatibility-json": {
+      "repo": "pines",
+      "commands": [
+        "python3 -m json.tool docs/turboquant-implementation/compatibility-pair.json >/dev/null",
+        "python3 -m json.tool docs/turboquant-implementation/compatibility-pair.schema.json >/dev/null"
+      ]
+    },
+    "json-diff-check": {
+      "repo": "pines",
+      "commands": [
+        "git diff --check"
+      ]
+    },
+    "schema-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter CoreContractTests"
+      ]
+    },
+    "failure-contract-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuant"
+      ]
+    },
+    "release-green-policy": {
+      "repo": "pines",
+      "commands": [
+        "python3 scripts/diagnostics/turboquant-worker-plan.py --validate --compatibility"
+      ]
+    },
+    "mlx-core-contract-tests": {
+      "repo": "mlx-swift",
+      "commands": [
+        "swift test --filter TurboQuantContractsTests"
+      ]
+    },
+    "mlx-validation-router-tests": {
+      "repo": "mlx-swift",
+      "commands": [
+        "swift test --filter 'TurboQuantValidationTests|TurboQuantAttentionRouterTests'"
+      ]
+    },
+    "mlx-core-benchmark-json-tests": {
+      "repo": "mlx-swift",
+      "commands": [
+        "swift test --filter TurboQuantBenchmarkReportTests",
+        "swift run TurboQuantBenchmark --json"
+      ]
+    },
+    "mlx-layout-v5-kernel-tests": {
+      "repo": "mlx-swift",
+      "commands": [
+        "swift test --filter 'TurboQuantNativeAttentionTests|MLXFastKernelTests'"
+      ]
+    },
+    "mlx-wave7-platform-tests": {
+      "repo": "mlx-swift",
+      "commands": [
+        "swift test --filter TurboQuantWave7PlatformPolicyTests"
+      ]
+    },
+    "mlx-lm-turboquant-runtime-failure-tests": {
+      "repo": "mlx-swift-lm",
+      "commands": [
+        "swift test --filter TurboQuantRuntimeFailureTests"
+      ]
+    },
+    "mlx-lm-cache-runtime-snapshot-tests": {
+      "repo": "mlx-swift-lm",
+      "commands": [
+        "swift test --filter 'TurboQuantCacheRuntimeSnapshotTests|KVCacheTests'"
+      ]
+    },
+    "mlx-lm-profile-tests": {
+      "repo": "mlx-swift-lm",
+      "commands": [
+        "swift test --filter TurboQuantProfileTests"
+      ]
+    },
+    "mlx-lm-snapshot-tests": {
+      "repo": "mlx-swift-lm",
+      "commands": [
+        "swift test --filter TurboQuantKVSnapshotTests"
+      ]
+    },
+    "mlx-lm-speculative-tests": {
+      "repo": "mlx-swift-lm",
+      "commands": [
+        "swift test --filter TurboQuantSpeculativeTests"
+      ]
+    },
+    "mlx-lm-wave7-platform-tests": {
+      "repo": "mlx-swift-lm",
+      "commands": [
+        "swift test --filter TurboQuantWave7PlatformTests"
+      ]
+    },
+    "pines-turboquant-control-plane-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave1ControlPlaneTests"
+      ]
+    },
+    "pines-fallback-contract-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantFallbackContractTests"
+      ]
+    },
+    "pines-admission-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantAdmission"
+      ]
+    },
+    "pines-run-decision-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantRunDecision"
+      ]
+    },
+    "pines-evidence-schema-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave3EvidenceTests"
+      ]
+    },
+    "quality-schema-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave3EvidenceTests"
+      ]
+    },
+    "memory-calibration-schema-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave3EvidenceTests"
+      ]
+    },
+    "pines-turboquant-bridge-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuant"
+      ]
+    },
+    "pines-pin-validation": {
+      "repo": "pines",
+      "commands": [
+        "swift build --disable-automatic-resolution",
+        "swift test --disable-automatic-resolution",
+        "bash scripts/ci/check-mlx-package-pins.sh"
+      ]
+    },
+    "pines-wave3-evidence-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave3EvidenceTests"
+      ]
+    },
+    "quality-gate-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave3EvidenceTests"
+      ]
+    },
+    "memory-calibration-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave3EvidenceTests"
+      ]
+    },
+    "compatibility-ui-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave3EvidenceTests"
+      ]
+    },
+    "physical-ios-real-model-evidence": {
+      "repo": "pines",
+      "commands": [
+        "PINES_TQ_BENCH_FULL=1 bash scripts/diagnostics/run-ios-turboquant-bench.sh"
+      ]
+    },
+    "full-pines-validation": {
+      "repo": "pines",
+      "commands": [
+        "swift build --disable-automatic-resolution",
+        "swift test --disable-automatic-resolution",
+        "swift run --disable-automatic-resolution PinesCoreTestRunner",
+        "bash scripts/ci/xcodegen.sh generate",
+        "bash scripts/ci/run-xcode-validation.sh"
+      ]
+    },
+    "context-memory-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave4ContextMemoryTests"
+      ]
+    },
+    "pines-kv-snapshot-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantKVSnapshotStoreTests"
+      ]
+    },
+    "snapshot-security-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter SnapshotSecurityPolicyTests"
+      ]
+    },
+    "ios-lifecycle-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuant"
+      ]
+    },
+    "quality-gate-regression": {
+      "repo": "mlx-swift-lm",
+      "commands": [
+        "TQ_MODEL_DIR=/path/to/mlx-model scripts/run-turboquant-current-benchmarks.sh"
+      ]
+    },
+    "v3-optimized-32k-64k-128k-quality-speed": {
+      "repo": "mlx-swift-lm",
+      "commands": [
+        "TQ_MODEL_DIR=/path/to/mlx-model scripts/run-turboquant-v3-optimization.sh"
+      ]
+    },
+    "sparse-v-real-model-quality-speed-fallback": {
+      "repo": "mlx-swift-lm",
+      "commands": [
+        "TQ_MODEL_DIR=/path/to/mlx-model scripts/run-turboquant-current-benchmarks.sh"
+      ]
+    },
+    "harness-json-tests": {
+      "repo": "all",
+      "commands": [
+        "python3 scripts/diagnostics/turboquant-worker-plan.py --validate --compatibility"
+      ]
+    },
+    "pines-speculative-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave6SpeculativeTests"
+      ]
+    },
+    "pines-wave7-platform-tests": {
+      "repo": "pines",
+      "commands": [
+        "swift test --disable-automatic-resolution --filter TurboQuantWave7PlatformTests"
+      ]
+    }
+  }
+}
