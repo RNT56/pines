@@ -75,6 +75,7 @@
 		8BA43F9B205B9683A03F3CD4 /* PinesAppModel+Stress.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3E7E5D4E7D39C6BCD7C151 /* PinesAppModel+Stress.swift */; };
 		8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */; };
 		8EE7C1B1695A1BAB21575CBD /* TurboQuantBench in Frameworks */ = {isa = PBXBuildFile; productRef = 305F3BC6514E8EC117D944DC /* TurboQuantBench */; };
+		2D1ECE82A3124BFAB0351C2A /* IntegrationTestHelpers in Frameworks */ = {isa = PBXBuildFile; productRef = 2F8EB04F1AE7427396F5802B /* IntegrationTestHelpers */; };
 		9134D9CF0C70BA7DB70339E4 /* PinesAppModel+GeminiLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 315265784B0270582992F131 /* PinesAppModel+GeminiLifecycle.swift */; };
 		916D0E6D49689CBB887B01E9 /* AnthropicProviderLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 345C971C204F651BF0C727C6 /* AnthropicProviderLifecycleCoordinator.swift */; };
 		9176A0BA11ED09EDF478927E /* MLXCompatibleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21E4C4124C8DDDCA58BDB764 /* MLXCompatibleModels.swift */; };
@@ -92,6 +93,7 @@
 		B11DDE4F6B5FAC4D4C811660 /* BYOKCloudInferenceProvider+Payloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB2DDD7A0B86BB137BF397A /* BYOKCloudInferenceProvider+Payloads.swift */; };
 		B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8627F9808A76C0F0A91729 /* SettingsView.swift */; };
 		B3597D1896C704560D0BBA0F /* PinesTurboQuantBenchmarkDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6EEEEF241E72FF35E46A640 /* PinesTurboQuantBenchmarkDiagnostics.swift */; };
+		AAC0E4CBA8B142B19FE11346 /* PinesRealModelTurboQuantDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36F5DCF5913428696B87719 /* PinesRealModelTurboQuantDiagnostics.swift */; };
 		B7A642333FC08377576C9C3F /* PinesUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA70907A54EAB3A9DE13642D /* PinesUITests.swift */; };
 		B925E264EAB46D0C3EB6B307 /* PinesHubXetSupport in Frameworks */ = {isa = PBXBuildFile; productRef = F5BE958969B414C35418437A /* PinesHubXetSupport */; };
 		BAF84E40F21C59F00422283F /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 97ADD97B0749021A162048FE /* MLXNN */; };
@@ -267,6 +269,7 @@
 		C4BAE1B582D05CB5B511A886 /* EncryptedBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptedBlobStore.swift; sourceTree = "<group>"; };
 		C7E23600ED90D04F53D655F7 /* AnthropicProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicProviderService.swift; sourceTree = "<group>"; };
 		D6EEEEF241E72FF35E46A640 /* PinesTurboQuantBenchmarkDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesTurboQuantBenchmarkDiagnostics.swift; sourceTree = "<group>"; };
+		D36F5DCF5913428696B87719 /* PinesRealModelTurboQuantDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRealModelTurboQuantDiagnostics.swift; sourceTree = "<group>"; };
 		D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
 		D8CF846797DB3246FDC4FE5F /* SecurityResetCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityResetCoordinator.swift; sourceTree = "<group>"; };
 		DA300803A417F81AEA21D094 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -304,6 +307,7 @@
 				515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */,
 				E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */,
 				8EE7C1B1695A1BAB21575CBD /* TurboQuantBench in Frameworks */,
+				2D1ECE82A3124BFAB0351C2A /* IntegrationTestHelpers in Frameworks */,
 				C3A8E8F1D7ADC06A8E2EBA43 /* Tokenizers in Frameworks */,
 				74762C61D2E73B7909039286 /* GRDB in Frameworks */,
 				51F0003C051BEA5B35753F1D /* SQLCipher in Frameworks */,
@@ -607,6 +611,7 @@
 				77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */,
 				BD7A1C3BB2F375BB75558DEF /* PinesStressDiagnostics.swift */,
 				D6EEEEF241E72FF35E46A640 /* PinesTurboQuantBenchmarkDiagnostics.swift */,
+				D36F5DCF5913428696B87719 /* PinesRealModelTurboQuantDiagnostics.swift */,
 				42338086683D67DAAB5A0244 /* PinesUITestInferenceProvider.swift */,
 				4E14D0CA724B74DAE144184C /* PinesUITestLaunchConfiguration.swift */,
 			);
@@ -706,6 +711,7 @@
 				85E4D304B541EE6A90CEFD6F /* MLXEmbedders */,
 				9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */,
 				305F3BC6514E8EC117D944DC /* TurboQuantBench */,
+				2F8EB04F1AE7427396F5802B /* IntegrationTestHelpers */,
 				79248E6D82F6B41C4A99016B /* Tokenizers */,
 				7CB37824DF7BF3CFC294142D /* GRDB */,
 				47290C155F603BA3AA043C93 /* SQLCipher */,
@@ -937,6 +943,7 @@
 				FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */,
 				148670557457CDC793E77B74 /* PinesStressDiagnostics.swift in Sources */,
 				B3597D1896C704560D0BBA0F /* PinesTurboQuantBenchmarkDiagnostics.swift in Sources */,
+				AAC0E4CBA8B142B19FE11346 /* PinesRealModelTurboQuantDiagnostics.swift in Sources */,
 				5BEDAE409D8D0BE9350E4A92 /* PinesUITestInferenceProvider.swift in Sources */,
 				338E625EF11210ABD3D670AC /* PinesUITestLaunchConfiguration.swift in Sources */,
 				FF7A2AF24CE204653E49DD36 /* SecureKeyStore.swift in Sources */,
@@ -1486,6 +1493,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = TurboQuantBench;
+		};
+		2F8EB04F1AE7427396F5802B /* IntegrationTestHelpers */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = IntegrationTestHelpers;
 		};
 		392E0E75023B6010705E840E /* MLXLLM */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -84,6 +84,8 @@ targets:
         product: MLXLMCommon
       - package: MLXSwiftLM
         product: TurboQuantBench
+      - package: MLXSwiftLM
+        product: IntegrationTestHelpers
       - package: SwiftTransformers
         product: Tokenizers
       - package: GRDB
