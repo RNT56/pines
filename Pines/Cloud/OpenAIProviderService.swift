@@ -50,7 +50,12 @@ struct OpenAIProviderService {
     }
 
     func retrieveFileContent(_ fileID: String) async throws -> OpenAIProviderResponse {
-        try await rawJSON(method: .get, path: "files/\(fileID)/content")
+        try await send(
+            method: .get,
+            path: "files/\(fileID)/content",
+            accept: "application/octet-stream",
+            maxResponseBytes: BoundedHTTPResponse.fileLimit
+        )
     }
 
     func deleteFile(_ fileID: String) async throws -> OpenAIProviderResponse {
@@ -194,7 +199,12 @@ struct OpenAIProviderService {
     }
 
     func retrieveVideoContent(_ videoID: String) async throws -> OpenAIProviderResponse {
-        try await rawJSON(method: .get, path: "videos/\(videoID)/content")
+        try await send(
+            method: .get,
+            path: "videos/\(videoID)/content",
+            accept: "video/*",
+            maxResponseBytes: BoundedHTTPResponse.videoLimit
+        )
     }
 
     func listBatches(_ request: OpenAIBatchListRequest = OpenAIBatchListRequest()) async throws -> OpenAIProviderResponse {
@@ -214,7 +224,14 @@ struct OpenAIProviderService {
     }
 
     func createSpeech(body: JSONValue) async throws -> OpenAIProviderResponse {
-        try await rawJSON(method: .post, path: "audio/speech", body: body)
+        try await send(
+            method: .post,
+            path: "audio/speech",
+            body: try JSONEncoder().encode(body),
+            contentType: "application/json",
+            accept: "audio/*",
+            maxResponseBytes: BoundedHTTPResponse.fileLimit
+        )
     }
 
     func createTranscription(multipart: OpenAIMultipartForm) async throws -> OpenAIProviderResponse {
@@ -287,7 +304,9 @@ struct OpenAIProviderService {
         path: String,
         queryItems: [URLQueryItem] = [],
         body: Data? = nil,
-        contentType: String? = nil
+        contentType: String? = nil,
+        accept: String = "application/json",
+        maxResponseBytes: Int = BoundedHTTPResponse.jsonLimit
     ) async throws -> OpenAIProviderResponse {
         guard let apiKey = try await readAPIKey() else {
             throw CloudProviderError.missingAPIKey
@@ -297,14 +316,14 @@ struct OpenAIProviderService {
         request.httpMethod = method.rawValue
         request.httpBody = body
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.addValue("application/json", forHTTPHeaderField: "Accept")
+        request.addValue(accept, forHTTPHeaderField: "Accept")
         if let contentType {
             request.addValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         addOpenAIClientRequestID(to: &request)
         try await applyExtraHeaders(to: &request)
 
-        let (data, http) = try await urlSession.data(for: request)
+        let (data, http) = try await BoundedHTTPResponse.data(for: request, session: urlSession, maxBytes: maxResponseBytes)
         let providerResponse = OpenAIProviderResponse(data: data, httpResponse: http)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(

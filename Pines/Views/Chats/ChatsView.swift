@@ -14,6 +14,8 @@ struct ChatsView: View {
     @EnvironmentObject private var chatState: PinesChatState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedThreadID: PinesThreadPreview.ID?
+    @State private var projectBeingRenamed: PinesProjectPreview?
+    @State private var projectNameDraft = ""
 
     private var selectedThread: PinesThreadPreview? {
         guard let selectedThreadID = selectedThreadID ?? defaultThreadID else {
@@ -76,6 +78,27 @@ struct ChatsView: View {
                         }
                         .buttonStyle(.plain)
                         .pinesSidebarListRow()
+                        .contextMenu {
+                            Button {
+                                projectNameDraft = project.name
+                                projectBeingRenamed = project
+                            } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            Button {
+                                Task {
+                                    await appModel.setProjectVaultEnabled(!project.vaultEnabled, projectID: project.id, services: services)
+                                }
+                            } label: {
+                                Label(project.vaultEnabled ? "Disable Project Vault" : "Enable Project Vault", systemImage: "folder.badge.gearshape")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                Task { await appModel.deleteProject(project, services: services) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button {
                                 Task {
@@ -174,6 +197,10 @@ struct ChatsView: View {
                                 if let projectID = await appModel.createProject(services: services) {
                                     appModel.selectProject(projectID)
                                     selectedThreadID = nil
+                                    if let project = chatState.projects.first(where: { $0.id == projectID }) {
+                                        projectNameDraft = ""
+                                        projectBeingRenamed = project
+                                    }
                                 }
                             }
                         } label: {
@@ -216,6 +243,27 @@ struct ChatsView: View {
             }
         }
         .accessibilityIdentifier("pines.screen.chats")
+        .alert(
+            projectNameDraft.isEmpty ? "Name Project" : "Rename Project",
+            isPresented: Binding(
+                get: { projectBeingRenamed != nil },
+                set: { if !$0 { projectBeingRenamed = nil } }
+            )
+        ) {
+            TextField("Project name", text: $projectNameDraft)
+            Button("Cancel", role: .cancel) {
+                projectBeingRenamed = nil
+            }
+            Button("Save") {
+                guard let project = projectBeingRenamed else { return }
+                let name = projectNameDraft
+                projectBeingRenamed = nil
+                Task { await appModel.renameProject(project, name: name, services: services) }
+            }
+            .disabled(projectNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Project names can be up to 80 characters.")
+        }
     }
 
     private func selectDefaultThreadIfNeeded() {

@@ -139,7 +139,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             throw InferenceError.unsupportedCapability("Anthropic does not provide a native embedding API. Configure Voyage AI, OpenAI, Gemini, OpenRouter, or a local embedding model.")
         }
 
-        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+        let (data, response) = try await BoundedHTTPResponse.data(
+            for: urlRequest,
+            session: .shared,
+            maxBytes: BoundedHTTPResponse.jsonLimit
+        )
         let http = try Self.httpResponse(from: response)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(
@@ -232,7 +236,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
 
         try await applyExtraHeaders(to: &request)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: .shared,
+            maxBytes: BoundedHTTPResponse.jsonLimit
+        )
         let http = try Self.httpResponse(from: response)
         if (200..<300).contains(http.statusCode) {
             return ProviderValidationResult(
@@ -438,7 +446,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
 
         try await applyExtraHeaders(to: &request)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: .shared,
+            maxBytes: BoundedHTTPResponse.jsonLimit
+        )
         let http = try Self.httpResponse(from: response)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(

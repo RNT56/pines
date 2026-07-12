@@ -1,12 +1,12 @@
 # Implementation Status
 
-This repository is a working foundation for `pines`, not a signed App Store distribution yet. The current TurboQuant compatibility pair is non-green: local gates and exact-pin physical-device smoke pass, but that smoke is synthetic attention-shape evidence. The latest Mac real-model K8/Vx matrix shows dense K8/V4 passing current 32K/64K logit gates, while K8/V3 and K8/V2 still fail P95 max-logit-error gates. Native Sparse-V threshold/top-k/cumulative/hybrid modes are implemented but not promoted. Model/device/mode `Verified` and `Certified` claims remain gated on accepted real-device evidence.
+This repository is a working foundation for `pines`, not a signed App Store distribution yet. The current TurboQuant compatibility pair is non-green. Exact-pair physical-device synthetic smoke and a small Qwen 3.5 0.8B real-model comparison pass, but they do not satisfy the full acceptance matrix or constitute an imported product evidence tuple. Historical synthetic attention-shape and Mac real-model results belong to older or different tuples and are not promotion evidence for this pair. Native Sparse-V threshold/top-k/cumulative/hybrid modes are implemented but not promoted. Model/device/mode `Verified` and `Certified` claims remain gated on accepted exact-pair real-device evidence.
 
 ## Implemented
 
 - XcodeGen iOS app project.
 - Committed SwiftPM package lockfile for package/test dependency reproducibility.
-- SwiftUI app shell with Chats, Models, Vault, and Settings surfaces.
+- SwiftUI app shell with Chats, Models, Vault, Artifacts, and Settings surfaces, including named Project Spaces shared by Chats and Vault.
 - Boot mark shown before live service construction, with lazy app-service creation after first-frame yield.
 - Custom app icon assets.
 - Environment-driven design system with selectable templates and light/dark modes.
@@ -33,7 +33,7 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - Anthropic provider lifecycle workflows for Files, generated file download/import, prompt cache metrics, citations, thinking preservation, Message Batches, token counting, hosted tool metadata, and model capability rows.
 - Gemini provider lifecycle workflows for Files, context caches, token counting, Deep Research, Live sessions, generated media artifacts, batches, URL context metadata, Google Search grounding, and model capability rows.
 - Chat provenance surfaces for provider citations, hosted tool timelines, provider file references, request/message IDs, cache metrics, thinking mode, and generated artifacts.
-- Built-in calculator, time/date, attachment read, vault search/read, conversation search, Brave Search BYOK, web fetch, and WKWebView browser observe/action tools.
+- Built-in calculator, time/date, attachment read, vault search/read, conversation search, Brave Search BYOK, bounded public-network-only web fetch, and policy-gated WKWebView browser observe/action tools.
 - Vault file/PDF/image import pipeline with scoped file types, bounded source size/text extraction, OCR, chunking, and embedding invocation.
 - TurboQuant runtime profile defaults, requested/active backend diagnostics, Metal codec and compressed-attention availability diagnostics, compressed vault embedding storage, approximate vector search, and FP16 rerank path.
 - TurboQuant control-plane runtime: pre-generation admission, memory zones, mode-specific fallback contracts, typed local failure events, RunDecision metadata, calibration samples, compatibility-pair tracking, evidence import/revocation, quality gates, and compatibility UI states.
@@ -43,9 +43,10 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - Platform-unlock contracts for adaptive precision, semantic/multimodal/agent memory, open KV descriptors, device mesh, personalization/adapters, and release kill switches. These are disabled by default and require compatibility-pair plus evidence gates before product activation.
 - iOS runtime guardrails: memory/thermal adaptive profiles, compact 6 GB device defaults, memory-warning unload, bounded vector scans, batched vault embedding ingestion, foreground-only MLX execution, conservative background model-download network defaults, and recovered-download reconciliation.
 - Read-only runtime diagnostics and OSLog/MetricKit hooks for startup phases, generation speed, vault retrieval, and memory pressure.
-- CloudKit private database sync service for opt-in settings, conversations, vault chunks, and explicitly enabled embedding/code blobs.
+- Bidirectional CloudKit private-database sync for opt-in settings, Project Spaces, conversations/messages, Vault document metadata/chunks, tombstones, and explicitly enabled embedding/code blobs. Sync is triggered at launch, foreground activation, settings changes, and local content mutations.
 - Personal-team-safe default signing: generated Xcode builds omit iCloud entitlements and keep CloudKit runtime activation disabled unless a paid-team build overrides both iCloud settings.
-- MCP Streamable HTTP support for tools, resources, prompts, user-approved sampling, bearer tokens, OAuth PKCE, subscriptions, and safe resource previews.
+- MCP Streamable HTTP support for tools, resources, prompts, user-approved sampling, bearer tokens, OAuth PKCE, subscriptions, safe resource previews, and persisted MCP tool safety annotations. Unannotated tools conservatively default to remote-state-changing.
+- Bounded provider response ingestion for JSON, files, audio, batch results, generated media, and video so provider endpoints cannot allocate unbounded in-memory responses.
 - Settings persistence, cloud provider settings flow, MCP server settings, and audit event UI.
 - Cloud provider create/update-by-name, validation, model catalog refresh, default model selection, and deletion.
 - Chat stop and retry controls.
@@ -56,12 +57,14 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - OAuth startup guardrails avoid crashing when authentication is attempted without an active foreground window.
 - Service bootstrap logs/audits recoverable built-in tool registration and store initialization failures instead of silently discarding them.
 - App architecture cleanup that splits large files into app model types, GRDB CloudKit sync, design components, MCP payloads, model download support, Settings detail, Models components, and MLX model-family files.
+- Exact-pair signed physical-device TurboQuant app-host smoke on `iPhone16,2`, including native compressed-path diagnostics and an explicitly unverified synthetic evidence baseline.
 
 ## Not Complete
 
-- Real-device TurboQuant acceptance on the A16 through A19 Pro hardware matrix, including at least one imported model/device/mode evidence tuple before any `Verified` or `Certified` product claim.
+- Real-device TurboQuant acceptance on the A16 through A19 Pro hardware matrix, including stable multi-repeat real-model coverage and at least one imported model/device/mode evidence tuple before any `Verified` or `Certified` product claim.
 - Production UX hardening for regenerate controls, fuller provider editing, provider-hosted transfer progress/retry/cancellation, richer hosted-tool approvals, CloudKit conflict UI, and detailed model compatibility messaging.
 - Signed App Store archive/export, TestFlight/App Store upload automation, and final App Store Connect privacy review for the submitted binary.
+- The platform-aware, warning-free `mlx-swift` build-tool plugin and Apple-mobile JIT compatibility fix are pinned at `d378d85c114b38c0919d5f6f7a489528427cb23d`; cold iOS device and simulator builds must remain warning-free as part of release validation.
 - Remaining monolith candidates are semantic rather than mechanical: `PinesAppModel` still owns high-level orchestration, `SettingsDetailView` owns the full settings editor, and `ModelsViewComponents` owns model list/detail presentation. Split these further only alongside focused feature changes.
 
 ## Verification
@@ -82,4 +85,4 @@ For a direct generic iOS build:
 xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform=iOS' build
 ```
 
-The current TurboQuant compatibility pair has passing focused local gates and exact-pin iOS app-host smoke evidence, but it is still non-green until native backend performance, real-model-inference benchmark matrix, quality, memory, Sparse-V/lower-V fallback, and physical-device gates pass.
+The current TurboQuant compatibility pair remains non-green until its exact pins pass native backend performance, the full real-model-inference benchmark matrix, quality, memory, Sparse-V/lower-V fallback, and accepted physical-device gates. The focused 4K Qwen 3.5 0.8B run is smoke evidence, not matrix completion. Do not reuse historical evidence from another pin tuple.

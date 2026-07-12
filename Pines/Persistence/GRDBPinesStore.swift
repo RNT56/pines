@@ -56,6 +56,18 @@ actor GRDBPinesStore:
         runtimeMetrics.recordStartupPhase("store_seed", elapsedSeconds: Date().timeIntervalSince(seedStartedAt))
     }
 
+    #if DEBUG
+    static func makeTestingStore(at url: URL) throws -> GRDBPinesStore {
+        let database = try DatabasePool(path: url.path)
+        try migrator.migrate(database)
+        return GRDBPinesStore(database: database)
+    }
+
+    private init(database: DatabasePool) {
+        self.database = database
+    }
+    #endif
+
     private static func databaseURL(fileName: String) throws -> URL {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -142,7 +154,7 @@ actor GRDBPinesStore:
             try db.execute(sql: "ATTACH DATABASE ? AS plaintext KEY ''", arguments: [url.path])
             defer { try? db.execute(sql: "DETACH DATABASE plaintext") }
 
-            for table in plaintextMigrationTables {
+            for table in PinesDatabaseSchema.durableUserTableNames {
                 guard try tableExists(table, in: "main", db: db),
                       try tableExists(table, in: "plaintext", db: db)
                 else {
@@ -171,61 +183,6 @@ actor GRDBPinesStore:
         try removeDatabaseFiles(at: encryptedURL)
         try removeDatabaseSidecars(for: url)
     }
-
-    private static let plaintextMigrationTables = [
-        "conversations",
-        "messages",
-        "attachments",
-        "model_installs",
-        "vault_documents",
-        "vault_chunks",
-        "audit_events",
-        "app_settings",
-        "cloud_providers",
-        "model_downloads",
-        "sync_records",
-        "chat_runs",
-        "agent_sessions",
-        "tool_runs",
-        "vault_import_jobs",
-        "browser_actions",
-        "vault_embeddings",
-        "mcp_servers",
-        "mcp_tools",
-        "mcp_resources",
-        "mcp_resource_templates",
-        "mcp_prompts",
-        "vault_embeddings_v2",
-        "vault_embedding_profiles",
-        "vault_embedding_jobs",
-        "vault_retrieval_events",
-        "vault_embeddings_v3",
-        "openai_provider_files",
-        "openai_vector_stores",
-        "openai_vector_store_files",
-        "openai_hosted_tool_calls",
-        "openai_artifacts",
-        "openai_background_responses",
-        "openai_realtime_sessions",
-        "openai_batch_jobs",
-        "openai_structured_output_results",
-        "provider_files",
-        "provider_artifacts",
-        "provider_caches",
-        "provider_batches",
-        "provider_live_sessions",
-        "provider_structured_outputs",
-        "provider_model_capabilities",
-        "provider_research_runs",
-        "projects",
-        "kv_snapshot_manifest",
-        "kv_snapshot_blob",
-        "kv_snapshot_reference",
-        "kv_snapshot_restore_attempt",
-        "kv_snapshot_quarantine",
-    ]
-
-    private static let userResetTables = plaintextMigrationTables
 
     private static let criticalMigrationTables = [
         "conversations",
@@ -365,7 +322,7 @@ actor GRDBPinesStore:
             defer {
                 try? db.execute(sql: "PRAGMA foreign_keys = ON")
             }
-            for table in Self.userResetTables.reversed() {
+            for table in PinesDatabaseSchema.durableUserTableNames.reversed() {
                 guard try Self.tableExists(table, in: "main", db: db) else { continue }
                 try db.execute(sql: "DELETE FROM \(Self.quotedIdentifier(table))")
             }
@@ -447,8 +404,8 @@ actor GRDBPinesStore:
         try await database.write { db in
             try db.execute(
                 sql: """
-                INSERT INTO projects (id, name, vault_enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO projects (id, name, vault_enabled, created_at, updated_at, sync_state)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 arguments: [
                     record.id.uuidString,
@@ -456,6 +413,7 @@ actor GRDBPinesStore:
                     record.vaultEnabled ? 1 : 0,
                     record.createdAt.timeIntervalSinceReferenceDate,
                     record.updatedAt.timeIntervalSinceReferenceDate,
+                    SyncState.local.rawValue,
                 ]
             )
         }
@@ -465,8 +423,13 @@ actor GRDBPinesStore:
     func updateProjectName(_ name: String, projectID: UUID) async throws {
         try await database.write { db in
             try db.execute(
-                sql: "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
-                arguments: [name.trimmingCharacters(in: .whitespacesAndNewlines), Date().timeIntervalSinceReferenceDate, projectID.uuidString]
+                sql: "UPDATE projects SET name = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [
+                    name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    Date().timeIntervalSinceReferenceDate,
+                    SyncState.local.rawValue,
+                    projectID.uuidString,
+                ]
             )
         }
     }
@@ -474,8 +437,13 @@ actor GRDBPinesStore:
     func setProjectVaultEnabled(_ enabled: Bool, projectID: UUID) async throws {
         try await database.write { db in
             try db.execute(
-                sql: "UPDATE projects SET vault_enabled = ?, updated_at = ? WHERE id = ?",
-                arguments: [enabled ? 1 : 0, Date().timeIntervalSinceReferenceDate, projectID.uuidString]
+                sql: "UPDATE projects SET vault_enabled = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [
+                    enabled ? 1 : 0,
+                    Date().timeIntervalSinceReferenceDate,
+                    SyncState.local.rawValue,
+                    projectID.uuidString,
+                ]
             )
         }
     }
@@ -483,9 +451,18 @@ actor GRDBPinesStore:
     func deleteProject(id: UUID) async throws {
         try await database.write { db in
             let now = Date().timeIntervalSinceReferenceDate
-            try db.execute(sql: "UPDATE projects SET deleted_at = ?, updated_at = ? WHERE id = ?", arguments: [now, now, id.uuidString])
-            try db.execute(sql: "UPDATE conversations SET project_id = NULL, updated_at = ? WHERE project_id = ?", arguments: [now, id.uuidString])
-            try db.execute(sql: "UPDATE vault_documents SET project_id = NULL, updated_at = ? WHERE project_id = ?", arguments: [now, id.uuidString])
+            try db.execute(
+                sql: "UPDATE projects SET deleted_at = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [now, now, SyncState.local.rawValue, id.uuidString]
+            )
+            try db.execute(
+                sql: "UPDATE conversations SET project_id = NULL, updated_at = ?, sync_state = ? WHERE project_id = ?",
+                arguments: [now, SyncState.local.rawValue, id.uuidString]
+            )
+            try db.execute(
+                sql: "UPDATE vault_documents SET project_id = NULL, updated_at = ?, sync_state = ? WHERE project_id = ?",
+                arguments: [now, SyncState.local.rawValue, id.uuidString]
+            )
         }
     }
 

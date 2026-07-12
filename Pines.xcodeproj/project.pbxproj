@@ -12,6 +12,7 @@
 		045753D1E6D222CA73E8C829 /* PinesWatchSupport in Frameworks */ = {isa = PBXBuildFile; productRef = B3571EDBCC217B75591214B9 /* PinesWatchSupport */; };
 		05561527FE332CA5AB165CB6 /* MLXCompatibleModels+DeepseekV4.swift in Sources */ = {isa = PBXBuildFile; fileRef = 395137944039334A88058625 /* MLXCompatibleModels+DeepseekV4.swift */; };
 		06E6CA0D37D79C43E61B8FC6 /* PinesHuggingFaceBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A790E0D7CCFB1AF34B214B13 /* PinesHuggingFaceBridge.swift */; };
+		09D075532ED88BFF8A4F162A /* CloudKitSyncPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA094EF84EDF89325F7E0DAB /* CloudKitSyncPersistenceTests.swift */; };
 		0C1BF8B65DD7DDED5F10676A /* PinesLiveActivities.swift in Sources */ = {isa = PBXBuildFile; fileRef = E77223EE304350F39F109139 /* PinesLiveActivities.swift */; };
 		0D13A988324EF08D8E6AF29F /* ChatComposerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1D839DB999966A154DC8E7 /* ChatComposerBar.swift */; };
 		1081E1DAB330D3ED36C90BE5 /* ArtifactsWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C6FF18172BCCD1C796B34F4 /* ArtifactsWorkspaceView.swift */; };
@@ -31,7 +32,7 @@
 		2AA5EBBAD5AC8336B9F3DD0D /* HuggingFaceCredentialService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7C4EBAAC5E84277A718C17 /* HuggingFaceCredentialService.swift */; };
 		2B7347D3CA9E68EB3EBE327E /* PinesWatchSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 5B2EE41E8AC9FFB4D0356A8C /* PinesWatchSupport */; };
 		2CAAEFE65E1DD44DFDF11701 /* WatchChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58FC276317CB9F908EE2727B /* WatchChatViewModel.swift */; };
-		2CB5C82AECCDA02EF25BD4FF /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 79453BB5651564170C3A0B1C /* Markdown */; };
+		2CB5C82AECCDA02EF25BD4FF /* SQLCipher in Frameworks */ = {isa = PBXBuildFile; productRef = 47290C155F603BA3AA043C93 /* SQLCipher */; };
 		2D09CE6C392BBD594E95F249 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = D09EC77F4F444343B14A238C /* PinesCore */; };
 		2DC7F4355DC8D047D2D5460C /* PinesAppModelTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */; };
 		30026D20DA004DF5A0C2BE13 /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */; };
@@ -43,9 +44,10 @@
 		45E76EAAE862C883439A1A7E /* SettingsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413251F8572CA2D6F3D0BD30 /* SettingsDetailView.swift */; };
 		47623D156F0438C9C37D545F /* OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3707ADF58DFE724BF12B2B2F /* OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift */; };
 		4A8B7ADED7E800D30BC296A1 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 2F62656B16557CFACC3CBFF7 /* PinesCore */; };
+		4DF47F98AF7E14D4A934D9D7 /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 907CAD8C8D83C6A5B614EB5A /* HighlightSwift */; };
 		51178ED2596CD94C977B39BF /* GeminiProviderRecordMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB652D0FDD899D4E676252F1 /* GeminiProviderRecordMapper.swift */; };
 		515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = 85E4D304B541EE6A90CEFD6F /* MLXEmbedders */; };
-		51F0003C051BEA5B35753F1D /* SQLCipher in Frameworks */ = {isa = PBXBuildFile; productRef = 47290C155F603BA3AA043C93 /* SQLCipher */; };
+		51F0003C051BEA5B35753F1D /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 7CB37824DF7BF3CFC294142D /* GRDB */; };
 		52B797063FB95D83A2D63E7A /* PinesAppModel+MCP.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE279F766D8B0CC93D1D150 /* PinesAppModel+MCP.swift */; };
 		55937CA552490AEA6ED46131 /* PinesDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45C618F4FAB69FDDE0FC788B /* PinesDesignSystem.swift */; };
 		560B1F88E54F9B6F3B855960 /* PinesAppModel+DeepResearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A13BF92952B097508CCADE95 /* PinesAppModel+DeepResearch.swift */; };
@@ -60,10 +62,12 @@
 		62BBB7D1AE85A01EA319E717 /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 94F08BBEEA508DB04384B5C9 /* MLX */; };
 		65F15CA6905766AC2C4C0280 /* GeminiProviderLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A91B81E9B245D2A619AC483 /* GeminiProviderLifecycleCoordinator.swift */; };
 		667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 443F2B0190673A086D3CEEE0 /* CloudKitSyncService.swift */; };
+		686B47B0D035141554B0F573 /* BoundedHTTPResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D033C19E3D30C55472B9C0 /* BoundedHTTPResponse.swift */; };
 		69BDBCFF81EA56913B793189 /* VaultIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A46B185F9ED03D5646D6C7C /* VaultIngestionService.swift */; };
 		6F2B60A874B79E3B73C27624 /* CloudProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */; };
 		719221FCF6C2534E106E242F /* PinesAppModel+AnthropicLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA6B8F14EBFB0EBF412BB1E7 /* PinesAppModel+AnthropicLifecycle.swift */; };
-		74762C61D2E73B7909039286 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 7CB37824DF7BF3CFC294142D /* GRDB */; };
+		72E9FD20785D66F46A2E07C4 /* BoundedHTTPResponseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E146838846B476DD76171BB2 /* BoundedHTTPResponseTests.swift */; };
+		74762C61D2E73B7909039286 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 79248E6D82F6B41C4A99016B /* Tokenizers */; };
 		75BAD67E75A276A731EF918B /* PinesLiveActivities.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2EC8BB0262D2F49A7518608A /* PinesLiveActivities.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		78A1D2B0783CF04BAE99BC62 /* WatchTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC95D2DA4ED0AE5A971C6BA3 /* WatchTranscriptView.swift */; };
 		79BE7BF0C5BD5EE6979AD3B9 /* VaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CFBB6BB9E0574B8AA20150 /* VaultView.swift */; };
@@ -75,7 +79,6 @@
 		8BA43F9B205B9683A03F3CD4 /* PinesAppModel+Stress.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3E7E5D4E7D39C6BCD7C151 /* PinesAppModel+Stress.swift */; };
 		8C35F8BC0A4CD94236F66F46 /* GRDBPinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5852E9A0AF3A4AC3314E5A48 /* GRDBPinesStore.swift */; };
 		8EE7C1B1695A1BAB21575CBD /* TurboQuantBench in Frameworks */ = {isa = PBXBuildFile; productRef = 305F3BC6514E8EC117D944DC /* TurboQuantBench */; };
-		2D1ECE82A3124BFAB0351C2A /* IntegrationTestHelpers in Frameworks */ = {isa = PBXBuildFile; productRef = 2F8EB04F1AE7427396F5802B /* IntegrationTestHelpers */; };
 		9134D9CF0C70BA7DB70339E4 /* PinesAppModel+GeminiLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 315265784B0270582992F131 /* PinesAppModel+GeminiLifecycle.swift */; };
 		916D0E6D49689CBB887B01E9 /* AnthropicProviderLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 345C971C204F651BF0C727C6 /* AnthropicProviderLifecycleCoordinator.swift */; };
 		9176A0BA11ED09EDF478927E /* MLXCompatibleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21E4C4124C8DDDCA58BDB764 /* MLXCompatibleModels.swift */; };
@@ -93,16 +96,16 @@
 		B11DDE4F6B5FAC4D4C811660 /* BYOKCloudInferenceProvider+Payloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB2DDD7A0B86BB137BF397A /* BYOKCloudInferenceProvider+Payloads.swift */; };
 		B3575B225F8E3FB7D77E8244 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8627F9808A76C0F0A91729 /* SettingsView.swift */; };
 		B3597D1896C704560D0BBA0F /* PinesTurboQuantBenchmarkDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6EEEEF241E72FF35E46A640 /* PinesTurboQuantBenchmarkDiagnostics.swift */; };
-		AAC0E4CBA8B142B19FE11346 /* PinesRealModelTurboQuantDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36F5DCF5913428696B87719 /* PinesRealModelTurboQuantDiagnostics.swift */; };
+		B4A9D4F14838316236688468 /* PinesRealModelTurboQuantDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B116CBC0CC3896287D3E1057 /* PinesRealModelTurboQuantDiagnostics.swift */; };
 		B7A642333FC08377576C9C3F /* PinesUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA70907A54EAB3A9DE13642D /* PinesUITests.swift */; };
 		B925E264EAB46D0C3EB6B307 /* PinesHubXetSupport in Frameworks */ = {isa = PBXBuildFile; productRef = F5BE958969B414C35418437A /* PinesHubXetSupport */; };
 		BAF84E40F21C59F00422283F /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 97ADD97B0749021A162048FE /* MLXNN */; };
 		BDB1CA0CE1D6AA812EC96D4F /* ArtifactsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7FFC4A75A71DA8C323BB59 /* ArtifactsModels.swift */; };
 		C01E6498FFFBC564A01F56AB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3777534B3E27910D84F4EA38 /* Assets.xcassets */; };
 		C05BF46FDF47D9D3C4831915 /* PinesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82DE8010D019802F630AAF0B /* PinesApp.swift */; };
-		C3A8E8F1D7ADC06A8E2EBA43 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 79248E6D82F6B41C4A99016B /* Tokenizers */; };
+		C3A8E8F1D7ADC06A8E2EBA43 /* IntegrationTestHelpers in Frameworks */ = {isa = PBXBuildFile; productRef = F50C2AD7C5C2184FDACA7F8F /* IntegrationTestHelpers */; };
 		C411EB6B042D0FE7426C58C8 /* WatchChatOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41ED12D2A8BE4F962735AC89 /* WatchChatOrchestrator.swift */; };
-		C4814779056C5C74CF21DC17 /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 907CAD8C8D83C6A5B614EB5A /* HighlightSwift */; };
+		C4814779056C5C74CF21DC17 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 79453BB5651564170C3A0B1C /* Markdown */; };
 		C7D06A852855C5632281E2CC /* AgentToolExecutionContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A85F05A80784C10515CC86 /* AgentToolExecutionContext.swift */; };
 		CA648B545AEC6D84C2D29D05 /* GeminiProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4AAEA18A8AFE76C3844F9A /* GeminiProviderService.swift */; };
 		D05C11A3E3EC13F54A914388 /* PinesAppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */; };
@@ -110,6 +113,7 @@
 		E191E6521ACC7C2B72C01C04 /* PinesAppModel+Artifacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B838038B4F8ACF52E8F8EB /* PinesAppModel+Artifacts.swift */; };
 		E30D2CC16F579D56D14DA498 /* CoreSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 989263AE706043656C31B580 /* CoreSurfaceTests.swift */; };
 		E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */; };
+		E6389B1E94D595D33725A8AC /* MCPToolAnnotationPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DCE6D93751290B9E24557E6 /* MCPToolAnnotationPersistenceTests.swift */; };
 		E64DF5CED9F4BECBE5446731 /* ModelDownloadLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EB6A8EFD9FE940BEFE80119 /* ModelDownloadLiveActivityController.swift */; };
 		E84F98A01F4A541B478C8D0D /* PinesAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */; };
 		E96F244C6E13B6BBAD411CE0 /* WKWebViewBrowserRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */; };
@@ -184,6 +188,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		01D033C19E3D30C55472B9C0 /* BoundedHTTPResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedHTTPResponse.swift; sourceTree = "<group>"; };
 		07A85F05A80784C10515CC86 /* AgentToolExecutionContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentToolExecutionContext.swift; sourceTree = "<group>"; };
 		095ED637BD4CD7B01DBD9F9C /* PinesRefreshRateSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRefreshRateSupport.swift; sourceTree = "<group>"; };
 		0C4E64D9B871AFF6B0734926 /* PinesDesignComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesDesignComponents.swift; sourceTree = "<group>"; };
@@ -219,6 +224,7 @@
 		46107CC67D229C2D05C33A59 /* VaultEmbeddingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultEmbeddingService.swift; sourceTree = "<group>"; };
 		48D656408D8E64E0D6C5E6E4 /* WKWebViewBrowserRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WKWebViewBrowserRuntime.swift; sourceTree = "<group>"; };
 		4A168FBE9051A1A21DB0BC6D /* CloudProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProviderService.swift; sourceTree = "<group>"; };
+		4DCE6D93751290B9E24557E6 /* MCPToolAnnotationPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPToolAnnotationPersistenceTests.swift; sourceTree = "<group>"; };
 		4E14D0CA724B74DAE144184C /* PinesUITestLaunchConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesUITestLaunchConfiguration.swift; sourceTree = "<group>"; };
 		500C1CF070133DCF6885979F /* ModelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsView.swift; sourceTree = "<group>"; };
 		5111BF39FD0BF9D28CDB406D /* OpenAIProviderLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProviderLifecycleCoordinator.swift; sourceTree = "<group>"; };
@@ -262,14 +268,15 @@
 		AE7FFC4A75A71DA8C323BB59 /* ArtifactsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactsModels.swift; sourceTree = "<group>"; };
 		AEC56EEE76C86B70FF02D9AF /* GRDBPinesStore+Mapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GRDBPinesStore+Mapping.swift"; sourceTree = "<group>"; };
 		AFD48FE443E1A98AEBADCBA8 /* PinesRuntimeMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRuntimeMetrics.swift; sourceTree = "<group>"; };
+		B116CBC0CC3896287D3E1057 /* PinesRealModelTurboQuantDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRealModelTurboQuantDiagnostics.swift; sourceTree = "<group>"; };
 		B69F0B4F374441712F7227A1 /* OpenAIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProviderService.swift; sourceTree = "<group>"; };
 		BD4AAEA18A8AFE76C3844F9A /* GeminiProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiProviderService.swift; sourceTree = "<group>"; };
 		BD7A1C3BB2F375BB75558DEF /* PinesStressDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesStressDiagnostics.swift; sourceTree = "<group>"; };
 		C3AF10F5840703BD49A8DE11 /* WatchRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRootView.swift; sourceTree = "<group>"; };
 		C4BAE1B582D05CB5B511A886 /* EncryptedBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptedBlobStore.swift; sourceTree = "<group>"; };
 		C7E23600ED90D04F53D655F7 /* AnthropicProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicProviderService.swift; sourceTree = "<group>"; };
+		CA094EF84EDF89325F7E0DAB /* CloudKitSyncPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitSyncPersistenceTests.swift; sourceTree = "<group>"; };
 		D6EEEEF241E72FF35E46A640 /* PinesTurboQuantBenchmarkDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesTurboQuantBenchmarkDiagnostics.swift; sourceTree = "<group>"; };
-		D36F5DCF5913428696B87719 /* PinesRealModelTurboQuantDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesRealModelTurboQuantDiagnostics.swift; sourceTree = "<group>"; };
 		D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
 		D8CF846797DB3246FDC4FE5F /* SecurityResetCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityResetCoordinator.swift; sourceTree = "<group>"; };
 		DA300803A417F81AEA21D094 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -281,6 +288,7 @@
 		DC9FA9E25B03EF1B185466EA /* MLXCompatibleModels+Llama4.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MLXCompatibleModels+Llama4.swift"; sourceTree = "<group>"; };
 		DD3E7E5D4E7D39C6BCD7C151 /* PinesAppModel+Stress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+Stress.swift"; sourceTree = "<group>"; };
 		DECDDBBF2E84B8CD8C5F6740 /* PinesUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PinesUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E146838846B476DD76171BB2 /* BoundedHTTPResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedHTTPResponseTests.swift; sourceTree = "<group>"; };
 		E192242783074E1BD4EDE4BD /* PinesManagedCloudService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesManagedCloudService.swift; sourceTree = "<group>"; };
 		E77223EE304350F39F109139 /* PinesLiveActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesLiveActivities.swift; sourceTree = "<group>"; };
 		EC9029C3E05E1BBB57A57451 /* MLXRuntimeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLXRuntimeBridge.swift; sourceTree = "<group>"; };
@@ -307,12 +315,12 @@
 				515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */,
 				E3A57273D77B9C0AB688FDC5 /* MLXLMCommon in Frameworks */,
 				8EE7C1B1695A1BAB21575CBD /* TurboQuantBench in Frameworks */,
-				2D1ECE82A3124BFAB0351C2A /* IntegrationTestHelpers in Frameworks */,
-				C3A8E8F1D7ADC06A8E2EBA43 /* Tokenizers in Frameworks */,
-				74762C61D2E73B7909039286 /* GRDB in Frameworks */,
-				51F0003C051BEA5B35753F1D /* SQLCipher in Frameworks */,
-				2CB5C82AECCDA02EF25BD4FF /* Markdown in Frameworks */,
-				C4814779056C5C74CF21DC17 /* HighlightSwift in Frameworks */,
+				C3A8E8F1D7ADC06A8E2EBA43 /* IntegrationTestHelpers in Frameworks */,
+				74762C61D2E73B7909039286 /* Tokenizers in Frameworks */,
+				51F0003C051BEA5B35753F1D /* GRDB in Frameworks */,
+				2CB5C82AECCDA02EF25BD4FF /* SQLCipher in Frameworks */,
+				C4814779056C5C74CF21DC17 /* Markdown in Frameworks */,
+				4DF47F98AF7E14D4A934D9D7 /* HighlightSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -401,7 +409,10 @@
 		285BEA30994142C0C5392A14 /* PinesTests */ = {
 			isa = PBXGroup;
 			children = (
+				E146838846B476DD76171BB2 /* BoundedHTTPResponseTests.swift */,
+				CA094EF84EDF89325F7E0DAB /* CloudKitSyncPersistenceTests.swift */,
 				989263AE706043656C31B580 /* CoreSurfaceTests.swift */,
+				4DCE6D93751290B9E24557E6 /* MCPToolAnnotationPersistenceTests.swift */,
 				FF525EBBEA1C9D3330E352F3 /* MLXTurboQuantRuntimeSmokeTests.swift */,
 			);
 			path = PinesTests;
@@ -608,10 +619,10 @@
 				0FA547644EE942BA65EC006C /* PinesAppModelTypes.swift */,
 				DC8CFAC4EBF64683D47B94C8 /* PinesAppServices.swift */,
 				95F1CE8B2C5E53DB9848C8C0 /* PinesAppState.swift */,
+				B116CBC0CC3896287D3E1057 /* PinesRealModelTurboQuantDiagnostics.swift */,
 				77F94D4259A69BFDBBD41FF0 /* PinesRootView.swift */,
 				BD7A1C3BB2F375BB75558DEF /* PinesStressDiagnostics.swift */,
 				D6EEEEF241E72FF35E46A640 /* PinesTurboQuantBenchmarkDiagnostics.swift */,
-				D36F5DCF5913428696B87719 /* PinesRealModelTurboQuantDiagnostics.swift */,
 				42338086683D67DAAB5A0244 /* PinesUITestInferenceProvider.swift */,
 				4E14D0CA724B74DAE144184C /* PinesUITestLaunchConfiguration.swift */,
 			);
@@ -624,6 +635,7 @@
 				345C971C204F651BF0C727C6 /* AnthropicProviderLifecycleCoordinator.swift */,
 				3E48CEB7F9E4EE2A4D9522F2 /* AnthropicProviderRecordMapper.swift */,
 				C7E23600ED90D04F53D655F7 /* AnthropicProviderService.swift */,
+				01D033C19E3D30C55472B9C0 /* BoundedHTTPResponse.swift */,
 				7876C27DBEB1176B0EE562EE /* BYOKCloudInferenceProvider.swift */,
 				5EB2DDD7A0B86BB137BF397A /* BYOKCloudInferenceProvider+Payloads.swift */,
 				ABBC1146085E67B1969B3C24 /* CloudKitRecordCipher.swift */,
@@ -711,7 +723,7 @@
 				85E4D304B541EE6A90CEFD6F /* MLXEmbedders */,
 				9F1B5A4B5304A83C6935F6CA /* MLXLMCommon */,
 				305F3BC6514E8EC117D944DC /* TurboQuantBench */,
-				2F8EB04F1AE7427396F5802B /* IntegrationTestHelpers */,
+				F50C2AD7C5C2184FDACA7F8F /* IntegrationTestHelpers */,
 				79248E6D82F6B41C4A99016B /* Tokenizers */,
 				7CB37824DF7BF3CFC294142D /* GRDB */,
 				47290C155F603BA3AA043C93 /* SQLCipher */,
@@ -879,6 +891,7 @@
 				1081E1DAB330D3ED36C90BE5 /* ArtifactsWorkspaceView.swift in Sources */,
 				B11DDE4F6B5FAC4D4C811660 /* BYOKCloudInferenceProvider+Payloads.swift in Sources */,
 				5A73B2F9FA959A8D2A6173EF /* BYOKCloudInferenceProvider.swift in Sources */,
+				686B47B0D035141554B0F573 /* BoundedHTTPResponse.swift in Sources */,
 				EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */,
 				0D13A988324EF08D8E6AF29F /* ChatComposerBar.swift in Sources */,
 				39CF2E229241A26056922251 /* ChatsView.swift in Sources */,
@@ -938,12 +951,12 @@
 				06E6CA0D37D79C43E61B8FC6 /* PinesHuggingFaceBridge.swift in Sources */,
 				38B759D4F9C428922E0CBE72 /* PinesManagedCloudService.swift in Sources */,
 				1280CC834227C905E3AD4423 /* PinesProEntitlementService.swift in Sources */,
+				B4A9D4F14838316236688468 /* PinesRealModelTurboQuantDiagnostics.swift in Sources */,
 				87777CD59861247F27DE9C34 /* PinesRefreshRateSupport.swift in Sources */,
 				57E5FA454DA9641889315B34 /* PinesRootView.swift in Sources */,
 				FD22B64E74B250E347D6A567 /* PinesRuntimeMetrics.swift in Sources */,
 				148670557457CDC793E77B74 /* PinesStressDiagnostics.swift in Sources */,
 				B3597D1896C704560D0BBA0F /* PinesTurboQuantBenchmarkDiagnostics.swift in Sources */,
-				AAC0E4CBA8B142B19FE11346 /* PinesRealModelTurboQuantDiagnostics.swift in Sources */,
 				5BEDAE409D8D0BE9350E4A92 /* PinesUITestInferenceProvider.swift in Sources */,
 				338E625EF11210ABD3D670AC /* PinesUITestLaunchConfiguration.swift in Sources */,
 				FF7A2AF24CE204653E49DD36 /* SecureKeyStore.swift in Sources */,
@@ -971,7 +984,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				72E9FD20785D66F46A2E07C4 /* BoundedHTTPResponseTests.swift in Sources */,
+				09D075532ED88BFF8A4F162A /* CloudKitSyncPersistenceTests.swift in Sources */,
 				E30D2CC16F579D56D14DA498 /* CoreSurfaceTests.swift in Sources */,
+				E6389B1E94D595D33725A8AC /* MCPToolAnnotationPersistenceTests.swift in Sources */,
 				9CAF8AA54EE5B61702B8103C /* MLXTurboQuantRuntimeSmokeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1455,7 +1471,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift";
 			requirement = {
 				kind = revision;
-				revision = 609e8333671419ee1dbe928eeee7f48a24682631;
+				revision = d378d85c114b38c0919d5f6f7a489528427cb23d;
 			};
 		};
 		A43A495519F824800780FBF4 /* XCRemoteSwiftPackageReference "SQLCipher.swift" */ = {
@@ -1471,7 +1487,7 @@
 			repositoryURL = "https://github.com/RNT56/mlx-swift-lm";
 			requirement = {
 				kind = revision;
-				revision = 725add5dd15ef6c1c01073ce9f81412957fa5c6d;
+				revision = 1ab388ff78eaa572b2eb9de2b330d218818b3920;
 			};
 		};
 		ED47E05C90C98D4D028DE9BB /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
@@ -1493,11 +1509,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = TurboQuantBench;
-		};
-		2F8EB04F1AE7427396F5802B /* IntegrationTestHelpers */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
-			productName = IntegrationTestHelpers;
 		};
 		392E0E75023B6010705E840E /* MLXLLM */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1565,6 +1576,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXVLM;
+		};
+		F50C2AD7C5C2184FDACA7F8F /* IntegrationTestHelpers */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E269A44A2AF006274BF5A1DD /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = IntegrationTestHelpers;
 		};
 		F5BE958969B414C35418437A /* PinesHubXetSupport */ = {
 			isa = XCSwiftPackageProductDependency;

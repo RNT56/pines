@@ -169,8 +169,8 @@ final class MLXTurboQuantRuntimeSmokeTests: XCTestCase {
             if !expectedProfileID.contains("-a3b") {
                 XCTAssertEqual(profile.recommendedScheme, .turbo8)
                 XCTAssertEqual(profile.recommendedScheme.preset, .turbo8)
-                XCTAssertEqual(profile.valueBits, 8)
-                XCTAssertEqual(profile.optimizationPolicy, .conservative)
+                XCTAssertEqual(profile.valueBits, 4)
+                XCTAssertEqual(profile.optimizationPolicy, .preferThroughput)
             }
         }
 

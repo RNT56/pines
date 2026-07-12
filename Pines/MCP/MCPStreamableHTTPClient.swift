@@ -247,7 +247,7 @@ final class MCPStreamableHTTPClient: Sendable {
         request.httpMethod = "DELETE"
         await applyBaseHeaders(to: &request)
         do {
-            _ = try await urlSession.data(for: request)
+            _ = try await BoundedHTTPResponse.data(for: request, session: urlSession, maxBytes: 64 * 1024)
         } catch {
             mcpTransportLogger.warning("mcp_session_terminate_failed server=\(server.id.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
         }
@@ -348,7 +348,7 @@ final class MCPStreamableHTTPClient: Sendable {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try await applyAuthHeader(to: &request, server: server)
         await applyBaseHeaders(to: &request)
-        let (_, http) = try await urlSession.data(for: request)
+        let (_, http) = try await BoundedHTTPResponse.data(for: request, session: urlSession, maxBytes: 1024 * 1024)
         guard (200..<300).contains(http.statusCode) else {
             throw MCPTransportError.invalidHTTPResponse
         }
@@ -399,7 +399,7 @@ final class MCPStreamableHTTPClient: Sendable {
         try await applyAuthHeader(to: &request, server: server, forceOAuthRefresh: forceOAuthRefresh)
         await applyBaseHeaders(to: &request)
 
-        let (data, http) = try await urlSession.data(for: request)
+        let (data, http) = try await BoundedHTTPResponse.data(for: request, session: urlSession, maxBytes: 8 * 1024 * 1024)
         if let headerSessionID = http.value(forHTTPHeaderField: "Mcp-Session-Id"), !headerSessionID.isEmpty {
             await state.setSessionID(headerSessionID)
         }
@@ -483,7 +483,7 @@ final class MCPStreamableHTTPClient: Sendable {
             .map { "\($0.key.mcpStreamURLFormEncoded)=\($0.value.mcpStreamURLFormEncoded)" }
             .joined(separator: "&")
             .data(using: .utf8)
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await BoundedHTTPResponse.data(for: request, session: urlSession, maxBytes: 1024 * 1024)
         guard (200..<300).contains(response.statusCode) else {
             return nil
         }

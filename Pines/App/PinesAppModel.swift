@@ -572,6 +572,8 @@ final class PinesAppModel: ObservableObject {
     private var didLoadStartupState = false
     private var isBootstrapping = false
     private var bootstrapBackgroundTask: Task<Void, Never>?
+    private var cloudKitSyncTask: Task<Void, Never>?
+    private var isCloudKitSyncing = false
     private var didStartMCPServers = false
     private var shouldEnrichRuntimeModelPreviews = false
     private var needsCloudModelCatalogRefresh = false
@@ -591,6 +593,44 @@ final class PinesAppModel: ObservableObject {
     private var modelSearchRequestID: UUID?
     private var modelSearchMetadataTask: Task<Void, Never>?
     private var modelSearchMetadataEnrichmentID: UUID?
+
+    func scheduleCloudKitSync(
+        services: PinesAppServices,
+        reason: String,
+        delaySeconds: TimeInterval = 1.5
+    ) {
+        guard storeConfiguration.iCloudSyncEnabled, services.cloudKitSyncService != nil else { return }
+        cloudKitSyncTask?.cancel()
+        cloudKitSyncTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(max(0, delaySeconds)))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.cloudKitSyncTask = nil
+            await self.syncCloudKitNow(services: services, reason: reason)
+        }
+    }
+
+    func syncCloudKitNow(services: PinesAppServices, reason: String) async {
+        guard storeConfiguration.iCloudSyncEnabled,
+              let syncService = services.cloudKitSyncService
+        else { return }
+        guard !isCloudKitSyncing else {
+            scheduleCloudKitSync(services: services, reason: "\(reason)_retry", delaySeconds: 2)
+            return
+        }
+
+        isCloudKitSyncing = true
+        defer { isCloudKitSyncing = false }
+        do {
+            try await syncService.syncNow()
+            await refreshAll(services: services)
+        } catch {
+            recordRecoverableIssue("cloudkit.sync.\(reason)", error: error, services: services)
+        }
+    }
 
     private func setIfChanged<Value: Equatable>(
         _ keyPath: ReferenceWritableKeyPath<PinesAppModel, Value>,
@@ -924,6 +964,7 @@ final class PinesAppModel: ObservableObject {
 
     deinit {
         bootstrapBackgroundTask?.cancel()
+        cloudKitSyncTask?.cancel()
         currentRunTask?.cancel()
         modelSearchMetadataTask?.cancel()
         repositoryObservationTasks.forEach { $0.cancel() }
@@ -1019,6 +1060,7 @@ final class PinesAppModel: ObservableObject {
         await services.bootstrap()
         await reconcileModelDownloads(services: services)
         await refreshPostBootstrapState(services: services)
+        await syncCloudKitNow(services: services, reason: "app_launch")
         didBootstrap = true
         isBootstrapping = false
         services.runtimeMetrics.recordStartupPhase("background_bootstrap", elapsedSeconds: Date().timeIntervalSince(startedAt))
@@ -1783,6 +1825,7 @@ final class PinesAppModel: ObservableObject {
                 Self.threadPreview(from: conversation, messages: []),
                 moveToFront: true
             )
+            scheduleCloudKitSync(services: services, reason: "conversation_created")
             emitHaptic(.primaryAction)
             return conversation.id
         } catch {
@@ -1805,6 +1848,7 @@ final class PinesAppModel: ObservableObject {
             let project = try await repository.createProject(name: name)
             setIfChanged(\.selectedProjectID, project.id)
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "project_created")
             emitHaptic(.primaryAction)
             return project.id
         } catch {
@@ -1819,6 +1863,25 @@ final class PinesAppModel: ObservableObject {
             guard let repository = services.projectRepository else { return }
             try await repository.setProjectVaultEnabled(enabled, projectID: projectID)
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "project_updated")
+            emitHaptic(.primaryAction)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    func renameProject(_ project: PinesProjectPreview, name: String, services: PinesAppServices) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            setIfChanged(\.serviceError, "Project names cannot be empty.")
+            return
+        }
+        do {
+            guard let repository = services.projectRepository else { return }
+            try await repository.updateProjectName(String(trimmed.prefix(80)), projectID: project.id)
+            await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "project_renamed")
             emitHaptic(.primaryAction)
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
@@ -1834,6 +1897,7 @@ final class PinesAppModel: ObservableObject {
                 setIfChanged(\.selectedProjectID, nil)
             }
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "project_deleted")
             emitHaptic(.destructiveAction)
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
@@ -1846,6 +1910,7 @@ final class PinesAppModel: ObservableObject {
             guard let repository = services.conversationRepository else { return }
             try await repository.moveConversation(thread.id, toProject: projectID)
             await refreshConversationPreviews(services: services)
+            scheduleCloudKitSync(services: services, reason: "conversation_moved")
             emitHaptic(.primaryAction)
         } catch {
             setChatError(error.localizedDescription)
@@ -2344,6 +2409,7 @@ final class PinesAppModel: ObservableObject {
             try await repository.setConversationArchived(archived, conversationID: thread.id)
             emitHaptic(archived ? .destructiveAction : .primaryAction)
             await refreshConversationPreviews(services: services)
+            scheduleCloudKitSync(services: services, reason: "conversation_archived")
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
@@ -2359,6 +2425,7 @@ final class PinesAppModel: ObservableObject {
             try await repository.setConversationPinned(pinned, conversationID: thread.id)
             emitHaptic(.primaryAction)
             await refreshConversationPreviews(services: services)
+            scheduleCloudKitSync(services: services, reason: "conversation_pinned")
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
@@ -2378,6 +2445,7 @@ final class PinesAppModel: ObservableObject {
             setIfChanged(\.threads, threads.filter { $0.id != thread.id })
             emitHaptic(.destructiveAction)
             await refreshConversationPreviews(services: services)
+            scheduleCloudKitSync(services: services, reason: "conversation_deleted")
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
@@ -2420,6 +2488,9 @@ final class PinesAppModel: ObservableObject {
         var lastPersistedAt = Date.distantPast
         let isAgentMode = mode == .agent
         var runProviderMetadata = [String: String]()
+        defer {
+            scheduleCloudKitSync(services: services, reason: "chat_run_finished")
+        }
 
         func providerMetadataForRun(
             assistantMessageID: UUID?,
@@ -3587,6 +3658,7 @@ final class PinesAppModel: ObservableObject {
                 interfaceMode: interfaceMode.rawValue
             )
             try await services.settingsRepository?.saveSettings(snapshot)
+            scheduleCloudKitSync(services: services, reason: "settings_changed")
         } catch {
             serviceError = error.localizedDescription
         }
@@ -4207,6 +4279,7 @@ final class PinesAppModel: ObservableObject {
                 try await repository.moveDocument(document.id, toProject: selectedProjectID)
             }
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "vault_document_imported")
         } catch {
             serviceError = error.localizedDescription
         }
@@ -4362,6 +4435,7 @@ final class PinesAppModel: ObservableObject {
             try await repository.deleteChunk(id: chunk.id, documentID: documentID)
             await refreshAll(services: services)
             await loadVaultItemDetails(id: documentID, services: services)
+            scheduleCloudKitSync(services: services, reason: "vault_chunk_deleted")
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
@@ -4372,6 +4446,7 @@ final class PinesAppModel: ObservableObject {
             guard let repository = services.vaultRepository else { return }
             try await repository.deleteDocument(id: id)
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "vault_document_deleted")
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
@@ -4383,6 +4458,7 @@ final class PinesAppModel: ObservableObject {
             try await repository.moveDocument(id, toProject: projectID)
             await refreshAll(services: services)
             await loadVaultItemDetails(id: id, services: services)
+            scheduleCloudKitSync(services: services, reason: "vault_document_moved")
             emitHaptic(.primaryAction)
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)

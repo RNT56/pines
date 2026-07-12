@@ -346,6 +346,7 @@ struct PinesRootView: View {
             if let services {
                 Task {
                     await services.mlxRuntime.setForegroundActive(true)
+                    await appModel.syncCloudKitNow(services: services, reason: "foreground_active")
                 }
             }
             if appLockEnabled, isPrivacyLocked {

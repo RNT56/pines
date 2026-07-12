@@ -580,6 +580,7 @@ public enum CloudProviderError: Error, Equatable, Sendable {
     case missingAPIKey
     case disabledForAgents
     case invalidResponse
+    case responseTooLarge(maxBytes: Int)
     case providerRejectedRequest(statusCode: Int, message: String)
 }
 
@@ -1020,6 +1021,8 @@ extension CloudProviderError: LocalizedError {
             "This cloud provider is disabled for agent execution."
         case .invalidResponse:
             "The cloud provider returned an invalid response."
+        case let .responseTooLarge(maxBytes):
+            "The cloud provider response exceeded the \(maxBytes)-byte safety limit."
         case let .providerRejectedRequest(statusCode, message):
             "The cloud provider rejected the request with HTTP \(statusCode): \(message)"
         }

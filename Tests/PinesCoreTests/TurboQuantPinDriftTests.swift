@@ -55,7 +55,7 @@ struct TurboQuantPinDriftTests {
 
         #expect(compatibility.status == "failed")
         #expect(compatibility.statusReason.contains("Authoritative current-pair status is failed"))
-        #expect(compatibility.statusReason.contains("performance parity is not achieved"))
+        #expect(compatibility.statusReason.contains("performance parity is not established for this pair"))
         #expect(compatibility.claimPolicy.pinsOnlyEvidenceLevel == "unverified")
         #expect(compatibility.claimPolicy.verifiedOrCertifiedProductClaimsAllowed == false)
         #expect(compatibility.claimPolicy.requiresRealDeviceEvidence == true)
@@ -80,8 +80,8 @@ struct TurboQuantPinDriftTests {
                 $0.contains("Full release benchmark-matrix")
             }
         )
-        #expect(compatibility.statusReason.contains("Exact-pin physical-device app-host smoke completed"))
-        #expect(compatibility.statusReason.contains("Release comparisons now require real model inference"))
+        #expect(compatibility.statusReason.contains("focused 4K Qwen3.5 0.8B real-model comparison passed"))
+        #expect(compatibility.statusReason.contains("Release comparisons require real-model inference across the full acceptance matrix"))
         #expect(compatibility.productionPinPromotion?.releaseGate.contains("non-green") == true)
         #expect(compatibility.productionPinPromotion?.releaseGate.contains("Verified or Certified") == true)
         Self.assertGreenStatusReleaseGates(compatibility)
@@ -91,6 +91,12 @@ struct TurboQuantPinDriftTests {
                 && $0.command == "swift test --filter TurboQuant"
                 && $0.result == "passed"
                 && $0.runID != compatibility.wave0Baseline.runID
+        })
+        #expect(compatibility.validationCommands.contains {
+            $0.repo == "pines"
+                && $0.runID == "device-rm-08b-current-20260712T151100Z"
+                && $0.result == "passed"
+                && $0.notes?.contains("does not establish native-backend performance parity") == true
         })
         #expect(compatibility.historicalValidationCommands.contains {
             $0.repo == "pines"
@@ -107,9 +113,9 @@ struct TurboQuantPinDriftTests {
                 && $0.command.contains("run-ios-turboquant-bench.sh")
                 && $0.result == "passed"
                 && $0.runID == "ios-turboquant-bench-20260531T132622Z"
-                && ($0.notes ?? "").contains("hybridNativeDiagnostics")
-                && ($0.notes ?? "").contains("realModelInferenceEvidence=missing")
-                && ($0.notes ?? "").contains("not-proven")
+                && ($0.notes ?? "").contains("Historical prior-pair")
+                && ($0.notes ?? "").contains("not exact-current-pair evidence")
+                && ($0.notes ?? "").contains("cannot promote the current tuple")
         })
         #expect(compatibility.historicalValidationCommands.contains {
             $0.result == "passed"

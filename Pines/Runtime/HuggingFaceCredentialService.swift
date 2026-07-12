@@ -51,7 +51,11 @@ struct HuggingFaceCredentialService {
         request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
 
-        let (data, http) = try await URLSession.shared.data(for: request)
+        let (data, http) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: .shared,
+            maxBytes: 1024 * 1024
+        )
 
         let message: String
         if (200..<300).contains(http.statusCode) {

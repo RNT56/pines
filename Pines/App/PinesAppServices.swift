@@ -496,14 +496,13 @@ final class PinesAppServices: @unchecked Sendable {
         guard
             CloudKitSyncService.hasRequiredEntitlements(),
             let conversationRepository,
-            let vaultRepository,
-            let settingsRepository
+            let settingsRepository,
+            let syncRepository = conversationRepository as? any CloudKitSyncRepository
         else {
             return nil
         }
         return CloudKitSyncService(
-            conversationRepository: conversationRepository,
-            vaultRepository: vaultRepository,
+            syncRepository: syncRepository,
             settingsRepository: settingsRepository,
             secureKeyStore: secureKeyStore,
             auditRepository: auditRepository

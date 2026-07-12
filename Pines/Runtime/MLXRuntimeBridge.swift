@@ -423,7 +423,13 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-609e8333671419ee1dbe928eeee7f48a24682631+mlx-swift-lm-725add5dd15ef6c1c01073ce9f81412957fa5c6d"
+        "mlx-swift-d378d85c114b38c0919d5f6f7a489528427cb23d+mlx-swift-lm-1ab388ff78eaa572b2eb9de2b330d218818b3920"
+
+    /// N2: prompt-length admission floor for draft-model-free self-speculation (lever ①).
+    /// Speculation is a long-context lever (crossover ≈12–16K; N7 async prefetch erases the
+    /// shorter-context regression) and is bit-exact for greedy/no-processor, falling back to
+    /// exact decode otherwise — so admission-gating on prompt length is safe.
+    static let selfSpeculationMinPromptTokens = 12288
     fileprivate static let shortContextPlainKVTokenThreshold = 16_384
     fileprivate static let forceTurboQuantShortContextEnvironmentKey =
         "PINES_FORCE_TURBOQUANT_SHORT_CONTEXT"
@@ -2409,8 +2415,11 @@ struct MLXRuntimeBridge: Sendable {
         switch path {
         case .baseline:
             return .rawSDPA
-        case .onlineFused, .tiledOnlineFused, .twoStageCompressed:
+        case .onlineFused, .tiledOnlineFused, .twoStageCompressed, .sparseValueTwoStageCompressed:
             return .swiftMetalKernel
+        case .nativeMLXCompressed, .affineInt4Native, .affineK8V4Native, .affineK8VxNative,
+            .affineK8VxResidual:
+            return .nativeMLX
         case .mlxPackedFallback:
             return .decodedReference
         case .unavailable:
@@ -2502,6 +2511,12 @@ struct MLXRuntimeBridge: Sendable {
             .polarQJLReference
         case .metalPolarQJL:
             .metalPolarQJL
+        // PolarWHT backends are experimental/diagnostic and gated out of production; PinesCore's
+        // coarse runtime-backend reporting buckets them under the closest QJL equivalent.
+        case .polarWHTReference:
+            .polarQJLReference
+        case .metalPolarWHT:
+            .metalPolarQJL
         }
     }
 
@@ -2535,6 +2550,13 @@ struct MLXRuntimeBridge: Sendable {
             return .affineK8V4
         case .affineInt4:
             return .affineInt4
+        // K8/Vx (variable value bits) and its residual variant are reported under the affine-K8
+        // family bucket for layer-policy diagnostics; the precise value bits surface via the
+        // separate valueBits fields in the runtime snapshot.
+        case .affineK8Vx:
+            return .affineK8V4
+        case .affineK8VxResidual:
+            return .affineK8V4
         case .turboQuant(let preset, let valueBits, let groupSize, let backend):
             return .turboQuant(
                 preset: coreTurboQuantPreset(from: preset),
@@ -4689,7 +4711,11 @@ private actor MLXRuntimeState {
             topP: request.sampling.topP,
             repetitionPenalty: resolvedRepetitionPenalty,
             repetitionContextSize: profile.repetitionContextSize,
-            prefillStepSize: profile.prefillStepSize
+            prefillStepSize: profile.prefillStepSize,
+            selfSpeculationMode: promptTokenCount >= MLXRuntimeBridge.selfSpeculationMinPromptTokens
+                ? .promptLookup : .off,
+            selfSpeculationPrefetch: true,
+            selfSpeculationMinPromptTokens: MLXRuntimeBridge.selfSpeculationMinPromptTokens
         )
         #else
         return GenerateParameters(
@@ -4724,7 +4750,11 @@ private actor MLXRuntimeState {
             topP: request.sampling.topP,
             repetitionPenalty: resolvedRepetitionPenalty,
             repetitionContextSize: profile.repetitionContextSize,
-            prefillStepSize: profile.prefillStepSize
+            prefillStepSize: profile.prefillStepSize,
+            selfSpeculationMode: promptTokenCount >= MLXRuntimeBridge.selfSpeculationMinPromptTokens
+                ? .promptLookup : .off,
+            selfSpeculationPrefetch: true,
+            selfSpeculationMinPromptTokens: MLXRuntimeBridge.selfSpeculationMinPromptTokens
         )
         #endif
     }
@@ -5073,8 +5103,11 @@ private actor MLXRuntimeState {
         switch path {
         case .baseline:
             return .rawSDPA
-        case .onlineFused, .tiledOnlineFused, .twoStageCompressed:
+        case .onlineFused, .tiledOnlineFused, .twoStageCompressed, .sparseValueTwoStageCompressed:
             return .swiftMetalKernel
+        case .nativeMLXCompressed, .affineInt4Native, .affineK8V4Native, .affineK8VxNative,
+            .affineK8VxResidual:
+            return .nativeMLX
         case .mlxPackedFallback:
             return .decodedReference
         case .unavailable:

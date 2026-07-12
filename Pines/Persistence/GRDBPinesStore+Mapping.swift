@@ -740,6 +740,7 @@ extension GRDBPinesStore {
             displayName: row["display_name"],
             description: row["description"],
             inputSchema: schema,
+            annotations: decodeJSON(row["annotations_json"] as String?),
             enabled: (row["enabled"] as Int) == 1,
             lastDiscoveredAt: Date(timeIntervalSinceReferenceDate: row["last_discovered_at"]),
             lastError: row["last_error"] as String?
@@ -748,12 +749,15 @@ extension GRDBPinesStore {
 
     static func insertMCPTool(_ tool: MCPToolRecord, db: Database) throws {
         let schemaJSON = String(decoding: try JSONEncoder().encode(tool.inputSchema), as: UTF8.self)
+        let annotationsJSON = try tool.annotations.map {
+            String(decoding: try JSONEncoder().encode($0), as: UTF8.self)
+        }
         try db.execute(
             sql: """
             INSERT INTO mcp_tools
                 (server_id, original_name, namespaced_name, display_name, description, input_schema_json,
-                 enabled, last_discovered_at, last_error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 annotations_json, enabled, last_discovered_at, last_error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [
                 tool.serverID.rawValue,
@@ -762,6 +766,7 @@ extension GRDBPinesStore {
                 tool.displayName,
                 tool.description,
                 schemaJSON,
+                annotationsJSON,
                 tool.enabled ? 1 : 0,
                 tool.lastDiscoveredAt.timeIntervalSinceReferenceDate,
                 tool.lastError,

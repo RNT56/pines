@@ -47,7 +47,7 @@ Phones are becoming AI machines in their own right. Pines takes that seriously.
 
 A local model is not just a privacy checkbox. It is instant access. It is work that can happen close to your files. It is a way to ask ordinary questions without making every thought a network request. It is the beginning of a personal AI stack that lives where you already work.
 
-Pines is built around MLX Swift, model discovery, install flows, runtime admission, memory zones, runtime guardrails, and a vault that can make your own material useful to the model. The local runtime now consumes release-green TurboQuant fork pins, records every admitted run through a decision ledger, keeps fallback behavior typed and explicit, and exposes compatibility state without pretending a device/model pair is verified before evidence exists.
+Pines is built around MLX Swift, model discovery, install flows, runtime admission, memory zones, runtime guardrails, and a vault that can make your own material useful to the model. The local runtime consumes exact, currently non-green TurboQuant fork pins, records every admitted run through a decision ledger, keeps fallback behavior typed and explicit, and exposes compatibility state without pretending a device/model pair is verified before evidence exists.
 
 The goal is simple: make local mobile AI feel less like a benchmark and more like a daily instrument.
 

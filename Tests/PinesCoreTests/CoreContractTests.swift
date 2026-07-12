@@ -1049,6 +1049,33 @@ struct CoreContractTests {
                 allowsExplicitLocalHTTP: true
             )
         }
+
+        for target in [
+            "https://localhost/admin",
+            "https://127.0.0.1/admin",
+            "https://10.0.0.1/admin",
+            "https://169.254.169.254/latest/meta-data",
+            "https://192.168.1.10/admin",
+            "https://[::1]/admin",
+            "https://service.local/admin",
+        ] {
+            #expect(throws: EndpointSecurityError.self) {
+                try policy.validate(URL(string: target)!, useCase: .webTool)
+            }
+        }
+        try policy.validate(URL(string: "https://example.com/article")!, useCase: .webTool)
+        #expect(EndpointSecurityPolicy.isSameOrigin(
+            URL(string: "https://example.com/a")!,
+            URL(string: "https://EXAMPLE.com:443/b")!
+        ))
+        #expect(!EndpointSecurityPolicy.isSameOrigin(
+            URL(string: "https://example.com/a")!,
+            URL(string: "https://other.example.com/b")!
+        ))
+        #expect(!EndpointSecurityPolicy.isSameOrigin(
+            URL(string: "https://example.com/a")!,
+            URL(string: "https://example.com:8443/b")!
+        ))
     }
 
     @Test
@@ -2632,7 +2659,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-    #expect(PinesDatabaseSchema.currentVersion == 24)
+    #expect(PinesDatabaseSchema.currentVersion == 26)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
     let genericProviderMigration = try #require(
       PinesDatabaseSchema.migrations.first { $0.version == 15 })

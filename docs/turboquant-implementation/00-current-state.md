@@ -8,32 +8,29 @@ After the Wave 0 baseline capture on 2026-05-31, the active local compatibility 
 
 | Repo | Branch | Validation commit/pin |
 | --- | --- | --- |
-| `pines` | `tq/real-device-evidence-acceptance` | `1f3cbc43289f3b4035fff2276c1f01206d616647` dirty validation base before this evidence update |
-| `mlx-swift` | `tq/layout-v5-default-device-tests` | `609e8333671419ee1dbe928eeee7f48a24682631` pushed continuation pin |
-| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `725add5dd15ef6c1c01073ce9f81412957fa5c6d` pushed continuation pin |
+| `pines` | `tq/real-device-evidence-acceptance` | `ebc1d80aba9466da5e72690b26d9155aec72836d` dirty validation base before this evidence update |
+| `mlx-swift` | `tq/layout-v5-default-device-tests` | `d378d85c114b38c0919d5f6f7a489528427cb23d` pushed platform-aware Metal and Apple-mobile JIT compatibility pin |
+| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `1ab388ff78eaa572b2eb9de2b330d218818b3920` pushed exact-core integration pin |
 
-Pines pins `MLXSwift` to `609e8333671419ee1dbe928eeee7f48a24682631` and `MLXSwiftLM` to `725add5dd15ef6c1c01073ce9f81412957fa5c6d` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
+Pines pins `MLXSwift` to `d378d85c114b38c0919d5f6f7a489528427cb23d` and `MLXSwiftLM` to `1ab388ff78eaa572b2eb9de2b330d218818b3920` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
 
-Wave 0 current-pair evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, while `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the Wave 0 app-hosted iOS smoke ended `failed_environmental` before install/launch. The continuation pass resolves the local TurboQuant test blocker, wires native affine K8/V4 mixed quantized SDPA through the MLX Swift LM cache path, and records exact-pin physical-device app-host smoke on `iPhone16,2`, but that smoke is a synthetic attention-shape benchmark. Mac real-model inference evidence exists for Qwen3.5-2B at 32K and 64K, but compressed equal-context throughput remains below raw FP16 and parity is not achieved. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V4 is the production default for new MLX attention layout requests; Layout V5/V6 remain supported for explicit experimental, benchmark, and compatibility runs only. Exact pins plus smoke evidence remain unverified and real-device model/device/mode evidence remains required before any `Verified` or `Certified` product claim.
+Wave 0 evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, while `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the Wave 0 app-hosted iOS smoke ended `failed_environmental` before install/launch. The continuation pass resolves the local TurboQuant test blocker, wires native affine K8/V4 mixed quantized SDPA through the MLX Swift LM cache path, and records exact-current-pin physical-device app-host smoke on `iPhone16,2` in `20260712T150706Z-ios-exact-pair-smoke.md`. A focused exact-pair Qwen 3.5 0.8B `real-model-inference-v1` comparison also passes at 4K in `20260712T151432Z-ios-qwen35-08b-realmodel-smoke.md`, but its two-repeat throughput interval is wide and selected-path diagnostics are absent. Mac real-model inference evidence exists for Qwen3.5-2B at 32K and 64K, but it belongs to an earlier tuple. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V4 is the production default for new MLX attention layout requests; Layout V5/V6 remain supported for explicit experimental, benchmark, and compatibility runs only. Exact pins plus focused smoke evidence remain unverified and a complete imported real-device model/device/mode evidence tuple remains required before any `Verified` or `Certified` product claim.
 
-### Pending upstream adoption: N2 self-speculation (lever ①) + N4 codec
+### Adopted N2 self-speculation (lever ①) + N4 codec surface
 
-`mlx-swift-lm` `295e66bef0b3d85be70290b5c1adea83d694660c` now exposes
+`mlx-swift-lm` `1ab388ff78eaa572b2eb9de2b330d218818b3920` exposes
 draft-model-free self-speculation as a product API: `GenerateParameters.selfSpeculationMode`
 (`.off` default | `.promptLookup`) routed via `makeGenerationIterator(...)`, bit-exact for
 greedy/no-processor and falling back to exact decode otherwise (incl. non-trimmable hybrid
 caches). It pairs with the validated N7 async-prefetch path (16K long-doc 1.43→1.76×). `mlx-swift`
-`6bfa04e…`/`4a83f63…` also adds the data-free Gaussian Lloyd-Max payload codec format
+also adds the data-free Gaussian Lloyd-Max payload codec format
 (`TurboQuantReferenceFormat.gaussianLloydMax`, 3.2× at equal quality), pending a Metal decode kernel.
 
-**This is NOT yet pinned here.** Adopting it requires advancing the MLX pin pair to
-mlx-swift `6bfa04e2924152c52c56eac5c3420a7cc7e8d720` + mlx-swift-lm
-`295e66bef0b3d85be70290b5c1adea83d694660c` across all six pin sites AND regenerating
-`compatibility-pair.json` via the wave0 validation harness (the evidence artifact must be
-harness-generated, not hand-edited) plus wiring `selfSpeculationMode` into
-`MLXRuntimeBridge.GenerateParameters`. The harness's full evidence needs the deferred A-series
-device run, so the pair would advance as `failed`/`unverified` until that lands. Self-speculation
-ships default-off, so it is inert (no behavior change) until explicitly enabled + device-validated.
+The integration pair now pins mlx-swift `d378d85c114b38c0919d5f6f7a489528427cb23d`
+plus mlx-swift-lm `1ab388ff78eaa572b2eb9de2b330d218818b3920`, and Pines wires
+`selfSpeculationMode` into `MLXRuntimeBridge.GenerateParameters`. The pair remains
+`failed`/`unverified` until exact-pair A-series evidence and the remaining release gates land.
+Self-speculation ships default-off, so it is inert until explicitly enabled and device-validated.
 
 Current continuation work adds explicit benchmark coverage and labels for
 `affineK8V4`, `affineK8V3`, `affineK8V2`, `mlxAffine-q8`, `affineInt4`,

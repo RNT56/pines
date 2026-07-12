@@ -569,7 +569,7 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_dimensions_json"), "missing speculative evidence dimensions column")
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_telemetry_json"), "missing speculative telemetry column")
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json"), "missing speculative auto-disable column")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 23)
+        try expectEqual(PinesDatabaseSchema.currentVersion, 26)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")
@@ -1177,10 +1177,14 @@ struct PinesCoreTestRunner {
             namespacedName: "mcp.local.search",
             displayName: "search",
             description: "Search",
-            inputSchema: schema
+            inputSchema: schema,
+            annotations: MCPToolAnnotations(readOnlyHint: true, destructiveHint: false)
         )
         let decoded = try JSONDecoder().decode(MCPToolRecord.self, from: JSONEncoder().encode(record))
         try expectEqual(decoded, record)
+        try expectEqual(decoded.annotations?.sideEffectLevel, .readsExternalData)
+        try expectEqual(MCPToolAnnotations(destructiveHint: true).sideEffectLevel, .sensitive)
+        try expectEqual(MCPToolAnnotations().sideEffectLevel, .changesRemoteState)
 
         let policy = MCPClientFeaturePolicy(samplingEnabled: true)
         let capabilities = try expectDictionary(policy.initializeCapabilities.anySendable, "sampling policy must encode object")

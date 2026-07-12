@@ -179,7 +179,7 @@ struct MCPServerService: Sendable {
                 inputJSONSchema: tool.inputSchema,
                 outputJSONSchema: JSONValue.objectSchema(),
                 permissions: [.network],
-                sideEffect: .readsExternalData,
+                sideEffect: tool.annotations?.sideEffectLevel ?? .changesRemoteState,
                 networkPolicy: .allowListedDomains(Self.networkDomains(for: server)),
                 timeoutSeconds: 60,
                 explanationRequired: true,
@@ -277,7 +277,8 @@ struct MCPServerService: Sendable {
                 namespacedName: namespacedName,
                 displayName: tool.name,
                 description: tool.description ?? "Remote MCP tool \(tool.name).",
-                inputSchema: tool.inputSchema
+                inputSchema: tool.inputSchema,
+                annotations: tool.annotations
             )
         }
     }
