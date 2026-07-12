@@ -54,7 +54,7 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
     }
 
     public var allZonesAreNonNegative: Bool {
-        [
+        let requiredZones: [Int64] = [
             modelWeightsBytes,
             compressedKVBytes,
             rawShadowBytes,
@@ -62,21 +62,25 @@ public struct RuntimeMemoryZones: Hashable, Codable, Sendable {
             decodedFallbackScratchBytes,
             vaultIndexBytes,
             promptBufferBytes,
-            speculativeDraftModelBytes ?? 0,
-            speculativeDraftKVBytes ?? 0,
-            speculativeRollbackReserveBytes ?? 0,
-      adaptivePrecisionMetadataBytes ?? 0,
-      semanticMemoryBytes ?? 0,
-      multimodalMemoryBytes ?? 0,
-      agentWorkingMemoryBytes ?? 0,
-      openKVFormatMetadataBytes ?? 0,
-      deviceMeshSyncBytes ?? 0,
-      personalizationAdapterBytes ?? 0,
             metalScratchReserveBytes,
             uiReserveBytes,
             safetyReserveBytes,
             totalPlannedBytes,
-        ].allSatisfy { $0 >= 0 }
+        ]
+        let optionalZones: [Int64] = [
+            speculativeDraftModelBytes ?? 0,
+            speculativeDraftKVBytes ?? 0,
+            speculativeRollbackReserveBytes ?? 0,
+            adaptivePrecisionMetadataBytes ?? 0,
+            semanticMemoryBytes ?? 0,
+            multimodalMemoryBytes ?? 0,
+            agentWorkingMemoryBytes ?? 0,
+            openKVFormatMetadataBytes ?? 0,
+            deviceMeshSyncBytes ?? 0,
+            personalizationAdapterBytes ?? 0,
+        ]
+        return requiredZones.allSatisfy { $0 >= 0 }
+            && optionalZones.allSatisfy { $0 >= 0 }
     }
 
     public init(
