@@ -25,6 +25,7 @@ struct SettingsDetailView: View {
     @State private var providerBaseURL = "https://api.openai.com/v1"
     @State private var providerAPIKey = ""
     @State private var providerEnabled = true
+    @State private var editingProviderID: ProviderID?
     @State private var providerSaveConfirmation: String?
     @State private var providerSaveError: String?
     @State private var mcpName = "Local MCP"
@@ -369,6 +370,45 @@ struct SettingsDetailView: View {
             ))
             .disabled(!iCloudSyncAvailable)
 
+            HStack(alignment: .center, spacing: theme.spacing.small) {
+                PinesStatusChip(status: cloudKitSyncChipStatus, compact: true)
+
+                Text(cloudKitSyncSummary)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: theme.spacing.small)
+
+                Button {
+                    Task { await appModel.syncCloudKitNow(services: services, reason: "manual_settings") }
+                } label: {
+                    if settingsState.cloudKitSyncStatus.phase == .syncing {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                }
+                .accessibilityLabel("Sync iCloud now")
+                .accessibilityIdentifier("pines.settings.icloud.sync-now")
+                .disabled(
+                    !iCloudSyncAvailable
+                        || !settingsState.storeConfiguration.iCloudSyncEnabled
+                        || settingsState.cloudKitSyncStatus.phase == .syncing
+                )
+                .pinesButtonStyle(.icon)
+            }
+
+            if let syncError = settingsState.cloudKitSyncStatus.lastError,
+               settingsState.storeConfiguration.iCloudSyncEnabled {
+                Label(syncError, systemImage: "exclamationmark.icloud")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("pines.settings.icloud.error")
+            }
+
             Toggle("App lock", isOn: Binding(
                 get: { settingsState.securityConfiguration.appLockEnabled },
                 set: { value in
@@ -410,6 +450,48 @@ struct SettingsDetailView: View {
         .id(SettingsDetailAnchor.storageAndSync)
 
         cloudProviderCard
+    }
+
+    private var cloudKitSyncChipStatus: PinesCloudStatus {
+        guard iCloudSyncAvailable else { return .unavailable }
+        guard settingsState.storeConfiguration.iCloudSyncEnabled else {
+            return .custom("Off", .neutral)
+        }
+        switch settingsState.cloudKitSyncStatus.phase {
+        case .idle:
+            return .pending
+        case .syncing:
+            return .running
+        case .succeeded:
+            return .complete
+        case .failed:
+            return .failed
+        }
+    }
+
+    private var cloudKitSyncSummary: String {
+        guard iCloudSyncAvailable else {
+            return "This build does not have private iCloud sync entitlements."
+        }
+        guard settingsState.storeConfiguration.iCloudSyncEnabled else {
+            return "Sync is off. Local data stays on this device."
+        }
+        switch settingsState.cloudKitSyncStatus.phase {
+        case .idle:
+            return "Waiting for the first sync."
+        case .syncing:
+            return "Uploading and merging private records."
+        case .succeeded:
+            if let lastSuccessAt = settingsState.cloudKitSyncStatus.lastSuccessAt {
+                return "Last completed \(lastSuccessAt.formatted(date: .abbreviated, time: .shortened))."
+            }
+            return "Private records are synchronized."
+        case .failed:
+            if let lastSuccessAt = settingsState.cloudKitSyncStatus.lastSuccessAt {
+                return "Last successful sync was \(lastSuccessAt.formatted(date: .abbreviated, time: .shortened))."
+            }
+            return "Sync has not completed successfully yet."
+        }
     }
 
     private var cloudProviderCard: some View {
@@ -464,7 +546,18 @@ struct SettingsDetailView: View {
                             Text(kind.title).tag(kind)
                         }
                     }
-                    .onChange(of: providerKind) { _, kind in applyProviderDefaults(kind) }
+                    .onChange(of: providerKind) { _, kind in
+                        guard editingProviderID == nil else { return }
+                        applyProviderDefaults(kind)
+                    }
+                    .disabled(editingProviderID != nil)
+
+                    if editingProviderID != nil {
+                        Label("Editing an existing provider. Its provider type and secure identity stay fixed.", systemImage: "pencil.circle")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     TextField("Display name", text: $providerName)
                         .pinesFieldChrome()
@@ -472,45 +565,83 @@ struct SettingsDetailView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .pinesFieldChrome()
-                    SecureField("API key", text: $providerAPIKey)
+                    SecureField(editingProviderID == nil ? "API key" : "New API key (optional)", text: $providerAPIKey)
                         .textContentType(.password)
                         .pinesFieldChrome()
                     Toggle("Enable for agents", isOn: $providerEnabled)
                         .disabled(providerKind == .voyageAI)
 
-                    Button {
-                        Task {
-                            providerSaveConfirmation = nil
-                            providerSaveError = nil
-                            let savedName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            let didSave = await appModel.saveCloudProvider(
-                                kind: providerKind,
-                                displayName: providerName,
-                                baseURLString: providerBaseURL,
-                                apiKey: providerAPIKey,
-                                enabledForAgents: providerEnabled,
-                                services: services
-                            )
-                            if didSave {
-                                providerAPIKey = ""
-                                providerSaveConfirmation = "Saved \(savedName). Validating the key and refreshing models."
+                    HStack(spacing: theme.spacing.small) {
+                        Button {
+                            Task {
+                                providerSaveConfirmation = nil
+                                providerSaveError = nil
+                                let savedName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                let wasEditing = editingProviderID != nil
+                                let replacedAPIKey = !providerAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                let endpointChanged = editingProviderID.flatMap { editingID in
+                                    settingsState.cloudProviders.first(where: { $0.id == editingID })
+                                }.map { existing in
+                                    existing.baseURL.absoluteString
+                                        != providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                                } ?? false
+                                let didSave = await appModel.saveCloudProvider(
+                                    providerID: editingProviderID,
+                                    kind: providerKind,
+                                    displayName: providerName,
+                                    baseURLString: providerBaseURL,
+                                    apiKey: providerAPIKey,
+                                    enabledForAgents: providerEnabled,
+                                    services: services
+                                )
+                                if didSave {
+                                    providerAPIKey = ""
+                                    if wasEditing {
+                                        cancelProviderEditing()
+                                    }
+                                    if wasEditing {
+                                        if replacedAPIKey {
+                                            providerSaveConfirmation = "Updated \(savedName). The new key is being validated and models are refreshing."
+                                        } else if endpointChanged {
+                                            providerSaveConfirmation = "Updated \(savedName). Existing credentials were kept and the new endpoint is being validated."
+                                        } else {
+                                            providerSaveConfirmation = "Updated \(savedName). Existing credentials were kept and models are refreshing."
+                                        }
+                                    } else {
+                                        providerSaveConfirmation = replacedAPIKey
+                                            ? "Saved \(savedName). Validating the key and refreshing models."
+                                            : "Saved \(savedName). Add a key before using this provider."
+                                    }
+                                } else {
+                                    providerSaveError = appModel.serviceError ?? "Provider could not be saved."
+                                }
+                            }
+                        } label: {
+                            if settingsState.isSavingCloudProvider {
+                                Label("Saving", systemImage: "hourglass")
+                            } else if editingProviderID != nil {
+                                Label("Update provider", systemImage: "checkmark.circle")
                             } else {
-                                providerSaveError = appModel.serviceError ?? "Provider key could not be saved."
+                                Label("Save provider", systemImage: "key")
                             }
                         }
-                    } label: {
-                        if settingsState.isSavingCloudProvider {
-                            Label("Saving", systemImage: "hourglass")
-                        } else {
-                            Label("Save key", systemImage: "key")
+                        .disabled(
+                            settingsState.isSavingCloudProvider
+                                || providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
+                        .pinesButtonStyle(.primary, fillWidth: true)
+
+                        if editingProviderID != nil {
+                            Button {
+                                cancelProviderEditing()
+                            } label: {
+                                Label("Cancel", systemImage: "xmark")
+                            }
+                            .disabled(settingsState.isSavingCloudProvider)
+                            .pinesButtonStyle(.secondary, fillWidth: true)
                         }
                     }
-                    .disabled(
-                        settingsState.isSavingCloudProvider
-                            || providerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || providerBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    )
-                    .pinesButtonStyle(.primary, fillWidth: true)
 
                     if let providerSaveConfirmation {
                         Label(providerSaveConfirmation, systemImage: "checkmark.circle.fill")
@@ -538,6 +669,10 @@ struct SettingsDetailView: View {
                         ForEach(settingsState.cloudProviders) { provider in
                             providerRow(provider)
                         }
+                    }
+
+                    if settingsState.cloudProviders.contains(where: { $0.kind == .openRouter }) {
+                        openRouterRoutingPolicyEditor
                     }
                 }
             } label: {
@@ -567,6 +702,124 @@ struct SettingsDetailView: View {
         case .revoked:
             return "Cloud Intelligence consent was revoked. Managed routes are disabled."
         }
+    }
+
+    private var openRouterRoutingPolicyEditor: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                Text("Apply a typed routing policy to every OpenRouter chat. Provider slugs are comma-separated and normalized before they are sent.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Picker("Optimize routing", selection: Binding(
+                    get: { settingsState.openRouterProviderPreferences.sort },
+                    set: { value in
+                        var preferences = settingsState.openRouterProviderPreferences
+                        preferences.sort = preferences.order.isEmpty ? value : .automatic
+                        settingsState.openRouterProviderPreferences = normalizedOpenRouterPreferences(preferences)
+                    }
+                )) {
+                    ForEach(OpenRouterProviderSort.allCases, id: \.self) { sort in
+                        Text(sort.settingsTitle).tag(sort)
+                    }
+                }
+                .disabled(!settingsState.openRouterProviderPreferences.order.isEmpty)
+
+                TextField("Preferred order (anthropic, openai)", text: openRouterProviderListBinding(\.order))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .pinesFieldChrome()
+                TextField("Only allow provider slugs", text: openRouterProviderListBinding(\.only))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .pinesFieldChrome()
+                TextField("Ignore provider slugs", text: openRouterProviderListBinding(\.ignore))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .pinesFieldChrome()
+
+                Toggle("Allow fallback providers", isOn: openRouterBoolBinding(\.allowFallbacks))
+                Toggle("Require every request parameter", isOn: openRouterBoolBinding(\.requireParameters))
+                Toggle("Deny providers that collect data", isOn: Binding(
+                    get: { settingsState.openRouterProviderPreferences.dataCollection == .deny },
+                    set: { deny in
+                        var preferences = settingsState.openRouterProviderPreferences
+                        preferences.dataCollection = deny ? .deny : .allow
+                        settingsState.openRouterProviderPreferences = normalizedOpenRouterPreferences(preferences)
+                    }
+                ))
+                Toggle("Require zero data retention", isOn: openRouterBoolBinding(\.zeroDataRetention))
+
+                Text("Zero-data-retention and data-collection restrictions can reduce provider availability. Pines automatically requires parameter support whenever tools or structured output are requested.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: theme.spacing.small) {
+                    Button {
+                        Task { await appModel.saveSettings(services: services) }
+                    } label: {
+                        Label("Save routing policy", systemImage: "checkmark.shield")
+                    }
+                    .pinesButtonStyle(.primary, fillWidth: true)
+
+                    Button {
+                        settingsState.openRouterProviderPreferences = .init()
+                        Task { await appModel.saveSettings(services: services) }
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                    }
+                    .pinesButtonStyle(.secondary, fillWidth: true)
+                }
+            }
+            .padding(.top, theme.spacing.small)
+        } label: {
+            Label("OpenRouter routing and privacy", systemImage: "arrow.triangle.branch")
+                .font(theme.typography.headline)
+        }
+        .accessibilityIdentifier("pines.settings.openrouter.routing")
+    }
+
+    private func openRouterProviderListBinding(
+        _ keyPath: WritableKeyPath<OpenRouterProviderPreferences, [String]>
+    ) -> Binding<String> {
+        Binding(
+            get: { settingsState.openRouterProviderPreferences[keyPath: keyPath].joined(separator: ", ") },
+            set: { rawValue in
+                var preferences = settingsState.openRouterProviderPreferences
+                preferences[keyPath: keyPath] = rawValue.split(separator: ",").map(String.init)
+                settingsState.openRouterProviderPreferences = normalizedOpenRouterPreferences(preferences)
+            }
+        )
+    }
+
+    private func openRouterBoolBinding(
+        _ keyPath: WritableKeyPath<OpenRouterProviderPreferences, Bool>
+    ) -> Binding<Bool> {
+        Binding(
+            get: { settingsState.openRouterProviderPreferences[keyPath: keyPath] },
+            set: { value in
+                var preferences = settingsState.openRouterProviderPreferences
+                preferences[keyPath: keyPath] = value
+                settingsState.openRouterProviderPreferences = normalizedOpenRouterPreferences(preferences)
+            }
+        )
+    }
+
+    private func normalizedOpenRouterPreferences(
+        _ preferences: OpenRouterProviderPreferences
+    ) -> OpenRouterProviderPreferences {
+        OpenRouterProviderPreferences(
+            order: preferences.order,
+            only: preferences.only,
+            ignore: preferences.ignore,
+            allowFallbacks: preferences.allowFallbacks,
+            requireParameters: preferences.requireParameters,
+            dataCollection: preferences.dataCollection,
+            zeroDataRetention: preferences.zeroDataRetention,
+            sort: preferences.sort
+        )
     }
 
     private func providerRow(_ provider: CloudProviderConfiguration) -> some View {
@@ -624,6 +877,15 @@ struct SettingsDetailView: View {
                 .disabled(provider.kind == .voyageAI)
 
                 Spacer(minLength: theme.spacing.small)
+
+                Button {
+                    beginProviderEditing(provider)
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .accessibilityLabel("Edit \(provider.displayName)")
+                .disabled(settingsState.isSavingCloudProvider)
+                .pinesButtonStyle(.icon)
 
                 Button {
                     Task { await appModel.validateCloudProvider(provider, services: services) }
@@ -1388,6 +1650,23 @@ struct SettingsDetailView: View {
         providerSaveError = nil
     }
 
+    private func beginProviderEditing(_ provider: CloudProviderConfiguration) {
+        editingProviderID = provider.id
+        providerKind = provider.kind
+        providerName = provider.displayName
+        providerBaseURL = provider.baseURL.absoluteString
+        providerAPIKey = ""
+        providerEnabled = provider.enabledForAgents
+        providerSaveConfirmation = nil
+        providerSaveError = nil
+    }
+
+    private func cancelProviderEditing() {
+        editingProviderID = nil
+        providerAPIKey = ""
+        applyProviderDefaults(providerKind)
+    }
+
     private static func compactModelName(_ rawValue: String) -> String {
         let name = rawValue
             .split(separator: "/")
@@ -1786,6 +2065,21 @@ private extension CloudProviderKind {
         }
     }
 
+}
+
+private extension OpenRouterProviderSort {
+    var settingsTitle: String {
+        switch self {
+        case .automatic:
+            "Automatic"
+        case .price:
+            "Lowest price"
+        case .throughput:
+            "Highest throughput"
+        case .latency:
+            "Lowest latency"
+        }
+    }
 }
 
 private extension ProviderValidationStatus {

@@ -394,6 +394,11 @@ final class PinesAppModel: ObservableObject {
         set { settingsState.cloudWebSearchMode = newValue }
     }
 
+    var openRouterProviderPreferences: OpenRouterProviderPreferences {
+        get { settingsState.openRouterProviderPreferences }
+        set { settingsState.openRouterProviderPreferences = newValue }
+    }
+
     var cloudModelCatalog: [ProviderID: [CloudProviderModel]] {
         get { settingsState.cloudModelCatalog }
         set { settingsState.cloudModelCatalog = newValue }
@@ -412,6 +417,11 @@ final class PinesAppModel: ObservableObject {
     var validatingCloudProviderIDs: Set<ProviderID> {
         get { settingsState.validatingCloudProviderIDs }
         set { settingsState.validatingCloudProviderIDs = newValue }
+    }
+
+    var cloudKitSyncStatus: PinesCloudKitSyncStatus {
+        get { settingsState.cloudKitSyncStatus }
+        set { settingsState.cloudKitSyncStatus = newValue }
     }
 
     var huggingFaceCredentialStatus: String {
@@ -614,9 +624,23 @@ final class PinesAppModel: ObservableObject {
     }
 
     func syncCloudKitNow(services: PinesAppServices, reason: String) async {
-        guard storeConfiguration.iCloudSyncEnabled,
-              let syncService = services.cloudKitSyncService
-        else { return }
+        guard storeConfiguration.iCloudSyncEnabled else {
+            setIfChanged(\.cloudKitSyncStatus, .init())
+            return
+        }
+        guard let syncService = services.cloudKitSyncService else {
+            setIfChanged(
+                \.cloudKitSyncStatus,
+                PinesCloudKitSyncStatus(
+                    phase: .failed,
+                    lastAttemptAt: Date(),
+                    lastSuccessAt: cloudKitSyncStatus.lastSuccessAt,
+                    lastError: "Private iCloud sync is unavailable in this build.",
+                    trigger: reason
+                )
+            )
+            return
+        }
         guard !isCloudKitSyncing else {
             scheduleCloudKitSync(services: services, reason: "\(reason)_retry", delaySeconds: 2)
             return
@@ -624,10 +648,42 @@ final class PinesAppModel: ObservableObject {
 
         isCloudKitSyncing = true
         defer { isCloudKitSyncing = false }
+        let attemptedAt = Date()
+        setIfChanged(
+            \.cloudKitSyncStatus,
+            PinesCloudKitSyncStatus(
+                phase: .syncing,
+                lastAttemptAt: attemptedAt,
+                lastSuccessAt: cloudKitSyncStatus.lastSuccessAt,
+                lastError: nil,
+                trigger: reason
+            )
+        )
         do {
             try await syncService.syncNow()
             await refreshAll(services: services)
+            setIfChanged(
+                \.cloudKitSyncStatus,
+                PinesCloudKitSyncStatus(
+                    phase: .succeeded,
+                    lastAttemptAt: attemptedAt,
+                    lastSuccessAt: Date(),
+                    lastError: nil,
+                    trigger: reason
+                )
+            )
         } catch {
+            let redactedError = services.redactor.redact(error.localizedDescription)
+            setIfChanged(
+                \.cloudKitSyncStatus,
+                PinesCloudKitSyncStatus(
+                    phase: .failed,
+                    lastAttemptAt: attemptedAt,
+                    lastSuccessAt: cloudKitSyncStatus.lastSuccessAt,
+                    lastError: redactedError,
+                    trigger: reason
+                )
+            )
             recordRecoverableIssue("cloudkit.sync.\(reason)", error: error, services: services)
         }
     }
@@ -1195,6 +1251,7 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.isRefreshingCloudModels, false)
         setIfChanged(\.isSavingCloudProvider, false)
         setIfChanged(\.validatingCloudProviderIDs, [])
+        setIfChanged(\.cloudKitSyncStatus, .init())
         setIfChanged(\.huggingFaceCredentialStatus, "Not configured")
         setIfChanged(\.braveSearchCredentialStatus, "Not configured")
         setIfChanged(\.mcpServers, [])
@@ -1785,6 +1842,7 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.anthropicTokenCountPreflightEnabled, settings.anthropicTokenCountPreflightEnabled)
         setIfChanged(\.geminiThinkingLevel, settings.geminiThinkingLevel)
         setIfChanged(\.cloudWebSearchMode, settings.cloudWebSearchMode)
+        setIfChanged(\.openRouterProviderPreferences, settings.openRouterProviderPreferences)
         setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
         setIfChanged(\.interfaceMode, PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode)
     }
@@ -2931,7 +2989,8 @@ final class PinesAppModel: ObservableObject {
                 availableTools: availableTools,
                 vaultContextIDs: includePrivateContext ? (vaultContext?.documentIDs ?? []) : [],
                 executionContext: isAgentMode ? .agent : .chat,
-                anthropicOptions: anthropicRequestOptions(for: selectedProviderID, settings: settings, services: services)
+                anthropicOptions: anthropicRequestOptions(for: selectedProviderID, settings: settings, services: services),
+                openRouterOptions: openRouterRequestOptions(for: selectedProviderID, settings: settings, services: services)
             )
             if request.resolvedAnthropicOptions.countTokensBeforeSend {
                 let body = Self.anthropicTokenCountPreflightBody(for: request)
@@ -3651,6 +3710,7 @@ final class PinesAppModel: ObservableObject {
                 anthropicTokenCountPreflightEnabled: anthropicTokenCountPreflightEnabled,
                 geminiThinkingLevel: geminiThinkingLevel,
                 cloudWebSearchMode: cloudWebSearchMode,
+                openRouterProviderPreferences: openRouterProviderPreferences,
                 requireToolApproval: true,
                 braveSearchEnabled: braveSearchCredentialStatus.hasPrefix("Configured"),
                 onboardingCompleted: true,
@@ -3721,6 +3781,17 @@ final class PinesAppModel: ObservableObject {
             citations: AnthropicCitationOptions(enabled: settings?.anthropicCitationsEnabled ?? anthropicCitationsEnabled),
             countTokensBeforeSend: settings?.anthropicTokenCountPreflightEnabled ?? anthropicTokenCountPreflightEnabled
         )
+    }
+
+    func openRouterRequestOptions(
+        for providerID: ProviderID,
+        settings: AppSettingsSnapshot?,
+        services: PinesAppServices
+    ) -> OpenRouterProviderPreferences? {
+        guard providerID != services.mlxRuntime.localProviderID,
+              cloudProviders.first(where: { $0.id == providerID })?.kind == .openRouter
+        else { return nil }
+        return settings?.openRouterProviderPreferences ?? openRouterProviderPreferences
     }
 
     private static func anthropicTokenCountPreflightBody(for request: ChatRequest) -> JSONValue {
@@ -4617,6 +4688,7 @@ final class PinesAppModel: ObservableObject {
     }
 
     func saveCloudProvider(
+        providerID: ProviderID? = nil,
         kind: CloudProviderKind,
         displayName: String,
         baseURLString: String,
@@ -4642,23 +4714,45 @@ final class PinesAppModel: ObservableObject {
                 return false
             }
             try EndpointSecurityPolicy().validate(baseURL, useCase: .cloudProvider)
-            let providerID = ProviderID(rawValue: trimmedDisplayName.lowercased().replacingOccurrences(of: " ", with: "-"))
-            let existing = cloudProviders.first(where: { $0.id == providerID })
+            let resolvedProviderID = providerID ?? Self.makeCloudProviderID(kind: kind)
+            let existing: CloudProviderConfiguration?
+            if let providerID {
+                guard let configuredProvider = cloudProviders.first(where: { $0.id == providerID }) else {
+                    serviceError = "The provider being edited no longer exists. Refresh providers and try again."
+                    return false
+                }
+                existing = configuredProvider
+            } else {
+                existing = nil
+            }
+            let resolvedKind = existing?.kind ?? kind
+            if cloudProviders.contains(where: {
+                $0.id != resolvedProviderID
+                    && $0.displayName.compare(trimmedDisplayName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }) {
+                serviceError = "Another cloud provider already uses that display name."
+                return false
+            }
             let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            let shouldValidate = Self.cloudProviderRequiresValidation(
+                existing: existing,
+                updatedBaseURL: baseURL,
+                replacementAPIKey: trimmedAPIKey
+            )
             let provider = CloudProviderConfiguration(
-                id: providerID,
-                kind: kind,
+                id: resolvedProviderID,
+                kind: resolvedKind,
                 displayName: trimmedDisplayName,
                 baseURL: baseURL,
                 defaultModelID: existing?.defaultModelID,
-                validationStatus: trimmedAPIKey.isEmpty ? (existing?.validationStatus ?? .unvalidated) : .unvalidated,
-                lastValidationError: trimmedAPIKey.isEmpty ? existing?.lastValidationError : nil,
+                validationStatus: shouldValidate ? .unvalidated : (existing?.validationStatus ?? .unvalidated),
+                lastValidationError: shouldValidate ? nil : existing?.lastValidationError,
                 headers: existing?.headers ?? [],
                 keychainService: existing?.keychainService ?? "com.schtack.pines.cloud",
-                keychainAccount: existing?.keychainAccount ?? providerID.rawValue,
+                keychainAccount: existing?.keychainAccount ?? resolvedProviderID.rawValue,
                 allowInsecureLocalHTTP: existing?.allowInsecureLocalHTTP ?? false,
-                enabledForAgents: kind == .voyageAI ? false : enabledForAgents,
-                lastValidatedAt: trimmedAPIKey.isEmpty ? existing?.lastValidatedAt : nil
+                enabledForAgents: resolvedKind == .voyageAI ? false : enabledForAgents,
+                lastValidatedAt: shouldValidate ? nil : existing?.lastValidatedAt
             )
             try await service.saveProvider(provider, apiKey: trimmedAPIKey.isEmpty ? nil : trimmedAPIKey)
             upsertCloudProvider(provider)
@@ -4667,8 +4761,8 @@ final class PinesAppModel: ObservableObject {
             setIfChanged(\.serviceError, nil)
             Task { [weak self] in
                 await self?.finishSavedCloudProviderActivation(
-                    providerID: providerID,
-                    shouldValidate: !trimmedAPIKey.isEmpty,
+                    providerID: resolvedProviderID,
+                    shouldValidate: shouldValidate,
                     services: services
                 )
             }
@@ -4677,6 +4771,21 @@ final class PinesAppModel: ObservableObject {
             serviceError = error.localizedDescription
             return false
         }
+    }
+
+    nonisolated static func makeCloudProviderID(kind: CloudProviderKind, uuid: UUID = UUID()) -> ProviderID {
+        ProviderID(rawValue: "\(kind.rawValue)-\(uuid.uuidString.lowercased())")
+    }
+
+    nonisolated static func cloudProviderRequiresValidation(
+        existing: CloudProviderConfiguration?,
+        updatedBaseURL: URL,
+        replacementAPIKey: String
+    ) -> Bool {
+        if !replacementAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return existing.map { $0.baseURL != updatedBaseURL } ?? false
     }
 
     private func finishSavedCloudProviderActivation(

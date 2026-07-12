@@ -1,20 +1,20 @@
-# OpenRouter Provider Gaps
+# OpenRouter Provider Status And Gaps
 
-Last verified: 2026-05-19.
+Last verified: 2026-07-12.
 
 Primary sources:
 
-- [OpenRouter API reference](https://openrouter.ai/docs/api/reference/overview/)
-- [Parameters](https://openrouter.ai/docs/api/reference/parameters)
+- [Chat Completions API](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request)
 - [Models](https://openrouter.ai/docs/guides/overview/models)
 - [Provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
-- [Structured outputs](https://openrouter.ai/docs/features/structured-outputs)
+- [Structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs)
 - [Server tools](https://openrouter.ai/docs/guides/features/server-tools/overview)
 - [Web search server tool](https://openrouter.ai/docs/guides/features/server-tools/web-search)
 - [Plugins](https://openrouter.ai/docs/guides/features/plugins/overview)
 - [Multimodal capabilities](https://openrouter.ai/docs/guides/overview/multimodal/overview)
-- [Usage accounting](https://openrouter.ai/docs/guides/guides/usage-accounting)
-- [Prompt caching](https://openrouter.ai/docs/features/prompt-caching)
+- [Reasoning tokens](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)
+- [Usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting)
+- [Response healing](https://openrouter.ai/docs/guides/features/plugins/response-healing)
 
 ## What Pines Supports Today
 
@@ -25,23 +25,27 @@ Primary sources:
 - PDF inputs through OpenRouter's `file` content part shape.
 - OpenRouter embeddings through `/embeddings` with `input_type`.
 - Usage parsing through OpenAI-compatible stream shapes.
+- Persisted, normalized routing policy for explicit provider order, provider allow/deny lists, price/throughput/latency sorting, fallback enablement, required-parameter enforcement, data-collection denial, and zero-data-retention eligibility.
+- OpenRouter routing-metadata opt-in through `X-OpenRouter-Metadata: enabled`.
+- Provider-neutral JSON object/schema requests mapped to Chat Completions `response_format`.
+- Automatic `require_parameters: true` for requests carrying tools or structured output, so routing cannot silently drop those required features.
 
 ## High-Value Unsupported Or Partial Features
 
-### 1. Provider routing controls
+### 1. Route provenance and remaining routing controls
 
-OpenRouter's main product value is routing across many upstream providers, but Pines does not expose `provider.order`, `allow_fallbacks`, `require_parameters`, `data_collection`, `zdr`, `max_price`, or provider ignore/only preferences.
+Pines now sends the highest-value provider routing and privacy controls, but it does not yet expose `max_price`, quantization filters, or per-thread/per-provider overrides. Requests opt in to routing metadata, but the streaming parser and run-detail UI do not yet persist and display the actual upstream provider or fallback route.
 
 Value:
 
-- Users can enforce privacy, cost, latency, availability, or provider-specific requirements.
-- Prevents silent fallback to providers that lack required parameters or retention guarantees.
+- Users should be able to verify which upstream actually handled a request, not only which route they requested.
+- Price and quantization ceilings complete the operational routing policy.
 
 Implementation notes:
 
-- Add OpenRouter-specific advanced settings per request/thread/provider.
-- Use `require_parameters: true` when Pines sends structured outputs, tools, reasoning controls, or modalities that must not be dropped.
-- Surface actual routed provider and fallback metadata where available.
+- Parse and persist response routing metadata and fallback information.
+- Add route provenance to chat/run details.
+- Add `max_price`, quantization, and scoped override controls after model metadata is available.
 
 ### 2. OpenRouter server tools
 
@@ -57,18 +61,19 @@ Implementation notes:
 - Parse tool calls/results and standardized annotations.
 - Prefer the server tool over deprecated web plugin shortcuts.
 
-### 3. Structured outputs and response healing
+### 3. Structured-output reliability and response healing
 
-Pines does not send `response_format` JSON schema or OpenRouter `structured_outputs` hints. It also does not enable response healing for imperfect JSON.
+Pines sends JSON object/schema `response_format` and automatically requires supported parameters. It still relies on static provider capability rather than current model/upstream metadata and does not enable response healing for imperfect JSON.
 
 Value:
 
-- Reliable extraction across many models.
-- More robust results from models that approximate JSON but do not strictly follow schemas.
+- Metadata-driven preflight can reject impossible routes before a paid request.
+- Optional response healing can improve non-streaming extraction from models that approximate JSON.
 
 Implementation notes:
 
-- Use `require_parameters: true` when a schema is mandatory.
+- Keep `require_parameters: true` when a schema is mandatory.
+- Validate eligibility against current model and upstream-provider metadata.
 - Consider optional response-healing plugin for non-streaming structured requests.
 
 ### 4. Reasoning token controls
@@ -164,19 +169,19 @@ Implementation notes:
 
 ## Suggested Priority
 
-1. Provider routing controls and actual routed-provider metadata.
-2. Structured outputs with `require_parameters`.
-3. Usage/cost accounting.
-4. Server web search tool.
-5. Reasoning controls.
-6. Model metadata-driven picker.
+1. Actual routed-provider/fallback provenance and usage/cost accounting.
+2. Model metadata-driven eligibility and picker details.
+3. Server web search tool and citations.
+4. OpenRouter reasoning controls and reasoning-token parsing.
+5. Response healing for eligible non-streaming structured requests.
+6. Max-price/quantization and scoped routing overrides.
 7. Prompt caching/transforms.
 8. Additional modalities and upstream BYOK routing.
 
-## Review Checklist
+## Decisions And Open Questions
 
-- Should OpenRouter be treated as just OpenAI-compatible, or as its own routing platform with dedicated UI?
-- Should Pines default `require_parameters: true` for tools/schema/modalities to avoid degraded requests?
-- Which routing controls should be simple toggles versus expert-only JSON settings?
-- Should OpenRouter cost accounting be first-class in run details?
-- Should OpenRouter server web search replace Pines-native or provider-native web search when selected?
+- Decision: OpenRouter has dedicated typed routing/privacy UI rather than raw JSON or generic OpenAI-compatible behavior.
+- Decision: Pines requires parameter support automatically for tools and structured output.
+- Open: should cost accounting and upstream route provenance share one run-detail panel?
+- Open: which routing controls should be per-thread overrides rather than provider defaults?
+- Open: should OpenRouter server web search replace Pines-native or provider-native web search when selected?

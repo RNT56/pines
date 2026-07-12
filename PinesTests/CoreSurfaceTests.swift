@@ -669,12 +669,29 @@ final class CoreSurfaceTests: XCTestCase {
         )
 
         XCTAssertTrue(settings.contains("@State private var providerEnabled = true"))
+        XCTAssertTrue(settings.contains("@State private var editingProviderID: ProviderID?"))
         XCTAssertTrue(settings.contains("providerSaveConfirmation"))
         XCTAssertTrue(settings.contains("Saved \\(savedName). Validating the key and refreshing models."))
+        XCTAssertTrue(settings.contains("New API key (optional)"))
+        XCTAssertTrue(settings.contains("Update provider"))
+        XCTAssertTrue(settings.contains("beginProviderEditing(provider)"))
+        XCTAssertTrue(settings.contains("cancelProviderEditing()"))
+        XCTAssertTrue(settings.contains("OpenRouter routing and privacy"))
+        XCTAssertTrue(settings.contains("Require zero data retention"))
+        XCTAssertTrue(settings.contains("Save routing policy"))
+        XCTAssertTrue(settings.contains("pines.settings.openrouter.routing"))
         XCTAssertTrue(settings.contains("Use for agents"))
         XCTAssertTrue(settings.contains("Default model"))
         XCTAssertTrue(settings.contains("provider.defaultModelID"))
         XCTAssertTrue(appModel.contains("finishSavedCloudProviderActivation"))
+        XCTAssertTrue(appModel.contains("providerID: ProviderID? = nil"))
+        XCTAssertTrue(appModel.contains("let resolvedProviderID = providerID ?? Self.makeCloudProviderID(kind: kind)"))
+        XCTAssertTrue(appModel.contains("The provider being edited no longer exists"))
+        XCTAssertTrue(appModel.contains("Another cloud provider already uses that display name"))
+        XCTAssertTrue(appModel.contains("keychainAccount: existing?.keychainAccount ?? resolvedProviderID.rawValue"))
+        XCTAssertTrue(appModel.contains("cloudProviderRequiresValidation"))
+        XCTAssertTrue(appModel.contains("openRouterRequestOptions"))
+        XCTAssertTrue(appModel.contains("openRouterProviderPreferences: openRouterProviderPreferences"))
         XCTAssertTrue(appModel.contains("applyCloudProviderValidationResult"))
         XCTAssertTrue(appModel.contains("recordFirstCloudModelIfNeeded"))
         XCTAssertTrue(appModel.contains("replaceCloudModelCatalog"))
@@ -685,5 +702,80 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(chats.contains("No agent models"))
         XCTAssertTrue(chats.contains("no curated agent models"))
         XCTAssertTrue(chats.contains("Saved Providers"))
+    }
+
+    func testCloudProviderEditIdentityAndValidationSemantics() throws {
+        let originalURL = try XCTUnwrap(URL(string: "https://openrouter.ai/api/v1"))
+        let changedURL = try XCTUnwrap(URL(string: "https://example.com/openrouter/v1"))
+        let provider = CloudProviderConfiguration(
+            id: "openrouter-stable-id",
+            kind: .openRouter,
+            displayName: "OpenRouter",
+            baseURL: originalURL,
+            validationStatus: .valid,
+            keychainAccount: "openrouter-stable-key"
+        )
+        let firstID = PinesAppModel.makeCloudProviderID(
+            kind: .openRouter,
+            uuid: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        )
+        let secondID = PinesAppModel.makeCloudProviderID(
+            kind: .openRouter,
+            uuid: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        )
+
+        XCTAssertEqual(firstID.rawValue, "openRouter-00000000-0000-0000-0000-000000000001")
+        XCTAssertNotEqual(firstID, secondID)
+        XCTAssertFalse(
+            PinesAppModel.cloudProviderRequiresValidation(
+                existing: provider,
+                updatedBaseURL: originalURL,
+                replacementAPIKey: ""
+            )
+        )
+        XCTAssertTrue(
+            PinesAppModel.cloudProviderRequiresValidation(
+                existing: provider,
+                updatedBaseURL: changedURL,
+                replacementAPIKey: ""
+            )
+        )
+        XCTAssertTrue(
+            PinesAppModel.cloudProviderRequiresValidation(
+                existing: provider,
+                updatedBaseURL: originalURL,
+                replacementAPIKey: "new-secret"
+            )
+        )
+    }
+
+    func testCloudKitSyncHealthIsUserVisibleAndRetryable() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appState = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppState.swift"),
+            encoding: .utf8
+        )
+        let appModel = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModel.swift"),
+            encoding: .utf8
+        )
+        let settings = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Settings/SettingsDetailView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appState.contains("struct PinesCloudKitSyncStatus: Equatable"))
+        XCTAssertTrue(appState.contains("@Published var cloudKitSyncStatus"))
+        XCTAssertTrue(appModel.contains("phase: .syncing"))
+        XCTAssertTrue(appModel.contains("phase: .succeeded"))
+        XCTAssertTrue(appModel.contains("phase: .failed"))
+        XCTAssertTrue(appModel.contains("services.redactor.redact(error.localizedDescription)"))
+        XCTAssertTrue(settings.contains("cloudKitSyncChipStatus"))
+        XCTAssertTrue(settings.contains("cloudKitSyncSummary"))
+        XCTAssertTrue(settings.contains("reason: \"manual_settings\""))
+        XCTAssertTrue(settings.contains("pines.settings.icloud.sync-now"))
+        XCTAssertTrue(settings.contains("pines.settings.icloud.error"))
     }
 }

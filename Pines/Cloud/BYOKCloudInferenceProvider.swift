@@ -356,7 +356,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         return request
     }
 
-    private func openAICompatibleRequest(apiKey: String, chatRequest: ChatRequest) async throws -> URLRequest {
+    func openAICompatibleRequest(apiKey: String, chatRequest: ChatRequest) async throws -> URLRequest {
         let url = apiBaseURL.appending(path: "chat/completions")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -390,6 +390,23 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.openAIFunctionToolObject()) }
             body["tool_choice"] = "auto"
             body["parallel_tool_calls"] = false
+        }
+        if configuration.capabilities.structuredOutputs,
+           let responseFormat = Self.openAIChatResponseFormatObject(from: chatRequest.structuredOutput) {
+            body["response_format"] = responseFormat
+        }
+        if configuration.kind == .openRouter {
+            request.setValue("enabled", forHTTPHeaderField: "X-OpenRouter-Metadata")
+            let preferences = chatRequest.openRouterOptions ?? OpenRouterProviderPreferences()
+            let requiresParameters = preferences.requireParameters
+                || (chatRequest.allowsTools && !chatRequest.availableTools.isEmpty)
+                || chatRequest.structuredOutput != .text
+            if let providerPreferences = Self.openRouterProviderObject(
+                preferences,
+                requiresParameters: requiresParameters
+            ) {
+                body["provider"] = providerPreferences
+            }
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         try await applyExtraHeaders(to: &request)
@@ -637,6 +654,55 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 "strict": strict,
             ]
         }
+    }
+
+    private static func openAIChatResponseFormatObject(from format: StructuredOutputFormat) -> [String: Any]? {
+        switch format {
+        case .text:
+            return nil
+        case .jsonObject:
+            return ["type": "json_object"]
+        case let .jsonSchema(name, schema, strict):
+            return [
+                "type": "json_schema",
+                "json_schema": [
+                    "name": name,
+                    "schema": jsonObject(from: schema),
+                    "strict": strict,
+                ],
+            ]
+        }
+    }
+
+    static func openRouterProviderObject(
+        _ preferences: OpenRouterProviderPreferences,
+        requiresParameters: Bool
+    ) -> [String: Any]? {
+        var provider = [String: Any]()
+        if !preferences.order.isEmpty {
+            provider["order"] = preferences.order
+        } else if preferences.sort != .automatic {
+            provider["sort"] = preferences.sort.rawValue
+        }
+        if !preferences.only.isEmpty {
+            provider["only"] = preferences.only
+        }
+        if !preferences.ignore.isEmpty {
+            provider["ignore"] = preferences.ignore
+        }
+        if !preferences.allowFallbacks {
+            provider["allow_fallbacks"] = false
+        }
+        if requiresParameters {
+            provider["require_parameters"] = true
+        }
+        if preferences.dataCollection == .deny {
+            provider["data_collection"] = OpenRouterDataCollectionPolicy.deny.rawValue
+        }
+        if preferences.zeroDataRetention {
+            provider["zdr"] = true
+        }
+        return provider.isEmpty ? nil : provider
     }
 
     private static func openAITextFormatObject(from request: OpenAIStructuredOutputRequest) -> [String: Any] {

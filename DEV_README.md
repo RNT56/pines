@@ -130,6 +130,8 @@ When changing persistence:
 
 CloudKit is optional and private-database scoped. It synchronizes settings, Project Spaces, conversations/messages, and enabled Vault metadata/chunks through encrypted payload records; project tombstones unlink child chat and Vault records on peers. Do not sync API keys, model binaries, prompt caches, TurboQuant KV snapshots, generated embeddings/vector codes by default, transient browser/tool state, or local chat attachment files. Generated embeddings and compressed vector codes sync only when private iCloud sync and the separate embedding sync toggle are both enabled.
 
+The app model owns one observable CloudKit sync status with the current phase, last attempt, last success, redacted error, and trigger. Settings exposes that state and a bounded manual retry. A successful transport/merge run is not evidence that user-visible conflict resolution is complete; conflict persistence and resolution UI remain separate product work.
+
 Personal Apple Developer accounts are safe by default. `PINES_CODE_SIGN_ENTITLEMENTS` and `PINES_ICLOUD_SWIFT_FLAGS` are empty in `project.yml`, so Xcode does not request iCloud provisioning. Paid-team CloudKit builds must override both:
 
 ```sh
@@ -354,6 +356,8 @@ When adding or changing a provider:
 - Parse provider metadata without leaking keys or raw sensitive payloads into logs.
 - Add tests for stream parser edge cases.
 - Keep cloud route selection explicit through `ExecutionRouter`.
+- Preserve provider identity and Keychain account when editing display names or endpoints; blank replacement credentials must retain the existing secret.
+- Keep OpenRouter routing policy typed and normalized. Schema/tool-critical requests must set `require_parameters`, and privacy restrictions must never be silently relaxed.
 
 ## Vault And Retrieval
 

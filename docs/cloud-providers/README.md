@@ -1,6 +1,6 @@
 # Cloud Provider Feature Review
 
-Last verified: 2026-05-19.
+Last full cross-provider review: 2026-05-19. OpenRouter implementation and documentation refreshed: 2026-07-12.
 
 This folder tracks the current cloud-provider surface in Pines, the remaining feature gaps, and the production parity roadmaps. It is intentionally scoped to the provider kinds currently present in `CloudProviderKind`: OpenAI/OpenAI-compatible, Anthropic, Gemini, OpenRouter, and Voyage AI.
 
@@ -18,6 +18,7 @@ Current Pines cloud surface, based on `Pines/Cloud/BYOKCloudInferenceProvider.sw
 - Chat provenance for request IDs, provider IDs, usage/cache metrics, citations, hosted tool events, file references, and selected provider-side state.
 - Provider-backed vault embeddings for OpenAI-compatible, Gemini, OpenRouter, Voyage AI, and custom providers.
 - Provider-specific reasoning controls for OpenAI, Anthropic, and Gemini where model eligibility is recognized.
+- Persisted OpenRouter routing/privacy controls for provider order, allow/deny lists, route sorting, fallback, supported-parameter enforcement, data collection, and zero-data-retention eligibility, plus Chat Completions structured-output mapping.
 
 Provider documents:
 

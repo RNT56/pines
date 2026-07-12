@@ -1,6 +1,12 @@
 # OpenRouter Production Parity Roadmap
 
-Last verified: 2026-05-19. Companion gap analysis: [openrouter.md](openrouter.md).
+Last verified: 2026-07-12. Companion gap analysis: [openrouter.md](openrouter.md).
+
+## Current Implementation State
+
+Pines now persists a normalized OpenRouter policy and applies it to Chat Completions requests. The shipped Settings controls cover explicit provider order, allow/deny lists, price/throughput/latency sorting, fallbacks, required-parameter enforcement, data-collection denial, and zero-data-retention eligibility. Tool and structured-output requests automatically require parameter support. JSON object/schema response formats are mapped to `response_format`, and requests opt in to OpenRouter routing metadata.
+
+This is a meaningful Phase 1/3 foundation, not production parity. Policy is currently global rather than per-thread/per-provider; max-price and quantization controls, parsed upstream route/fallback provenance, cost accounting, metadata-driven model eligibility, server tools, reasoning controls, response healing, caching/transforms, and output media remain incomplete.
 
 ## Product Goal
 
@@ -51,12 +57,13 @@ Goal: Give users control over where OpenRouter sends their request.
 
 Todos:
 
-- Add OpenRouter-specific request settings for provider order, allow/deny providers, allow fallbacks, require parameters, data collection, ZDR preference, and max price.
-- Default `require_parameters` for schema/tool/modality-critical requests.
-- Surface actual routed provider and fallback metadata in run details where available.
-- Add per-thread and per-provider defaults.
-- Add tests for strict provider order, fallback disabled, and unsupported parameter rejection.
-- Add routing control panel and route provenance UI.
+- [x] Add typed request settings for provider order, allow/deny providers, route sorting, fallbacks, required parameters, data collection, and ZDR preference.
+- [x] Default `require_parameters` for schema/tool-critical requests.
+- [x] Add persisted routing/privacy controls and direct request-construction tests.
+- [ ] Add max-price and quantization controls.
+- [ ] Surface actual routed provider and fallback metadata in run details.
+- [ ] Add per-thread and per-provider overrides.
+- [ ] Add route provenance UI and live unsupported-parameter rejection coverage.
 
 Possible hiccups:
 
@@ -95,10 +102,10 @@ Goal: Make extraction reliable across routed models.
 
 Todos:
 
-- Map provider-neutral schema requests to OpenRouter structured output format.
-- Set `require_parameters` when schema adherence is required.
-- Add optional response healing for non-streaming structured requests if still supported and useful.
-- Add model/provider capability checks before sending schemas.
+- [x] Map provider-neutral JSON object/schema requests to OpenRouter `response_format`.
+- [x] Set `require_parameters` when schema adherence is required.
+- [ ] Add optional response healing for non-streaming structured requests if still supported and useful.
+- [ ] Replace static provider capability with model/upstream metadata checks before sending schemas.
 
 Possible hiccups:
 

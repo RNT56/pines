@@ -2339,6 +2339,7 @@ struct CoreContractTests {
         #expect(decoded.anthropicTokenCountPreflightEnabled == false)
         #expect(decoded.geminiThinkingLevel == .medium)
         #expect(decoded.cloudWebSearchMode == .off)
+        #expect(decoded.openRouterProviderPreferences == .init())
         #expect(decoded.cloudAccessMode == .byok)
         #expect(decoded.proEntitlementStatus == .inactive)
         #expect(decoded.managedCloudConsent == .notAsked)
@@ -2356,7 +2357,17 @@ struct CoreContractTests {
             anthropicEffort: .xhigh,
             anthropicTokenCountPreflightEnabled: true,
             geminiThinkingLevel: .high,
-            cloudWebSearchMode: .automatic
+            cloudWebSearchMode: .automatic,
+            openRouterProviderPreferences: OpenRouterProviderPreferences(
+                order: [" Anthropic ", "OPENAI", "anthropic"],
+                only: ["azure"],
+                ignore: ["AZURE", "deepinfra"],
+                allowFallbacks: false,
+                requireParameters: true,
+                dataCollection: .deny,
+                zeroDataRetention: true,
+                sort: .throughput
+            )
         )
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
         #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
@@ -2368,6 +2379,10 @@ struct CoreContractTests {
         #expect(clamped.anthropicTokenCountPreflightEnabled == true)
         #expect(clamped.geminiThinkingLevel == .high)
         #expect(clamped.cloudWebSearchMode == .automatic)
+        #expect(clamped.openRouterProviderPreferences.order == ["anthropic", "openai"])
+        #expect(clamped.openRouterProviderPreferences.only == ["azure"])
+        #expect(clamped.openRouterProviderPreferences.ignore == ["deepinfra"])
+        #expect(clamped.openRouterProviderPreferences.sort == .automatic)
         #expect(clamped.cloudAccessMode == .managedPro)
         #expect(clamped.proEntitlementStatus == .active)
         #expect(clamped.managedCloudConsent == .optedIn)
@@ -2597,7 +2612,13 @@ struct CoreContractTests {
                 previousResponseID: "resp_previous",
                 hostedTools: [OpenAIHostedToolRequest(kind: .fileSearch, vectorStoreIDs: ["vs_1"])]
             ),
-            geminiOptions: GeminiRequestOptions(cachedContentName: "cachedContents/1")
+            geminiOptions: GeminiRequestOptions(cachedContentName: "cachedContents/1"),
+            openRouterOptions: OpenRouterProviderPreferences(
+                order: ["anthropic", "openai"],
+                allowFallbacks: false,
+                dataCollection: .deny,
+                zeroDataRetention: true
+            )
         )
 
         let rebuilt = request.replacing(
@@ -2616,6 +2637,7 @@ struct CoreContractTests {
         #expect(rebuilt.openAIResponseOptions?.previousResponseID == "resp_previous")
         #expect(rebuilt.openAIResponseOptions?.hostedTools.first?.vectorStoreIDs == ["vs_1"])
         #expect(rebuilt.geminiOptions?.cachedContentName == "cachedContents/1")
+        #expect(rebuilt.openRouterOptions == request.openRouterOptions)
         #expect(rebuilt.webSearchOptions?.allowedDomains == ["example.com"])
         #expect(rebuilt.vaultContextIDs == request.vaultContextIDs)
     }
