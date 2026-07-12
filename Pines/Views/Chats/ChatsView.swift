@@ -1206,6 +1206,9 @@ private struct ChatBubble: View {
                 if !hostedToolEntries.isEmpty {
                     ChatHostedToolTimeline(entries: hostedToolEntries)
                 }
+                if let provenance = OpenRouterRunProvenance(metadata: message.providerMetadata) {
+                    ChatOpenRouterReceiptView(provenance: provenance)
+                }
 
                 let agentActivities = PinesAppModel.agentActivities(from: message.providerMetadata)
                 if !agentActivities.isEmpty {

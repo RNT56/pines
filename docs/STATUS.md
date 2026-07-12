@@ -27,12 +27,12 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - Exact app-level pins to the maintained `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` forks for TurboQuant and compatibility APIs.
 - Split MLX compatibility implementations for Llama 4 and DeepSeek V4 model families.
 - Hugging Face preflight and resumable model install/delete service.
-- BYOK cloud streaming adapters for OpenAI-compatible, OpenRouter, Anthropic, and Gemini, including provider-specific stream metadata parsing. OpenRouter requests support persisted provider order/allow/deny/sort policy, fallback and supported-parameter enforcement, data-collection/ZDR constraints, routing-metadata opt-in, and JSON object/schema response formats.
+- BYOK cloud streaming adapters for OpenAI-compatible, OpenRouter, Anthropic, and Gemini, including provider-specific stream metadata parsing. OpenRouter requests support persisted provider order/allow/deny/sort policy, fallback and supported-parameter enforcement, data-collection/ZDR constraints, routing-metadata opt-in, JSON object/schema response formats, and terminal route/usage/cost receipts.
 - Shared provider lifecycle records, repositories, previews, and the Artifacts workspace for provider-hosted files, artifacts, caches/vector stores, batches, model capabilities, live sessions, and research runs.
 - OpenAI provider lifecycle workflows for Files, vector stores, vector-store file batches, batches, Deep Research, realtime session records, generated image/video artifacts, speech, transcription, and translation artifacts.
 - Anthropic provider lifecycle workflows for Files, generated file download/import, prompt cache metrics, citations, thinking preservation, Message Batches, token counting, hosted tool metadata, and model capability rows.
 - Gemini provider lifecycle workflows for Files, context caches, token counting, Deep Research, Live sessions, generated media artifacts, batches, URL context metadata, Google Search grounding, and model capability rows.
-- Chat provenance surfaces for provider citations, hosted tool timelines, provider file references, request/message IDs, cache metrics, thinking mode, and generated artifacts.
+- Chat provenance surfaces for provider citations, hosted tool timelines, provider file references, request/message IDs, cache metrics, thinking mode, generated artifacts, and privacy-minimized OpenRouter route/fallback/token/cost receipts.
 - Built-in calculator, time/date, attachment read, vault search/read, conversation search, Brave Search BYOK, bounded public-network-only web fetch, and policy-gated WKWebView browser observe/action tools.
 - Vault file/PDF/image import pipeline with scoped file types, bounded source size/text extraction, OCR, chunking, and embedding invocation.
 - TurboQuant runtime profile defaults, requested/active backend diagnostics, Metal codec and compressed-attention availability diagnostics, compressed vault embedding storage, approximate vector search, and FP16 rerank path.
@@ -62,7 +62,7 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 ## Not Complete
 
 - Real-device TurboQuant acceptance on the A16 through A19 Pro hardware matrix, including stable multi-repeat real-model coverage and at least one imported model/device/mode evidence tuple before any `Verified` or `Certified` product claim.
-- Production UX hardening for provider-hosted transfer progress/retry/cancellation, richer hosted-tool approvals, persisted CloudKit conflict resolution, detailed model compatibility messaging, and OpenRouter route/cost provenance.
+- Production UX hardening for provider-hosted transfer progress/retry/cancellation, richer hosted-tool approvals, persisted CloudKit conflict resolution, detailed model compatibility messaging, and OpenRouter metadata-driven eligibility plus aggregate spend reporting.
 - Signed App Store archive/export, TestFlight/App Store upload automation, and final App Store Connect privacy review for the submitted binary.
 - The platform-aware, warning-free `mlx-swift` build-tool plugin, Apple-mobile JIT compatibility fix, and SwiftPM 6.2 manifest compatibility are pinned at `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`; cold iOS device and simulator builds must remain warning-free as part of release validation.
 - Remaining monolith candidates are semantic rather than mechanical: `PinesAppModel` still owns high-level orchestration, `SettingsDetailView` owns the full settings editor, and `ModelsViewComponents` owns model list/detail presentation. Split these further only alongside focused feature changes.

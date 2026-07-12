@@ -101,6 +101,7 @@
 		B7A642333FC08377576C9C3F /* PinesUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA70907A54EAB3A9DE13642D /* PinesUITests.swift */; };
 		B925E264EAB46D0C3EB6B307 /* PinesHubXetSupport in Frameworks */ = {isa = PBXBuildFile; productRef = F5BE958969B414C35418437A /* PinesHubXetSupport */; };
 		BAF84E40F21C59F00422283F /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 97ADD97B0749021A162048FE /* MLXNN */; };
+		BB770B473FA6D4FB3E97FF14 /* ChatOpenRouterReceiptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDA783D05156233EA9620B1 /* ChatOpenRouterReceiptView.swift */; };
 		BDB1CA0CE1D6AA812EC96D4F /* ArtifactsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7FFC4A75A71DA8C323BB59 /* ArtifactsModels.swift */; };
 		C01E6498FFFBC564A01F56AB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3777534B3E27910D84F4EA38 /* Assets.xcassets */; };
 		C05BF46FDF47D9D3C4831915 /* PinesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82DE8010D019802F630AAF0B /* PinesApp.swift */; };
@@ -258,6 +259,7 @@
 		989263AE706043656C31B580 /* CoreSurfaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSurfaceTests.swift; sourceTree = "<group>"; };
 		99ABB45AA2309B6667A25016 /* PinesAppModel+OpenAIProviderStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+OpenAIProviderStorage.swift"; sourceTree = "<group>"; };
 		9B417F2B5DA63F1EDAE01442 /* PinesAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesAppModel.swift; sourceTree = "<group>"; };
+		9BDA783D05156233EA9620B1 /* ChatOpenRouterReceiptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatOpenRouterReceiptView.swift; sourceTree = "<group>"; };
 		9C6FF18172BCCD1C796B34F4 /* ArtifactsWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactsWorkspaceView.swift; sourceTree = "<group>"; };
 		9CB6251B36A1F706D8884A9E /* ModelDownloadSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadSupport.swift; sourceTree = "<group>"; };
 		A13BF92952B097508CCADE95 /* PinesAppModel+DeepResearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PinesAppModel+DeepResearch.swift"; sourceTree = "<group>"; };
@@ -495,6 +497,7 @@
 			isa = PBXGroup;
 			children = (
 				3A1D839DB999966A154DC8E7 /* ChatComposerBar.swift */,
+				9BDA783D05156233EA9620B1 /* ChatOpenRouterReceiptView.swift */,
 				68F090D0FF64498C5E03C0CA /* ChatsView.swift */,
 				8BD9A00CA54B90E791E77F56 /* MarkdownMessageView.swift */,
 			);
@@ -897,6 +900,7 @@
 				686B47B0D035141554B0F573 /* BoundedHTTPResponse.swift in Sources */,
 				EF4BB673BC780064BBF0DDD5 /* BraveSearchTool.swift in Sources */,
 				0D13A988324EF08D8E6AF29F /* ChatComposerBar.swift in Sources */,
+				BB770B473FA6D4FB3E97FF14 /* ChatOpenRouterReceiptView.swift in Sources */,
 				39CF2E229241A26056922251 /* ChatsView.swift in Sources */,
 				A98FB291F3056FD1DF91BEF1 /* CloudKitRecordCipher.swift in Sources */,
 				667DB9AFA3DAD1AAD581754E /* CloudKitSyncService.swift in Sources */,

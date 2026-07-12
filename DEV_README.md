@@ -358,6 +358,7 @@ When adding or changing a provider:
 - Keep cloud route selection explicit through `ExecutionRouter`.
 - Preserve provider identity and Keychain account when editing display names or endpoints; blank replacement credentials must retain the existing secret.
 - Keep OpenRouter routing policy typed and normalized. Schema/tool-critical requests must set `require_parameters`, and privacy restrictions must never be silently relaxed.
+- Finalize streamed provider metadata only after the terminal accounting chunk. Persist only the OpenRouter receipt allowlist (route/provider/model/status, usage, and cost), never arbitrary router pipeline/plugin payloads.
 
 ## Vault And Retrieval
 

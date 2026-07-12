@@ -1,12 +1,12 @@
 # OpenRouter Production Parity Roadmap
 
-Last verified: 2026-07-12. Companion gap analysis: [openrouter.md](openrouter.md).
+Last verified: 2026-07-13. Companion gap analysis: [openrouter.md](openrouter.md).
 
 ## Current Implementation State
 
-Pines now persists a normalized OpenRouter policy and applies it to Chat Completions requests. The shipped Settings controls cover explicit provider order, allow/deny lists, price/throughput/latency sorting, fallbacks, required-parameter enforcement, data-collection denial, and zero-data-retention eligibility. Tool and structured-output requests automatically require parameter support. JSON object/schema response formats are mapped to `response_format`, and requests opt in to OpenRouter routing metadata.
+Pines now persists a normalized OpenRouter policy and applies it to Chat Completions requests. The shipped Settings controls cover explicit provider order, allow/deny lists, price/throughput/latency sorting, fallbacks, required-parameter enforcement, data-collection denial, and zero-data-retention eligibility. Tool and structured-output requests automatically require parameter support. JSON object/schema response formats are mapped to `response_format`, and requests opt in to OpenRouter routing metadata. The terminal stream chunk is finalized into a privacy-minimized chat receipt with resolved route/fallback, usage, BYOK, and cost data.
 
-This is a meaningful Phase 1/3 foundation, not production parity. Policy is currently global rather than per-thread/per-provider; max-price and quantization controls, parsed upstream route/fallback provenance, cost accounting, metadata-driven model eligibility, server tools, reasoning controls, response healing, caching/transforms, and output media remain incomplete.
+This is a meaningful Phase 1/3/7 foundation, not production parity. Policy is currently global rather than per-thread/per-provider; max-price and quantization controls, aggregate/reconciled accounting, metadata-driven model eligibility, server tools, reasoning controls, response healing, caching/transforms, and output media remain incomplete.
 
 ## Product Goal
 
@@ -61,13 +61,14 @@ Todos:
 - [x] Default `require_parameters` for schema/tool-critical requests.
 - [x] Add persisted routing/privacy controls and direct request-construction tests.
 - [ ] Add max-price and quantization controls.
-- [ ] Surface actual routed provider and fallback metadata in run details.
+- [x] Surface actual routed provider and fallback metadata in run details.
 - [ ] Add per-thread and per-provider overrides.
-- [ ] Add route provenance UI and live unsupported-parameter rejection coverage.
+- [x] Add privacy-minimized route provenance UI.
+- [ ] Add live unsupported-parameter rejection coverage.
 
 Possible hiccups:
 
-- Actual routed-provider metadata may be incomplete or returned out of band.
+- Router metadata is intentionally absent on OpenRouter cache hits and can be incomplete on early failures.
 - Tight routing constraints can make requests fail more often.
 - Privacy settings need clear wording, not acronyms only.
 
@@ -184,15 +185,18 @@ Goal: Make OpenRouter cost transparent.
 
 Todos:
 
-- Parse prompt/completion/reasoning/cached tokens and cost fields.
-- Store upstream provider, model, route, and cost in metadata.
+- [x] Parse prompt/completion/total tokens, BYOK state, reported cost, and upstream inference cost.
+- [ ] Parse reasoning, cached, media, and server-tool usage details.
+- [x] Store upstream provider, model, safe fallback route, and cost in metadata after the terminal stream chunk.
 - Add per-thread and per-provider spend summaries if product wants it.
-- Add cost inspector and run detail rows for routed provider/cost metadata.
+- [x] Add a progressively disclosed chat receipt for routed provider/cost metadata.
+- [ ] Add aggregate cost inspection and optional generation-endpoint reconciliation.
 
 Possible hiccups:
 
-- Cost can be returned after generation or through a separate accounting endpoint.
+- Cost and router metadata arrive after the ordinary finish-reason chunk; stream finalization must preserve the terminal receipt.
+- Cache hits omit router metadata, while generation accounting may require a separate authenticated lookup.
 
 Production complete when:
 
-- Users can inspect actual OpenRouter cost and route details for every run.
+- Users can inspect actual OpenRouter cost and route details whenever the provider returns them, with honest missing-data behavior for cache hits and early failures.

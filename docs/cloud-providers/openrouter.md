@@ -1,6 +1,6 @@
 # OpenRouter Provider Status And Gaps
 
-Last verified: 2026-07-12.
+Last verified: 2026-07-13.
 
 Primary sources:
 
@@ -14,6 +14,7 @@ Primary sources:
 - [Multimodal capabilities](https://openrouter.ai/docs/guides/overview/multimodal/overview)
 - [Reasoning tokens](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)
 - [Usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting)
+- [Router metadata](https://openrouter.ai/docs/guides/features/router-metadata)
 - [Response healing](https://openrouter.ai/docs/guides/features/plugins/response-healing)
 
 ## What Pines Supports Today
@@ -29,12 +30,15 @@ Primary sources:
 - OpenRouter routing-metadata opt-in through `X-OpenRouter-Metadata: enabled`.
 - Provider-neutral JSON object/schema requests mapped to Chat Completions `response_format`.
 - Automatic `require_parameters: true` for requests carrying tools or structured output, so routing cannot silently drop those required features.
+- Terminal stream receipt parsing for resolved provider/model, routing strategy/region, selected endpoint, fallback attempts and statuses, native finish reason, service tier, prompt/completion/total tokens, BYOK state, reported cost, and upstream inference cost.
+- A collapsed OpenRouter receipt in each eligible assistant message, with route, fallback, usage, execution, cost, and generation details available on demand.
+- Privacy-minimized persistence: Pines stores allowlisted routing and usage fields while excluding arbitrary router pipeline/plugin additions from message metadata and CloudKit sync.
 
 ## High-Value Unsupported Or Partial Features
 
 ### 1. Route provenance and remaining routing controls
 
-Pines now sends the highest-value provider routing and privacy controls, but it does not yet expose `max_price`, quantization filters, or per-thread/per-provider overrides. Requests opt in to routing metadata, but the streaming parser and run-detail UI do not yet persist and display the actual upstream provider or fallback route.
+Pines sends the highest-value provider routing and privacy controls and now persists/displays the successful response's selected upstream and safe fallback-attempt chain. It does not yet expose `max_price`, quantization filters, or per-thread/per-provider overrides. OpenRouter cache hits intentionally omit router metadata, so those receipts may contain accounting and generation identity without a route snapshot.
 
 Value:
 
@@ -43,9 +47,8 @@ Value:
 
 Implementation notes:
 
-- Parse and persist response routing metadata and fallback information.
-- Add route provenance to chat/run details.
 - Add `max_price`, quantization, and scoped override controls after model metadata is available.
+- Keep the receipt parser permissive for additive response changes while retaining the persisted allowlist.
 
 ### 2. OpenRouter server tools
 
@@ -90,9 +93,9 @@ Implementation notes:
 - Add OpenRouter-specific `reasoning` mapping separate from official OpenAI Responses `reasoning`.
 - Parse reasoning content and reasoning token usage when available.
 
-### 5. Usage accounting and cost metadata
+### 5. Detailed usage accounting and aggregate spend
 
-OpenRouter returns detailed token, cached-token, reasoning-token, and cost data. Pines only parses generic token usage.
+Pines parses and displays prompt/completion/total tokens, reported cost, upstream inference cost, and BYOK state per run. Cached/reasoning/media/server-tool detail, thread/provider rollups, and reconciliation through the generation accounting endpoint remain incomplete.
 
 Value:
 
@@ -100,8 +103,8 @@ Value:
 
 Implementation notes:
 
-- Extend `InferenceMetrics` or provider metadata to include cost and detailed token fields.
-- Show per-run cost in audit/details UI.
+- Add cached, reasoning, media, and server-tool usage fields as product surfaces consume them.
+- Add optional thread/provider spend summaries and generation-endpoint reconciliation without turning Pines into an account-management client.
 
 ### 6. Prompt caching and sticky routing
 
@@ -169,12 +172,12 @@ Implementation notes:
 
 ## Suggested Priority
 
-1. Actual routed-provider/fallback provenance and usage/cost accounting.
-2. Model metadata-driven eligibility and picker details.
-3. Server web search tool and citations.
-4. OpenRouter reasoning controls and reasoning-token parsing.
-5. Response healing for eligible non-streaming structured requests.
-6. Max-price/quantization and scoped routing overrides.
+1. Model metadata-driven eligibility and picker details.
+2. Server web search tool and citations.
+3. OpenRouter reasoning controls and detailed reasoning/cache usage.
+4. Response healing for eligible non-streaming structured requests.
+5. Max-price/quantization and scoped routing overrides.
+6. Aggregate/reconciled spend reporting.
 7. Prompt caching/transforms.
 8. Additional modalities and upstream BYOK routing.
 
@@ -182,6 +185,6 @@ Implementation notes:
 
 - Decision: OpenRouter has dedicated typed routing/privacy UI rather than raw JSON or generic OpenAI-compatible behavior.
 - Decision: Pines requires parameter support automatically for tools and structured output.
-- Open: should cost accounting and upstream route provenance share one run-detail panel?
+- Decision: per-run cost accounting and upstream route provenance share one privacy-minimized, progressively disclosed chat receipt.
 - Open: which routing controls should be per-thread overrides rather than provider defaults?
 - Open: should OpenRouter server web search replace Pines-native or provider-native web search when selected?

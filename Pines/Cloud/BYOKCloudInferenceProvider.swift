@@ -89,7 +89,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                     if let event = sseDecoder.finish() {
                         handleSSEEvent(event, format: streamingFormat, parser: &streamParser, pendingFinish: &pendingFinish, continuation: continuation)
                     }
-                    continuation.yield(.finish(pendingFinish ?? streamParser.fallbackFinish(
+                    continuation.yield(.finish(streamParser.finalizedFinish(
+                        pendingFinish,
                         format: streamingFormat,
                         providerKind: configuration.kind,
                         modelID: request.modelID,

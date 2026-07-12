@@ -1237,6 +1237,86 @@ struct CoreContractTests {
     }
 
     @Test
+    func openRouterTerminalReceiptPreservesRouteUsageAndCostAfterFinishReason() throws {
+        var parser = CloudProviderStreamParser()
+        let finishPayload = #"{"id":"gen-route-1","object":"chat.completion.chunk","model":"anthropic/claude-sonnet-4.6","provider":"Anthropic","service_tier":"priority","choices":[{"index":0,"delta":{},"finish_reason":"stop","native_finish_reason":"end_turn"}]}"#
+        let receiptPayload = #"{"id":"gen-route-1","object":"chat.completion.chunk","model":"anthropic/claude-sonnet-4.6","choices":[],"usage":{"prompt_tokens":120,"completion_tokens":30,"total_tokens":150,"cost":0.00125,"is_byok":false,"cost_details":{"upstream_inference_cost":0.001},"future_usage":{"sensitive":"excluded"}},"openrouter_metadata":{"requested":"openrouter/auto","strategy":"fallback","region":"iad","summary":"available=2, selected=Anthropic","attempt":2,"is_byok":false,"endpoints":{"total":2,"available":[{"provider":"OpenAI","model":"openai/gpt-4.1","selected":false},{"provider":"Anthropic","model":"anthropic/claude-sonnet-4.6","selected":true}]},"attempts":[{"provider":"OpenAI","model":"openai/gpt-4.1","status":503},{"provider":"Anthropic","model":"anthropic/claude-sonnet-4.6","status":200}],"future_addition":{"accepted":true}}}"#
+
+        let finishOutput = parser.parse(
+            data: Data(finishPayload.utf8),
+            format: .chatCompletions,
+            providerKind: .openRouter
+        )
+        let receiptOutput = parser.parse(
+            data: Data(receiptPayload.utf8),
+            format: .chatCompletions,
+            providerKind: .openRouter
+        )
+        let finish = parser.finalizedFinish(
+            finishOutput.finish,
+            format: .chatCompletions,
+            providerKind: .openRouter,
+            modelID: "openrouter/auto",
+            usesOfficialOpenAIReasoningChat: false
+        )
+
+        #expect(receiptOutput.finish == nil)
+        #expect(receiptOutput.events == [.metrics(InferenceMetrics(promptTokens: 120, completionTokens: 30))])
+        #expect(finish.reason == .stop)
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterGenerationID] == "gen-route-1")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterProvider] == "Anthropic")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterSelectedProvider] == "Anthropic")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterSelectedModel] == "anthropic/claude-sonnet-4.6")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterRequestedModel] == "openrouter/auto")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterStrategy] == "fallback")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterAttempt] == "2")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterAttemptCount] == "2")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterPromptTokens] == "120")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterCompletionTokens] == "30")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterTotalTokens] == "150")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterCostCredits] == "0.00125")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterUpstreamInferenceCost] == "0.001")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterIsBYOK] == "false")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterNativeFinishReason] == "end_turn")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterServiceTier] == "priority")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterMetadataJSON]?.contains("future_addition") == false)
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterAttemptsJSON]?.contains("Anthropic") == true)
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterUsageJSON]?.contains("cost_details") == true)
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterUsageJSON]?.contains("future_usage") == false)
+
+        let provenance = try #require(OpenRouterRunProvenance(metadata: finish.providerMetadata))
+        #expect(provenance.generationID == "gen-route-1")
+        #expect(provenance.model == "anthropic/claude-sonnet-4.6")
+        #expect(provenance.selectedProvider == "Anthropic")
+        #expect(provenance.effectiveAttemptCount == 2)
+        #expect(provenance.routeAttempts.count == 2)
+        #expect(provenance.routeAttempts.first?.provider == "OpenAI")
+        #expect(provenance.routeAttempts.first?.status == 503)
+        #expect(provenance.promptTokens == 120)
+        #expect(provenance.completionTokens == 30)
+        #expect(provenance.totalTokens == 150)
+        #expect(provenance.costCredits == 0.00125)
+        #expect(provenance.upstreamInferenceCost == 0.001)
+        #expect(provenance.isBYOK == false)
+    }
+
+    @Test
+    func openAICompatibleChunksDoNotMasqueradeAsOpenRouterReceipts() {
+        var parser = CloudProviderStreamParser()
+        let payload = #"{"id":"chatcmpl-1","model":"custom/model","provider":"Example","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5,"cost":12.5},"openrouter_metadata":{"requested":"ignored","attempt":1}}"#
+
+        _ = parser.parse(
+            data: Data(payload.utf8),
+            format: .chatCompletions,
+            providerKind: .openAICompatible
+        )
+
+        #expect(parser.state.openAIProviderMetadata[CloudProviderMetadataKeys.openAIChatCompletionID] == "chatcmpl-1")
+        #expect(parser.state.openAIProviderMetadata[CloudProviderMetadataKeys.openRouterGenerationID] == nil)
+        #expect(OpenRouterRunProvenance(metadata: parser.state.openAIProviderMetadata) == nil)
+    }
+
+    @Test
     func cloudProviderModelControlsMatchAnthropicAndGeminiCapabilities() {
         #expect(CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-opus-4-7"))
         #expect(CloudProviderModelEligibility.usesAnthropicAdaptiveThinking(modelID: "claude-opus-4-6"))
