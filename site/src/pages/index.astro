@@ -6,7 +6,6 @@ import DeviceShowcase from "../components/DeviceShowcase.astro";
 import ProductTour from "../components/ProductTour.astro";
 import FeatureBands from "../components/FeatureBands.astro";
 import BuilderSection from "../components/BuilderSection.astro";
-import PreviewSuite from "../components/PreviewSuite.astro";
 import OnboardingSection from "../components/OnboardingSection.astro";
 import MarketingCompleteness from "../components/MarketingCompleteness.astro";
 
@@ -23,7 +22,7 @@ const proofItems = [
 <MarketingLayout path="/">
   <div class="page-shell">
     <SiteNav />
-    <main>
+    <main id="main-content">
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-copy">
           <div class="hero-badge">
@@ -53,7 +52,6 @@ const proofItems = [
       </section>
 
       <FeatureBands />
-      <PreviewSuite />
       <ProductTour />
       <OnboardingSection />
       <MarketingCompleteness />
@@ -62,12 +60,12 @@ const proofItems = [
       <section class="section status-cta" aria-labelledby="status-title">
         <div>
           <span class="section-kicker">Current Status</span>
-          <h2 id="status-title">Transparent about what is ready and what is still being hardened.</h2>
+          <h2 id="status-title">Working software, with the remaining release work stated plainly.</h2>
           <p>
             Pines already has the iPhone app foundation, Watch companion, local model runtime,
             BYOK providers, vault ingestion, MCP support, tool approval, audit surfaces,
-            and release validation. Public distribution still depends on real-device acceptance
-            and final App Store polish.
+            and release validation. Public distribution still depends on broader real-device
+            acceptance and final App Store hardening.
           </p>
         </div>
         <a class="button primary" href="/status/">Read status</a>
