@@ -80,7 +80,7 @@ struct TurboQuantPinDriftTests {
                 $0.contains("Full release benchmark-matrix")
             }
         )
-        #expect(compatibility.statusReason.contains("focused 4K Qwen3.5 0.8B real-model comparison passed"))
+        #expect(compatibility.statusReason.contains("Exact-pair signed physical-device validation must be refreshed"))
         #expect(compatibility.statusReason.contains("Release comparisons require real-model inference across the full acceptance matrix"))
         #expect(compatibility.productionPinPromotion?.releaseGate.contains("non-green") == true)
         #expect(compatibility.productionPinPromotion?.releaseGate.contains("Verified or Certified") == true)
@@ -92,11 +92,13 @@ struct TurboQuantPinDriftTests {
                 && $0.result == "passed"
                 && $0.runID != compatibility.wave0Baseline.runID
         })
-        #expect(compatibility.validationCommands.contains {
+        #expect(compatibility.historicalValidationCommands.contains {
             $0.repo == "pines"
                 && $0.runID == "device-rm-08b-current-20260712T151100Z"
                 && $0.result == "passed"
-                && $0.notes?.contains("does not establish native-backend performance parity") == true
+                && $0.historicalStatus == "superseded"
+                && $0.notes?.contains("Immediately-prior-pair") == true
+                && $0.notes?.contains("does not establish final-pair native-backend performance parity") == true
         })
         #expect(compatibility.historicalValidationCommands.contains {
             $0.repo == "pines"

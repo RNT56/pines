@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 import PinesCore
+@testable import pines
 
 final class CoreSurfaceTests: XCTestCase {
     func testInferenceWatchdogGuardsStalledFirstEventStream() async throws {
@@ -191,7 +192,23 @@ final class CoreSurfaceTests: XCTestCase {
         )
         XCTAssertTrue(refreshSupport.contains("UIUpdateLink"))
         XCTAssertTrue(refreshSupport.contains("preferredFrameRateRange"))
+        XCTAssertTrue(refreshSupport.contains("highMotionMinimumFramesPerSecond = 80"))
         XCTAssertFalse(refreshSupport.contains("requiresContinuousUpdates"))
+    }
+
+    func testHighRefreshPolicyRequestsHighMotionCadence() {
+        let range = PinesRefreshRatePolicy.preferredFrameRateRange(maximumFramesPerSecond: 120)
+
+        XCTAssertEqual(range.minimum, 80)
+        XCTAssertEqual(range.maximum, 120)
+        XCTAssertEqual(range.preferred, 120)
+    }
+
+    func testContinuousHapticsDoNotReprepareEveryFeedbackPulse() {
+        XCTAssertFalse(PinesHapticEvent.scrollUp.preparesFollowingPlayback)
+        XCTAssertFalse(PinesHapticEvent.scrollDown.preparesFollowingPlayback)
+        XCTAssertFalse(PinesHapticEvent.streamPulse.preparesFollowingPlayback)
+        XCTAssertTrue(PinesHapticEvent.primaryAction.preparesFollowingPlayback)
     }
 
     func testArtifactsTabRoutesToExtractedWorkspace() throws {

@@ -1,6 +1,6 @@
 # Implementation Status
 
-This repository is a working foundation for `pines`, not a signed App Store distribution yet. The current TurboQuant compatibility pair is non-green. Exact-pair physical-device synthetic smoke and a small Qwen 3.5 0.8B real-model comparison pass, but they do not satisfy the full acceptance matrix or constitute an imported product evidence tuple. Historical synthetic attention-shape and Mac real-model results belong to older or different tuples and are not promotion evidence for this pair. Native Sparse-V threshold/top-k/cumulative/hybrid modes are implemented but not promoted. Model/device/mode `Verified` and `Certified` claims remain gated on accepted exact-pair real-device evidence.
+This repository is a working foundation for `pines`, not a signed App Store distribution yet. The current TurboQuant compatibility pair is non-green. Immediately-prior-pair physical-device synthetic smoke and a small Qwen 3.5 0.8B real-model comparison pass, but a manifest-only SwiftPM compatibility revision changed the immutable pair identity. Those results are now historical; they do not satisfy the current-pair acceptance matrix or constitute an imported product evidence tuple. Earlier synthetic attention-shape and Mac real-model results also belong to older or different tuples and are not promotion evidence for this pair. Native Sparse-V threshold/top-k/cumulative/hybrid modes are implemented but not promoted. Model/device/mode `Verified` and `Certified` claims remain gated on accepted exact-pair real-device evidence.
 
 ## Implemented
 
@@ -57,14 +57,14 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - OAuth startup guardrails avoid crashing when authentication is attempted without an active foreground window.
 - Service bootstrap logs/audits recoverable built-in tool registration and store initialization failures instead of silently discarding them.
 - App architecture cleanup that splits large files into app model types, GRDB CloudKit sync, design components, MCP payloads, model download support, Settings detail, Models components, and MLX model-family files.
-- Exact-pair signed physical-device TurboQuant app-host smoke on `iPhone16,2`, including native compressed-path diagnostics and an explicitly unverified synthetic evidence baseline.
+- Historical signed physical-device TurboQuant app-host smoke on `iPhone16,2` for the immediately prior immutable pair, including native compressed-path diagnostics and an explicitly unverified synthetic evidence baseline.
 
 ## Not Complete
 
 - Real-device TurboQuant acceptance on the A16 through A19 Pro hardware matrix, including stable multi-repeat real-model coverage and at least one imported model/device/mode evidence tuple before any `Verified` or `Certified` product claim.
 - Production UX hardening for regenerate controls, fuller provider editing, provider-hosted transfer progress/retry/cancellation, richer hosted-tool approvals, CloudKit conflict UI, and detailed model compatibility messaging.
 - Signed App Store archive/export, TestFlight/App Store upload automation, and final App Store Connect privacy review for the submitted binary.
-- The platform-aware, warning-free `mlx-swift` build-tool plugin and Apple-mobile JIT compatibility fix are pinned at `d378d85c114b38c0919d5f6f7a489528427cb23d`; cold iOS device and simulator builds must remain warning-free as part of release validation.
+- The platform-aware, warning-free `mlx-swift` build-tool plugin, Apple-mobile JIT compatibility fix, and SwiftPM 6.2 manifest compatibility are pinned at `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`; cold iOS device and simulator builds must remain warning-free as part of release validation.
 - Remaining monolith candidates are semantic rather than mechanical: `PinesAppModel` still owns high-level orchestration, `SettingsDetailView` owns the full settings editor, and `ModelsViewComponents` owns model list/detail presentation. Split these further only alongside focused feature changes.
 
 ## Verification

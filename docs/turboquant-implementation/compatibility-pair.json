@@ -10,13 +10,13 @@
   "mlxSwift": {
     "repo": "mlx-swift",
     "branch": "tq/layout-v5-default-device-tests",
-    "commit": "d378d85c114b38c0919d5f6f7a489528427cb23d",
+    "commit": "bcf93af23f11428f6f01efb0bb4b9020cd2eb383",
     "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
     "branch": "tq/lm-layout-v5-default-device-tests",
-    "commit": "1ab388ff78eaa572b2eb9de2b330d218818b3920",
+    "commit": "aeaa8e3024a82b25969741b53c749b28ddc64d1a",
     "dirtyAtValidation": false
   },
   "wave0Baseline": {
@@ -55,27 +55,25 @@
     "OpenKVFormat": 1,
     "PlatformEvidenceDimensions": 1
   },
-  "validatedAt": "2026-07-12T15:14:32Z",
+  "validatedAt": "2026-07-12T15:37:54Z",
   "validationCommands": [
     {
-      "repo": "pines",
-      "command": "PINES_TQ_REAL_BENCH=1 PINES_TQ_REAL_MODEL=mlx-community/Qwen3.5-0.8B-MLX-4bit PINES_TQ_REAL_CONTEXTS=4096 PINES_TQ_REAL_GEN_TOKENS=8 PINES_TQ_REAL_REPEATS=2 PINES_TQ_REAL_BOOTSTRAP=200",
+      "repo": "mlx-swift-lm",
+      "command": "swift package resolve && swift test --filter TurboQuantBenchTests",
       "result": "passed",
-      "artifactPath": "/Users/mt/Programming/Schtack/pines/docs/turboquant-implementation/baselines/20260712T151432Z-ios-qwen35-08b-realmodel-smoke.md",
-      "runID": "device-rm-08b-current-20260712T151100Z",
-      "startedAt": "2026-07-12T15:11:00Z",
-      "finishedAt": "2026-07-12T15:14:32Z",
-      "notes": "Exact-current-pair physical-device real-model smoke passed for the installed Qwen3.5 0.8B MLX 4-bit model at 4K. FP16-referenced quality passed and no raw fallback was allocated; only two throughput repeats were requested, the ratio CI is wide, and selected-path diagnostics were empty, so this does not establish native-backend performance parity or complete the release matrix."
+      "runID": "swiftpm-62-pin-refresh-20260712",
+      "startedAt": "2026-07-12T15:30:20Z",
+      "finishedAt": "2026-07-12T15:30:50Z",
+      "notes": "The LM fork resolved the SwiftPM 6.2-compatible core revision and all 12 focused TurboQuant benchmark tests passed. This is build and contract evidence, not physical-device or product-claim evidence."
     },
     {
       "repo": "pines",
-      "command": "PINES_DEVICE_ID=7BFB7B72-C40C-58A7-B2C6-F075BDE21116 PINES_TQ_BENCH_SKIP_INSTALL=1 PINES_TQ_BENCH_CONTEXTS=8192 PINES_TQ_BENCH_SCHEMES=turbo4v2 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 bash scripts/diagnostics/run-ios-turboquant-bench.sh",
+      "command": "xcodebuild -resolvePackageDependencies -project Pines.xcodeproj -scheme Pines && bash scripts/ci/check-mlx-package-pins.sh",
       "result": "passed",
-      "artifactPath": "/Users/mt/Programming/Schtack/pines/docs/turboquant-implementation/baselines/20260712T150706Z-ios-exact-pair-smoke.md",
-      "runID": "turboquant-bench-20260712T150706Z",
-      "startedAt": "2026-07-12T15:07:06Z",
-      "finishedAt": "2026-07-12T15:07:15Z",
-      "notes": "Exact-current-pair signed app-host smoke passed on iPhone16,2 with the native MLX compressed path active. The row is synthetic attention-shape evidence with realModel=false and remains Unverified; it does not establish real-model quality or performance parity."
+      "runID": "swiftpm-62-pin-refresh-20260712",
+      "startedAt": "2026-07-12T15:31:20Z",
+      "finishedAt": "2026-07-12T15:37:54Z",
+      "notes": "The generated Xcode graph resolved the exact final fork pair and the pin-alignment guard passed. Signing authorization prevented refreshing exact-pair device evidence in this run; immediately-prior-pair device evidence remains historical only."
     },
     {
       "repo": "mlx-swift",
@@ -579,8 +577,8 @@
     }
   },
   "notes": [
-    "Current integration pins mlx-swift d378d85c114b38c0919d5f6f7a489528427cb23d, which includes the quantized SDPA Swift APIs, a warning-free SwiftPM Metal plugin that targets the active Apple SDK, and an Apple-mobile-safe nested CPU JIT gate.",
-    "Current integration pins mlx-swift-lm 1ab388ff78eaa572b2eb9de2b330d218818b3920, which includes long-context prompt-lookup self-speculation, subsequent model/runtime hardening, and the exact iOS-compatible core dependency.",
+    "Current integration pins mlx-swift bcf93af23f11428f6f01efb0bb4b9020cd2eb383, which includes the quantized SDPA Swift APIs, a warning-free SwiftPM Metal plugin that targets the active Apple SDK, an Apple-mobile-safe nested CPU JIT gate, and a SwiftPM 6.2-compatible manifest.",
+    "Current integration pins mlx-swift-lm aeaa8e3024a82b25969741b53c749b28ddc64d1a, which includes long-context prompt-lookup self-speculation, subsequent model/runtime hardening, and the exact iOS-compatible core dependency.",
     "The current continuation pair has exact-pair physical app-host synthetic smoke and a focused 4K Qwen3.5 0.8B real-model smoke, but remains failed/non-green until native-performance, the full real-model-inference benchmark matrix, performance-parity, quality-memory, and fallback evidence pass; historical app-host smoke from earlier pins is retained only as prior evidence.",
     "Post-Wave0 stabilization produced passing dependency tests and app-hosted physical-device smoke for a prior pin pair. Those results are historical and are not exact-current-pair evidence.",
     "The historical physical-device smoke artifact is /Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T132622Z. It reports 8K qwen3.5-2b turbo4v2 synthetic attention-shape smoke and remains unverified prior-pair evidence only.",
@@ -622,13 +620,13 @@
   ],
   "productionPinPromotion": {
     "branch": "tq/real-device-evidence-acceptance",
-    "pinnedMLXSwift": "d378d85c114b38c0919d5f6f7a489528427cb23d",
-    "pinnedMLXSwiftLM": "1ab388ff78eaa572b2eb9de2b330d218818b3920",
-    "compatibilityPairID": "mlx-swift-d378d85c114b38c0919d5f6f7a489528427cb23d+mlx-swift-lm-1ab388ff78eaa572b2eb9de2b330d218818b3920",
-    "releaseGate": "non-green after the platform-aware MLX integration pin move: Pines pins mlx-swift d378d85c114b38c0919d5f6f7a489528427cb23d plus mlx-swift-lm 1ab388ff78eaa572b2eb9de2b330d218818b3920. Exact-pair physical app-host synthetic smoke and a focused 4K Qwen3.5 0.8B real-model comparison passed, but native-path performance confidence, broader quality, memory, fallback, imported-product-evidence, and benchmark-matrix gates remain required before any Verified or Certified claim."
+    "pinnedMLXSwift": "bcf93af23f11428f6f01efb0bb4b9020cd2eb383",
+    "pinnedMLXSwiftLM": "aeaa8e3024a82b25969741b53c749b28ddc64d1a",
+    "compatibilityPairID": "mlx-swift-bcf93af23f11428f6f01efb0bb4b9020cd2eb383+mlx-swift-lm-aeaa8e3024a82b25969741b53c749b28ddc64d1a",
+    "releaseGate": "non-green after the SwiftPM 6.2-compatible MLX integration pin move: Pines pins mlx-swift bcf93af23f11428f6f01efb0bb4b9020cd2eb383 plus mlx-swift-lm aeaa8e3024a82b25969741b53c749b28ddc64d1a. Exact-pair physical-device validation must be refreshed for this manifest-only core revision; native-path performance confidence, broader quality, memory, fallback, imported-product-evidence, and benchmark-matrix gates remain required before any Verified or Certified claim."
   },
-  "statusReason": "Authoritative current-pair status is failed/non-green. The integration pair pins platform-aware, Apple-mobile-compatible mlx-swift d378d85c114b38c0919d5f6f7a489528427cb23d and mlx-swift-lm 1ab388ff78eaa572b2eb9de2b330d218818b3920, retaining the Swift quantized-SDPA surface, model/runtime hardening, and long-context self-speculation integration. Exact-pair signed physical-device synthetic smoke and a focused 4K Qwen3.5 0.8B real-model comparison passed on iPhone16,2. Release comparisons require real-model inference across the full acceptance matrix; this two-repeat result has a wide ratio interval and missing selected-path diagnostics, prior-pair smoke and Mac evidence are historical only, performance parity is not established for this pair, and the broader release benchmark, quality, memory, and fallback evidence remains incomplete.",
-  "compatibilityPairID": "mlx-swift-d378d85c114b38c0919d5f6f7a489528427cb23d+mlx-swift-lm-1ab388ff78eaa572b2eb9de2b330d218818b3920",
+  "statusReason": "Authoritative current-pair status is failed/non-green. The integration pair pins SwiftPM 6.2-compatible, platform-aware, Apple-mobile-compatible mlx-swift bcf93af23f11428f6f01efb0bb4b9020cd2eb383 and mlx-swift-lm aeaa8e3024a82b25969741b53c749b28ddc64d1a, retaining the Swift quantized-SDPA surface, model/runtime hardening, and long-context self-speculation integration. Exact-pair signed physical-device validation must be refreshed for this manifest-only core revision. Release comparisons require real-model inference across the full acceptance matrix; prior-pair smoke and Mac evidence are historical only, performance parity is not established for this pair, and the broader release benchmark, quality, memory, and fallback evidence remains incomplete.",
+  "compatibilityPairID": "mlx-swift-bcf93af23f11428f6f01efb0bb4b9020cd2eb383+mlx-swift-lm-aeaa8e3024a82b25969741b53c749b28ddc64d1a",
   "claimPolicy": {
     "pinsOnlyEvidenceLevel": "unverified",
     "verifiedOrCertifiedProductClaimsAllowed": false,
@@ -657,6 +655,30 @@
     "notes": "Status cannot become green until current-pair evidence explicitly passes native backend performance, compressed-vs-plain performance parity, full benchmark-matrix, and real-device app-host gates. App-host benchmark artifacts must carry hybrid/native cache diagnostics."
   },
   "historicalValidationCommands": [
+    {
+      "repo": "pines",
+      "command": "PINES_TQ_REAL_BENCH=1 PINES_TQ_REAL_MODEL=mlx-community/Qwen3.5-0.8B-MLX-4bit PINES_TQ_REAL_CONTEXTS=4096 PINES_TQ_REAL_GEN_TOKENS=8 PINES_TQ_REAL_REPEATS=2 PINES_TQ_REAL_BOOTSTRAP=200",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/docs/turboquant-implementation/baselines/20260712T151432Z-ios-qwen35-08b-realmodel-smoke.md",
+      "runID": "device-rm-08b-current-20260712T151100Z",
+      "startedAt": "2026-07-12T15:11:00Z",
+      "finishedAt": "2026-07-12T15:14:32Z",
+      "notes": "Immediately-prior-pair physical-device real-model smoke passed for the installed Qwen3.5 0.8B MLX 4-bit model at 4K. FP16-referenced quality passed and no raw fallback was allocated; only two throughput repeats were requested, the ratio CI is wide, and selected-path diagnostics were empty. A manifest-only SwiftPM compatibility revision now changes the exact pair, so this remains historical evidence and does not establish final-pair native-backend performance parity or complete the release matrix.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "swiftpm-62-pin-refresh-20260712"
+    },
+    {
+      "repo": "pines",
+      "command": "PINES_DEVICE_ID=7BFB7B72-C40C-58A7-B2C6-F075BDE21116 PINES_TQ_BENCH_SKIP_INSTALL=1 PINES_TQ_BENCH_CONTEXTS=8192 PINES_TQ_BENCH_SCHEMES=turbo4v2 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 bash scripts/diagnostics/run-ios-turboquant-bench.sh",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/docs/turboquant-implementation/baselines/20260712T150706Z-ios-exact-pair-smoke.md",
+      "runID": "turboquant-bench-20260712T150706Z",
+      "startedAt": "2026-07-12T15:07:06Z",
+      "finishedAt": "2026-07-12T15:07:15Z",
+      "notes": "Immediately-prior-pair signed app-host smoke passed on iPhone16,2 with the native MLX compressed path active. The row is synthetic attention-shape evidence with realModel=false. A manifest-only SwiftPM compatibility revision now changes the exact pair, so this remains historical Unverified evidence and does not establish final-pair real-model quality or performance parity.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "swiftpm-62-pin-refresh-20260712"
+    },
     {
       "artifactPath": "/Users/mt/Programming/Schtack/pines/artifacts/turboquant-wave0-20260531T024557Z/logs/ios-smoke.log",
       "command": "PINES_TQ_BENCH_CONTEXTS=8192 PINES_TQ_BENCH_SCHEMES=turbo4v2 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 bash scripts/diagnostics/run-ios-turboquant-bench.sh",

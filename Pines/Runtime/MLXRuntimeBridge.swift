@@ -423,7 +423,7 @@ private actor LocalRuntimeSupervisor {
 
 struct MLXRuntimeBridge: Sendable {
     static let turboQuantCompatibilityPairID =
-        "mlx-swift-d378d85c114b38c0919d5f6f7a489528427cb23d+mlx-swift-lm-1ab388ff78eaa572b2eb9de2b330d218818b3920"
+        "mlx-swift-bcf93af23f11428f6f01efb0bb4b9020cd2eb383+mlx-swift-lm-aeaa8e3024a82b25969741b53c749b28ddc64d1a"
 
     /// N2: prompt-length admission floor for draft-model-free self-speculation (lever ①).
     /// Speculation is a long-context lever (crossover ≈12–16K; N7 async prefetch erases the

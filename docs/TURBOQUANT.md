@@ -4,10 +4,10 @@ Pines requests TurboQuant as the default local KV-cache strategy and stores vaul
 
 The current MLX fork pins are:
 
-- `RNT56/mlx-swift`: `d378d85c114b38c0919d5f6f7a489528427cb23d`
-- `RNT56/mlx-swift-lm`: `1ab388ff78eaa572b2eb9de2b330d218818b3920`
+- `RNT56/mlx-swift`: `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`
+- `RNT56/mlx-swift-lm`: `aeaa8e3024a82b25969741b53c749b28ddc64d1a`
 
-The current pair is intentionally non-green. Local Pines gates pass, an exact-pair `iPhone16,2` synthetic attention-shape smoke completed on 2026-07-12, and a focused exact-pair Qwen 3.5 0.8B real-model comparison passed at 4K. That two-repeat diagnostic is not a complete acceptance matrix or an imported product evidence tuple; earlier device smoke and Mac K8/V4 measurements remain historical engineering evidence and cannot promote or green the current pair.
+The current pair is intentionally non-green. Local Pines gates pass. An immediately-prior-pair `iPhone16,2` synthetic attention-shape smoke completed on 2026-07-12, and a focused Qwen 3.5 0.8B real-model comparison passed at 4K. The current core revision changes only SwiftPM manifest compatibility, but the immutable pair identity changed; those device results are therefore historical. The two-repeat diagnostic is not a complete acceptance matrix or imported product evidence tuple, and neither it nor earlier Mac K8/V4 measurements can promote or green the current pair.
 
 This does not promote any model/device/mode to `Verified` or `Certified`. Those labels still require imported real-device evidence for the exact model revision, tokenizer/profile/fallback hashes, device class, context length, quality gate, memory behavior, and active TurboQuant path.
 
@@ -47,8 +47,8 @@ TQ_MODEL_DIR=/path/to/mlx-model scripts/run-turboquant-current-benchmarks.sh
 - iOS memory warnings soft-recover through the runtime bridge while active generation still has emergency headroom; otherwise they stop the active local run and unload transient MLX containers.
 - Pine pins `RNT56/mlx-swift` and `RNT56/mlx-swift-lm` to exact TurboQuant fork revisions in `project.yml` and the generated Xcode project. CI rejects drift back to the pre-fix revisions.
 - Current pins:
-  - `RNT56/mlx-swift`: `d378d85c114b38c0919d5f6f7a489528427cb23d`
-  - `RNT56/mlx-swift-lm`: `1ab388ff78eaa572b2eb9de2b330d218818b3920`
+  - `RNT56/mlx-swift`: `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`
+  - `RNT56/mlx-swift-lm`: `aeaa8e3024a82b25969741b53c749b28ddc64d1a`
   - Nested `mlx` inside `RNT56/mlx-swift`: `e230d124a1fdcb5f4b3daab6321744a7a8b6a9f2`
   - Nested `mlx-c` inside `RNT56/mlx-swift`: `2fbeccd5a6ec6f7aadedaf1d3dfb2894ef44fbc1`
 - `mlx-swift` exposes additive TurboQuant packed tensor APIs over MLX native packed quantization and quantized matmul, a deterministic PolarQuant/QJL reference codec, custom Metal encode/decode kernels, row-wise compressed-attention code blobs, runtime-layout direct compressed `QK^T`, runtime-layout direct compressed `AV`, runtime-layout compressed decode, `turbo8` high-precision KV-cache mode, device-profile-gated online fused decode, block-parallel fused partial/reduce kernels for long-context decode, automatic block-token planning for 32K/64K/128K/256K decode, fp16/bf16 block-partial value storage with float32 stats/reduce accumulation, a Mac Apple silicon kernel profile, Mac-gated grouped-query block fused decode for Qwen-style GQA, grouped GQA softmax reductions, four-repeat Qwen GQA key reuse, fixed-tail split-magnitude Turbo3.5/Turbo2.5 key reads without prefix scans, compact derived high-lane masks, aligned affine value reads, active-block dispatch for reserved larger caches, reduce-width tuning for block-parallel reductions, Qwen-shaped benchmark head-count and block-token controls, p50/p95 benchmark reporting, word-level packed bit read/write helpers for fixed and mixed TurboQuant schemes, runtime device capabilities, selected kernel profiles, tiny latency probes, opt-in long-context fused warmup, cooperative coalesced QK decode behind `TQ_COOP=1` for A-series validation, per-group QJL residual scaling, quality-gate metrics, and a runtime self-tested backend availability contract.
@@ -112,9 +112,9 @@ parity claim until the real-model and device gates pass.
 
 ## Physical Device Evidence
 
-Exact-current-pair app-hosted attention smoke validation ran on `iPhone16,2` / A17 Pro / iPhone 15 Pro Max (`7BFB7B72-C40C-58A7-B2C6-F075BDE21116`) on 2026-07-12 and is summarized in [the exact-pair iOS baseline](turboquant-implementation/baselines/20260712T150706Z-ios-exact-pair-smoke.md). It proves the signed app-host, native compressed path, and diagnostics export for the active pins, but it is synthetic attention-shape evidence. Parity, `Verified`, and `Certified` gates still require `real-model-inference-v1` evidence from actual model generation/inference comparisons on the current tuple.
+Immediately-prior-pair app-hosted attention smoke validation ran on `iPhone16,2` / A17 Pro / iPhone 15 Pro Max (`7BFB7B72-C40C-58A7-B2C6-F075BDE21116`) on 2026-07-12 and is summarized in [the signed iOS baseline](turboquant-implementation/baselines/20260712T150706Z-ios-exact-pair-smoke.md). It proves that pair's signed app-host, native compressed path, and diagnostics export, but it is synthetic attention-shape evidence. The current core revision changes only SwiftPM manifest compatibility, yet the immutable pair identity changed, so the run remains historical rather than exact-current-pair evidence. Parity, `Verified`, and `Certified` gates still require `real-model-inference-v1` evidence from actual model generation/inference comparisons on the current tuple.
 
-A focused exact-pair [Qwen 3.5 0.8B real-model smoke](turboquant-implementation/baselines/20260712T151432Z-ios-qwen35-08b-realmodel-smoke.md) also passed on the same phone at 4K with actual weights and a passing FP16-referenced quality gate. Its two-repeat throughput result is useful diagnostic evidence, but the wide ratio interval and missing selected-path diagnostics prevent native-performance or parity promotion; the full release matrix remains required.
+A focused immediately-prior-pair [Qwen 3.5 0.8B real-model smoke](turboquant-implementation/baselines/20260712T151432Z-ios-qwen35-08b-realmodel-smoke.md) also passed on the same phone at 4K with actual weights and a passing FP16-referenced quality gate. Its two-repeat throughput result is useful historical diagnostic evidence, but the changed immutable pair identity, wide ratio interval, and missing selected-path diagnostics prevent current-pair native-performance or parity promotion; the full release matrix remains required.
 
 | Model | Artifact | Result | Active profile/path | Observed result |
 | --- | --- | --- | --- | --- |

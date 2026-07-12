@@ -574,6 +574,7 @@ private struct ChatTranscriptView: View {
     @State private var isAutoScrollPinned = true
     @State private var isComposerFocused = false
     @State private var openSwipeMessageID: UUID?
+    @State private var isTranscriptDragging = false
     @State private var lastTranscriptInteractionAt = Date.distantPast
     let thread: PinesThreadPreview
 
@@ -771,19 +772,25 @@ private struct ChatTranscriptView: View {
     }
 
     private var transcriptDragGesture: some Gesture {
-        DragGesture(minimumDistance: 2, coordinateSpace: .local)
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
             .onChanged { _ in
+                guard !isTranscriptDragging else { return }
+                isTranscriptDragging = true
                 lastTranscriptInteractionAt = Date()
-                if chatState.activeRunID != nil && !isNearTranscriptBottom {
+                if chatState.activeRunID != nil, !isNearTranscriptBottom, isAutoScrollPinned {
                     isAutoScrollPinned = false
                 }
                 guard isComposerFocused else { return }
                 isComposerFocused = false
             }
+            .onEnded { _ in
+                lastTranscriptInteractionAt = Date()
+                isTranscriptDragging = false
+            }
     }
 
     private var shouldAutoScrollAfterTranscriptChange: Bool {
-        Date().timeIntervalSince(lastTranscriptInteractionAt) > 0.35
+        !isTranscriptDragging && Date().timeIntervalSince(lastTranscriptInteractionAt) > 0.35
     }
 
     private var shouldAutoScrollLiveMessage: Bool {

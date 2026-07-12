@@ -225,8 +225,8 @@ Current app-level limits and defaults:
 
 The iOS app links exact maintained MLX fork revisions through `project.yml` and the generated Xcode project:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `d378d85c114b38c0919d5f6f7a489528427cb23d`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `1ab388ff78eaa572b2eb9de2b330d218818b3920`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `aeaa8e3024a82b25969741b53c749b28ddc64d1a`
 - Nested `mlx` inside `MLXSwift`: `e230d124a1fdcb5f4b3daab6321744a7a8b6a9f2`
 - Nested `mlx-c` inside `MLXSwift`: `2fbeccd5a6ec6f7aadedaf1d3dfb2894ef44fbc1`
 
