@@ -52,6 +52,58 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
+    func testAccessibilityTextSizeKeepsPrimarySurfacesReachable() throws {
+        configureLaunch(resetStore: true)
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+            "-AppleInterfaceStyle",
+            "Dark",
+        ]
+        launchAndWaitForMainUI()
+
+        openTab("Models")
+        assertMenuCanOpen(buttonLabel: "All tasks", item: "All tasks")
+
+        openTab("Vault")
+        assertExists(app.buttons["Vault settings"], "Vault settings should remain reachable at accessibility text sizes.")
+
+        openTab("Artifacts")
+        switchArtifactsWorkspace(to: "Create")
+        switchArtifactsWorkspace(to: "Research")
+        switchArtifactsWorkspace(to: "Library")
+
+        openTab("Chats")
+        tapCreateChat()
+        openFirstThreadIfComposerIsNotVisible()
+        assertIdentifierVisible("pines.chat.composer.input", "Chat composer should remain reachable at accessibility text sizes.")
+        assertIdentifierVisible("pines.chat.composer.run-mode", "Run mode should remain reachable at accessibility text sizes.")
+        assertIdentifierVisible("pines.chat.composer.send", "Send should remain reachable at accessibility text sizes.")
+    }
+
+    @MainActor
+    func testChatDeletionRequiresExplicitConfirmation() throws {
+        launchAndWaitForMainUI()
+        openTab("Chats")
+        tapCreateChat()
+        openFirstThreadIfComposerIsNotVisible()
+
+        let back = app.navigationBars.buttons["Chats"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "Chat list back button was missing.")
+        back.tap()
+
+        let thread = app.descendants(matching: .any).matching(identifier: "pines.chat.thread.row").firstMatch
+        XCTAssertTrue(thread.waitForExistence(timeout: 10), "Created chat row was missing.")
+        thread.swipeLeft()
+        let delete = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5), "Delete swipe action was missing.")
+        delete.tap()
+
+        XCTAssertTrue(app.staticTexts["Delete this chat?"].waitForExistence(timeout: 5), "Chat deletion did not request confirmation.")
+        XCTAssertTrue(app.buttons["Delete chat"].exists, "Confirmed destructive action was missing.")
+    }
+
+    @MainActor
     func testContinuedChatStreamsAndPersistsAcrossRelaunch() throws {
         configureLaunch(scenario: "streaming", resetStore: true)
         launchAndWaitForMainUI()
@@ -162,14 +214,20 @@ final class PinesUITests: XCTestCase {
         assertMenuCanOpen(buttonLabel: "All tasks", item: "All tasks")
         assertMenuCanOpen(buttonLabel: "Compatibility", item: "All compatibility")
         assertMenuCanOpen(buttonLabel: "State", item: "Any state")
-        assertExists(app.buttons["Use as default model"], "Default model toolbar action was missing.")
-        assertExists(app.buttons["Download model"], "Download model toolbar action was missing.")
-        assertExists(app.buttons["Cancel model download"], "Cancel download toolbar action was missing.")
-        assertExists(app.buttons["Delete model"], "Delete model toolbar action was missing.")
+        assertExists(
+            firstExisting([app.staticTexts["Installed models"], app.staticTexts["MLX Hub results"]]),
+            "The model library result summary was missing."
+        )
 
         openTab("Vault")
         assertExists(firstExisting([app.buttons["Import"], app.buttons["Search vault"]]), "Vault toolbar actions were missing.")
         assertExists(firstExisting([app.buttons["Search vault"], app.buttons["Search"]]), "Vault search action was missing.")
+        assertExists(app.buttons["Vault settings"], "Vault settings action was missing.")
+
+        openTab("Artifacts")
+        switchArtifactsWorkspace(to: "Create")
+        switchArtifactsWorkspace(to: "Research")
+        switchArtifactsWorkspace(to: "Library")
 
         openTab("Settings")
         openSettingsSection("Design")
@@ -481,7 +539,7 @@ final class PinesUITests: XCTestCase {
         case "Chats": "pines.screen.chats"
         case "Models": "pines.screen.models"
         case "Vault": "pines.screen.vault"
-        case "Artifacts": "pines.screen.artifacts"
+        case "Artifacts": "pines.artifacts.workspace.mode"
         case "Settings": "pines.screen.settings"
         default: nil
         }

@@ -14,6 +14,8 @@ struct WatchRootView: View {
     @EnvironmentObject private var model: WatchChatViewModel
     @State private var renameConversation: WatchConversationSummary?
     @State private var renameTitle = ""
+    @State private var conversationPendingDeletion: WatchConversationSummary?
+    @State private var requestPendingDiscard: PendingWatchRequest?
 
     var body: some View {
         NavigationStack {
@@ -27,21 +29,6 @@ struct WatchRootView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
-                    }
-                }
-
-                Section("Diagnostics") {
-                    WatchDiagnosticRow(title: "Runtime", value: model.phoneStatus.runtimeReady ? "Ready" : "Open iPhone")
-                    WatchDiagnosticRow(title: "Reachable", value: model.phoneStatus.reachable ? "Yes" : "No")
-                    WatchDiagnosticRow(title: "Paired", value: model.phoneStatus.paired ? "Yes" : "No")
-                    WatchDiagnosticRow(title: "Installed", value: model.phoneStatus.watchAppInstalled ? "Yes" : "No")
-                }
-
-                if !model.pendingRequests.isEmpty {
-                    Section("Pending") {
-                        ForEach(model.pendingRequests) { request in
-                            PendingRequestRow(request: request)
-                        }
                     }
                 }
 
@@ -81,12 +68,30 @@ struct WatchRootView: View {
                                 }
 
                                 Button(role: .destructive) {
-                                    model.deleteConversation(conversation.id)
+                                    conversationPendingDeletion = conversation
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
                             }
                         }
+                    }
+                }
+
+                if !model.pendingRequests.isEmpty {
+                    Section("Pending") {
+                        ForEach(model.pendingRequests) { request in
+                            PendingRequestRow(request: request) {
+                                requestPendingDiscard = request
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        WatchDiagnosticsView()
+                    } label: {
+                        Label("Connection details", systemImage: "iphone.and.arrow.forward")
                     }
                 }
             }
@@ -117,7 +122,53 @@ struct WatchRootView: View {
                     }
                 )
             }
+            .confirmationDialog(
+                "Delete this chat?",
+                isPresented: Binding(
+                    get: { conversationPendingDeletion != nil },
+                    set: { if !$0 { conversationPendingDeletion = nil } }
+                )
+            ) {
+                Button("Delete chat", role: .destructive) {
+                    guard let conversation = conversationPendingDeletion else { return }
+                    conversationPendingDeletion = nil
+                    model.deleteConversation(conversation.id)
+                }
+                Button("Cancel", role: .cancel) { conversationPendingDeletion = nil }
+            } message: {
+                Text("The conversation and its messages will be permanently deleted from Pines.")
+            }
+            .confirmationDialog(
+                "Discard queued request?",
+                isPresented: Binding(
+                    get: { requestPendingDiscard != nil },
+                    set: { if !$0 { requestPendingDiscard = nil } }
+                )
+            ) {
+                Button("Discard request", role: .destructive) {
+                    guard let request = requestPendingDiscard else { return }
+                    requestPendingDiscard = nil
+                    model.discardPendingRequest(request)
+                }
+                Button("Keep queued", role: .cancel) { requestPendingDiscard = nil }
+            } message: {
+                Text("The queued action will not be sent to the iPhone.")
+            }
         }
+    }
+}
+
+private struct WatchDiagnosticsView: View {
+    @EnvironmentObject private var model: WatchChatViewModel
+
+    var body: some View {
+        List {
+            WatchDiagnosticRow(title: "Runtime", value: model.phoneStatus.runtimeReady ? "Ready" : "Open iPhone")
+            WatchDiagnosticRow(title: "Reachable", value: model.phoneStatus.reachable ? "Yes" : "No")
+            WatchDiagnosticRow(title: "Paired", value: model.phoneStatus.paired ? "Yes" : "No")
+            WatchDiagnosticRow(title: "Installed", value: model.phoneStatus.watchAppInstalled ? "Yes" : "No")
+        }
+        .navigationTitle("Connection")
     }
 }
 
@@ -140,6 +191,7 @@ private struct WatchDiagnosticRow: View {
 private struct PendingRequestRow: View {
     @EnvironmentObject private var model: WatchChatViewModel
     let request: PendingWatchRequest
+    let onDiscard: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -159,9 +211,7 @@ private struct PendingRequestRow: View {
                 }
                 .accessibilityLabel("Retry")
 
-                Button(role: .destructive) {
-                    model.discardPendingRequest(request)
-                } label: {
+                Button(role: .destructive, action: onDiscard) {
                     Image(systemName: "xmark")
                 }
                 .accessibilityLabel("Discard")

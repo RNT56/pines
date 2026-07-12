@@ -10,6 +10,8 @@ private enum PinesSettingsDetailLayout {
 }
 
 struct SettingsDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
@@ -55,6 +57,12 @@ struct SettingsDetailView: View {
     @State private var huggingFaceToken = ""
     @State private var braveSearchKey = ""
     @State private var showsEraseAllDataConfirmation = false
+    @State private var showsHuggingFaceTokenDeletionConfirmation = false
+    @State private var showsBraveSearchKeyDeletionConfirmation = false
+    @State private var providerPendingDeletion: CloudProviderConfiguration?
+    @State private var mcpServerPendingDeletion: MCPServerConfiguration?
+    @State private var showsAdvancedMCPOptions = false
+    @State private var showsAdvancedSyncOptions = false
 
     private var iCloudSyncAvailable: Bool {
         services.cloudKitSyncService != nil
@@ -99,6 +107,70 @@ struct SettingsDetailView: View {
         } message: {
             Text("This deletes local models, chats, vault files, provider records, credentials, MCP servers, artifacts, and the private iCloud sync zone when available.")
         }
+        .confirmationDialog(
+            "Delete Hugging Face token?",
+            isPresented: $showsHuggingFaceTokenDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete token", role: .destructive) {
+                Task {
+                    await appModel.deleteHuggingFaceToken(services: services)
+                    huggingFaceToken = ""
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Pines will remove the token from this device. Gated model downloads may stop working until you save another token.")
+        }
+        .confirmationDialog(
+            "Delete Brave Search key?",
+            isPresented: $showsBraveSearchKeyDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete key", role: .destructive) {
+                Task {
+                    await appModel.saveBraveSearchKey("", services: services)
+                    braveSearchKey = ""
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Pines will remove the key from this device. Agent web search will remain unavailable until you save another key.")
+        }
+        .confirmationDialog(
+            "Delete cloud provider?",
+            isPresented: Binding(
+                get: { providerPendingDeletion != nil },
+                set: { if !$0 { providerPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete provider", role: .destructive) {
+                guard let provider = providerPendingDeletion else { return }
+                providerPendingDeletion = nil
+                Task { await appModel.deleteCloudProvider(provider, services: services) }
+            }
+            Button("Cancel", role: .cancel) { providerPendingDeletion = nil }
+        } message: {
+            Text("This removes the provider configuration and its stored credential from Pines. Existing chats and local files remain on this device.")
+        }
+        .confirmationDialog(
+            "Delete MCP server?",
+            isPresented: Binding(
+                get: { mcpServerPendingDeletion != nil },
+                set: { if !$0 { mcpServerPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete server", role: .destructive) {
+                guard let server = mcpServerPendingDeletion else { return }
+                mcpServerPendingDeletion = nil
+                Task { await appModel.deleteMCPServer(server, services: services) }
+            }
+            Button("Cancel", role: .cancel) { mcpServerPendingDeletion = nil }
+        } message: {
+            Text("This removes the server configuration and credentials from Pines. Tools from this server will no longer be available to agents.")
+        }
         .task(id: section.destination) {
             guard section.destination == .tools else { return }
             await appModel.startMCPServersIfNeeded(services: services)
@@ -118,7 +190,7 @@ struct SettingsDetailView: View {
                     Button {
                         guard let anchor = section.detailAnchor(for: row) else { return }
                         haptics.play(.navigationSelected)
-                        withAnimation(theme.motion.standard) {
+                        withAnimation(reduceMotion ? nil : theme.motion.standard) {
                             scrollProxy.scrollTo(anchor, anchor: .top)
                         }
                     } label: {
@@ -138,7 +210,7 @@ struct SettingsDetailView: View {
 
     @ViewBuilder
     private var designDashboard: some View {
-        StableSettingsCardSection("Appearance", subtitle: "Theme, contrast, and interface behavior.", systemImage: "paintpalette") {
+        PinesCardSection("Appearance", subtitle: "Theme, contrast, and interface behavior.", systemImage: "paintpalette") {
             Picker("Interface mode", selection: $interfaceMode) {
                 ForEach(PinesInterfaceMode.allCases) { mode in
                     Text(mode.title).tag(mode)
@@ -151,7 +223,7 @@ struct SettingsDetailView: View {
             }
 
             LazyVGrid(
-                columns: PinesThemePickerLayout.gridColumns,
+                columns: themePickerColumns,
                 spacing: PinesThemePickerLayout.gridSpacing
             ) {
                 ForEach(PinesThemeTemplate.allCases) { template in
@@ -191,6 +263,13 @@ struct SettingsDetailView: View {
             )
         }
         .id(SettingsDetailAnchor.hapticsAndMotion)
+    }
+
+    private var themePickerColumns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return [GridItem(.flexible())]
+        }
+        return PinesThemePickerLayout.gridColumns
     }
 
     @ViewBuilder
@@ -318,7 +397,7 @@ struct SettingsDetailView: View {
                 .pinesFieldChrome()
 
             VStack(spacing: theme.spacing.small) {
-                HStack(spacing: theme.spacing.small) {
+                PinesAdaptiveButtonRow {
                     Button {
                         Task {
                             await appModel.saveHuggingFaceToken(huggingFaceToken, services: services)
@@ -339,10 +418,7 @@ struct SettingsDetailView: View {
                 }
 
                 Button(role: .destructive) {
-                    Task {
-                        await appModel.deleteHuggingFaceToken(services: services)
-                        huggingFaceToken = ""
-                    }
+                    showsHuggingFaceTokenDeletionConfirmation = true
                 } label: {
                     Label("Delete token", systemImage: "trash")
                 }
@@ -417,23 +493,28 @@ struct SettingsDetailView: View {
                 }
             ))
 
-            Toggle("Sync source documents", isOn: Binding(
-                get: { settingsState.storeConfiguration.syncsSourceDocuments },
-                set: { value in
-                    settingsState.storeConfiguration.syncsSourceDocuments = value
-                    Task { await appModel.saveSettings(services: services) }
-                }
-            ))
-            .disabled(!iCloudSyncAvailable || !settingsState.storeConfiguration.iCloudSyncEnabled)
+            DisclosureGroup("Advanced sync options", isExpanded: $showsAdvancedSyncOptions) {
+                VStack(alignment: .leading, spacing: theme.spacing.small) {
+                    Toggle("Sync source documents", isOn: Binding(
+                        get: { settingsState.storeConfiguration.syncsSourceDocuments },
+                        set: { value in
+                            settingsState.storeConfiguration.syncsSourceDocuments = value
+                            Task { await appModel.saveSettings(services: services) }
+                        }
+                    ))
+                    .disabled(!iCloudSyncAvailable || !settingsState.storeConfiguration.iCloudSyncEnabled)
 
-            Toggle("Sync embeddings", isOn: Binding(
-                get: { settingsState.storeConfiguration.syncsEmbeddings },
-                set: { value in
-                    settingsState.storeConfiguration.syncsEmbeddings = value
-                    Task { await appModel.saveSettings(services: services) }
+                    Toggle("Sync embeddings", isOn: Binding(
+                        get: { settingsState.storeConfiguration.syncsEmbeddings },
+                        set: { value in
+                            settingsState.storeConfiguration.syncsEmbeddings = value
+                            Task { await appModel.saveSettings(services: services) }
+                        }
+                    ))
+                    .disabled(!iCloudSyncAvailable || !settingsState.storeConfiguration.iCloudSyncEnabled)
                 }
-            ))
-            .disabled(!iCloudSyncAvailable || !settingsState.storeConfiguration.iCloudSyncEnabled)
+                .padding(.top, theme.spacing.small)
+            }
 
             Button(role: .destructive) {
                 showsEraseAllDataConfirmation = true
@@ -901,7 +982,7 @@ struct SettingsDetailView: View {
                 .pinesButtonStyle(.icon)
 
                 Button(role: .destructive) {
-                    Task { await appModel.deleteCloudProvider(provider, services: services) }
+                    providerPendingDeletion = provider
                 } label: {
                     Image(systemName: "trash")
                 }
@@ -963,7 +1044,7 @@ struct SettingsDetailView: View {
                 .accessibilityIdentifier("pines.settings.brave.key")
                 .pinesFieldChrome()
 
-            HStack(spacing: theme.spacing.small) {
+            PinesAdaptiveButtonRow {
                 Button {
                     Task {
                         await appModel.saveBraveSearchKey(braveSearchKey, services: services)
@@ -976,10 +1057,7 @@ struct SettingsDetailView: View {
                 .pinesButtonStyle(.primary, fillWidth: true)
 
                 Button(role: .destructive) {
-                    Task {
-                        await appModel.saveBraveSearchKey("", services: services)
-                        braveSearchKey = ""
-                    }
+                    showsBraveSearchKeyDeletionConfirmation = true
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
@@ -1025,20 +1103,26 @@ struct SettingsDetailView: View {
                 oauthFields
             }
 
-            LazyVGrid(columns: dashboardColumns, spacing: theme.spacing.small) {
-                Toggle("Enable server", isOn: $mcpEnabled)
-                Toggle("Allow insecure local HTTP", isOn: $mcpAllowInsecureLocalHTTP)
-                Toggle("Resources", isOn: $mcpResourcesEnabled)
-                Toggle("Prompts", isOn: $mcpPromptsEnabled)
-                Toggle("Sampling", isOn: $mcpSamplingEnabled)
-                Toggle("BYOK sampling", isOn: $mcpBYOKSamplingEnabled)
-                    .disabled(!mcpSamplingEnabled)
-                Toggle("Resource subscriptions", isOn: $mcpSubscriptionsEnabled)
-                    .disabled(!mcpResourcesEnabled)
-            }
+            Toggle("Enable server", isOn: $mcpEnabled)
 
-            Stepper("Sampling requests per session: \(mcpMaxSamplingRequests)", value: $mcpMaxSamplingRequests, in: 0...20)
-                .disabled(!mcpSamplingEnabled)
+            DisclosureGroup("Advanced capabilities", isExpanded: $showsAdvancedMCPOptions) {
+                VStack(alignment: .leading, spacing: theme.spacing.small) {
+                    LazyVGrid(columns: dashboardColumns, spacing: theme.spacing.small) {
+                        Toggle("Allow insecure local HTTP", isOn: $mcpAllowInsecureLocalHTTP)
+                        Toggle("Resources", isOn: $mcpResourcesEnabled)
+                        Toggle("Prompts", isOn: $mcpPromptsEnabled)
+                        Toggle("Sampling", isOn: $mcpSamplingEnabled)
+                        Toggle("BYOK sampling", isOn: $mcpBYOKSamplingEnabled)
+                            .disabled(!mcpSamplingEnabled)
+                        Toggle("Resource subscriptions", isOn: $mcpSubscriptionsEnabled)
+                            .disabled(!mcpResourcesEnabled)
+                    }
+
+                    Stepper("Sampling requests per session: \(mcpMaxSamplingRequests)", value: $mcpMaxSamplingRequests, in: 0...20)
+                        .disabled(!mcpSamplingEnabled)
+                }
+                .padding(.top, theme.spacing.small)
+            }
 
             HStack(spacing: theme.spacing.small) {
                 Button {
@@ -1135,7 +1219,7 @@ struct SettingsDetailView: View {
                 .pinesButtonStyle(.icon)
 
                 Button(role: .destructive) {
-                    Task { await appModel.deleteMCPServer(server, services: services) }
+                    mcpServerPendingDeletion = server
                 } label: {
                     Image(systemName: "trash")
                 }
@@ -1715,66 +1799,6 @@ struct SettingsDetailView: View {
         mcpBYOKSamplingEnabled = false
         mcpSubscriptionsEnabled = false
         mcpMaxSamplingRequests = 3
-    }
-}
-
-private struct StableSettingsCardSection<Content: View>: View {
-    @Environment(\.pinesTheme) private var theme
-    let title: String
-    let subtitle: String?
-    let systemImage: String
-    @ViewBuilder var content: () -> Content
-
-    init(
-        _ title: String,
-        subtitle: String? = nil,
-        systemImage: String,
-        @ViewBuilder content: @escaping () -> Content
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.systemImage = systemImage
-        self.content = content
-    }
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(theme.colors.accent)
-                    .frame(width: 38, height: 38)
-                    .background(theme.colors.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(theme.colors.primaryText)
-                        .pinesFittingText()
-
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(theme.colors.secondaryText)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.86)
-                    }
-                }
-            }
-
-            content()
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 104, alignment: .topLeading)
-        .background(theme.colors.surface, in: shape)
-        .overlay {
-            shape
-                .strokeBorder(theme.colors.cardBorder, lineWidth: 1)
-        }
-        .shadow(color: theme.shadow.panelColor.opacity(0.24), radius: 8, x: 0, y: 4)
     }
 }
 

@@ -8,6 +8,7 @@ import WatchConnectivity
 #endif
 
 struct PinesRootView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appModel: PinesAppModel
@@ -88,6 +89,17 @@ struct PinesRootView: View {
                     })
                     .pinesTheme(theme)
                     .transition(.opacity)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if let serviceError = appModel.serviceError {
+                            PinesGlobalErrorBanner(
+                                message: serviceError,
+                                dismiss: { appModel.serviceError = nil }
+                            )
+                            .padding(.horizontal, theme.spacing.medium)
+                            .padding(.top, theme.spacing.xsmall)
+                            .pinesTheme(theme)
+                        }
+                    }
             }
 
             if showsBootMark {
@@ -148,7 +160,7 @@ struct PinesRootView: View {
             #endif
 
             isMainUIReady = true
-            withAnimation(theme.motion.emphasized) {
+            withAnimation(reduceMotion ? nil : theme.motion.emphasized) {
                 showsBootMark = false
             }
             haptics.play(.appReady)
@@ -240,6 +252,8 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
             get: { workflowState.pendingCloudContextApproval },
@@ -257,6 +271,8 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
             get: { workflowState.pendingCloudVaultEmbeddingApproval },
@@ -273,6 +289,8 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
             get: { workflowState.pendingMCPSamplingRequest },
@@ -290,6 +308,8 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
             get: { workflowState.pendingMCPSamplingResultReview },
@@ -306,6 +326,8 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -523,6 +545,7 @@ private struct ToolApprovalSheet: View {
                     }
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("Approve Tool")
             .toolbar {
@@ -585,6 +608,7 @@ private struct CloudContextApprovalSheet: View {
                         .foregroundStyle(theme.colors.secondaryText)
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("Send Local Context?")
             .toolbar {
@@ -626,6 +650,7 @@ private struct CloudVaultEmbeddingApprovalSheet: View {
                         .foregroundStyle(theme.colors.tertiaryText)
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("Enable Cloud Embeddings?")
             .toolbar {
@@ -673,6 +698,7 @@ private struct MCPSamplingApprovalSheet: View {
                     }
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("MCP Sampling")
             .toolbar {
@@ -708,6 +734,7 @@ private struct MCPSamplingResultReviewSheet: View {
                         .textSelection(.enabled)
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("Return Sampling Result")
             .toolbar {

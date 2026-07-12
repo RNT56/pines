@@ -15,6 +15,8 @@ struct ChatsView: View {
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedThreadID: PinesThreadPreview.ID?
     @State private var projectBeingRenamed: PinesProjectPreview?
+    @State private var projectPendingDeletion: PinesProjectPreview?
+    @State private var threadPendingDeletion: PinesThreadPreview?
     @State private var projectNameDraft = ""
 
     private var selectedThread: PinesThreadPreview? {
@@ -94,7 +96,7 @@ struct ChatsView: View {
                             }
                             Divider()
                             Button(role: .destructive) {
-                                Task { await appModel.deleteProject(project, services: services) }
+                                projectPendingDeletion = project
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -111,7 +113,7 @@ struct ChatsView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                Task { await appModel.deleteProject(project, services: services) }
+                                projectPendingDeletion = project
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -125,6 +127,27 @@ struct ChatsView: View {
                 }
 
                 Section {
+                    if visibleThreads.isEmpty {
+                        Button {
+                            Task {
+                                if let threadID = await appModel.createChat(services: services) {
+                                    selectedThreadID = threadID
+                                }
+                            }
+                        } label: {
+                            PinesSidebarRow(
+                                title: "Start a new chat",
+                                subtitle: "Private by default, local when possible",
+                                systemImage: "square.and.pencil",
+                                tint: theme.colors.accent,
+                                isSelected: false
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("pines.chat.empty.create")
+                        .pinesSidebarListRow()
+                    }
+
                     ForEach(visibleThreads) { thread in
                         NavigationLink(value: thread.id) {
                             ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
@@ -153,9 +176,7 @@ struct ChatsView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                Task {
-                                    await appModel.deleteThread(thread, services: services)
-                                }
+                                threadPendingDeletion = thread
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -238,8 +259,16 @@ struct ChatsView: View {
                 PinesEmptyState(
                     title: "No chats",
                     detail: "Start a local chat when the inference runtime is connected.",
-                    systemImage: "bubble.left.and.text.bubble.right"
-                )
+                    systemImage: "bubble.left.and.text.bubble.right",
+                    primaryActionTitle: "New chat",
+                    primaryActionSystemImage: "square.and.pencil"
+                ) {
+                    Task {
+                        if let threadID = await appModel.createChat(services: services) {
+                            selectedThreadID = threadID
+                        }
+                    }
+                }
             }
         }
         .accessibilityIdentifier("pines.screen.chats")
@@ -263,6 +292,40 @@ struct ChatsView: View {
             .disabled(projectNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: {
             Text("Project names can be up to 80 characters.")
+        }
+        .confirmationDialog(
+            "Delete this project?",
+            isPresented: Binding(
+                get: { projectPendingDeletion != nil },
+                set: { if !$0 { projectPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: projectPendingDeletion
+        ) { project in
+            Button("Delete project", role: .destructive) {
+                projectPendingDeletion = nil
+                Task { await appModel.deleteProject(project, services: services) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("The project is removed. Its chats return to All Chats and its Vault documents return to Personal Vault.")
+        }
+        .confirmationDialog(
+            "Delete this chat?",
+            isPresented: Binding(
+                get: { threadPendingDeletion != nil },
+                set: { if !$0 { threadPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: threadPendingDeletion
+        ) { thread in
+            Button("Delete chat", role: .destructive) {
+                threadPendingDeletion = nil
+                Task { await appModel.deleteThread(thread, services: services) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This permanently deletes the local conversation and its messages. Vault documents are not deleted.")
         }
     }
 
@@ -562,6 +625,7 @@ private extension ModelPickerOption {
 }
 
 private struct ChatTranscriptView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
@@ -607,7 +671,7 @@ private struct ChatTranscriptView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }
-                    .animation(theme.motion.standard, value: thread.messages.count)
+                    .animation(reduceMotion ? nil : theme.motion.standard, value: thread.messages.count)
 
                     Color.clear
                         .frame(height: 1)
@@ -700,7 +764,7 @@ private struct ChatTranscriptView: View {
 
                 Button {
                     haptics.play(.primaryAction)
-                    withAnimation(theme.motion.emphasized) {
+                    withAnimation(reduceMotion ? nil : theme.motion.emphasized) {
                         retrySpin.toggle()
                     }
                     appModel.retryLastUserMessage(in: thread, services: services)
@@ -730,7 +794,7 @@ private struct ChatTranscriptView: View {
             }
             .padding(.top, composerInsetTopPadding)
             .padding(.bottom, composerInsetBottomPadding)
-            .animation(theme.motion.standard, value: chatState.chatError)
+            .animation(reduceMotion ? nil : theme.motion.standard, value: chatState.chatError)
         }
     }
 
@@ -752,7 +816,7 @@ private struct ChatTranscriptView: View {
 
     private var composerInsetBottomPadding: CGFloat {
         guard horizontalSizeClass == .compact else { return theme.spacing.small }
-        return isComposerFocused ? theme.spacing.xxsmall : -theme.spacing.small
+        return isComposerFocused ? theme.spacing.xxsmall : theme.spacing.xsmall
     }
 
     @ViewBuilder
@@ -798,7 +862,7 @@ private struct ChatTranscriptView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        let shouldAnimate = animated && shouldAutoScrollAfterTranscriptChange
+        let shouldAnimate = animated && shouldAutoScrollAfterTranscriptChange && !reduceMotion
         if shouldAnimate {
             withAnimation(theme.motion.standard) {
                 proxy.scrollTo("chat-bottom", anchor: .bottom)
@@ -1160,8 +1224,7 @@ private struct ChatBubble: View {
             .shadow(color: theme.shadow.panelColor.opacity(message.role == .assistant ? 0.55 : 0.32), radius: theme.shadow.panelRadius * 0.25, x: 0, y: theme.shadow.panelY * 0.20)
             .scaleEffect(isStreaming && !reduceMotion ? 1.006 : 1)
             .animation(reduceMotion ? nil : theme.motion.fast, value: isStreaming)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(message.role.title): \(message.content)")
+            .accessibilityElement(children: .contain)
             .contextMenu {
                 Button {
                     haptics.play(.primaryAction)

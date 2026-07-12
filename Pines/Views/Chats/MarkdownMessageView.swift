@@ -520,18 +520,20 @@ private struct MarkdownIconButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(theme.typography.caption.weight(.semibold))
-            .foregroundStyle(configuration.isPressed ? theme.colors.primaryText : theme.colors.secondaryText)
-            .frame(width: 32, height: 32)
-            .background(
-                configuration.isPressed ? theme.colors.controlPressed : theme.colors.controlFill,
-                in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
-                    .strokeBorder(configuration.isPressed ? theme.colors.focusRing.opacity(0.45) : theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
-            }
+        ZStack {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .fill(configuration.isPressed ? theme.colors.controlPressed : theme.colors.controlFill)
+                .frame(width: 32, height: 32)
+                .overlay {
+                    RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                        .strokeBorder(configuration.isPressed ? theme.colors.focusRing.opacity(0.45) : theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+                }
+
+            configuration.label
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(configuration.isPressed ? theme.colors.primaryText : theme.colors.secondaryText)
+        }
+            .frame(width: 44, height: 44)
             .contentShape(RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.94 : 1)
             .animation(reduceMotion ? nil : theme.motion.fast, value: configuration.isPressed)

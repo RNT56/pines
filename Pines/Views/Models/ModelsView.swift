@@ -62,61 +62,6 @@ struct ModelsView: View {
             )
             .navigationTitle("Models")
             .pinesExpressiveScrollHaptics()
-            .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        if let selectedModel {
-                            haptics.play(.primaryAction)
-                            Task {
-                                await appModel.selectDefaultModel(selectedModel, services: services)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "checkmark.circle")
-                    }
-                    .accessibilityLabel("Use as default model")
-                    .disabled(selectedModel?.install.state != .installed)
-
-                    Button {
-                        if let selectedModel {
-                            haptics.play(.primaryAction)
-                            Task {
-                                await appModel.installModel(repository: selectedModel.install.repository, services: services)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "arrow.down.circle")
-                    }
-                    .accessibilityLabel("Download model")
-                    .disabled(selectedModel == nil || selectedModel?.install.state == .installed || selectedModel?.hasActiveDownload == true || selectedModel?.status == .unsupported)
-
-                    Button {
-                        if let selectedModel {
-                            haptics.play(.destructiveAction)
-                            Task {
-                                await appModel.cancelModelDownload(repository: selectedModel.install.repository, services: services)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "stop.circle")
-                    }
-                    .accessibilityLabel("Cancel model download")
-                    .disabled(selectedModel?.hasActiveDownload != true)
-
-                    Button(role: .destructive) {
-                        if let selectedModel {
-                            haptics.play(.destructiveAction)
-                            Task {
-                                await appModel.deleteModel(repository: selectedModel.install.repository, services: services)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .accessibilityLabel("Delete model")
-                    .disabled(selectedModel == nil || selectedModel?.canDeleteModel != true)
-                }
-            }
             .searchable(text: searchTextBinding, prompt: "Search Hugging Face")
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
@@ -153,8 +98,14 @@ struct ModelsView: View {
                 PinesEmptyState(
                     title: "No models",
                     detail: "Search Hugging Face or install a curated local MLX model.",
-                    systemImage: "cpu"
-                )
+                    systemImage: "cpu",
+                    primaryActionTitle: "Browse MLX models",
+                    primaryActionSystemImage: "magnifyingglass"
+                ) {
+                    let criteria = ModelSearchCriteria(query: "mlx")
+                    searchInput.text = criteria.query
+                    scheduleModelSearch(criteria)
+                }
             }
         }
         .accessibilityIdentifier("pines.screen.models")
