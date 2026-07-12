@@ -88,49 +88,69 @@ private struct ModelRows: View {
     let models: [PinesModelPreview]
     let defaultModelID: ModelID?
     let selectedModelKey: String?
+    @State private var modelPendingDeletion: PinesModelPreview?
 
     var body: some View {
-        ForEach(models) { model in
-            ModelRow(
-                model: model,
-                isDefault: defaultModelID == model.install.modelID,
-                isSelected: selectedModelKey == model.selectionKey
-            )
-            .tag(model.selectionKey)
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                if model.canStartDownload {
-                    Button {
-                        haptics.play(.primaryAction)
-                        Task {
-                            await appModel.installModel(repository: model.install.repository, services: services)
+        Group {
+            ForEach(models) { model in
+                ModelRow(
+                    model: model,
+                    isDefault: defaultModelID == model.install.modelID,
+                    isSelected: selectedModelKey == model.selectionKey
+                )
+                .tag(model.selectionKey)
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    if model.canStartDownload {
+                        Button {
+                            haptics.play(.primaryAction)
+                            Task {
+                                await appModel.installModel(repository: model.install.repository, services: services)
+                            }
+                        } label: {
+                            Label(model.downloadProgress?.canResume == true ? "Resume" : "Download", systemImage: "arrow.down.circle")
                         }
-                    } label: {
-                        Label(model.downloadProgress?.canResume == true ? "Resume" : "Download", systemImage: "arrow.down.circle")
-                    }
-                    .tint(theme.colors.accent)
-                }
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                if model.hasActiveDownload {
-                    Button(role: .destructive) {
-                        haptics.play(.destructiveAction)
-                        Task {
-                            await appModel.cancelModelDownload(repository: model.install.repository, services: services)
-                        }
-                    } label: {
-                        Label("Cancel", systemImage: "stop.circle")
-                    }
-                } else if model.canDeleteModel {
-                    Button(role: .destructive) {
-                        haptics.play(.destructiveAction)
-                        Task {
-                            await appModel.deleteModel(repository: model.install.repository, services: services)
-                        }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+                        .tint(theme.colors.accent)
                     }
                 }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if model.hasActiveDownload {
+                        Button(role: .destructive) {
+                            haptics.play(.destructiveAction)
+                            Task {
+                                await appModel.cancelModelDownload(repository: model.install.repository, services: services)
+                            }
+                        } label: {
+                            Label("Cancel", systemImage: "stop.circle")
+                        }
+                    } else if model.canDeleteModel {
+                        Button(role: .destructive) {
+                            haptics.play(.destructiveAction)
+                            modelPendingDeletion = model
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
             }
+        }
+        .confirmationDialog(
+            "Delete this model?",
+            isPresented: Binding(
+                get: { modelPendingDeletion != nil },
+                set: { if !$0 { modelPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: modelPendingDeletion
+        ) { model in
+            Button("Delete downloaded model", role: .destructive) {
+                modelPendingDeletion = nil
+                Task {
+                    await appModel.deleteModel(repository: model.install.repository, services: services)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { model in
+            Text("This removes the local files for \(model.name). You can download the model again later.")
         }
     }
 }
@@ -423,6 +443,8 @@ private struct ModelActionLabel: View {
 }
 
 struct ModelDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
@@ -430,6 +452,7 @@ struct ModelDetailView: View {
     @EnvironmentObject private var haptics: PinesHaptics
     let model: PinesModelPreview
     @State private var pendingAction: ModelDetailAction?
+    @State private var showsDeleteConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -468,6 +491,20 @@ struct ModelDetailView: View {
                 pendingAction = nil
             }
         }
+        .confirmationDialog(
+            "Delete this model?",
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete downloaded model", role: .destructive) {
+                runAction(.delete) {
+                    await appModel.deleteModel(repository: model.install.repository, services: services)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the local files for \(model.name). You can download the model again later.")
+        }
     }
 
     private var gridColumns: [GridItem] {
@@ -476,16 +513,15 @@ struct ModelDetailView: View {
 
     private var headerCard: some View {
         PinesCardSection(model.name, subtitle: "\(model.family) model for \(model.runtime)", systemImage: model.status.systemImage, kind: .glass) {
-            HStack(alignment: .center, spacing: theme.spacing.large) {
-                PinesReadinessRing(value: model.readiness, title: "Ready", subtitle: model.status.title)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: theme.spacing.large) {
+                    readinessRing
+                    modelSummaryGrid
+                }
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.dashboard.compactGridMinWidth), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
-                    PinesInfoTile(title: "Status", value: model.status.title, systemImage: model.status.systemImage, tint: model.status.tint(in: theme))
-                    PinesInfoTile(title: "Footprint", value: model.footprint, systemImage: "externaldrive")
-                    PinesInfoTile(title: "Context", value: model.contextWindow, systemImage: "text.word.spacing")
-                    if modelState.defaultModelID == model.install.modelID {
-                        PinesInfoTile(title: "Default", value: "Selected", systemImage: "checkmark.circle", tint: theme.colors.success)
-                    }
+                VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                    readinessRing
+                    modelSummaryGrid
                 }
             }
         }
@@ -494,6 +530,24 @@ struct ModelDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
                 .opacity(0.42)
         }
+    }
+
+    private var readinessRing: some View {
+        PinesReadinessRing(value: model.readiness, title: "Ready", subtitle: model.status.title)
+            .fixedSize(horizontal: true, vertical: true)
+            .frame(maxWidth: horizontalSizeClass == .compact ? .infinity : nil, alignment: .center)
+    }
+
+    private var modelSummaryGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.dashboard.compactGridMinWidth), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
+            PinesInfoTile(title: "Status", value: model.status.title, systemImage: model.status.systemImage, tint: model.status.tint(in: theme))
+            PinesInfoTile(title: "Footprint", value: model.footprint, systemImage: "externaldrive")
+            PinesInfoTile(title: "Context", value: model.contextWindow, systemImage: "text.word.spacing")
+            if modelState.defaultModelID == model.install.modelID {
+                PinesInfoTile(title: "Default", value: "Selected", systemImage: "checkmark.circle", tint: theme.colors.success)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var actionsCard: some View {
@@ -558,7 +612,7 @@ struct ModelDetailView: View {
                     .pinesButtonStyle(.destructive, fillWidth: true)
                     .disabled(pendingAction != nil)
                 } else {
-                    HStack(spacing: theme.spacing.small) {
+                    PinesAdaptiveButtonRow {
                         if model.canChooseInstallMode {
                             Menu {
                                 Button("Text only", systemImage: "text.bubble") {
@@ -621,9 +675,7 @@ struct ModelDetailView: View {
                 }
 
                 Button(role: .destructive) {
-                    runAction(.delete) {
-                        await appModel.deleteModel(repository: model.install.repository, services: services)
-                    }
+                    showsDeleteConfirmation = true
                 } label: {
                     ModelActionLabel(
                         title: pendingAction == .delete ? "Deleting" : (model.hasActiveDownload ? "Remove download" : "Delete model"),
@@ -634,7 +686,7 @@ struct ModelDetailView: View {
                 .pinesButtonStyle(.destructive, fillWidth: true)
                 .disabled(!model.canDeleteModel || pendingAction != nil)
             }
-            .animation(theme.motion.fast, value: pendingAction)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: pendingAction)
         }
     }
 

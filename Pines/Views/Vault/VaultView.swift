@@ -16,6 +16,7 @@ struct VaultView: View {
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedItemID: PinesVaultItemPreview.ID?
     @State private var showingImporter = false
+    @State private var showingVaultSettings = false
     @State private var searchInput = VaultSearchInputState()
 
     private var selectedItem: PinesVaultItemPreview? {
@@ -50,9 +51,6 @@ struct VaultView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedItemID) {
-                VaultEmbeddingSetupSection()
-                VaultProviderStorageSection()
-
                 if !searchInput.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Section("Search results") {
                         ForEach(vaultState.vaultSearchResults) { result in
@@ -65,6 +63,20 @@ struct VaultView: View {
                 }
 
                 Section(chatState.selectedProjectID == nil ? "Vault" : "Project Vault") {
+                    if visibleVaultItems.isEmpty {
+                        Button {
+                            haptics.play(.primaryAction)
+                            showingImporter = true
+                        } label: {
+                            Label("Import your first file", systemImage: "doc.badge.plus")
+                                .font(theme.typography.callout.weight(.semibold))
+                                .foregroundStyle(theme.colors.accent)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        .pinesSidebarListRow()
+                    }
+
                     ForEach(visibleVaultItems) { item in
                         NavigationLink(value: item.id) {
                             VaultItemRow(item: item, isSelected: selectedItemID == item.id)
@@ -92,6 +104,14 @@ struct VaultView: View {
                         Image(systemName: "magnifyingglass")
                     }
                     .accessibilityLabel("Search vault")
+
+                    Button {
+                        haptics.play(.navigationSelected)
+                        showingVaultSettings = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Vault settings")
                 }
             }
             .searchable(text: vaultSearchBinding, isPresented: $vaultState.isVaultSearchPresented, prompt: "Search vault")
@@ -126,6 +146,23 @@ struct VaultView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showingVaultSettings) {
+                NavigationStack {
+                    List {
+                        VaultEmbeddingSetupSection()
+                        VaultProviderStorageSection()
+                    }
+                    .navigationTitle("Vault Settings")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingVaultSettings = false }
+                        }
+                    }
+                    .pinesSidebarListChrome()
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
             .pinesSidebarListChrome()
         } detail: {
             if let selectedItem {
@@ -134,7 +171,10 @@ struct VaultView: View {
                 PinesEmptyState(
                     title: "Vault empty",
                     detail: "Private notes, documents, keys, and image references appear here.",
-                    systemImage: "shippingbox"
+                    systemImage: "shippingbox",
+                    primaryActionTitle: "Import file",
+                    primaryActionSystemImage: "doc.badge.plus",
+                    primaryAction: { showingImporter = true }
                 )
             }
         }
@@ -268,6 +308,7 @@ private struct VaultProviderVectorStoreRow: View {
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     let store: PinesProviderCachePreview
+    @State private var showsDeleteConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
@@ -285,19 +326,28 @@ private struct VaultProviderVectorStoreRow: View {
                 .lineLimit(1)
 
             HStack(spacing: theme.spacing.xsmall) {
-                Button("Files") {
+                PinesCompactIconButton(title: "Refresh cloud files", systemImage: "arrow.clockwise") {
                     Task { await refreshFiles() }
                 }
-                .buttonStyle(.borderless)
 
-                Button("Delete", role: .destructive) {
-                    Task { await deleteStore() }
+                PinesCompactIconButton(title: "Delete cloud context", systemImage: "trash", role: .destructive) {
+                    showsDeleteConfirmation = true
                 }
-                .buttonStyle(.borderless)
             }
-            .font(theme.typography.caption)
         }
         .padding(.vertical, theme.spacing.xsmall)
+        .confirmationDialog(
+            "Delete this cloud context?",
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete cloud context", role: .destructive) {
+                Task { await deleteStore() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes the provider-hosted vector store. Local Vault documents are not deleted.")
+        }
     }
 
     @MainActor
@@ -333,6 +383,7 @@ private struct VaultProviderFileRow: View {
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     let file: PinesProviderFilePreview
+    @State private var showsDeleteConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
@@ -349,13 +400,26 @@ private struct VaultProviderFileRow: View {
                 .foregroundStyle(theme.colors.secondaryText)
                 .lineLimit(1)
 
-            Button("Delete hosted file", role: .destructive) {
-                Task { await deleteFile() }
+            HStack {
+                Spacer()
+                PinesCompactIconButton(title: "Delete hosted file", systemImage: "trash", role: .destructive) {
+                    showsDeleteConfirmation = true
+                }
             }
-            .buttonStyle(.borderless)
-            .font(theme.typography.caption)
         }
         .padding(.vertical, theme.spacing.xsmall)
+        .confirmationDialog(
+            "Delete this hosted file?",
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete cloud copy", role: .destructive) {
+                Task { await deleteFile() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes the provider-hosted copy. The local Vault document is not deleted.")
+        }
     }
 
     @MainActor
@@ -552,6 +616,8 @@ private struct VaultDetailView: View {
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     @State private var providerStorageExportInFlightID: ProviderID?
+    @State private var showsDocumentDeleteConfirmation = false
+    @State private var chunkPendingDeletion: VaultChunk?
     let item: PinesVaultItemPreview
 
     var body: some View {
@@ -578,15 +644,15 @@ private struct VaultDetailView: View {
                     } label: {
                         Label(projectLabel, systemImage: "folder")
                     }
-                    .buttonStyle(.borderless)
+                    .pinesButtonStyle(.secondary)
 
                     Spacer()
                     Button(role: .destructive) {
-                        Task { await appModel.deleteVaultDocument(id: item.id, services: services) }
+                        showsDocumentDeleteConfirmation = true
                     } label: {
                         Label("Delete Vault file", systemImage: "trash")
                     }
-                    .buttonStyle(.borderless)
+                    .pinesButtonStyle(.destructive)
                 }
 
                 VaultSourcePreview(item: item)
@@ -608,11 +674,11 @@ private struct VaultDetailView: View {
                                     .foregroundStyle(theme.colors.tertiaryText)
                                 Spacer(minLength: theme.spacing.xsmall)
                                 Button(role: .destructive) {
-                                    Task { await appModel.deleteVaultChunk(chunk, documentID: item.id, services: services) }
+                                    chunkPendingDeletion = chunk
                                 } label: {
                                     Image(systemName: "trash")
                                 }
-                                .buttonStyle(.borderless)
+                                .pinesButtonStyle(.icon)
                                 .accessibilityLabel("Delete chunk \(chunk.ordinal + 1)")
                             }
                             Text(chunk.text)
@@ -695,6 +761,35 @@ private struct VaultDetailView: View {
         .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .pinesAppBackground()
+        .confirmationDialog(
+            "Delete this Vault file?",
+            isPresented: $showsDocumentDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete local Vault file", role: .destructive) {
+                Task { await appModel.deleteVaultDocument(id: item.id, services: services) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes the local Vault document and its local search index. Provider-hosted copies, if any, are separate.")
+        }
+        .confirmationDialog(
+            "Delete this indexed chunk?",
+            isPresented: Binding(
+                get: { chunkPendingDeletion != nil },
+                set: { if !$0 { chunkPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: chunkPendingDeletion
+        ) { chunk in
+            Button("Delete local chunk", role: .destructive) {
+                chunkPendingDeletion = nil
+                Task { await appModel.deleteVaultChunk(chunk, documentID: item.id, services: services) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This removes the chunk from local Vault search. It does not delete provider-hosted copies.")
+        }
     }
 
     private var indexSummary: String {
