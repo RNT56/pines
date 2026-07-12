@@ -1,6 +1,6 @@
 # TurboQuant Speed And Memory Baseline
 
-Created UTC: `2026-06-01T11:06:48Z`  
+Created UTC: `2026-06-01T11:06:48Z`
 Created local: `2026-06-01 13:06:48 CEST`
 
 This baseline records the current real-model speed evidence and KV-cache memory estimates for comparing later TurboQuant, K8/V4, and hybrid-attention changes.
