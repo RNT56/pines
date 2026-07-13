@@ -202,6 +202,10 @@ jobs:
     name: Xcode project build
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS: 180
+      PINES_XCODE_TEST_TIMEOUT_SECONDS: 480
+      PINES_XCODE_TEST_ATTEMPTS: 1
 
     steps:
       - name: Checkout

@@ -465,9 +465,7 @@ struct ModelDetailView: View {
                 repositoryCard
                 capabilitiesCard
 
-                if !model.compatibilityWarnings.isEmpty {
-                    compatibilityCard
-                }
+                compatibilityCard
             }
             .padding(theme.spacing.large)
             .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .leading)
@@ -917,7 +915,7 @@ struct ModelDetailView: View {
     }
 
     private var compatibilityCard: some View {
-        PinesCardSection("Compatibility", subtitle: "Warnings surfaced before install or execution.", systemImage: "exclamationmark.triangle") {
+        PinesCardSection("Compatibility", subtitle: "Exact runtime claim, evidence tuple, admission, and fallback behavior.", systemImage: "checkmark.shield") {
             Label(model.runtimeCompatibilityState.title, systemImage: model.runtimeCompatibilityState.systemImage)
                 .font(theme.typography.callout.weight(.semibold))
                 .foregroundStyle(model.runtimeCompatibilityState.tint(in: theme))
@@ -925,12 +923,38 @@ struct ModelDetailView: View {
                 .minimumScaleFactor(0.86)
                 .pinesSurface(.inset, padding: theme.spacing.small)
 
+            VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                Text(model.compatibilityExplanation.headline)
+                    .font(theme.typography.callout.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                Text(model.compatibilityExplanation.summary)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(model.compatibilityExplanation.claimBasis)
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(model.runtimeCompatibilityState.allowsProductClaim ? theme.colors.success : theme.colors.warning)
+            }
+            .pinesSurface(.inset, padding: theme.spacing.small)
+
+            PinesKeyValueGrid(items: model.compatibilityExplanation.facts.map { fact in
+                .init(fact.label, fact.value, copyable: fact.label == "Compatibility pair" || fact.label == "Fallback contract")
+            })
+
             ForEach(model.compatibilityWarnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .font(theme.typography.callout)
                     .foregroundStyle(model.runtimeCompatibilityState == .unsupported ? theme.colors.danger : theme.colors.warning)
                     .lineLimit(3)
                     .minimumScaleFactor(0.86)
+                    .pinesSurface(.inset, padding: theme.spacing.small)
+            }
+
+            if let nextAction = model.compatibilityExplanation.nextAction {
+                Label(nextAction, systemImage: "arrow.forward.circle")
+                    .font(theme.typography.callout)
+                    .foregroundStyle(theme.colors.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
                     .pinesSurface(.inset, padding: theme.spacing.small)
             }
         }

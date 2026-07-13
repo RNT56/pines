@@ -246,6 +246,12 @@ extension PinesAppModel {
         case .revoked:
             compatibilityWarnings.append("Previous benchmark evidence was revoked and cannot support this tuple.")
         }
+        let compatibilityExplanation = runtimeCompatibilityExplanation(
+            state: runtimeCompatibilityState,
+            install: install,
+            profile: runtimeProfile,
+            evidence: matchingProfileEvidence
+        )
         let contextWindow: String
         if enrichRuntime,
            let admittedContext = runtimeProfile.quantization.turboQuantAdmission?.admittedContextLength,
@@ -271,7 +277,91 @@ extension PinesAppModel {
             downloadProgress: download,
             compatibilityWarnings: compatibilityWarnings,
             runtimeProfileEvidence: matchingProfileEvidence,
-            runtimeCompatibilityState: runtimeCompatibilityState
+            runtimeCompatibilityState: runtimeCompatibilityState,
+            compatibilityExplanation: compatibilityExplanation
+        )
+    }
+
+    nonisolated private static func runtimeCompatibilityExplanation(
+        state: RuntimeCompatibilityState,
+        install: ModelInstall,
+        profile: RuntimeProfile,
+        evidence: RuntimeProfileEvidence?
+    ) -> PinesRuntimeCompatibilityExplanation {
+        let admission = profile.quantization.turboQuantAdmission
+        let headline: String
+        let summary: String
+        let nextAction: String?
+        switch state {
+        case .verified:
+            headline = "Verified for this exact runtime tuple"
+            summary = "Trusted benchmark evidence matches the model, runtime pair, device class, mode, backend, and fallback contract shown below."
+            nextAction = nil
+        case .conservative:
+            headline = "Installable; running conservatively"
+            summary = "The model is supported by the installer, but no matching benchmark may be used as a product-level performance claim. Pines keeps conservative defaults."
+            nextAction = "Import or run a matching trusted device benchmark to verify this tuple."
+        case .unverified:
+            headline = "Installable metadata, unverified runtime tuple"
+            summary = "Repository metadata passed basic checks. That is not proof for this device, context, runtime pair, or backend."
+            nextAction = install.state == .remote ? "Run preflight, install the model, then capture device evidence." : "Capture matching on-device evidence before relying on performance claims."
+        case .degraded:
+            headline = "Supported with a runtime downgrade"
+            summary = admission?.userMessage ?? "Pines reduced context or selected a fallback path to stay within the current device budget."
+            nextAction = "Use the admitted context below or choose a smaller model/profile."
+        case .unsupported:
+            headline = "Unsupported by the current runtime profile"
+            summary = admission?.userMessage ?? "This model or requested tuple cannot be admitted safely on the current runtime profile."
+            nextAction = "Choose a supported model, reduce context, or change the runtime mode."
+        case .benchmarkRequired:
+            headline = "Benchmark required before support can be claimed"
+            summary = "The repository is experimental and needs a trusted benchmark for the exact tuple shown below."
+            nextAction = "Run and import the required on-device benchmark."
+        case .revoked:
+            headline = "Previous evidence was revoked"
+            summary = evidence?.revokedReason ?? "The prior evidence no longer supports this runtime tuple. Pines will not use it for a compatibility claim."
+            nextAction = "Capture replacement evidence with the current runtime and fallback contract."
+        }
+
+        var facts = [PinesRuntimeCompatibilityExplanation.Fact]()
+        facts.append(.init(label: "Install check", value: install.verification.rawValue))
+        facts.append(.init(label: "Profile", value: profile.name))
+        if let evidence {
+            facts.append(.init(label: "Evidence", value: "\(evidence.evidenceLevel.rawValue) - \(evidence.createdAt.formatted(date: .abbreviated, time: .omitted))"))
+            facts.append(.init(label: "Compatibility pair", value: evidence.compatibilityPairID))
+            facts.append(.init(label: "Device class", value: evidence.deviceClass.rawValue))
+            facts.append(.init(label: "Mode", value: evidence.userMode.rawValue))
+            if let mode = evidence.resolvedRuntimeMode { facts.append(.init(label: "Runtime mode", value: mode.rawValue)) }
+            if let backend = evidence.effectiveBackend { facts.append(.init(label: "Backend", value: backend.rawValue)) }
+            facts.append(.init(label: "Fallback contract", value: String(evidence.fallbackContractHash.prefix(16))))
+        } else {
+            facts.append(.init(label: "Evidence", value: "No matching trusted evidence"))
+            if let deviceClass = profile.quantization.devicePerformanceClass {
+                facts.append(.init(label: "Device class", value: deviceClass.rawValue))
+            }
+            facts.append(.init(label: "Mode", value: profile.quantization.turboQuantUserMode.rawValue))
+            if let mode = profile.quantization.turboQuantResolvedRuntimeMode {
+                facts.append(.init(label: "Runtime mode", value: mode.rawValue))
+            }
+            if let backend = profile.quantization.turboQuantEffectiveBackend {
+                facts.append(.init(label: "Backend", value: backend.rawValue))
+            }
+        }
+        if let admission {
+            facts.append(.init(
+                label: "Context admission",
+                value: "\(admission.requestedContextLength.formatted()) requested -> \(admission.admittedContextLength.formatted()) admitted"
+            ))
+        }
+        if let fallback = profile.quantization.activeFallbackReason, !fallback.isEmpty {
+            facts.append(.init(label: "Fallback", value: fallback))
+        }
+        return PinesRuntimeCompatibilityExplanation(
+            headline: headline,
+            summary: summary,
+            claimBasis: state.allowsProductClaim ? "Exact-tuple claim backed by trusted evidence" : "No verified product claim for this exact tuple",
+            facts: facts,
+            nextAction: nextAction
         )
     }
 

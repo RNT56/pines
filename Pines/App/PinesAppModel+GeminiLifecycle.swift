@@ -82,6 +82,7 @@ extension PinesAppModel {
         contentType: String? = nil,
         consent: PinesGeminiProviderStorageConsent,
         poll: GeminiFilePolling? = GeminiFilePolling(),
+        uploadProgress: ProviderUploadProgress? = nil,
         services: PinesAppServices
     ) async throws -> PinesGeminiProviderUploadResult {
         do {
@@ -108,7 +109,8 @@ extension PinesAppModel {
                 contentType: resolvedContentType,
                 data: data,
                 localURL: fileURL,
-                poll: poll
+                poll: poll,
+                uploadProgress: uploadProgress
             )
             try await auditGeminiProviderStorageConsent(consent, providerID: coordinator.providerID, services: services)
             await refreshProviderLifecycleState(services: services)

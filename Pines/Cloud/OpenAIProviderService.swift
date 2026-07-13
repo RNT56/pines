@@ -25,7 +25,8 @@ struct OpenAIProviderService {
         method: OpenAIHTTPMethod = .post,
         path: String,
         queryItems: [URLQueryItem] = [],
-        multipart: OpenAIMultipartForm
+        multipart: OpenAIMultipartForm,
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> OpenAIProviderResponse {
         let boundary = "PinesOpenAI-\(UUID().uuidString)"
         return try await send(
@@ -33,7 +34,8 @@ struct OpenAIProviderService {
             path: path,
             queryItems: queryItems,
             body: multipart.encoded(boundary: boundary),
-            contentType: "multipart/form-data; boundary=\(boundary)"
+            contentType: "multipart/form-data; boundary=\(boundary)",
+            uploadProgress: uploadProgress
         )
     }
 
@@ -41,8 +43,11 @@ struct OpenAIProviderService {
         try await rawJSON(method: .get, path: "files", queryItems: request.queryItems)
     }
 
-    func uploadFile(_ request: OpenAIFileUploadRequest) async throws -> OpenAIProviderResponse {
-        try await rawMultipart(path: "files", multipart: request.multipart)
+    func uploadFile(
+        _ request: OpenAIFileUploadRequest,
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> OpenAIProviderResponse {
+        try await rawMultipart(path: "files", multipart: request.multipart, uploadProgress: uploadProgress)
     }
 
     func retrieveFile(_ fileID: String) async throws -> OpenAIProviderResponse {
@@ -306,7 +311,8 @@ struct OpenAIProviderService {
         body: Data? = nil,
         contentType: String? = nil,
         accept: String = "application/json",
-        maxResponseBytes: Int = BoundedHTTPResponse.jsonLimit
+        maxResponseBytes: Int = BoundedHTTPResponse.jsonLimit,
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> OpenAIProviderResponse {
         guard let apiKey = try await readAPIKey() else {
             throw CloudProviderError.missingAPIKey
@@ -323,7 +329,12 @@ struct OpenAIProviderService {
         addOpenAIClientRequestID(to: &request)
         try await applyExtraHeaders(to: &request)
 
-        let (data, http) = try await BoundedHTTPResponse.data(for: request, session: urlSession, maxBytes: maxResponseBytes)
+        let (data, http) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: urlSession,
+            maxBytes: maxResponseBytes,
+            uploadProgress: uploadProgress
+        )
         let providerResponse = OpenAIProviderResponse(data: data, httpResponse: http)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(

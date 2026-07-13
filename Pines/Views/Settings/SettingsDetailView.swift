@@ -63,6 +63,7 @@ struct SettingsDetailView: View {
     @State private var mcpServerPendingDeletion: MCPServerConfiguration?
     @State private var showsAdvancedMCPOptions = false
     @State private var showsAdvancedSyncOptions = false
+    @State private var openRouterSpendWindow: OpenRouterSpendWindow = .month
 
     private var iCloudSyncAvailable: Bool {
         services.cloudKitSyncService != nil
@@ -485,6 +486,22 @@ struct SettingsDetailView: View {
                     .accessibilityIdentifier("pines.settings.icloud.error")
             }
 
+            if !settingsState.cloudKitConflicts.isEmpty {
+                VStack(alignment: .leading, spacing: theme.spacing.small) {
+                    Label(
+                        "\(settingsState.cloudKitConflicts.count) change conflict\(settingsState.cloudKitConflicts.count == 1 ? "" : "s") need review",
+                        systemImage: "arrow.triangle.2.circlepath.icloud"
+                    )
+                    .font(theme.typography.callout.weight(.semibold))
+                    .foregroundStyle(theme.colors.warning)
+
+                    ForEach(settingsState.cloudKitConflicts) { conflict in
+                        cloudKitConflictRow(conflict)
+                    }
+                }
+                .accessibilityIdentifier("pines.settings.icloud.conflicts")
+            }
+
             Toggle("App lock", isOn: Binding(
                 get: { settingsState.securityConfiguration.appLockEnabled },
                 set: { value in
@@ -754,6 +771,7 @@ struct SettingsDetailView: View {
 
                     if settingsState.cloudProviders.contains(where: { $0.kind == .openRouter }) {
                         openRouterRoutingPolicyEditor
+                        openRouterSpendDashboard
                     }
                 }
             } label: {
@@ -873,6 +891,104 @@ struct SettingsDetailView: View {
                 .font(theme.typography.headline)
         }
         .accessibilityIdentifier("pines.settings.openrouter.routing")
+    }
+
+    private var openRouterSpendDashboard: some View {
+        let report = settingsState.openRouterSpendReport
+        return DisclosureGroup {
+            VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                Picker("Period", selection: $openRouterSpendWindow) {
+                    ForEach(OpenRouterSpendWindow.allCases, id: \.self) { window in
+                        Text(window.settingsTitle).tag(window)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: openRouterSpendWindow) { _, window in
+                    Task { await appModel.refreshOpenRouterSpend(window: window, services: services) }
+                }
+
+                PinesKeyValueGrid(items: [
+                    .init("Reported cost", String(format: "%.6f credits", report.reportedCostCredits), systemImage: "creditcard"),
+                    .init("Runs", "\(report.runCount)", systemImage: "bolt"),
+                    .init("Cost coverage", "\(report.reportedCostRunCount)/\(report.runCount)", systemImage: "checkmark.seal"),
+                    .init("Tokens", "\(report.promptTokens + report.completionTokens)", systemImage: "text.word.spacing")
+                ])
+
+                if report.missingCostRunCount > 0 {
+                    Label(
+                        "\(report.missingCostRunCount) run\(report.missingCostRunCount == 1 ? "" : "s") did not report cost. Totals intentionally exclude those runs.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if report.byUpstreamProvider.isEmpty {
+                    Text("No OpenRouter usage receipts were recorded in this period.")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                } else {
+                    ForEach(report.byUpstreamProvider) { provider in
+                        HStack(spacing: theme.spacing.small) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(provider.providerName)
+                                    .font(theme.typography.callout.weight(.semibold))
+                                    .foregroundStyle(theme.colors.primaryText)
+                                Text("\(provider.runCount) run\(provider.runCount == 1 ? "" : "s")")
+                                    .font(theme.typography.caption)
+                                    .foregroundStyle(theme.colors.secondaryText)
+                            }
+                            Spacer()
+                            Text(String(format: "%.6f credits", provider.reportedCostCredits))
+                                .font(theme.typography.caption.monospacedDigit())
+                                .foregroundStyle(theme.colors.primaryText)
+                        }
+                    }
+                }
+
+                Text("Pines reports provider-returned credits and never guesses a missing price. Upstream cost is tracked separately when OpenRouter supplies it.")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, theme.spacing.small)
+        } label: {
+            Label("OpenRouter spend and reconciliation", systemImage: "chart.bar.xaxis")
+                .font(theme.typography.headline)
+        }
+        .task {
+            openRouterSpendWindow = settingsState.openRouterSpendReport.window
+            await appModel.refreshOpenRouterSpend(window: openRouterSpendWindow, services: services)
+        }
+        .accessibilityIdentifier("pines.settings.openrouter.spend")
+    }
+
+    private func cloudKitConflictRow(_ conflict: CloudKitConflictRecord) -> some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            Text(conflict.title)
+                .font(theme.typography.callout.weight(.semibold))
+                .foregroundStyle(theme.colors.primaryText)
+            Label(conflict.deviceSummary, systemImage: "iphone")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Label(conflict.iCloudSummary, systemImage: "icloud")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            PinesAdaptiveButtonRow {
+                Button("Keep This Device") {
+                    Task { await appModel.resolveCloudKitConflict(id: conflict.id, resolution: .keepDevice, services: services) }
+                }
+                .pinesButtonStyle(.secondary, fillWidth: true)
+                Button("Use iCloud") {
+                    Task { await appModel.resolveCloudKitConflict(id: conflict.id, resolution: .useICloud, services: services) }
+                }
+                .pinesButtonStyle(.secondary, fillWidth: true)
+            }
+        }
+        .pinesSurface(.inset, padding: theme.spacing.small)
     }
 
     private func openRouterProviderListBinding(
@@ -2135,6 +2251,17 @@ private extension OpenRouterWebSearchEngine {
             "Parallel"
         case .perplexity:
             "Perplexity"
+        }
+    }
+}
+
+private extension OpenRouterSpendWindow {
+    var settingsTitle: String {
+        switch self {
+        case .day: "24h"
+        case .week: "7d"
+        case .month: "30d"
+        case .all: "All"
         }
     }
 }

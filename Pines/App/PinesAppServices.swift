@@ -22,6 +22,9 @@ typealias PinesLiveStore = any ConversationRepository
     & ProviderStructuredOutputRepository
     & ProviderModelCapabilityRepository
     & ProviderResearchRunRepository
+    & ProviderTransferRepository
+    & CloudKitConflictRepository
+    & CloudSpendRepository
     & MCPServerRepository
     & ModelDownloadRepository
     & AuditEventRepository
@@ -128,6 +131,9 @@ final class PinesAppServices: @unchecked Sendable {
     var providerStructuredOutputRepository: (any ProviderStructuredOutputRepository)? { liveStore }
     var providerModelCapabilityRepository: (any ProviderModelCapabilityRepository)? { liveStore }
     var providerResearchRunRepository: (any ProviderResearchRunRepository)? { liveStore }
+    var providerTransferRepository: (any ProviderTransferRepository)? { liveStore }
+    var cloudKitConflictRepository: (any CloudKitConflictRepository)? { liveStore }
+    var cloudSpendRepository: (any CloudSpendRepository)? { liveStore }
     var mcpServerRepository: (any MCPServerRepository)? { liveStore }
     var modelDownloadRepository: (any ModelDownloadRepository)? { liveStore }
     var auditRepository: (any AuditEventRepository)? { liveStore }

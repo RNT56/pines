@@ -2867,7 +2867,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-    #expect(PinesDatabaseSchema.currentVersion == 27)
+    #expect(PinesDatabaseSchema.currentVersion == 28)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
     let genericProviderMigration = try #require(
       PinesDatabaseSchema.migrations.first { $0.version == 15 })
@@ -2875,6 +2875,8 @@ struct CoreContractTests {
       PinesDatabaseSchema.migrations.first { $0.version == 16 })
     let runtimeMetadataMigration = try #require(
       PinesDatabaseSchema.migrations.first { $0.version == 17 })
+    let productionUXMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 28 })
         let sql = openAIMigration.sql.joined(separator: "\n")
 
         for table in [
@@ -2918,6 +2920,10 @@ struct CoreContractTests {
         ] {
             #expect(genericSQL.contains("CREATE TABLE IF NOT EXISTS \(table)"))
         }
+
+        let productionUXSQL = productionUXMigration.sql.joined(separator: "\n")
+        #expect(productionUXSQL.contains("CREATE TABLE IF NOT EXISTS provider_transfers"))
+        #expect(productionUXSQL.contains("CREATE TABLE IF NOT EXISTS cloudkit_conflicts"))
         #expect(genericSQL.contains("credential_keychain_account"))
         #expect(!genericSQL.contains("client_secret_keychain_account"))
 

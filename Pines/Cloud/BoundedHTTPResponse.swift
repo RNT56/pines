@@ -1,6 +1,8 @@
 import Foundation
 import PinesCore
 
+typealias ProviderUploadProgress = @Sendable (_ completedBytes: Int64, _ totalBytes: Int64) -> Void
+
 enum BoundedHTTPResponse {
     enum RedirectScope {
         case sameOrigin
@@ -15,10 +17,15 @@ enum BoundedHTTPResponse {
         for request: URLRequest,
         session: URLSession,
         maxBytes: Int,
-        redirectScope: RedirectScope = .sameOrigin
+        redirectScope: RedirectScope = .sameOrigin,
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> (Data, HTTPURLResponse) {
         guard let originURL = request.url else { throw CloudProviderError.invalidResponse }
-        let redirectPolicy = BoundedRedirectPolicy(originURL: originURL, scope: redirectScope)
+        let redirectPolicy = BoundedRedirectPolicy(
+            originURL: originURL,
+            scope: redirectScope,
+            uploadProgress: uploadProgress
+        )
         let (bytes, response) = try await session.bytes(for: request, delegate: redirectPolicy)
         guard let http = response as? HTTPURLResponse else {
             throw CloudProviderError.invalidResponse
@@ -57,10 +64,27 @@ enum BoundedHTTPResponse {
 private final class BoundedRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let originURL: URL
     private let scope: BoundedHTTPResponse.RedirectScope
+    private let uploadProgress: ProviderUploadProgress?
 
-    init(originURL: URL, scope: BoundedHTTPResponse.RedirectScope) {
+    init(
+        originURL: URL,
+        scope: BoundedHTTPResponse.RedirectScope,
+        uploadProgress: ProviderUploadProgress?
+    ) {
         self.originURL = originURL
         self.scope = scope
+        self.uploadProgress = uploadProgress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        uploadProgress?(totalBytesSent, totalBytesExpectedToSend)
     }
 
     func urlSession(

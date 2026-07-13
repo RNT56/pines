@@ -194,9 +194,11 @@ Todos:
 - [ ] Parse reasoning, cached, and media usage details.
 - [x] Parse server web-search request usage and show it in the run receipt/timeline.
 - [x] Store upstream provider, model, safe fallback route, and cost in metadata after the terminal stream chunk.
-- Add per-thread and per-provider spend summaries if product wants it.
+- [x] Add receipt-backed aggregate spend windows with upstream-provider breakdown and explicit missing-cost coverage.
+- [ ] Add per-thread spend summaries if product wants them.
 - [x] Add a progressively disclosed chat receipt for routed provider/cost metadata.
-- [ ] Add aggregate cost inspection and optional generation-endpoint reconciliation.
+- [x] Add aggregate cost inspection without estimating missing provider data.
+- [ ] Add optional generation-endpoint reconciliation.
 
 Possible hiccups:
 

@@ -32,7 +32,8 @@ struct AnthropicProviderService: Sendable {
         path: String,
         queryItems: [URLQueryItem] = [],
         multipart: OpenAIMultipartForm,
-        betaHeaders: [String] = []
+        betaHeaders: [String] = [],
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> AnthropicProviderResponse {
         let boundary = "PinesAnthropic-\(UUID().uuidString)"
         return try await send(
@@ -42,7 +43,8 @@ struct AnthropicProviderService: Sendable {
             body: multipart.encoded(boundary: boundary),
             contentType: "multipart/form-data; boundary=\(boundary)",
             accept: "application/json",
-            betaHeaders: betaHeaders
+            betaHeaders: betaHeaders,
+            uploadProgress: uploadProgress
         )
     }
 
@@ -50,8 +52,16 @@ struct AnthropicProviderService: Sendable {
         try await rawJSON(method: .get, path: "files", queryItems: request.queryItems, betaHeaders: [Self.filesAPIBeta])
     }
 
-    func uploadFile(_ request: AnthropicFileUploadRequest) async throws -> AnthropicProviderResponse {
-        try await rawMultipart(path: "files", multipart: request.multipart, betaHeaders: [Self.filesAPIBeta])
+    func uploadFile(
+        _ request: AnthropicFileUploadRequest,
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> AnthropicProviderResponse {
+        try await rawMultipart(
+            path: "files",
+            multipart: request.multipart,
+            betaHeaders: [Self.filesAPIBeta],
+            uploadProgress: uploadProgress
+        )
     }
 
     func retrieveFile(_ fileID: String) async throws -> AnthropicProviderResponse {
@@ -131,7 +141,8 @@ struct AnthropicProviderService: Sendable {
         contentType: String? = nil,
         accept: String? = nil,
         betaHeaders: [String] = [],
-        maxResponseBytes: Int = BoundedHTTPResponse.jsonLimit
+        maxResponseBytes: Int = BoundedHTTPResponse.jsonLimit,
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> AnthropicProviderResponse {
         guard let apiKey = try await readAPIKey() else {
             throw CloudProviderError.missingAPIKey
@@ -159,7 +170,12 @@ struct AnthropicProviderService: Sendable {
 
         var lastRetryableResponse: AnthropicProviderResponse?
         for attempt in 0..<3 {
-            let (data, http) = try await BoundedHTTPResponse.data(for: request, session: urlSession, maxBytes: maxResponseBytes)
+            let (data, http) = try await BoundedHTTPResponse.data(
+                for: request,
+                session: urlSession,
+                maxBytes: maxResponseBytes,
+                uploadProgress: uploadProgress
+            )
             let providerResponse = AnthropicProviderResponse(data: data, httpResponse: http)
             if (200..<300).contains(http.statusCode) {
                 return providerResponse

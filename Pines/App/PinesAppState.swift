@@ -223,6 +223,8 @@ final class PinesSettingsState: ObservableObject {
     @Published var isSavingCloudProvider: Bool
     @Published var validatingCloudProviderIDs: Set<ProviderID>
     @Published var cloudKitSyncStatus: PinesCloudKitSyncStatus
+    @Published var cloudKitConflicts: [CloudKitConflictRecord]
+    @Published var openRouterSpendReport: OpenRouterSpendReport
     @Published var huggingFaceCredentialStatus: String
     @Published var braveSearchCredentialStatus: String
 
@@ -264,6 +266,8 @@ final class PinesSettingsState: ObservableObject {
         isSavingCloudProvider: Bool = false,
         validatingCloudProviderIDs: Set<ProviderID> = [],
         cloudKitSyncStatus: PinesCloudKitSyncStatus = .init(),
+        cloudKitConflicts: [CloudKitConflictRecord] = [],
+        openRouterSpendReport: OpenRouterSpendReport = .init(window: .month),
         huggingFaceCredentialStatus: String = "Not configured",
         braveSearchCredentialStatus: String = "Not configured"
     ) {
@@ -304,6 +308,8 @@ final class PinesSettingsState: ObservableObject {
         self.isSavingCloudProvider = isSavingCloudProvider
         self.validatingCloudProviderIDs = validatingCloudProviderIDs
         self.cloudKitSyncStatus = cloudKitSyncStatus
+        self.cloudKitConflicts = cloudKitConflicts
+        self.openRouterSpendReport = openRouterSpendReport
         self.huggingFaceCredentialStatus = huggingFaceCredentialStatus
         self.braveSearchCredentialStatus = braveSearchCredentialStatus
     }
@@ -311,6 +317,7 @@ final class PinesSettingsState: ObservableObject {
 
 @MainActor
 final class PinesProviderLifecycleState: ObservableObject {
+    @Published var providerTransfers: [ProviderTransferRecord]
     @Published var providerFiles: [ProviderFileRecord]
     @Published var providerFilePreviews: [PinesProviderFilePreview]
     @Published var providerArtifacts: [ProviderArtifactRecord]
@@ -333,6 +340,7 @@ final class PinesProviderLifecycleState: ObservableObject {
     @Published var providerLifecycleError: String?
 
     init(
+        providerTransfers: [ProviderTransferRecord] = [],
         providerFiles: [ProviderFileRecord] = [],
         providerFilePreviews: [PinesProviderFilePreview] = [],
         providerArtifacts: [ProviderArtifactRecord] = [],
@@ -354,6 +362,7 @@ final class PinesProviderLifecycleState: ObservableObject {
         isRefreshingProviderLifecycle: Bool = false,
         providerLifecycleError: String? = nil
     ) {
+        self.providerTransfers = providerTransfers
         self.providerFiles = providerFiles
         self.providerFilePreviews = providerFilePreviews
         self.providerArtifacts = providerArtifacts
@@ -381,6 +390,7 @@ final class PinesProviderLifecycleState: ObservableObject {
 final class PinesWorkflowState: ObservableObject {
     @Published var serviceError: String?
     @Published var pendingToolApproval: ToolApprovalRequest?
+    @Published var pendingHostedToolApproval: HostedToolApprovalRequest?
     @Published var pendingCloudContextApproval: CloudContextApprovalRequest?
     @Published var pendingCloudVaultEmbeddingApproval: CloudVaultEmbeddingApprovalRequest?
     @Published var pendingMCPSamplingRequest: MCPSamplingRequest?
@@ -392,6 +402,7 @@ final class PinesWorkflowState: ObservableObject {
     init(
         serviceError: String? = nil,
         pendingToolApproval: ToolApprovalRequest? = nil,
+        pendingHostedToolApproval: HostedToolApprovalRequest? = nil,
         pendingCloudContextApproval: CloudContextApprovalRequest? = nil,
         pendingCloudVaultEmbeddingApproval: CloudVaultEmbeddingApprovalRequest? = nil,
         pendingMCPSamplingRequest: MCPSamplingRequest? = nil,
@@ -402,6 +413,7 @@ final class PinesWorkflowState: ObservableObject {
     ) {
         self.serviceError = serviceError
         self.pendingToolApproval = pendingToolApproval
+        self.pendingHostedToolApproval = pendingHostedToolApproval
         self.pendingCloudContextApproval = pendingCloudContextApproval
         self.pendingCloudVaultEmbeddingApproval = pendingCloudVaultEmbeddingApproval
         self.pendingMCPSamplingRequest = pendingMCPSamplingRequest

@@ -374,12 +374,28 @@ extension GRDBPinesStore: CloudKitSyncRepository {
     private static func applyCloudKitConversation(_ conversation: CloudKitConversationSnapshot, db: Database) throws {
         let local = try Row.fetchOne(
             db,
-            sql: "SELECT updated_at, deleted_at FROM conversations WHERE id = ?",
+            sql: """
+            SELECT title, updated_at, deleted_at, default_model_id, default_provider_id, project_id,
+                   archived_at, pinned, sync_state
+            FROM conversations WHERE id = ?
+            """,
             arguments: [conversation.id.uuidString]
         )
         let localUpdatedAt = (local?["updated_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
             ?? Date(timeIntervalSinceReferenceDate: 0)
         let localDeletedAt = (local?["deleted_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
+        let localSyncState = (local?["sync_state"] as String?).flatMap(SyncState.init(rawValue:))
+
+        if let local,
+           [.local, .pendingUpload, .conflicted].contains(localSyncState),
+           try cloudKitConversationDiffers(local: local, remote: conversation) {
+            try recordCloudKitConversationConflict(local: local, remote: conversation, db: db)
+            try db.execute(
+                sql: "UPDATE conversations SET sync_state = ? WHERE id = ?",
+                arguments: [SyncState.conflicted.rawValue, conversation.id.uuidString]
+            )
+            return
+        }
 
         if let remoteDeletedAt = conversation.deletedAt {
             guard local == nil || remoteDeletedAt >= max(localUpdatedAt, localDeletedAt ?? Date(timeIntervalSinceReferenceDate: 0)) else {
@@ -398,7 +414,7 @@ extension GRDBPinesStore: CloudKitSyncRepository {
         try upsertCloudKitConversation(conversation, deletedAt: nil, db: db)
     }
 
-    private static func upsertCloudKitConversation(
+    static func upsertCloudKitConversation(
         _ conversation: CloudKitConversationSnapshot,
         deletedAt: Date?,
         db: Database
@@ -549,12 +565,23 @@ extension GRDBPinesStore: CloudKitSyncRepository {
     private static func applyCloudKitDocument(_ document: CloudKitVaultDocumentSnapshot, db: Database) throws {
         let local = try Row.fetchOne(
             db,
-            sql: "SELECT updated_at, sync_state FROM vault_documents WHERE id = ?",
+            sql: "SELECT title, source_type, project_id, updated_at, sync_state FROM vault_documents WHERE id = ?",
             arguments: [document.id.uuidString]
         )
         let localUpdatedAt = (local?["updated_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
             ?? Date(timeIntervalSinceReferenceDate: 0)
         let localSyncState = (local?["sync_state"] as String?).flatMap(SyncState.init(rawValue:))
+
+        if let local,
+           [.local, .pendingUpload, .conflicted].contains(localSyncState),
+           try cloudKitDocumentDiffers(local: local, remote: document) {
+            try recordCloudKitDocumentConflict(local: local, remote: document, db: db)
+            try db.execute(
+                sql: "UPDATE vault_documents SET sync_state = ? WHERE id = ?",
+                arguments: [SyncState.conflicted.rawValue, document.id.uuidString]
+            )
+            return
+        }
 
         if let remoteDeletedAt = document.deletedAt {
             guard local == nil || remoteDeletedAt >= localUpdatedAt else { return }
@@ -571,7 +598,7 @@ extension GRDBPinesStore: CloudKitSyncRepository {
         try upsertCloudKitDocument(document, syncState: .synced, updatedAt: document.updatedAt, db: db)
     }
 
-    private static func upsertCloudKitDocument(
+    static func upsertCloudKitDocument(
         _ document: CloudKitVaultDocumentSnapshot,
         syncState: SyncState,
         updatedAt: Date,
@@ -600,6 +627,133 @@ extension GRDBPinesStore: CloudKitSyncRepository {
                 syncState.rawValue,
             ]
         )
+    }
+
+    private static func cloudKitConversationDiffers(local: Row, remote: CloudKitConversationSnapshot) throws -> Bool {
+        let localDeletedAt = (local["deleted_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
+        let localArchivedAt = (local["archived_at"] as Double?).map(Date.init(timeIntervalSinceReferenceDate:))
+        return (local["title"] as String) != remote.title
+            || (local["default_model_id"] as String?) != remote.defaultModelID?.rawValue
+            || (local["default_provider_id"] as String?) != remote.defaultProviderID?.rawValue
+            || (local["project_id"] as String?) != remote.projectID?.uuidString
+            || (local["pinned"] as Int) != (remote.pinned ? 1 : 0)
+            || (localArchivedAt != nil) != remote.archived
+            || localDeletedAt != remote.deletedAt
+    }
+
+    private static func cloudKitDocumentDiffers(local: Row, remote: CloudKitVaultDocumentSnapshot) throws -> Bool {
+        (local["title"] as String) != remote.title
+            || (local["source_type"] as String) != remote.sourceType
+            || (local["project_id"] as String?) != remote.projectID?.uuidString
+            || remote.deletedAt != nil
+    }
+
+    private static func recordCloudKitConversationConflict(
+        local: Row,
+        remote: CloudKitConversationSnapshot,
+        db: Database
+    ) throws {
+        let localPayload: [String: String] = [
+            "title": local["title"],
+            "default_model_id": (local["default_model_id"] as String?) ?? "",
+            "default_provider_id": (local["default_provider_id"] as String?) ?? "",
+            "project_id": (local["project_id"] as String?) ?? "",
+            "archived": (local["archived_at"] as Double?) == nil ? "false" : "true",
+            "pinned": (local["pinned"] as Int) == 1 ? "true" : "false",
+        ]
+        try recordCloudKitConflict(
+            entity: .conversation,
+            entityID: remote.id,
+            title: local["title"],
+            deviceSummary: "This device has unsynced conversation changes from \(dateLabel(local["updated_at"] as Double)).",
+            iCloudSummary: remote.deletedAt == nil
+                ? "iCloud has \"\(remote.title)\" from \(dateLabel(remote.updatedAt.timeIntervalSinceReferenceDate))."
+                : "The conversation was deleted from iCloud at \(dateLabel(remote.deletedAt!.timeIntervalSinceReferenceDate)).",
+            devicePayloadJSON: String(decoding: try JSONEncoder().encode(localPayload), as: UTF8.self),
+            iCloudPayloadJSON: String(decoding: try JSONEncoder().encode(remote), as: UTF8.self),
+            deviceUpdatedAt: Date(timeIntervalSinceReferenceDate: local["updated_at"]),
+            iCloudUpdatedAt: remote.deletedAt ?? remote.updatedAt,
+            db: db
+        )
+    }
+
+    private static func recordCloudKitDocumentConflict(
+        local: Row,
+        remote: CloudKitVaultDocumentSnapshot,
+        db: Database
+    ) throws {
+        let localPayload: [String: String] = [
+            "title": local["title"],
+            "source_type": local["source_type"],
+            "project_id": (local["project_id"] as String?) ?? "",
+        ]
+        try recordCloudKitConflict(
+            entity: .vaultDocument,
+            entityID: remote.id,
+            title: local["title"],
+            deviceSummary: "This device has unsynced Vault changes from \(dateLabel(local["updated_at"] as Double)).",
+            iCloudSummary: remote.deletedAt == nil
+                ? "iCloud has \"\(remote.title)\" from \(dateLabel(remote.updatedAt.timeIntervalSinceReferenceDate))."
+                : "The Vault document was deleted from iCloud at \(dateLabel(remote.deletedAt!.timeIntervalSinceReferenceDate)).",
+            devicePayloadJSON: String(decoding: try JSONEncoder().encode(localPayload), as: UTF8.self),
+            iCloudPayloadJSON: String(decoding: try JSONEncoder().encode(remote), as: UTF8.self),
+            deviceUpdatedAt: Date(timeIntervalSinceReferenceDate: local["updated_at"]),
+            iCloudUpdatedAt: remote.deletedAt ?? remote.updatedAt,
+            db: db
+        )
+    }
+
+    private static func recordCloudKitConflict(
+        entity: CloudKitConflictEntity,
+        entityID: UUID,
+        title: String,
+        deviceSummary: String,
+        iCloudSummary: String,
+        devicePayloadJSON: String,
+        iCloudPayloadJSON: String,
+        deviceUpdatedAt: Date,
+        iCloudUpdatedAt: Date,
+        db: Database
+    ) throws {
+        let existingID = try String.fetchOne(
+            db,
+            sql: "SELECT id FROM cloudkit_conflicts WHERE entity = ? AND entity_id = ? AND resolution = ?",
+            arguments: [entity.rawValue, entityID.uuidString, CloudKitConflictResolution.unresolved.rawValue]
+        )
+        try db.execute(
+            sql: """
+            INSERT INTO cloudkit_conflicts
+                (id, entity, entity_id, title, device_summary, icloud_summary, device_payload_json,
+                 icloud_payload_json, device_updated_at, icloud_updated_at, resolution, detected_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                device_summary = excluded.device_summary,
+                icloud_summary = excluded.icloud_summary,
+                device_payload_json = excluded.device_payload_json,
+                icloud_payload_json = excluded.icloud_payload_json,
+                device_updated_at = excluded.device_updated_at,
+                icloud_updated_at = excluded.icloud_updated_at
+            """,
+            arguments: [
+                existingID ?? UUID().uuidString,
+                entity.rawValue,
+                entityID.uuidString,
+                title,
+                deviceSummary,
+                iCloudSummary,
+                devicePayloadJSON,
+                iCloudPayloadJSON,
+                deviceUpdatedAt.timeIntervalSinceReferenceDate,
+                iCloudUpdatedAt.timeIntervalSinceReferenceDate,
+                CloudKitConflictResolution.unresolved.rawValue,
+                Date().timeIntervalSinceReferenceDate,
+            ]
+        )
+    }
+
+    private static func dateLabel(_ referenceTime: Double) -> String {
+        Date(timeIntervalSinceReferenceDate: referenceTime).formatted(date: .abbreviated, time: .shortened)
     }
 
     private static func activeProjectID(_ projectID: UUID?, db: Database) throws -> UUID? {
@@ -716,6 +870,36 @@ extension GRDBPinesStore: CloudKitSyncRepository {
             try db.execute(sql: "UPDATE conversations SET project_id = NULL WHERE project_id = ?", arguments: [deletion.recordName])
             try db.execute(sql: "UPDATE vault_documents SET project_id = NULL WHERE project_id = ?", arguments: [deletion.recordName])
         case "Conversation":
+            if let id = UUID(uuidString: deletion.recordName),
+               let local = try Row.fetchOne(
+                db,
+                sql: """
+                SELECT title, updated_at, deleted_at, default_model_id, default_provider_id, project_id,
+                       archived_at, pinned, sync_state
+                FROM conversations WHERE id = ?
+                """,
+                arguments: [deletion.recordName]
+               ),
+               let state = (local["sync_state"] as String?).flatMap(SyncState.init(rawValue:)),
+               [.local, .pendingUpload, .conflicted].contains(state) {
+                let remote = CloudKitConversationSnapshot(
+                    id: id,
+                    title: local["title"],
+                    updatedAt: deletion.deletedAt,
+                    deletedAt: deletion.deletedAt,
+                    defaultModelID: (local["default_model_id"] as String?).map(ModelID.init(rawValue:)),
+                    defaultProviderID: (local["default_provider_id"] as String?).map(ProviderID.init(rawValue:)),
+                    projectID: (local["project_id"] as String?).flatMap(UUID.init(uuidString:)),
+                    archived: (local["archived_at"] as Double?) != nil,
+                    pinned: (local["pinned"] as Int) == 1
+                )
+                try recordCloudKitConversationConflict(local: local, remote: remote, db: db)
+                try db.execute(
+                    sql: "UPDATE conversations SET sync_state = ? WHERE id = ?",
+                    arguments: [SyncState.conflicted.rawValue, deletion.recordName]
+                )
+                return
+            }
             try db.execute(
                 sql: "UPDATE conversations SET deleted_at = ?, updated_at = ?, sync_state = ? WHERE id = ? AND updated_at <= ?",
                 arguments: [deletedAt, deletedAt, SyncState.deleted.rawValue, deletion.recordName, deletedAt]
@@ -726,6 +910,30 @@ extension GRDBPinesStore: CloudKitSyncRepository {
                 arguments: [deletedAt, deletedAt, SyncState.deleted.rawValue, deletion.recordName, deletedAt]
             )
         case "VaultDocument":
+            if let id = UUID(uuidString: deletion.recordName),
+               let local = try Row.fetchOne(
+                db,
+                sql: "SELECT title, source_type, project_id, updated_at, sync_state FROM vault_documents WHERE id = ?",
+                arguments: [deletion.recordName]
+               ),
+               let state = (local["sync_state"] as String?).flatMap(SyncState.init(rawValue:)),
+               [.local, .pendingUpload, .conflicted].contains(state) {
+                let remote = CloudKitVaultDocumentSnapshot(
+                    id: id,
+                    title: local["title"],
+                    sourceType: local["source_type"],
+                    projectID: (local["project_id"] as String?).flatMap(UUID.init(uuidString:)),
+                    updatedAt: deletion.deletedAt,
+                    deletedAt: deletion.deletedAt,
+                    chunkCount: 0
+                )
+                try recordCloudKitDocumentConflict(local: local, remote: remote, db: db)
+                try db.execute(
+                    sql: "UPDATE vault_documents SET sync_state = ? WHERE id = ?",
+                    arguments: [SyncState.conflicted.rawValue, deletion.recordName]
+                )
+                return
+            }
             try db.execute(
                 sql: "UPDATE vault_documents SET sync_state = ?, updated_at = ? WHERE id = ? AND updated_at <= ?",
                 arguments: [SyncState.deleted.rawValue, deletedAt, deletion.recordName, deletedAt]

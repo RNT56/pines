@@ -1,6 +1,6 @@
 # Cloud Provider UI Roadmap
 
-Last verified: 2026-05-19.
+Last verified: 2026-07-13.
 
 This document defines the shared UI work required by the provider parity roadmaps. Every new provider feature must follow the Pines design system in [DESIGN_SYSTEM.md](../DESIGN_SYSTEM.md): no feature-local palettes, no hard-coded light/dark colors, dense operational layouts, shared list/panel/card primitives, semantic colors, and theme support through `\.pinesTheme`.
 
@@ -10,14 +10,16 @@ Add advanced cloud-provider capabilities without turning Pines into a dashboard 
 
 ## Implementation Status
 
-Updated 2026-05-19:
+Updated 2026-07-13:
 
 - Pines has a shared provider lifecycle dashboard with previews for files, artifacts, caches/vector stores, batches, research runs, live sessions, and model capabilities.
 - Vault/provider storage views show OpenAI, Anthropic, and Gemini provider-hosted files separately from local Vault items, with refresh/delete/export/import paths where supported.
 - Anthropic now has Settings capability rows, prompt/thinking quick settings, file management, batch create/count/refresh/cancel/import flows, citations/source panels, hosted-tool timeline rows, and run provenance pills.
 - Gemini now has file/media management, context cache management, generated media workspace, Deep Research workspace, realtime session records, batch rows, and capability previews.
 - OpenAI now has file/vector-store management, artifact previews, batch rows, Deep Research workspace, realtime session records, and media/audio artifact workflows.
-- Remaining UI work is production hardening: durable upload progress, retry/cancellation, richer provider-hosted approval sheets, media viewers, realtime controls, source highlighting, compact-width polish, and provider-specific cost/retention detail.
+- OpenAI, Anthropic, and Gemini file uploads now use a persisted transfer queue with real byte progress, retry/cancellation, relaunch recovery, retained staged sources, and provider-copy verification.
+- Approval-gated hosted tools now pause before the provider request and disclose environment, data egress, side effects, network destinations, and retention before one-time approval or denial; decisions are audited.
+- Remaining UI work includes media viewers, realtime controls, source highlighting, compact-width preview coverage, richer per-resource retention/billing detail, and dedicated computer-use action review.
 
 ## Design Principles
 
@@ -82,7 +84,7 @@ Production requirements:
 
 - Provider-hosted files must never appear indistinguishable from local Vault records.
 - Deleting local Vault content must not imply deleting provider-hosted copies, and vice versa.
-- Long uploads need progress, retry, cancellation, and background-safe state.
+- Long uploads have progress, retry, cancellation, and durable relaunch state. Pines does not claim that an in-flight foreground URL-session upload continues indefinitely after iOS suspends the app.
 
 ### 4. Tool Approval And Hosted Tool Timeline
 

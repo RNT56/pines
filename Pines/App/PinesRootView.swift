@@ -256,6 +256,24 @@ struct PinesRootView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
+            get: { workflowState.pendingHostedToolApproval },
+            set: { request in
+                if request == nil {
+                    appModel.resolvePendingHostedToolApproval(false, services: services)
+                }
+            }
+        )) { request in
+            HostedToolApprovalSheet(
+                request: request,
+                deny: { appModel.resolvePendingHostedToolApproval(false, services: services) },
+                approve: { appModel.resolvePendingHostedToolApproval(true, services: services) }
+            )
+            .environmentObject(haptics)
+            .pinesTheme(theme)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: Binding(
             get: { workflowState.pendingCloudContextApproval },
             set: { request in
                 if request == nil {
@@ -575,6 +593,71 @@ private struct ToolApprovalSheet: View {
             return raw
         }
         return String(decoding: pretty, as: UTF8.self)
+    }
+}
+
+private struct HostedToolApprovalSheet: View {
+    @Environment(\.pinesTheme) private var theme
+    @EnvironmentObject private var haptics: PinesHaptics
+    let request: HostedToolApprovalRequest
+    let deny: () -> Void
+    let approve: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Provider Environment") {
+                    LabeledContent("Provider", value: request.providerName)
+                    LabeledContent("Model", value: request.modelID.rawValue)
+                    Text("These tools run outside this iPhone. Review what leaves the device and what each hosted environment can change.")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+
+                ForEach(request.descriptors) { descriptor in
+                    Section(descriptor.displayName) {
+                        LabeledContent("Runs in", value: descriptor.environment)
+                        hostedApprovalList("Data leaving this device", values: descriptor.dataLeavingDevice)
+                        hostedApprovalList("Possible side effects", values: descriptor.sideEffects)
+                        hostedApprovalList("Network destinations", values: descriptor.networkDestinations)
+                        Text(descriptor.retentionNotice)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                    }
+                }
+            }
+            .pinesThemedForm()
+            .navigationTitle("Approve Hosted Tools")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Deny", role: .cancel) {
+                        haptics.play(.primaryAction)
+                        deny()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Approve Once") {
+                        haptics.play(.primaryAction)
+                        approve()
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func hostedApprovalList(_ title: String, values: [String]) -> some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+            Text(title)
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.primaryText)
+            ForEach(values, id: \.self) { value in
+                Label(value, systemImage: "circle.fill")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .labelStyle(.titleAndIcon)
+            }
+        }
     }
 }
 

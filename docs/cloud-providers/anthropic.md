@@ -1,6 +1,6 @@
 # Anthropic Provider Status And Gaps
 
-Last verified: 2026-05-19.
+Last verified: 2026-07-13.
 
 Primary sources:
 
@@ -31,18 +31,19 @@ Primary sources:
 - Token counting for Anthropic chat/batch preflight where enabled.
 - Stream parser coverage for cache usage fields, request/message IDs, signed thinking, citations, `server_tool_use`, hosted tool results, web fetch/search results, code execution outputs, generated files, and Anthropic error events.
 - Settings capability rows, shared lifecycle dashboard previews, Anthropic file manager, batch creator, chat quick settings, provider citation panel, hosted-tool timeline rows, and run provenance metadata.
+- Durable Files API transfers with real upload progress, staged-source recovery, retry/cancellation, and provider-copy verification.
+- Preflight approval sheets for approval-gated hosted tools that disclose the Anthropic-hosted environment, data leaving the device, side effects, destinations, and retention before execution.
 
 ## Remaining High-Value Gaps
 
-### 1. Hosted tool approval depth
+### 1. Hosted tool policy defaults and incremental arguments
 
-Pines maps and records Anthropic hosted tools, but production approval UX still needs more detail for code execution, remote MCP, text editor/bash, and web fetch.
+Pines maps and records Anthropic hosted tools and presents detailed one-time approval before code execution, remote MCP, text editor/bash, or other approval-gated execution. Per-tool saved defaults and argument-level reapproval during fine-grained streaming remain incomplete.
 
 Needed work:
 
-- Show exact provider-hosted environment labels before execution.
-- Preview external data transfer, expected side effects, allowed domains, and generated-file retention.
 - Add richer denial/retry paths and per-tool policy defaults.
+- Revisit approval when fine-grained streaming materially changes tool arguments after initial consent.
 
 ### 2. Source highlighting and Vault citation alignment
 
@@ -83,13 +84,12 @@ Needed work:
 - Map Vault snippets into Anthropic search-result blocks only after user approval for cloud context.
 - Validate final structured output separately from normal markdown streaming.
 
-### 6. Production file-transfer hardening
+### 6. Provider file cleanup and suspended-transfer limits
 
-Anthropic files are now represented as provider-hosted records, but upload/download operations still need production-grade progress and recovery.
+Anthropic files are represented as provider-hosted records, and foreground uploads now have durable progress, retry, cancellation, relaunch recovery, and retained staged sources. Pines does not claim indefinite background continuation after iOS suspension.
 
 Needed work:
 
-- Durable progress, retry, cancellation, and background-safe transfer state.
 - Orphan cleanup for generated files and failed imports.
 - Clearer retention and billing labels in every file picker and provider storage row.
 
@@ -97,7 +97,7 @@ Needed work:
 
 1. Harden hosted tool approval sheets and generated-file import UX.
 2. Add source highlighting and Vault citation alignment.
-3. Add production transfer progress/retry/cancellation.
+3. Add orphan cleanup and richer per-resource retention/billing labels.
 4. Complete fine-grained tool streaming and parallel tool controls.
 5. Add provider-neutral structured outputs and custom RAG search-result blocks.
 6. Revisit computer use only after a dedicated safety design is ready.

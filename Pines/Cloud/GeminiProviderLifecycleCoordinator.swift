@@ -28,10 +28,15 @@ struct GeminiProviderLifecycleCoordinator: Sendable {
         contentType: String,
         data: Data,
         localURL: URL? = nil,
-        poll: GeminiFilePolling? = nil
+        poll: GeminiFilePolling? = nil,
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> ProviderFileRecord {
         let session = try await service.startResumableUpload(displayName: fileName, mimeType: contentType, byteCount: data.count)
-        let response = try await service.uploadResumableData(to: session.uploadURL, data: data)
+        let response = try await service.uploadResumableData(
+            to: session.uploadURL,
+            data: data,
+            uploadProgress: uploadProgress
+        )
         guard var record = fileRecord(from: response.json, fallbackFileName: fileName, contentType: contentType, byteCount: data.count) else {
             throw CloudProviderError.invalidResponse
         }

@@ -424,6 +424,16 @@ final class PinesAppModel: ObservableObject {
         set { settingsState.cloudKitSyncStatus = newValue }
     }
 
+    var cloudKitConflicts: [CloudKitConflictRecord] {
+        get { settingsState.cloudKitConflicts }
+        set { settingsState.cloudKitConflicts = newValue }
+    }
+
+    var openRouterSpendReport: OpenRouterSpendReport {
+        get { settingsState.openRouterSpendReport }
+        set { settingsState.openRouterSpendReport = newValue }
+    }
+
     var huggingFaceCredentialStatus: String {
         get { settingsState.huggingFaceCredentialStatus }
         set { settingsState.huggingFaceCredentialStatus = newValue }
@@ -437,6 +447,11 @@ final class PinesAppModel: ObservableObject {
     var providerFiles: [ProviderFileRecord] {
         get { providerLifecycleState.providerFiles }
         set { providerLifecycleState.providerFiles = newValue }
+    }
+
+    var providerTransfers: [ProviderTransferRecord] {
+        get { providerLifecycleState.providerTransfers }
+        set { providerLifecycleState.providerTransfers = newValue }
     }
 
     var providerFilePreviews: [PinesProviderFilePreview] {
@@ -544,6 +559,11 @@ final class PinesAppModel: ObservableObject {
         set { workflowState.pendingToolApproval = newValue }
     }
 
+    var pendingHostedToolApproval: HostedToolApprovalRequest? {
+        get { workflowState.pendingHostedToolApproval }
+        set { workflowState.pendingHostedToolApproval = newValue }
+    }
+
     var pendingCloudContextApproval: CloudContextApprovalRequest? {
         get { workflowState.pendingCloudContextApproval }
         set { workflowState.pendingCloudContextApproval = newValue }
@@ -589,11 +609,13 @@ final class PinesAppModel: ObservableObject {
     private var needsCloudModelCatalogRefresh = false
     private var cloudModelCatalogSnapshots: [ProviderID: CloudProviderModelCatalogSnapshot] = [:]
     private var repositoryObservationTasks: [Task<Void, Never>] = []
+    var providerTransferTasks: [UUID: Task<Void, Never>] = [:]
     private var currentRunTask: Task<Void, Never>?
     private var currentRunToken: UUID?
     private var currentRunUsesLocalRuntime = false
     private var vaultReindexToken: UUID?
     var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
+    var hostedToolApprovalContinuation: CheckedContinuation<Bool, Never>?
     var cloudContextContinuation: CheckedContinuation<CloudContextApprovalDecision, Never>?
     var cloudVaultEmbeddingContinuation: CheckedContinuation<Bool, Never>?
     var samplingContinuation: CheckedContinuation<Bool, Never>?
@@ -689,7 +711,7 @@ final class PinesAppModel: ObservableObject {
         }
     }
 
-    private func setIfChanged<Value: Equatable>(
+    func setIfChanged<Value: Equatable>(
         _ keyPath: ReferenceWritableKeyPath<PinesAppModel, Value>,
         _ value: Value
     ) {
@@ -1025,7 +1047,9 @@ final class PinesAppModel: ObservableObject {
         currentRunTask?.cancel()
         modelSearchMetadataTask?.cancel()
         repositoryObservationTasks.forEach { $0.cancel() }
+        providerTransferTasks.values.forEach { $0.cancel() }
         approvalContinuation?.resume(returning: .denied)
+        hostedToolApprovalContinuation?.resume(returning: false)
         cloudContextContinuation?.resume(returning: .cancel)
         cloudVaultEmbeddingContinuation?.resume(returning: false)
         samplingContinuation?.resume(returning: false)
@@ -1086,9 +1110,21 @@ final class PinesAppModel: ObservableObject {
             if let cloudProviderRepository = services.cloudProviderRepository {
                 setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
             }
+
+            if let conflictRepository = services.cloudKitConflictRepository {
+                setIfChanged(\.cloudKitConflicts, try await conflictRepository.listCloudKitConflicts(unresolvedOnly: true))
+            }
+
+            if let spendRepository = services.cloudSpendRepository {
+                setIfChanged(
+                    \.openRouterSpendReport,
+                    try await spendRepository.openRouterSpendReport(window: openRouterSpendReport.window, now: Date())
+                )
+            }
             await hydrateCloudModelCatalogSnapshots(services: services)
 
             await repairInterruptedChatRuns(services: services)
+            try await services.providerTransferRepository?.markActiveProviderTransfersInterrupted(at: Date())
             try await services.modelLifecycleService?.validateInstalledModels()
             await refreshProviderLifecycleState(services: services)
             try await refreshModelPreviews(services: services, enrichRuntime: false)
@@ -1351,6 +1387,9 @@ final class PinesAppModel: ObservableObject {
         defer { isRefreshingProviderLifecycle = false }
 
         do {
+            if let repository = services.providerTransferRepository {
+                setIfChanged(\.providerTransfers, try await repository.listProviderTransfers(providerID: nil))
+            }
             if let repository = services.providerFileRepository {
                 let records = try await repository.listProviderFiles(providerID: nil)
                 setIfChanged(\.providerFiles, records)
@@ -2995,6 +3034,21 @@ final class PinesAppModel: ObservableObject {
                 anthropicOptions: anthropicRequestOptions(for: selectedProviderID, settings: settings, services: services),
                 openRouterOptions: openRouterRequestOptions(for: selectedProviderID, settings: settings, services: services)
             )
+            let hostedProviderName = cloudProviders.first(where: { $0.id == selectedProviderID })?.displayName
+                ?? (selectedProviderID == ManagedCloudPolicy.providerID ? "Pines Pro Cloud" : selectedProviderID.rawValue)
+            let hostedToolDescriptors = request.hostedToolApprovalDescriptors(providerName: hostedProviderName)
+            if !hostedToolDescriptors.isEmpty {
+                let approved = await requestHostedToolApproval(
+                    HostedToolApprovalRequest(
+                        providerID: selectedProviderID,
+                        providerName: hostedProviderName,
+                        modelID: selectedModelID,
+                        descriptors: hostedToolDescriptors
+                    ),
+                    services: services
+                )
+                guard approved else { throw InferenceError.cancelled }
+            }
             if let eligibilityFailure = openRouterModelEligibilityFailure(
                 providerID: selectedProviderID,
                 request: request

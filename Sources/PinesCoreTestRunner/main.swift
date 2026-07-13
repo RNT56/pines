@@ -571,7 +571,9 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json"), "missing speculative auto-disable column")
         try expect(sql.contains("CREATE TABLE IF NOT EXISTS cloud_model_catalog_snapshots"), "missing cloud model catalog snapshot table")
         try expect(sql.contains("expires_at REAL NOT NULL"), "cloud model catalog snapshots must expire")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 27)
+        try expect(sql.contains("CREATE TABLE IF NOT EXISTS provider_transfers"), "missing durable provider transfer table")
+        try expect(sql.contains("CREATE TABLE IF NOT EXISTS cloudkit_conflicts"), "missing CloudKit conflict table")
+        try expectEqual(PinesDatabaseSchema.currentVersion, 28)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")

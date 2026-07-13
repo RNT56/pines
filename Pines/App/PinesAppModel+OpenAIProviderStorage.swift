@@ -59,6 +59,7 @@ extension PinesAppModel {
         consent: PinesOpenAIProviderStorageConsent,
         attachToVectorStoreID: String? = nil,
         vectorStoreAttributes: JSONValue? = nil,
+        uploadProgress: ProviderUploadProgress? = nil,
         services: PinesAppServices
     ) async throws -> PinesOpenAIProviderUploadResult {
         do {
@@ -77,7 +78,8 @@ extension PinesAppModel {
                 contentType: contentType ?? Self.providerStorageContentType(for: fileURL),
                 data: data,
                 purpose: purpose,
-                localURL: fileURL
+                localURL: fileURL,
+                uploadProgress: uploadProgress
             )
             let attached: ProviderCacheRecord?
             if let attachToVectorStoreID {

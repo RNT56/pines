@@ -140,6 +140,29 @@ first_available_iphone_simulator() {
   xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }'
 }
 
+create_ephemeral_iphone_simulator() {
+  local timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
+  local device_type="${PINES_SIMULATOR_DEVICE_TYPE:-}"
+  local runtime="${PINES_SIMULATOR_RUNTIME:-}"
+
+  if [ -z "$device_type" ]; then
+    device_type="$(xcrun simctl list devicetypes | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+  fi
+  if [ -z "$runtime" ]; then
+    runtime="$(xcrun simctl list runtimes available | awk '/^iOS / { value=$NF } END { print value }')"
+  fi
+  if [ -z "$device_type" ] || [ -z "$runtime" ]; then
+    echo "::error::Unable to select an available iPhone device type and iOS runtime." >&2
+    xcrun simctl list devicetypes || true
+    xcrun simctl list runtimes available || true
+    return 1
+  fi
+
+  echo "Creating an ephemeral iPhone simulator for this validation run..." >&2
+  run_with_timeout "$timeout_seconds" \
+    xcrun simctl create "Pines-CI-$$-$(date +%s)" "$device_type" "$runtime"
+}
+
 simulator_required() {
   local required="${PINES_REQUIRE_SIMULATOR_TEST_RUN:-}"
   if [ -z "$required" ] && [ "${CI:-}" = "true" ]; then
@@ -155,7 +178,11 @@ build_tests() {
 
   local destination='generic/platform=iOS Simulator'
   local simulator_id
-  simulator_id="$(first_available_iphone_simulator || true)"
+  if [ "${CI:-}" = "true" ]; then
+    simulator_id="$(create_ephemeral_iphone_simulator || true)"
+  else
+    simulator_id="$(first_available_iphone_simulator || true)"
+  fi
   if [ -n "$simulator_id" ]; then
     destination="id=$simulator_id"
     printf '%s\n' "$simulator_id" > "$simulator_id_file"
@@ -202,28 +229,39 @@ run_tests() {
     return 0
   fi
 
+  trap cleanup_test_simulator EXIT INT TERM
   : > "$log_dir/xcodebuild-test-run.log"
+  prepare_test_simulator "$simulator_id"
   run_xcode_test_phase "$simulator_id" "unit tests" -only-testing:PinesTests
   run_xcode_test_phase "$simulator_id" "UI smoke tests" -only-testing:PinesUITests
+  cleanup_test_simulator
+  trap - EXIT INT TERM
 }
 
 run_xcode_test_phase() {
   local simulator_id="$1"
   local label="$2"
   local timeout_seconds="${PINES_XCODE_TEST_TIMEOUT_SECONDS:-}"
+  local attempts="${PINES_XCODE_TEST_ATTEMPTS:-}"
   shift 2
 
   if [ -z "$timeout_seconds" ]; then
     if [ "${CI:-}" = "true" ]; then
-      timeout_seconds=600
+      timeout_seconds=480
     else
       timeout_seconds=0
     fi
   fi
+  if [ -z "$attempts" ]; then
+    if [ "${CI:-}" = "true" ]; then
+      attempts=1
+    else
+      attempts=2
+    fi
+  fi
 
   local attempt
-  for attempt in 1 2; do
-    prepare_test_simulator "$simulator_id"
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
     echo "Running iOS runtime smoke tests ($label, attempt $attempt)..."
     set -o pipefail
     if run_with_timeout "$timeout_seconds" \
@@ -241,12 +279,13 @@ run_xcode_test_phase() {
     fi
 
     local status="${PIPESTATUS[0]}"
-    if [ "$attempt" -eq 2 ]; then
-      echo "::error::$label failed after a fresh simulator retry (status $status)." >&2
+    if [ "$attempt" -eq "$attempts" ]; then
+      echo "::error::$label failed after $attempt attempt(s) (status $status)." >&2
       return "$status"
     fi
 
-    echo "::warning::$label did not complete (status $status); retrying with a freshly booted simulator." >&2
+    echo "::warning::$label did not complete (status $status); restarting the simulator before retry." >&2
+    prepare_test_simulator "$simulator_id"
   done
 }
 
@@ -258,10 +297,28 @@ prepare_test_simulator() {
   fi
 
   echo "Preparing simulator $simulator_id for runtime tests..."
-  xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
-  xcrun simctl erase "$simulator_id"
-  xcrun simctl boot "$simulator_id"
-  xcrun simctl bootstatus "$simulator_id" -b
+  local timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
+  run_with_timeout "$timeout_seconds" xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
+  run_with_timeout "$timeout_seconds" xcrun simctl erase "$simulator_id"
+  run_with_timeout "$timeout_seconds" xcrun simctl boot "$simulator_id"
+  if ! run_with_timeout "$timeout_seconds" xcrun simctl bootstatus "$simulator_id" -b; then
+    echo "::error::Simulator $simulator_id did not finish booting within ${timeout_seconds}s." >&2
+    xcrun simctl diagnose -b --no-archive || true
+    return 1
+  fi
+}
+
+cleanup_test_simulator() {
+  [ "${CI:-}" = "true" ] || return 0
+  [ -f "$simulator_id_file" ] || return 0
+  local simulator_id
+  simulator_id="$(cat "$simulator_id_file")"
+  [ -n "$simulator_id" ] || return 0
+  local timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
+  echo "Cleaning up validation simulator $simulator_id..."
+  run_with_timeout "$timeout_seconds" xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
+  run_with_timeout "$timeout_seconds" xcrun simctl delete "$simulator_id" >/dev/null 2>&1 || true
+  rm -f "$simulator_id_file"
 }
 
 run_with_timeout() {
@@ -281,6 +338,7 @@ run_with_timeout() {
 }
 
 finalize_validation() {
+  cleanup_test_simulator
   require_snapshot
   echo "Restoring generated Xcode project..."
   "${xcodegen[@]}" generate

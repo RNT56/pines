@@ -61,7 +61,8 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         data: Data,
         purpose: String,
         localURL: URL? = nil,
-        fields: [String: String] = [:]
+        fields: [String: String] = [:],
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> ProviderFileRecord {
         let response = try await service.uploadFile(
             OpenAIFileUploadRequest(
@@ -70,7 +71,8 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
                 data: data,
                 purpose: purpose,
                 fields: fields
-            )
+            ),
+            uploadProgress: uploadProgress
         )
         guard var record = response.json.flatMap({ OpenAIProviderRecordMapper.providerFile(from: $0, providerID: providerID) }) else {
             throw CloudProviderError.invalidResponse
