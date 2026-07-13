@@ -1301,6 +1301,108 @@ struct CoreContractTests {
     }
 
     @Test
+    func openRouterWebSearchCapturesNestedAnnotationsUsageAndHostedTimeline() throws {
+        var parser = CloudProviderStreamParser()
+        let answerPayload = #"""
+        {
+          "id": "gen-search-1",
+          "object": "chat.completion.chunk",
+          "model": "openai/gpt-5-mini",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "content": "Current answer [1]",
+              "annotations": [
+                {
+                  "type": "url_citation",
+                  "url_citation": {
+                    "url": "https://example.com/news?item=1",
+                    "title": "Example release",
+                    "content": "Bounded source excerpt.",
+                    "start_index": 15,
+                    "end_index": 18
+                  }
+                },
+                {
+                  "type": "url_citation",
+                  "url_citation": {
+                    "url": "http://127.0.0.1/private",
+                    "title": "Must not persist"
+                  }
+                }
+              ]
+            },
+            "finish_reason": "stop"
+          }]
+        }
+        """#
+        let receiptPayload = #"""
+        {
+          "id": "gen-search-1",
+          "object": "chat.completion.chunk",
+          "model": "openai/gpt-5-mini",
+          "choices": [],
+          "usage": {
+            "prompt_tokens": 30,
+            "completion_tokens": 8,
+            "total_tokens": 38,
+            "cost": 0.006,
+            "server_tool_use": {
+              "web_search_requests": 2,
+              "future_counter": 99
+            }
+          }
+        }
+        """#
+
+        let answer = parser.parse(
+            data: Data(answerPayload.utf8),
+            format: .chatCompletions,
+            providerKind: .openRouter
+        )
+        _ = parser.parse(
+            data: Data(receiptPayload.utf8),
+            format: .chatCompletions,
+            providerKind: .openRouter
+        )
+        let finish = parser.finalizedFinish(
+            answer.finish,
+            format: .chatCompletions,
+            providerKind: .openRouter,
+            modelID: "openai/gpt-5-mini",
+            usesOfficialOpenAIReasoningChat: false
+        )
+        let metadata = finish.providerMetadata
+        let citationData = try #require(
+            metadata[CloudProviderMetadataKeys.webSearchCitationsJSON]?.data(using: .utf8)
+        )
+        let citations = try JSONDecoder().decode([WebSearchCitation].self, from: citationData)
+        let providerCitations = metadata.providerCitations
+        let timeline = metadata.hostedToolAuditEntries
+        let provenance = try #require(OpenRouterRunProvenance(metadata: metadata))
+
+        #expect(answer.events.contains(.token(TokenDelta(kind: .token, text: "Current answer [1]", tokenCount: 1))))
+        #expect(citations.count == 1)
+        #expect(citations.first?.title == "Example release")
+        #expect(citations.first?.source == "OpenRouter")
+        #expect(providerCitations.count == 1)
+        #expect(providerCitations.first?.providerKind == .openRouter)
+        #expect(providerCitations.first?.sourceType == .web)
+        #expect(providerCitations.first?.startOffset == 15)
+        #expect(providerCitations.first?.endOffset == 18)
+        #expect(providerCitations.first?.citedText == "Bounded source excerpt.")
+        #expect(metadata[CloudProviderMetadataKeys.openRouterWebSearchRequests] == "2")
+        #expect(metadata[CloudProviderMetadataKeys.openRouterUsageJSON]?.contains("web_search_requests") == true)
+        #expect(metadata[CloudProviderMetadataKeys.openRouterUsageJSON]?.contains("future_counter") == false)
+        #expect(timeline.count == 1)
+        #expect(timeline.first?.kind == .webSearch)
+        #expect(timeline.first?.status == .completed)
+        #expect(timeline.first?.name == "OpenRouter web search (2 requests)")
+        #expect(provenance.webSearchRequests == 2)
+        #expect(provenance.costCredits == 0.006)
+    }
+
+    @Test
     func openAICompatibleChunksDoNotMasqueradeAsOpenRouterReceipts() {
         var parser = CloudProviderStreamParser()
         let payload = #"{"id":"chatcmpl-1","model":"custom/model","provider":"Example","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5,"cost":12.5},"openrouter_metadata":{"requested":"ignored","attempt":1}}"#
@@ -2446,7 +2548,8 @@ struct CoreContractTests {
                 requireParameters: true,
                 dataCollection: .deny,
                 zeroDataRetention: true,
-                sort: .throughput
+                sort: .throughput,
+                webSearchEngine: .exa
             )
         )
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
@@ -2463,6 +2566,7 @@ struct CoreContractTests {
         #expect(clamped.openRouterProviderPreferences.only == ["azure"])
         #expect(clamped.openRouterProviderPreferences.ignore == ["deepinfra"])
         #expect(clamped.openRouterProviderPreferences.sort == .automatic)
+        #expect(clamped.openRouterProviderPreferences.webSearchEngine == .exa)
         #expect(clamped.cloudAccessMode == .managedPro)
         #expect(clamped.proEntitlementStatus == .active)
         #expect(clamped.managedCloudConsent == .optedIn)
@@ -2697,7 +2801,8 @@ struct CoreContractTests {
                 order: ["anthropic", "openai"],
                 allowFallbacks: false,
                 dataCollection: .deny,
-                zeroDataRetention: true
+                zeroDataRetention: true,
+                webSearchEngine: .parallel
             )
         )
 
@@ -2718,6 +2823,7 @@ struct CoreContractTests {
         #expect(rebuilt.openAIResponseOptions?.hostedTools.first?.vectorStoreIDs == ["vs_1"])
         #expect(rebuilt.geminiOptions?.cachedContentName == "cachedContents/1")
         #expect(rebuilt.openRouterOptions == request.openRouterOptions)
+        #expect(rebuilt.openRouterOptions?.webSearchEngine == .parallel)
         #expect(rebuilt.webSearchOptions?.allowedDomains == ["example.com"])
         #expect(rebuilt.vaultContextIDs == request.vaultContextIDs)
     }

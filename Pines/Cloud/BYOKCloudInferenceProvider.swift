@@ -391,9 +391,26 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             ).rawValue
             body["verbosity"] = chatRequest.sampling.openAITextVerbosity.rawValue
         }
-        if chatRequest.allowsTools, !chatRequest.availableTools.isEmpty {
-            body["tools"] = chatRequest.availableTools.map { Self.jsonSerializable($0.openAIFunctionToolObject()) }
-            body["tool_choice"] = "auto"
+        let functionTools = chatRequest.allowsTools
+            ? chatRequest.availableTools.map { Self.jsonSerializable($0.openAIFunctionToolObject()) }
+            : []
+        let openRouterPreferences = chatRequest.openRouterOptions ?? OpenRouterProviderPreferences()
+        let openRouterWebSearchEnabled = configuration.kind == .openRouter
+            && chatRequest.sampling.cloudWebSearchMode != .off
+        let openRouterServerTools = openRouterWebSearchEnabled
+            ? [try Self.openRouterWebSearchToolObject(
+                options: chatRequest.webSearchOptions,
+                engine: openRouterPreferences.webSearchEngine
+            )]
+            : []
+        let tools = functionTools + openRouterServerTools
+        if !tools.isEmpty {
+            body["tools"] = tools
+            if openRouterWebSearchEnabled, chatRequest.sampling.cloudWebSearchMode == .required {
+                body["tool_choice"] = ["type": "openrouter:web_search"]
+            } else {
+                body["tool_choice"] = "auto"
+            }
             body["parallel_tool_calls"] = false
         }
         if configuration.capabilities.structuredOutputs,
@@ -402,12 +419,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
         if configuration.kind == .openRouter {
             request.setValue("enabled", forHTTPHeaderField: "X-OpenRouter-Metadata")
-            let preferences = chatRequest.openRouterOptions ?? OpenRouterProviderPreferences()
-            let requiresParameters = preferences.requireParameters
-                || (chatRequest.allowsTools && !chatRequest.availableTools.isEmpty)
+            let requiresParameters = openRouterPreferences.requireParameters
+                || !functionTools.isEmpty
                 || chatRequest.structuredOutput != .text
             if let providerPreferences = Self.openRouterProviderObject(
-                preferences,
+                openRouterPreferences,
                 requiresParameters: requiresParameters
             ) {
                 body["provider"] = providerPreferences
@@ -662,6 +678,45 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             tool["user_location"] = userLocation
         }
         return tool
+    }
+
+    private static func openRouterWebSearchToolObject(
+        options: CloudWebSearchOptions?,
+        engine: OpenRouterWebSearchEngine
+    ) throws -> [String: Any] {
+        let resolvedOptions = options ?? CloudWebSearchOptions()
+        guard resolvedOptions.externalWebAccess else {
+            throw InferenceError.unsupportedCapability(
+                "OpenRouter server web search requires external web access."
+            )
+        }
+
+        var parameters: [String: Any] = [
+            "engine": engine.rawValue,
+            "max_results": 5,
+            "max_total_results": 10,
+            "search_context_size": resolvedOptions.contextSize.rawValue,
+        ]
+        let allowedDomains = normalizedWebSearchDomains(resolvedOptions.allowedDomains)
+            .prefix(20)
+            .map { String($0.prefix(253)) }
+        let excludedDomains = normalizedWebSearchDomains(resolvedOptions.blockedDomains)
+            .prefix(20)
+            .map { String($0.prefix(253)) }
+        if !allowedDomains.isEmpty {
+            // OpenRouter's portable server-tool contract treats allow/exclude lists as
+            // mutually exclusive. An explicit allowlist is the stricter policy.
+            parameters["allowed_domains"] = allowedDomains
+        } else if !excludedDomains.isEmpty {
+            parameters["excluded_domains"] = excludedDomains
+        }
+        if let userLocation = webSearchUserLocationObject(from: resolvedOptions.userLocation) {
+            parameters["user_location"] = userLocation
+        }
+        return [
+            "type": "openrouter:web_search",
+            "parameters": parameters,
+        ]
     }
 
     private static func openAITextFormatObject(from format: StructuredOutputFormat) -> [String: Any] {
@@ -1183,7 +1238,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
     private static func normalizedWebSearchString(_ value: String?) -> String? {
         let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(256))
     }
 
     private static func normalizedWebSearchDomains(_ domains: [String]) -> [String] {

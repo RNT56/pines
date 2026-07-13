@@ -21,6 +21,9 @@ struct ChatOpenRouterReceiptView: View {
                 if let usage = usageDetail {
                     receiptRow("Usage", value: usage)
                 }
+                if let search = searchDetail {
+                    receiptRow("Search", value: search)
+                }
                 if let cost = costDetail {
                     receiptRow("Cost", value: cost)
                 }
@@ -118,6 +121,11 @@ struct ChatOpenRouterReceiptView: View {
         }
         .joined(separator: " -> ")
         .nilIfEmpty
+    }
+
+    private var searchDetail: String? {
+        guard let count = provenance.webSearchRequests, count > 0 else { return nil }
+        return count == 1 ? "1 server-tool request" : "\(count) server-tool requests"
     }
 
     private var costDetail: String? {

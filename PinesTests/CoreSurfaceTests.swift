@@ -679,6 +679,8 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(settings.contains("beginProviderEditing(provider)"))
         XCTAssertTrue(settings.contains("cancelProviderEditing()"))
         XCTAssertTrue(settings.contains("OpenRouter routing and privacy"))
+        XCTAssertTrue(settings.contains("Web search engine"))
+        XCTAssertTrue(settings.contains("Auto (native or fallback)"))
         XCTAssertTrue(settings.contains("Require zero data retention"))
         XCTAssertTrue(settings.contains("Save routing policy"))
         XCTAssertTrue(settings.contains("pines.settings.openrouter.routing"))

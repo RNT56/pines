@@ -4,9 +4,9 @@ Last verified: 2026-07-13. Companion gap analysis: [openrouter.md](openrouter.md
 
 ## Current Implementation State
 
-Pines now persists a normalized OpenRouter policy and applies it to Chat Completions requests. The shipped Settings controls cover explicit provider order, allow/deny lists, price/throughput/latency sorting, fallbacks, required-parameter enforcement, data-collection denial, and zero-data-retention eligibility. Tool and structured-output requests automatically require parameter support. JSON object/schema response formats are mapped to `response_format`, and requests opt in to OpenRouter routing metadata. The terminal stream chunk is finalized into a privacy-minimized chat receipt with resolved route/fallback, usage, BYOK, and cost data.
+Pines now persists a normalized OpenRouter policy and applies it to Chat Completions requests. The shipped Settings controls cover explicit provider order, allow/deny lists, price/throughput/latency sorting, fallbacks, required-parameter enforcement, data-collection denial, zero-data-retention eligibility, and the preferred server web-search engine. Tool and structured-output requests automatically require parameter support. JSON object/schema response formats are mapped to `response_format`, requests opt in to OpenRouter routing metadata, and automatic/required web search maps to the beta `openrouter:web_search` server tool rather than deprecated plugin shortcuts. The terminal stream chunk is finalized into a privacy-minimized chat receipt with resolved route/fallback, usage, BYOK, cost, citations, and server-search request count.
 
-This is a meaningful Phase 1/2/3/7 foundation, not production parity. Policy is currently global rather than per-thread/per-provider; max-price and quantization controls, endpoint-level model/provider eligibility, aggregate/reconciled accounting, server tools, reasoning controls, response healing, caching/transforms, and output media remain incomplete.
+This is a meaningful Phase 1/2/3/4/7 foundation, not production parity. Policy is currently global rather than per-thread/per-provider; max-price and quantization controls, endpoint-level model/provider eligibility, aggregate/reconciled accounting, reasoning controls, response healing, caching/transforms, and output media remain incomplete. Phase 4 is contract-complete in Pines, but a live provider run still requires a user-configured OpenRouter key and a model/route that accepts the beta server tool.
 
 ## Product Goal
 
@@ -126,20 +126,22 @@ Goal: Expose OpenRouter-hosted tools consistently.
 
 Todos:
 
-- Add `openrouter:web_search` server tool support.
-- Parse annotations/citations/source metadata.
-- Add settings to choose OpenRouter search versus provider-native search when both exist.
-- Track server tool usage and cost.
-- Add server tool timeline rows and source panel.
+- [x] Add `openrouter:web_search` server tool support for automatic and required search modes.
+- [x] Parse nested/flat annotations into bounded public-URL citations and source metadata.
+- [x] Add settings for automatic, provider-native, Exa, Firecrawl, Parallel, and Perplexity search-engine selection.
+- [x] Track server web-search request count alongside OpenRouter's reported run cost.
+- [x] Add server-tool timeline rows, source citations, and receipt details.
 
 Possible hiccups:
 
+- OpenRouter currently labels server web search beta.
 - Server tool behavior differs from OpenAI/Anthropic/Gemini native search.
 - Search availability and pricing can vary by model/route.
+- Pines bounds requests to five results per search and ten total results, rejects disabled external-web access, prefers an explicit allowlist over a blocklist, and persists only public HTTP(S) citation URLs.
 
 Production complete when:
 
-- OpenRouter can provide source-backed web answers with citations and cost visibility.
+- [x] OpenRouter can provide source-backed web answers with citations and cost visibility. Request, parser, settings, and receipt contracts are covered locally; live availability remains provider/model/route dependent.
 
 ## Phase 5: Reasoning, Caching, And Transforms
 
@@ -189,7 +191,8 @@ Goal: Make OpenRouter cost transparent.
 Todos:
 
 - [x] Parse prompt/completion/total tokens, BYOK state, reported cost, and upstream inference cost.
-- [ ] Parse reasoning, cached, media, and server-tool usage details.
+- [ ] Parse reasoning, cached, and media usage details.
+- [x] Parse server web-search request usage and show it in the run receipt/timeline.
 - [x] Store upstream provider, model, safe fallback route, and cost in metadata after the terminal stream chunk.
 - Add per-thread and per-provider spend summaries if product wants it.
 - [x] Add a progressively disclosed chat receipt for routed provider/cost metadata.

@@ -157,7 +157,8 @@ final class OpenRouterRoutingTests: XCTestCase {
             allowFallbacks: false,
             requireParameters: true,
             dataCollection: .deny,
-            zeroDataRetention: true
+            zeroDataRetention: true,
+            webSearchEngine: .parallel
         )
         let request = ChatRequest(
             modelID: ModelID(rawValue: "openai/gpt-5-mini"),
@@ -188,6 +189,7 @@ final class OpenRouterRoutingTests: XCTestCase {
         XCTAssertFalse(decoded.requireParameters)
         XCTAssertEqual(decoded.dataCollection, .allow)
         XCTAssertFalse(decoded.zeroDataRetention)
+        XCTAssertEqual(decoded.webSearchEngine, .automatic)
     }
 
     func testOpenRouterRequestCarriesTypedRoutingPolicyAndStructuredOutput() async throws {
@@ -243,5 +245,124 @@ final class OpenRouterRoutingTests: XCTestCase {
         XCTAssertEqual(responseFormat["type"] as? String, "json_schema")
         XCTAssertEqual(jsonSchema["name"] as? String, "answer")
         XCTAssertEqual(jsonSchema["strict"] as? Bool, true)
+    }
+
+    func testOpenRouterAutomaticWebSearchMergesWithClientToolsAndBoundsPolicy() async throws {
+        let provider = try makeOpenRouterProvider()
+        let clientTool = try AnyToolSpec(
+            name: "calendar.lookup",
+            description: "Look up a calendar entry.",
+            inputJSONSchema: .object([
+                "type": .string("object"),
+                "properties": .object([:]),
+            ])
+        )
+        let request = ChatRequest(
+            modelID: "openai/gpt-5-mini",
+            messages: [ChatMessage(role: .user, content: "Find current release notes")],
+            sampling: ChatSampling(cloudWebSearchMode: .automatic),
+            webSearchOptions: CloudWebSearchOptions(
+                contextSize: .high,
+                userLocation: CloudWebSearchUserLocation(
+                    city: "Berlin",
+                    country: "DE",
+                    timezone: "Europe/Berlin"
+                ),
+                allowedDomains: ["https://Swift.org/documentation", "swift.org"],
+                blockedDomains: ["example.net"]
+            ),
+            allowsTools: true,
+            availableTools: [clientTool],
+            openRouterOptions: OpenRouterProviderPreferences(webSearchEngine: .exa)
+        )
+
+        let urlRequest = try await provider.openAICompatibleRequest(
+            apiKey: "test-secret",
+            chatRequest: request
+        )
+        let body = try requestBody(urlRequest)
+        let tools = try XCTUnwrap(body["tools"] as? [[String: Any]])
+        let serverTool = try XCTUnwrap(
+            tools.first { ($0["type"] as? String) == "openrouter:web_search" }
+        )
+        let parameters = try XCTUnwrap(serverTool["parameters"] as? [String: Any])
+        let routing = try XCTUnwrap(body["provider"] as? [String: Any])
+
+        XCTAssertEqual(tools.count, 2)
+        XCTAssertTrue(tools.contains { ($0["type"] as? String) == "function" })
+        XCTAssertEqual(body["tool_choice"] as? String, "auto")
+        XCTAssertEqual(body["parallel_tool_calls"] as? Bool, false)
+        XCTAssertEqual(parameters["engine"] as? String, "exa")
+        XCTAssertEqual(parameters["max_results"] as? Int, 5)
+        XCTAssertEqual(parameters["max_total_results"] as? Int, 10)
+        XCTAssertEqual(parameters["search_context_size"] as? String, "high")
+        XCTAssertEqual(parameters["allowed_domains"] as? [String], ["swift.org"])
+        XCTAssertNil(parameters["excluded_domains"], "An allowlist must win over the less strict blocklist.")
+        XCTAssertEqual((parameters["user_location"] as? [String: Any])?["city"] as? String, "Berlin")
+        XCTAssertEqual(routing["require_parameters"] as? Bool, true)
+    }
+
+    func testOpenRouterRequiredWebSearchForcesTheSpecificServerTool() async throws {
+        let provider = try makeOpenRouterProvider()
+        let request = ChatRequest(
+            modelID: "anthropic/claude-sonnet-4.6",
+            messages: [ChatMessage(role: .user, content: "What changed today?")],
+            sampling: ChatSampling(cloudWebSearchMode: .required),
+            webSearchOptions: CloudWebSearchOptions(blockedDomains: ["reddit.com"]),
+            openRouterOptions: OpenRouterProviderPreferences(webSearchEngine: .native)
+        )
+
+        let urlRequest = try await provider.openAICompatibleRequest(
+            apiKey: "test-secret",
+            chatRequest: request
+        )
+        let body = try requestBody(urlRequest)
+        let tools = try XCTUnwrap(body["tools"] as? [[String: Any]])
+        let parameters = try XCTUnwrap(tools.first?["parameters"] as? [String: Any])
+        let toolChoice = try XCTUnwrap(body["tool_choice"] as? [String: Any])
+
+        XCTAssertEqual(tools.first?["type"] as? String, "openrouter:web_search")
+        XCTAssertEqual(parameters["engine"] as? String, "native")
+        XCTAssertEqual(parameters["excluded_domains"] as? [String], ["reddit.com"])
+        XCTAssertEqual(toolChoice["type"] as? String, "openrouter:web_search")
+        XCTAssertNil(body["provider"], "Router-hosted search must not unnecessarily filter upstream routes.")
+    }
+
+    func testOpenRouterWebSearchRejectsExternalAccessDisabledPolicy() async throws {
+        let provider = try makeOpenRouterProvider()
+        let request = ChatRequest(
+            modelID: "openai/gpt-5-mini",
+            messages: [ChatMessage(role: .user, content: "Search")],
+            sampling: ChatSampling(cloudWebSearchMode: .automatic),
+            webSearchOptions: CloudWebSearchOptions(externalWebAccess: false)
+        )
+
+        do {
+            _ = try await provider.openAICompatibleRequest(apiKey: "test-secret", chatRequest: request)
+            XCTFail("Expected external-web policy rejection.")
+        } catch let error as InferenceError {
+            guard case let .unsupportedCapability(message) = error else {
+                return XCTFail("Unexpected inference error: \(error)")
+            }
+            XCTAssertTrue(message.contains("requires external web access"))
+        }
+    }
+
+    private func makeOpenRouterProvider() throws -> BYOKCloudInferenceProvider {
+        BYOKCloudInferenceProvider(
+            configuration: CloudProviderConfiguration(
+                id: "openrouter",
+                kind: .openRouter,
+                displayName: "OpenRouter",
+                baseURL: try XCTUnwrap(URL(string: "https://openrouter.ai/api/v1")),
+                keychainAccount: "openrouter"
+            ),
+            secretStore: InMemorySecretStore()
+        )
+    }
+
+    private func requestBody(_ request: URLRequest) throws -> [String: Any] {
+        let bodyData = try XCTUnwrap(request.httpBody)
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
     }
 }

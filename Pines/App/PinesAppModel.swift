@@ -3710,7 +3710,7 @@ final class PinesAppModel: ObservableObject {
             return [.off, .automatic, .required]
         }
         switch providerKind {
-        case .openAI, .anthropic:
+        case .openAI, .anthropic, .openRouter:
             return [.off, .automatic, .required]
         case .gemini:
             return [.off, .automatic]

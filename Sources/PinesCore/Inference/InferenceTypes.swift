@@ -1417,6 +1417,15 @@ public enum OpenRouterProviderSort: String, Hashable, Codable, Sendable, CaseIte
     case latency
 }
 
+public enum OpenRouterWebSearchEngine: String, Hashable, Codable, Sendable, CaseIterable {
+    case automatic = "auto"
+    case native
+    case exa
+    case firecrawl
+    case parallel
+    case perplexity
+}
+
 public struct OpenRouterProviderPreferences: Hashable, Codable, Sendable {
     public var order: [String]
     public var only: [String]
@@ -1426,6 +1435,7 @@ public struct OpenRouterProviderPreferences: Hashable, Codable, Sendable {
     public var dataCollection: OpenRouterDataCollectionPolicy
     public var zeroDataRetention: Bool
     public var sort: OpenRouterProviderSort
+    public var webSearchEngine: OpenRouterWebSearchEngine
 
     public init(
         order: [String] = [],
@@ -1435,7 +1445,8 @@ public struct OpenRouterProviderPreferences: Hashable, Codable, Sendable {
         requireParameters: Bool = false,
         dataCollection: OpenRouterDataCollectionPolicy = .allow,
         zeroDataRetention: Bool = false,
-        sort: OpenRouterProviderSort = .automatic
+        sort: OpenRouterProviderSort = .automatic,
+        webSearchEngine: OpenRouterWebSearchEngine = .automatic
     ) {
         let normalizedOrder = Self.normalizedProviderSlugs(order)
         let normalizedOnly = Self.normalizedProviderSlugs(only)
@@ -1447,6 +1458,7 @@ public struct OpenRouterProviderPreferences: Hashable, Codable, Sendable {
         self.dataCollection = dataCollection
         self.zeroDataRetention = zeroDataRetention
         self.sort = normalizedOrder.isEmpty ? sort : .automatic
+        self.webSearchEngine = webSearchEngine
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1458,6 +1470,7 @@ public struct OpenRouterProviderPreferences: Hashable, Codable, Sendable {
         case dataCollection
         case zeroDataRetention
         case sort
+        case webSearchEngine
     }
 
     public init(from decoder: Decoder) throws {
@@ -1473,7 +1486,11 @@ public struct OpenRouterProviderPreferences: Hashable, Codable, Sendable {
                 forKey: .dataCollection
             ) ?? .allow,
             zeroDataRetention: try container.decodeIfPresent(Bool.self, forKey: .zeroDataRetention) ?? false,
-            sort: try container.decodeIfPresent(OpenRouterProviderSort.self, forKey: .sort) ?? .automatic
+            sort: try container.decodeIfPresent(OpenRouterProviderSort.self, forKey: .sort) ?? .automatic,
+            webSearchEngine: try container.decodeIfPresent(
+                OpenRouterWebSearchEngine.self,
+                forKey: .webSearchEngine
+            ) ?? .automatic
         )
     }
 
@@ -1486,6 +1503,7 @@ public struct OpenRouterProviderPreferences: Hashable, Codable, Sendable {
             && dataCollection == .allow
             && !zeroDataRetention
             && sort == .automatic
+            && webSearchEngine == .automatic
     }
 
     private static func normalizedProviderSlugs(_ values: [String]) -> [String] {

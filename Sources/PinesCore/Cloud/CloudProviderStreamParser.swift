@@ -41,6 +41,7 @@ public enum CloudProviderMetadataKeys {
     public static let openRouterTotalTokens = "openrouter.usage.total_tokens"
     public static let openRouterCostCredits = "openrouter.usage.cost_credits"
     public static let openRouterUpstreamInferenceCost = "openrouter.usage.upstream_inference_cost"
+    public static let openRouterWebSearchRequests = "openrouter.usage.web_search_requests"
     public static let webSearchCitationsJSON = "pines.web_search.citations_json"
     public static let webSearchQueriesJSON = "pines.web_search.queries_json"
     public static let webSearchSuggestionsHTML = "pines.web_search.suggestions_html"
@@ -1032,6 +1033,16 @@ public struct CloudProviderStreamState {
         metadata[CloudProviderMetadataKeys.webSearchCitationsJSON] = String(decoding: data, as: UTF8.self)
     }
 
+    private static func recordProviderCitations(_ citations: [ProviderCitation], into metadata: inout [String: String]) {
+        guard !citations.isEmpty else { return }
+        var combined = existingProviderCitations(from: metadata)
+        for citation in citations where !combined.contains(where: { $0.id == citation.id }) {
+            combined.append(citation)
+        }
+        guard let data = try? JSONEncoder().encode(Array(combined.prefix(64))) else { return }
+        metadata[CloudProviderMetadataKeys.providerCitationsJSON] = String(decoding: data, as: UTF8.self)
+    }
+
     private static func recordSearchQueries(_ queries: [String], into metadata: inout [String: String]) {
         let cleanQueries = queries
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1105,6 +1116,87 @@ public struct CloudProviderStreamState {
                 source: "OpenAI"
             )
         }
+    }
+
+    private static func openRouterAnnotationObjects(from chunk: [String: Any]) -> [[String: Any]] {
+        var annotations = chunk["annotations"] as? [[String: Any]] ?? []
+        for choice in chunk["choices"] as? [[String: Any]] ?? [] {
+            annotations.append(contentsOf: choice["annotations"] as? [[String: Any]] ?? [])
+            for key in ["delta", "message"] {
+                let message = choice[key] as? [String: Any]
+                annotations.append(contentsOf: message?["annotations"] as? [[String: Any]] ?? [])
+            }
+        }
+        return Array(annotations.prefix(64))
+    }
+
+    private static func openRouterWebSearchCitations(from chunk: [String: Any]) -> [WebSearchCitation] {
+        openRouterAnnotationObjects(from: chunk).compactMap { annotation in
+            guard let citation = openRouterURLCitation(from: annotation) else { return nil }
+            return WebSearchCitation(title: citation.title, url: citation.url, source: "OpenRouter")
+        }
+    }
+
+    private static func openRouterProviderCitations(from chunk: [String: Any]) -> [ProviderCitation] {
+        openRouterAnnotationObjects(from: chunk).compactMap { annotation in
+            guard let citation = openRouterURLCitation(from: annotation) else { return nil }
+            var id = "openrouter#\(citation.url)"
+            if let startOffset = citation.startOffset { id += "#\(startOffset)" }
+            if let endOffset = citation.endOffset { id += "#\(endOffset)" }
+            return ProviderCitation(
+                id: id,
+                providerKind: .openRouter,
+                sourceType: .web,
+                title: citation.title,
+                url: citation.url,
+                startOffset: citation.startOffset,
+                endOffset: citation.endOffset,
+                citedText: citation.content,
+                source: "OpenRouter",
+                raw: citation.raw
+            )
+        }
+    }
+
+    private static func openRouterURLCitation(
+        from annotation: [String: Any]
+    ) -> (url: String, title: String, content: String?, startOffset: Int?, endOffset: Int?, raw: JSONValue)? {
+        guard annotation["type"] as? String == "url_citation" else { return nil }
+        let value = annotation["url_citation"] as? [String: Any] ?? annotation
+        guard let rawURL = boundedNonEmptyString(value["url"], maximumLength: 2_048),
+              var components = URLComponents(string: rawURL),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              EndpointSecurityPolicy.isPublicWebHost(components.host)
+        else { return nil }
+        components.user = nil
+        components.password = nil
+        guard let url = components.url?.absoluteString else { return nil }
+
+        let title = boundedNonEmptyString(value["title"], maximumLength: 512) ?? url
+        let content = boundedNonEmptyString(value["content"], maximumLength: 4_096)
+        let startOffset = boundedNonnegativeInt(value["start_index"])
+        let endOffset = boundedNonnegativeInt(value["end_index"])
+        var raw: [String: JSONValue] = [
+            "type": .string("url_citation"),
+            "url": .string(url),
+            "title": .string(title),
+        ]
+        if let content { raw["content"] = .string(content) }
+        if let startOffset { raw["start_index"] = .number(Double(startOffset)) }
+        if let endOffset { raw["end_index"] = .number(Double(endOffset)) }
+        return (url, title, content, startOffset, endOffset, .object(raw))
+    }
+
+    private static func boundedNonEmptyString(_ value: Any?, maximumLength: Int) -> String? {
+        guard let value = value as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(maximumLength))
+    }
+
+    private static func boundedNonnegativeInt(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber else { return nil }
+        return min(max(number.intValue, 0), 10_000_000)
     }
 
     private static func openAIWebSearchQueries(from response: [String: Any]) -> [String] {
@@ -1890,6 +1982,14 @@ public struct CloudProviderStreamState {
            let nativeFinishReason = Self.nonEmptyString(choice["native_finish_reason"]) {
             openAIProviderMetadata[CloudProviderMetadataKeys.openRouterNativeFinishReason] = nativeFinishReason
         }
+        Self.recordSearchCitations(
+            Self.openRouterWebSearchCitations(from: chunk),
+            into: &openAIProviderMetadata
+        )
+        Self.recordProviderCitations(
+            Self.openRouterProviderCitations(from: chunk),
+            into: &openAIProviderMetadata
+        )
 
         if let usage = chunk["usage"] as? [String: Any] {
             Self.recordJSON(
@@ -1910,6 +2010,16 @@ public struct CloudProviderStreamState {
             }
             if let isBYOK = usage["is_byok"] as? Bool {
                 openAIProviderMetadata[CloudProviderMetadataKeys.openRouterIsBYOK] = String(isBYOK)
+            }
+            if let serverToolUse = usage["server_tool_use"] as? [String: Any] {
+                let webSearchRequests = min(
+                    max(Self.intValue(serverToolUse["web_search_requests"]), 0),
+                    10_000
+                )
+                openAIProviderMetadata[CloudProviderMetadataKeys.openRouterWebSearchRequests] = String(webSearchRequests)
+                if webSearchRequests > 0 {
+                    recordOpenRouterWebSearchUsage(requestCount: webSearchRequests)
+                }
             }
         }
 
@@ -2176,6 +2286,33 @@ public struct CloudProviderStreamState {
         }
     }
 
+    private mutating func recordOpenRouterWebSearchUsage(requestCount: Int) {
+        let generationID = openAIProviderMetadata[CloudProviderMetadataKeys.openRouterGenerationID]
+            ?? openAIProviderMetadata[CloudProviderMetadataKeys.openAIChatCompletionID]
+            ?? "request"
+        let id = "openrouter-web-search-\(generationID)"
+        let summary: [String: Any] = [
+            "id": id,
+            "type": "web_search_call",
+            "status": "completed",
+            "name": requestCount == 1
+                ? "OpenRouter web search (1 request)"
+                : "OpenRouter web search (\(requestCount) requests)",
+            "action": [
+                "type": "search",
+                "request_count": requestCount,
+            ],
+        ]
+        if let index = openAIHostedToolCalls.firstIndex(where: { ($0["id"] as? String) == id }) {
+            openAIHostedToolCalls[index] = summary
+        } else {
+            openAIHostedToolCalls = Array((openAIHostedToolCalls + [summary]).prefix(64))
+        }
+        if let json = Self.jsonString(fromJSONObjectSummaries: openAIHostedToolCalls) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON] = json
+        }
+    }
+
     public mutating func recordOpenAIFileSearchResults(_ results: [[String: Any]]) {
         openAIFileSearchResults = Self.appendingJSONObjectSummaries(results, to: openAIFileSearchResults)
         if let json = Self.jsonString(fromJSONObjectSummaries: openAIFileSearchResults) {
@@ -2325,13 +2462,7 @@ public struct CloudProviderStreamState {
     }
 
     public mutating func recordAnthropicCitations(from citations: [ProviderCitation]) {
-        guard !citations.isEmpty else { return }
-        var combined = Self.existingProviderCitations(from: anthropicProviderMetadata)
-        for citation in citations where !combined.contains(where: { $0.id == citation.id }) {
-            combined.append(citation)
-        }
-        guard let data = try? JSONEncoder().encode(Array(combined.prefix(64))) else { return }
-        anthropicProviderMetadata[CloudProviderMetadataKeys.providerCitationsJSON] = String(decoding: data, as: UTF8.self)
+        Self.recordProviderCitations(citations, into: &anthropicProviderMetadata)
     }
 
     public mutating func recordAnthropicCitationObjects(_ citations: [[String: Any]]) {

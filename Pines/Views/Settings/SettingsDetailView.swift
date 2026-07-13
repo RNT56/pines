@@ -807,6 +807,19 @@ struct SettingsDetailView: View {
                 }
                 .disabled(!settingsState.openRouterProviderPreferences.order.isEmpty)
 
+                Picker("Web search engine", selection: Binding(
+                    get: { settingsState.openRouterProviderPreferences.webSearchEngine },
+                    set: { value in
+                        var preferences = settingsState.openRouterProviderPreferences
+                        preferences.webSearchEngine = value
+                        settingsState.openRouterProviderPreferences = normalizedOpenRouterPreferences(preferences)
+                    }
+                )) {
+                    ForEach(OpenRouterWebSearchEngine.allCases, id: \.self) { engine in
+                        Text(engine.settingsTitle).tag(engine)
+                    }
+                }
+
                 TextField("Preferred order (anthropic, openai)", text: openRouterProviderListBinding(\.order))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -832,7 +845,7 @@ struct SettingsDetailView: View {
                 ))
                 Toggle("Require zero data retention", isOn: openRouterBoolBinding(\.zeroDataRetention))
 
-                Text("Zero-data-retention and data-collection restrictions can reduce provider availability. Pines automatically requires parameter support whenever tools or structured output are requested.")
+                Text("Auto search prefers a provider's native search when available and otherwise uses OpenRouter's fallback. Other engines make that choice explicit. Zero-data-retention and data-collection restrictions can reduce provider availability. Pines automatically requires parameter support whenever client tools or structured output are requested.")
                     .font(theme.typography.caption)
                     .foregroundStyle(theme.colors.tertiaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -899,7 +912,8 @@ struct SettingsDetailView: View {
             requireParameters: preferences.requireParameters,
             dataCollection: preferences.dataCollection,
             zeroDataRetention: preferences.zeroDataRetention,
-            sort: preferences.sort
+            sort: preferences.sort,
+            webSearchEngine: preferences.webSearchEngine
         )
     }
 
@@ -2102,6 +2116,25 @@ private extension OpenRouterProviderSort {
             "Highest throughput"
         case .latency:
             "Lowest latency"
+        }
+    }
+}
+
+private extension OpenRouterWebSearchEngine {
+    var settingsTitle: String {
+        switch self {
+        case .automatic:
+            "Auto (native or fallback)"
+        case .native:
+            "Prefer provider-native"
+        case .exa:
+            "Exa"
+        case .firecrawl:
+            "Firecrawl (BYOK)"
+        case .parallel:
+            "Parallel"
+        case .perplexity:
+            "Perplexity"
         }
     }
 }

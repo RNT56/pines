@@ -29,6 +29,7 @@ public struct OpenRouterRunProvenance: Hashable, Sendable {
     public var totalTokens: Int?
     public var costCredits: Double?
     public var upstreamInferenceCost: Double?
+    public var webSearchRequests: Int?
     public var nativeFinishReason: String?
     public var serviceTier: String?
     public var routeAttempts: [RouteAttempt]
@@ -57,6 +58,9 @@ public struct OpenRouterRunProvenance: Hashable, Sendable {
         costCredits = Self.nonnegativeDouble(metadata[CloudProviderMetadataKeys.openRouterCostCredits])
         upstreamInferenceCost = Self.nonnegativeDouble(
             metadata[CloudProviderMetadataKeys.openRouterUpstreamInferenceCost]
+        )
+        webSearchRequests = Self.nonnegativeInt(
+            metadata[CloudProviderMetadataKeys.openRouterWebSearchRequests]
         )
         nativeFinishReason = Self.clean(metadata[CloudProviderMetadataKeys.openRouterNativeFinishReason])
         serviceTier = Self.clean(metadata[CloudProviderMetadataKeys.openRouterServiceTier])

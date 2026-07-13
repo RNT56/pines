@@ -30,11 +30,13 @@ Primary sources:
 - OpenRouter routing-metadata opt-in through `X-OpenRouter-Metadata: enabled`.
 - Provider-neutral JSON object/schema requests mapped to Chat Completions `response_format`.
 - Automatic `require_parameters: true` for requests carrying tools or structured output, so routing cannot silently drop those required features.
+- Beta `openrouter:web_search` server-tool requests for automatic and required web-search modes, with an explicit engine preference, bounded result/domain/location policy, and fail-closed external-web access.
+- Nested or flat web-search annotations normalized into bounded public-URL citations, plus server-search request count in the hosted-tool timeline and OpenRouter receipt.
 - Terminal stream receipt parsing for resolved provider/model, routing strategy/region, selected endpoint, fallback attempts and statuses, native finish reason, service tier, prompt/completion/total tokens, BYOK state, reported cost, and upstream inference cost.
 - A collapsed OpenRouter receipt in each eligible assistant message, with route, fallback, usage, execution, cost, and generation details available on demand.
 - Privacy-minimized persistence: Pines stores allowlisted routing and usage fields while excluding arbitrary router pipeline/plugin additions from message metadata and CloudKit sync.
 
-## High-Value Unsupported Or Partial Features
+## High-Value Partial Or Unsupported Features
 
 ### 1. Route provenance and remaining routing controls
 
@@ -50,19 +52,23 @@ Implementation notes:
 - Add `max_price`, quantization, and scoped override controls after model metadata is available.
 - Keep the receipt parser permissive for additive response changes while retaining the persisted allowlist.
 
-### 2. OpenRouter server tools
+### 2. OpenRouter server web search
 
-Pines does not expose OpenRouter server tools such as `openrouter:web_search`.
+Pines maps its provider-neutral automatic/required search modes to `openrouter:web_search`, can force that exact server tool when search is required, and lets users select automatic, provider-native, Exa, Firecrawl, Parallel, or Perplexity execution. It combines server search with client function tools, disables parallel tool calls for deterministic orchestration, and does not unnecessarily constrain upstream-provider routing merely because the router-hosted search tool is present.
 
-Value:
+Safety and receipt behavior:
 
-- Model-callable real-time web search for any model, not just models with native search.
+- External-web access must be enabled or request construction fails before network spend.
+- Search results are bounded to five per search and ten total; domain lists are normalized, deduplicated, length-bounded, and capped at 20.
+- When both domain policies are present, the stricter explicit allowlist wins because the portable server-tool contract treats allow/exclude lists as mutually exclusive.
+- Citation ingestion accepts only public HTTP(S) destinations, strips credentials, bounds stored text, and rejects local/private addresses.
+- OpenRouter's server-search request count and reported aggregate cost are surfaced in the existing progressively disclosed run details.
 
-Implementation notes:
+Current boundary:
 
-- Add server tool definitions to OpenRouter `tools`.
-- Parse tool calls/results and standardized annotations.
-- Prefer the server tool over deprecated web plugin shortcuts.
+- The OpenRouter API labels server web search beta, and availability/pricing remain model/route dependent.
+- Pines uses the current server-tool contract rather than the deprecated web-search plugin or `:online` shortcut.
+- Request, parsing, settings, and UI contracts are tested locally. A live end-to-end provider call requires the user's configured OpenRouter key and incurs provider charges.
 
 ### 3. Structured-output reliability and response healing
 
@@ -95,7 +101,7 @@ Implementation notes:
 
 ### 5. Detailed usage accounting and aggregate spend
 
-Pines parses and displays prompt/completion/total tokens, reported cost, upstream inference cost, and BYOK state per run. Cached/reasoning/media/server-tool detail, thread/provider rollups, and reconciliation through the generation accounting endpoint remain incomplete.
+Pines parses and displays prompt/completion/total tokens, reported cost, upstream inference cost, BYOK state, and server web-search request count per run. Cached/reasoning/media detail, thread/provider rollups, and reconciliation through the generation accounting endpoint remain incomplete.
 
 Value:
 
@@ -103,7 +109,7 @@ Value:
 
 Implementation notes:
 
-- Add cached, reasoning, media, and server-tool usage fields as product surfaces consume them.
+- Add cached, reasoning, and media usage fields as product surfaces consume them.
 - Add optional thread/provider spend summaries and generation-endpoint reconciliation without turning Pines into an account-management client.
 
 ### 6. Prompt caching and sticky routing
@@ -174,19 +180,18 @@ Implementation notes:
 
 ## Suggested Priority
 
-1. Server web search tool and citations.
-2. Endpoint-level provider availability and metadata freshness.
-3. OpenRouter reasoning controls and detailed reasoning/cache usage.
-4. Response healing for eligible non-streaming structured requests.
-5. Max-price/quantization and scoped routing overrides.
-6. Aggregate/reconciled spend reporting.
-7. Prompt caching/transforms.
-8. Additional output modalities and upstream BYOK routing.
+1. Endpoint-level provider availability and metadata freshness.
+2. OpenRouter reasoning controls and detailed reasoning/cache usage.
+3. Response healing for eligible non-streaming structured requests.
+4. Max-price/quantization and scoped routing overrides.
+5. Aggregate/reconciled spend reporting.
+6. Prompt caching/transforms.
+7. Additional output modalities and upstream BYOK routing.
 
 ## Decisions And Open Questions
 
 - Decision: OpenRouter has dedicated typed routing/privacy UI rather than raw JSON or generic OpenAI-compatible behavior.
 - Decision: Pines requires parameter support automatically for tools and structured output.
 - Decision: per-run cost accounting and upstream route provenance share one privacy-minimized, progressively disclosed chat receipt.
+- Decision: provider-neutral web-search modes use OpenRouter's server tool when OpenRouter is selected; the engine preference decides automatic/provider-native/third-party execution without routing through Pines' Brave tool.
 - Open: which routing controls should be per-thread overrides rather than provider defaults?
-- Open: should OpenRouter server web search replace Pines-native or provider-native web search when selected?
