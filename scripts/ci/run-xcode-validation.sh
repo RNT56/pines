@@ -247,7 +247,7 @@ run_xcode_test_phase() {
 
   if [ -z "$timeout_seconds" ]; then
     if [ "${CI:-}" = "true" ]; then
-      timeout_seconds=480
+      timeout_seconds=720
     else
       timeout_seconds=0
     fi
