@@ -66,7 +66,7 @@ Repository protocols separate UI from storage:
 - `ModelDownloadRepository`
 - `AuditEventRepository`
 
-The production local store is GRDB on SQLCipher with optional E2E-encrypted CloudKit private-database sync for user-enabled settings, conversations, messages, vault metadata, and vault chunks. API keys, model binaries, prompt caches, browser state, chat attachment files, and transient tool state do not sync. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
+The production local store is GRDB on SQLCipher with optional E2E-encrypted CloudKit private-database sync for user-enabled settings, Project Spaces, conversations, messages, vault metadata, and vault chunks. Project identifiers are preserved across chat and Vault records, and project tombstones unlink child records on every device. API keys, model binaries, prompt caches, browser state, chat attachment files, transient tool state, and provider model-catalog snapshots do not sync. Model catalogs are bounded, encrypted locally, tied to their provider row, and expire before they can drive hard capability rejection. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
 
 `SecureKeyStore` owns data keys for the encrypted database, encrypted blob store, and CloudKit sync. Device-local keys are non-migrating Keychain items; the CloudKit content key is synchronizable through iCloud Keychain. `SecurityResetCoordinator` runs before normal repository use and clears sensitive configuration from previous versions while preserving user content.
 
@@ -80,7 +80,7 @@ The GRDB implementation is split by repository concern: encrypted local-store op
 
 ## Security Model
 
-`EndpointSecurityPolicy` is the shared network gate for BYOK providers, MCP servers, OAuth authorization and token exchange, model catalog calls, and web fetch. Remote URLs must be HTTPS. HTTP is permitted only for `localhost`, `127.0.0.1`, and `[::1]` when the integration explicitly opts into local development; LAN/private HTTP remains blocked.
+`EndpointSecurityPolicy` is the shared network gate for BYOK providers, MCP servers, OAuth authorization and token exchange, model catalog calls, web fetch, and in-app browser top-level navigation. Remote URLs must use HTTPS. HTTP is permitted only for `localhost`, `127.0.0.1`, and `[::1]` when the integration explicitly opts into local development; LAN/private HTTP remains blocked. Arbitrary web tools additionally reject local/private/link-local/special-use hosts, validate resolved addresses immediately before requests, and revalidate redirects and final URLs.
 
 `CloudProviderHeader` replaces raw custom header JSON. Plaintext header values are rejected for secret-like names, while secret headers must reference Keychain items. `Redactor` is applied before audit persistence and covers provider keys, bearer/OAuth/JWT/cookie values, private keys, and generic long credential shapes.
 
@@ -99,14 +99,18 @@ The router must never silently fall back to cloud. If local capability is missin
 
 `DeviceRuntimeMonitor` adapts local runtime defaults from physical memory, available process memory, and thermal state. Compact 6 GB devices use lower prefill, embedding batch, vector scan, and pressure-aware completion limits. iOS memory warnings soft-recover during active generation while emergency headroom remains; otherwise they stop the active run and unload transient MLX containers.
 
+The local TurboQuant path is controlled by a Pines-owned admission and evidence layer before MLX generation starts. That layer computes the admitted context, memory zones, fallback contract, selected user mode, context assembly plan, and downgrade/rejection reason. The bridge passes the admitted context and fallback policy into MLXLM generation parameters, records a RunDecision and calibration sample, and maps TurboQuant failures into typed stream failures rather than fatal termination or cloud retry.
+
+Evidence is tuple-scoped. A model detail surface may show a green compatibility pair for the pinned runtime while still showing a model/device/mode as unverified until benchmark evidence matches the active compatibility pair, model revision, tokenizer/profile/fallback hashes, device class, layout version, quality gate, and memory behavior.
+
 Vault retrieval stores both FP16 embeddings and compressed TurboQuant vector codes. Search first uses the compressed code path, filters by embedding model where possible, reranks with FP16 cosine, and falls back to SQLite FTS when embeddings are missing.
 
 The app links MLX through exact fork pins in `project.yml`:
 
-- `https://github.com/RNT56/mlx-swift` at `a90b1097df45e4e70b6e0bb367624f8f5857970b`
-- `https://github.com/RNT56/mlx-swift-lm` at `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c`
-- Nested `mlx` inside `RNT56/mlx-swift` at `3eb8ef074b911b00ecdbeb47f7bdafd91a123ad0`
-- Nested `mlx-c` inside `RNT56/mlx-swift` at `2abc34daff6ded246054d9e15b98870b5cd08b97`
+- `https://github.com/RNT56/mlx-swift` at `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`
+- `https://github.com/RNT56/mlx-swift-lm` at `aeaa8e3024a82b25969741b53c749b28ddc64d1a`
+- Nested `mlx` inside `RNT56/mlx-swift` at `e230d124a1fdcb5f4b3daab6321744a7a8b6a9f2`
+- Nested `mlx-c` inside `RNT56/mlx-swift` at `2fbeccd5a6ec6f7aadedaf1d3dfb2894ef44fbc1`
 
 Compatibility implementations for model families not yet present in linked MLX packages are split into `MLXCompatibleModels+Llama4.swift` and `MLXCompatibleModels+DeepseekV4.swift`.
 
@@ -155,7 +159,7 @@ The agent replacement seam has three contracts:
 - `AgentToolCatalog` supplies the Agent-mode tool inventory independently from chat orchestration.
 - `AgentRuntimeCallbacks` carries human-in-the-loop approval and activity/progress reporting, keeping UI concerns out of agent execution.
 
-MCP sampling can forward server-supplied tool definitions to the selected local or BYOK provider while the MCP server owns its tool loop.
+MCP sampling can forward server-supplied tool definitions to the selected local or BYOK provider while the MCP server owns its tool loop. Discovered MCP tool annotations are persisted and mapped to Pines side-effect levels; missing annotations default to `changesRemoteState`, read-only hints map to external reads, and destructive hints map to sensitive actions.
 
 ## Source Organization Notes
 

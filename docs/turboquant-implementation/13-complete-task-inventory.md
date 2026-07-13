@@ -16,6 +16,7 @@ Use [Worker Launch Schedule](14-worker-launch-schedule.md) to decide execution o
 | Wave 4 | MVP 1.5 evidence gate passed | W11, W14A, W14B, W17, iOS lifecycle policy |
 | Wave 5 | benchmark/quality/memory loop exists | W13, optimization evidence update |
 | Wave 6 | rollback-safe compressed cache exists | W15A, W15B, platform backlog |
+| Wave 7 | completed Wave 6 | W29-core, W29-lm, W29-pines platform contracts |
 
 Inventory tables below retain the original task depth. If a task appears in a later queue, it can be implemented behind a disabled flag earlier only if it does not modify serialized files or product activation.
 

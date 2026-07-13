@@ -14,6 +14,10 @@ struct ChatsView: View {
     @EnvironmentObject private var chatState: PinesChatState
     @EnvironmentObject private var haptics: PinesHaptics
     @State private var selectedThreadID: PinesThreadPreview.ID?
+    @State private var projectBeingRenamed: PinesProjectPreview?
+    @State private var projectPendingDeletion: PinesProjectPreview?
+    @State private var threadPendingDeletion: PinesThreadPreview?
+    @State private var projectNameDraft = ""
 
     private var selectedThread: PinesThreadPreview? {
         guard let selectedThreadID = selectedThreadID ?? defaultThreadID else {
@@ -76,6 +80,27 @@ struct ChatsView: View {
                         }
                         .buttonStyle(.plain)
                         .pinesSidebarListRow()
+                        .contextMenu {
+                            Button {
+                                projectNameDraft = project.name
+                                projectBeingRenamed = project
+                            } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            Button {
+                                Task {
+                                    await appModel.setProjectVaultEnabled(!project.vaultEnabled, projectID: project.id, services: services)
+                                }
+                            } label: {
+                                Label(project.vaultEnabled ? "Disable Project Vault" : "Enable Project Vault", systemImage: "folder.badge.gearshape")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                projectPendingDeletion = project
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button {
                                 Task {
@@ -88,7 +113,7 @@ struct ChatsView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                Task { await appModel.deleteProject(project, services: services) }
+                                projectPendingDeletion = project
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -102,6 +127,27 @@ struct ChatsView: View {
                 }
 
                 Section {
+                    if visibleThreads.isEmpty {
+                        Button {
+                            Task {
+                                if let threadID = await appModel.createChat(services: services) {
+                                    selectedThreadID = threadID
+                                }
+                            }
+                        } label: {
+                            PinesSidebarRow(
+                                title: "Start a new chat",
+                                subtitle: "Private by default, local when possible",
+                                systemImage: "square.and.pencil",
+                                tint: theme.colors.accent,
+                                isSelected: false
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("pines.chat.empty.create")
+                        .pinesSidebarListRow()
+                    }
+
                     ForEach(visibleThreads) { thread in
                         NavigationLink(value: thread.id) {
                             ChatThreadRow(thread: thread, isSelected: selectedThreadID == thread.id)
@@ -130,9 +176,7 @@ struct ChatsView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                Task {
-                                    await appModel.deleteThread(thread, services: services)
-                                }
+                                threadPendingDeletion = thread
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -174,6 +218,10 @@ struct ChatsView: View {
                                 if let projectID = await appModel.createProject(services: services) {
                                     appModel.selectProject(projectID)
                                     selectedThreadID = nil
+                                    if let project = chatState.projects.first(where: { $0.id == projectID }) {
+                                        projectNameDraft = ""
+                                        projectBeingRenamed = project
+                                    }
                                 }
                             }
                         } label: {
@@ -211,11 +259,74 @@ struct ChatsView: View {
                 PinesEmptyState(
                     title: "No chats",
                     detail: "Start a local chat when the inference runtime is connected.",
-                    systemImage: "bubble.left.and.text.bubble.right"
-                )
+                    systemImage: "bubble.left.and.text.bubble.right",
+                    primaryActionTitle: "New chat",
+                    primaryActionSystemImage: "square.and.pencil"
+                ) {
+                    Task {
+                        if let threadID = await appModel.createChat(services: services) {
+                            selectedThreadID = threadID
+                        }
+                    }
+                }
             }
         }
         .accessibilityIdentifier("pines.screen.chats")
+        .alert(
+            projectNameDraft.isEmpty ? "Name Project" : "Rename Project",
+            isPresented: Binding(
+                get: { projectBeingRenamed != nil },
+                set: { if !$0 { projectBeingRenamed = nil } }
+            )
+        ) {
+            TextField("Project name", text: $projectNameDraft)
+            Button("Cancel", role: .cancel) {
+                projectBeingRenamed = nil
+            }
+            Button("Save") {
+                guard let project = projectBeingRenamed else { return }
+                let name = projectNameDraft
+                projectBeingRenamed = nil
+                Task { await appModel.renameProject(project, name: name, services: services) }
+            }
+            .disabled(projectNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Project names can be up to 80 characters.")
+        }
+        .confirmationDialog(
+            "Delete this project?",
+            isPresented: Binding(
+                get: { projectPendingDeletion != nil },
+                set: { if !$0 { projectPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: projectPendingDeletion
+        ) { project in
+            Button("Delete project", role: .destructive) {
+                projectPendingDeletion = nil
+                Task { await appModel.deleteProject(project, services: services) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("The project is removed. Its chats return to All Chats and its Vault documents return to Personal Vault.")
+        }
+        .confirmationDialog(
+            "Delete this chat?",
+            isPresented: Binding(
+                get: { threadPendingDeletion != nil },
+                set: { if !$0 { threadPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: threadPendingDeletion
+        ) { thread in
+            Button("Delete chat", role: .destructive) {
+                threadPendingDeletion = nil
+                Task { await appModel.deleteThread(thread, services: services) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This permanently deletes the local conversation and its messages. Vault documents are not deleted.")
+        }
     }
 
     private func selectDefaultThreadIfNeeded() {
@@ -250,6 +361,7 @@ private struct ChatModelPickerButton: View {
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var modelState: PinesModelState
     @EnvironmentObject private var haptics: PinesHaptics
+    @State private var showsModelPicker = false
     let currentProviderID: ProviderID?
     let currentModelID: ModelID?
     let fallbackLabel: String?
@@ -275,44 +387,23 @@ private struct ChatModelPickerButton: View {
                 .accessibilityValue("No models installed")
                 .accessibilityHint("Opens Models")
             } else {
-                Menu {
-                    ForEach(sections) { section in
-                        Section(section.title) {
-                            ForEach(section.models) { option in
-                                Button {
-                                    Task {
-                                        await select(option)
-                                    }
-                                } label: {
-                                    Label {
-                                        Text(option.compactDisplayName)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    } icon: {
-                                        Image(systemName: option.systemImage)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if !unavailableProviders.isEmpty {
-                        Section("Saved Providers") {
-                            ForEach(unavailableProviders) { provider in
-                                Button {} label: {
-                                    Label {
-                                        Text(unavailableProviderStatus(for: provider))
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    } icon: {
-                                        Image(systemName: "line.3.horizontal.decrease.circle")
-                                    }
-                                }
-                                .disabled(true)
-                            }
-                        }
-                    }
+                Button {
+                    haptics.play(.navigationSelected)
+                    showsModelPicker = true
                 } label: {
                     pickerLabel(showsDisclosure: true, currentModelLabel: currentModelLabel)
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showsModelPicker) {
+                    ChatModelPickerSheet(
+                        sections: sections,
+                        unavailableProviders: unavailableProviders,
+                        currentProviderID: currentProviderID,
+                        currentModelID: currentModelID,
+                        select: select
+                    )
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
                 }
             }
         }
@@ -437,6 +528,117 @@ private struct ChatModelPickerButton: View {
             }
     }
 
+}
+
+private struct ChatModelPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    let sections: [ModelPickerSection]
+    let unavailableProviders: [CloudProviderConfiguration]
+    let currentProviderID: ProviderID?
+    let currentModelID: ModelID?
+    let select: (ModelPickerOption) async -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(filteredSections) { section in
+                    Section(section.title) {
+                        ForEach(section.models) { option in
+                            Button {
+                                Task {
+                                    await select(option)
+                                    dismiss()
+                                }
+                            } label: {
+                                modelRow(option)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint(option.catalogAccessibilityDetail ?? "Selects this model")
+                        }
+                    }
+                }
+                if normalizedQuery.isEmpty, !unavailableProviders.isEmpty {
+                    Section("Saved Providers") {
+                        ForEach(unavailableProviders) { provider in
+                            Label(unavailableProviderStatus(for: provider), systemImage: "line.3.horizontal.decrease.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .overlay {
+                if filteredSections.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                }
+            }
+            .navigationTitle("Choose Model")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name, model ID, or capability")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var normalizedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var filteredSections: [ModelPickerSection] {
+        guard !normalizedQuery.isEmpty else { return sections }
+        return sections.compactMap { section in
+            let models = section.models.filter { option in
+                let searchable = [
+                    option.displayName,
+                    option.modelID.rawValue,
+                    option.providerName,
+                    option.catalogDetailLabel ?? "",
+                    option.modelMetadata?.summary ?? "",
+                ]
+                .joined(separator: " ")
+                .lowercased()
+                return searchable.contains(normalizedQuery)
+            }
+            return models.isEmpty ? nil : ModelPickerSection(title: section.title, models: models)
+        }
+    }
+
+    private func modelRow(_ option: ModelPickerOption) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: option.systemImage)
+                .frame(width: 24)
+                .foregroundStyle(option.providerKind == .openRouter ? Color.accentColor : .secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(option.displayName)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                if let detail = option.catalogDetailLabel {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else if option.displayName.caseInsensitiveCompare(option.modelID.rawValue) != .orderedSame {
+                    Text(option.modelID.rawValue)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 8)
+            if option.providerID == currentProviderID, option.modelID == currentModelID {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityLabel("Selected")
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
     private func unavailableProviderStatus(for provider: CloudProviderConfiguration) -> String {
         switch provider.validationStatus {
         case .valid:
@@ -511,9 +713,78 @@ private extension ModelPickerOption {
             return "network"
         }
     }
+
+    var catalogDetailLabel: String? {
+        guard providerKind == .openRouter else { return nil }
+        var details = [String]()
+        if let context = modelMetadata?.contextLength ?? capabilities?.maxContextTokens {
+            details.append("\(Self.compactTokenCount(context)) context")
+        }
+        if let pricing = modelMetadata?.pricing,
+           let price = Self.compactTokenPricing(pricing) {
+            details.append(price)
+        }
+        let inputModalities = Set(modelMetadata?.inputModalities ?? [])
+        if inputModalities.contains("image") {
+            details.append("images")
+        }
+        if inputModalities.contains("file") || inputModalities.contains("pdf") {
+            details.append("files")
+        }
+        if capabilities?.toolCalling == true {
+            details.append("tools")
+        }
+        if capabilities?.structuredOutputs == true {
+            details.append("schema")
+        }
+        return details.isEmpty ? nil : details.prefix(5).joined(separator: " · ")
+    }
+
+    var catalogAccessibilityDetail: String? {
+        guard providerKind == .openRouter else { return nil }
+        var details = [String]()
+        if let catalogDetailLabel {
+            details.append(catalogDetailLabel)
+        }
+        if let summary = modelMetadata?.summary, !summary.isEmpty {
+            details.append(summary)
+        }
+        return details.isEmpty ? nil : details.joined(separator: ". ")
+    }
+
+    private static func compactTokenCount(_ value: Int) -> String {
+        if value >= 1_000_000 {
+            let millions = Double(value) / 1_000_000
+            return millions.rounded() == millions ? "\(Int(millions))M" : String(format: "%.1fM", millions)
+        }
+        if value >= 1_000 {
+            let thousands = Double(value) / 1_000
+            return thousands.rounded() == thousands ? "\(Int(thousands))K" : String(format: "%.1fK", thousands)
+        }
+        return value.formatted()
+    }
+
+    private static func compactTokenPricing(_ pricing: CloudProviderModelPricing) -> String? {
+        guard let prompt = pricing.tokenPricePerMillion(pricing.prompt),
+              let completion = pricing.tokenPricePerMillion(pricing.completion)
+        else {
+            return nil
+        }
+        return "\(currency(prompt)) in · \(currency(completion)) out / M"
+    }
+
+    private static func currency(_ value: Decimal) -> String {
+        let number = NSDecimalNumber(decimal: value)
+        let amount = number.doubleValue
+        if amount == 0 { return "$0" }
+        if amount < 0.01 { return String(format: "$%.4f", amount) }
+        if amount < 1 { return String(format: "$%.3f", amount) }
+        return String(format: "$%.2f", amount)
+    }
 }
 
 private struct ChatTranscriptView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
@@ -526,6 +797,7 @@ private struct ChatTranscriptView: View {
     @State private var isAutoScrollPinned = true
     @State private var isComposerFocused = false
     @State private var openSwipeMessageID: UUID?
+    @State private var isTranscriptDragging = false
     @State private var lastTranscriptInteractionAt = Date.distantPast
     let thread: PinesThreadPreview
 
@@ -558,7 +830,7 @@ private struct ChatTranscriptView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }
-                    .animation(theme.motion.standard, value: thread.messages.count)
+                    .animation(reduceMotion ? nil : theme.motion.standard, value: thread.messages.count)
 
                     Color.clear
                         .frame(height: 1)
@@ -651,7 +923,7 @@ private struct ChatTranscriptView: View {
 
                 Button {
                     haptics.play(.primaryAction)
-                    withAnimation(theme.motion.emphasized) {
+                    withAnimation(reduceMotion ? nil : theme.motion.emphasized) {
                         retrySpin.toggle()
                     }
                     appModel.retryLastUserMessage(in: thread, services: services)
@@ -681,7 +953,7 @@ private struct ChatTranscriptView: View {
             }
             .padding(.top, composerInsetTopPadding)
             .padding(.bottom, composerInsetBottomPadding)
-            .animation(theme.motion.standard, value: chatState.chatError)
+            .animation(reduceMotion ? nil : theme.motion.standard, value: chatState.chatError)
         }
     }
 
@@ -703,7 +975,7 @@ private struct ChatTranscriptView: View {
 
     private var composerInsetBottomPadding: CGFloat {
         guard horizontalSizeClass == .compact else { return theme.spacing.small }
-        return isComposerFocused ? theme.spacing.xxsmall : -theme.spacing.small
+        return isComposerFocused ? theme.spacing.xxsmall : theme.spacing.xsmall
     }
 
     @ViewBuilder
@@ -723,19 +995,25 @@ private struct ChatTranscriptView: View {
     }
 
     private var transcriptDragGesture: some Gesture {
-        DragGesture(minimumDistance: 2, coordinateSpace: .local)
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
             .onChanged { _ in
+                guard !isTranscriptDragging else { return }
+                isTranscriptDragging = true
                 lastTranscriptInteractionAt = Date()
-                if chatState.activeRunID != nil && !isNearTranscriptBottom {
+                if chatState.activeRunID != nil, !isNearTranscriptBottom, isAutoScrollPinned {
                     isAutoScrollPinned = false
                 }
                 guard isComposerFocused else { return }
                 isComposerFocused = false
             }
+            .onEnded { _ in
+                lastTranscriptInteractionAt = Date()
+                isTranscriptDragging = false
+            }
     }
 
     private var shouldAutoScrollAfterTranscriptChange: Bool {
-        Date().timeIntervalSince(lastTranscriptInteractionAt) > 0.35
+        !isTranscriptDragging && Date().timeIntervalSince(lastTranscriptInteractionAt) > 0.35
     }
 
     private var shouldAutoScrollLiveMessage: Bool {
@@ -743,7 +1021,7 @@ private struct ChatTranscriptView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        let shouldAnimate = animated && shouldAutoScrollAfterTranscriptChange
+        let shouldAnimate = animated && shouldAutoScrollAfterTranscriptChange && !reduceMotion
         if shouldAnimate {
             withAnimation(theme.motion.standard) {
                 proxy.scrollTo("chat-bottom", anchor: .bottom)
@@ -1087,6 +1365,9 @@ private struct ChatBubble: View {
                 if !hostedToolEntries.isEmpty {
                     ChatHostedToolTimeline(entries: hostedToolEntries)
                 }
+                if let provenance = OpenRouterRunProvenance(metadata: message.providerMetadata) {
+                    ChatOpenRouterReceiptView(provenance: provenance)
+                }
 
                 let agentActivities = PinesAppModel.agentActivities(from: message.providerMetadata)
                 if !agentActivities.isEmpty {
@@ -1105,8 +1386,7 @@ private struct ChatBubble: View {
             .shadow(color: theme.shadow.panelColor.opacity(message.role == .assistant ? 0.55 : 0.32), radius: theme.shadow.panelRadius * 0.25, x: 0, y: theme.shadow.panelY * 0.20)
             .scaleEffect(isStreaming && !reduceMotion ? 1.006 : 1)
             .animation(reduceMotion ? nil : theme.motion.fast, value: isStreaming)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(message.role.title): \(message.content)")
+            .accessibilityElement(children: .contain)
             .contextMenu {
                 Button {
                     haptics.play(.primaryAction)

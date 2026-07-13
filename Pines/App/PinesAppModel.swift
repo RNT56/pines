@@ -394,6 +394,11 @@ final class PinesAppModel: ObservableObject {
         set { settingsState.cloudWebSearchMode = newValue }
     }
 
+    var openRouterProviderPreferences: OpenRouterProviderPreferences {
+        get { settingsState.openRouterProviderPreferences }
+        set { settingsState.openRouterProviderPreferences = newValue }
+    }
+
     var cloudModelCatalog: [ProviderID: [CloudProviderModel]] {
         get { settingsState.cloudModelCatalog }
         set { settingsState.cloudModelCatalog = newValue }
@@ -412,6 +417,11 @@ final class PinesAppModel: ObservableObject {
     var validatingCloudProviderIDs: Set<ProviderID> {
         get { settingsState.validatingCloudProviderIDs }
         set { settingsState.validatingCloudProviderIDs = newValue }
+    }
+
+    var cloudKitSyncStatus: PinesCloudKitSyncStatus {
+        get { settingsState.cloudKitSyncStatus }
+        set { settingsState.cloudKitSyncStatus = newValue }
     }
 
     var huggingFaceCredentialStatus: String {
@@ -572,9 +582,12 @@ final class PinesAppModel: ObservableObject {
     private var didLoadStartupState = false
     private var isBootstrapping = false
     private var bootstrapBackgroundTask: Task<Void, Never>?
+    private var cloudKitSyncTask: Task<Void, Never>?
+    private var isCloudKitSyncing = false
     private var didStartMCPServers = false
     private var shouldEnrichRuntimeModelPreviews = false
     private var needsCloudModelCatalogRefresh = false
+    private var cloudModelCatalogSnapshots: [ProviderID: CloudProviderModelCatalogSnapshot] = [:]
     private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
     private var currentRunToken: UUID?
@@ -591,6 +604,90 @@ final class PinesAppModel: ObservableObject {
     private var modelSearchRequestID: UUID?
     private var modelSearchMetadataTask: Task<Void, Never>?
     private var modelSearchMetadataEnrichmentID: UUID?
+
+    func scheduleCloudKitSync(
+        services: PinesAppServices,
+        reason: String,
+        delaySeconds: TimeInterval = 1.5
+    ) {
+        guard storeConfiguration.iCloudSyncEnabled, services.cloudKitSyncService != nil else { return }
+        cloudKitSyncTask?.cancel()
+        cloudKitSyncTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(max(0, delaySeconds)))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.cloudKitSyncTask = nil
+            await self.syncCloudKitNow(services: services, reason: reason)
+        }
+    }
+
+    func syncCloudKitNow(services: PinesAppServices, reason: String) async {
+        guard storeConfiguration.iCloudSyncEnabled else {
+            setIfChanged(\.cloudKitSyncStatus, .init())
+            return
+        }
+        guard let syncService = services.cloudKitSyncService else {
+            setIfChanged(
+                \.cloudKitSyncStatus,
+                PinesCloudKitSyncStatus(
+                    phase: .failed,
+                    lastAttemptAt: Date(),
+                    lastSuccessAt: cloudKitSyncStatus.lastSuccessAt,
+                    lastError: "Private iCloud sync is unavailable in this build.",
+                    trigger: reason
+                )
+            )
+            return
+        }
+        guard !isCloudKitSyncing else {
+            scheduleCloudKitSync(services: services, reason: "\(reason)_retry", delaySeconds: 2)
+            return
+        }
+
+        isCloudKitSyncing = true
+        defer { isCloudKitSyncing = false }
+        let attemptedAt = Date()
+        setIfChanged(
+            \.cloudKitSyncStatus,
+            PinesCloudKitSyncStatus(
+                phase: .syncing,
+                lastAttemptAt: attemptedAt,
+                lastSuccessAt: cloudKitSyncStatus.lastSuccessAt,
+                lastError: nil,
+                trigger: reason
+            )
+        )
+        do {
+            try await syncService.syncNow()
+            await refreshAll(services: services)
+            setIfChanged(
+                \.cloudKitSyncStatus,
+                PinesCloudKitSyncStatus(
+                    phase: .succeeded,
+                    lastAttemptAt: attemptedAt,
+                    lastSuccessAt: Date(),
+                    lastError: nil,
+                    trigger: reason
+                )
+            )
+        } catch {
+            let redactedError = services.redactor.redact(error.localizedDescription)
+            setIfChanged(
+                \.cloudKitSyncStatus,
+                PinesCloudKitSyncStatus(
+                    phase: .failed,
+                    lastAttemptAt: attemptedAt,
+                    lastSuccessAt: cloudKitSyncStatus.lastSuccessAt,
+                    lastError: redactedError,
+                    trigger: reason
+                )
+            )
+            recordRecoverableIssue("cloudkit.sync.\(reason)", error: error, services: services)
+        }
+    }
 
     private func setIfChanged<Value: Equatable>(
         _ keyPath: ReferenceWritableKeyPath<PinesAppModel, Value>,
@@ -924,6 +1021,7 @@ final class PinesAppModel: ObservableObject {
 
     deinit {
         bootstrapBackgroundTask?.cancel()
+        cloudKitSyncTask?.cancel()
         currentRunTask?.cancel()
         modelSearchMetadataTask?.cancel()
         repositoryObservationTasks.forEach { $0.cancel() }
@@ -988,6 +1086,7 @@ final class PinesAppModel: ObservableObject {
             if let cloudProviderRepository = services.cloudProviderRepository {
                 setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
             }
+            await hydrateCloudModelCatalogSnapshots(services: services)
 
             await repairInterruptedChatRuns(services: services)
             try await services.modelLifecycleService?.validateInstalledModels()
@@ -1019,6 +1118,7 @@ final class PinesAppModel: ObservableObject {
         await services.bootstrap()
         await reconcileModelDownloads(services: services)
         await refreshPostBootstrapState(services: services)
+        await syncCloudKitNow(services: services, reason: "app_launch")
         didBootstrap = true
         isBootstrapping = false
         services.runtimeMetrics.recordStartupPhase("background_bootstrap", elapsedSeconds: Date().timeIntervalSince(startedAt))
@@ -1150,9 +1250,11 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.auditEvents, [])
         setIfChanged(\.cloudProviders, [])
         setIfChanged(\.cloudModelCatalog, [:])
+        cloudModelCatalogSnapshots = [:]
         setIfChanged(\.isRefreshingCloudModels, false)
         setIfChanged(\.isSavingCloudProvider, false)
         setIfChanged(\.validatingCloudProviderIDs, [])
+        setIfChanged(\.cloudKitSyncStatus, .init())
         setIfChanged(\.huggingFaceCredentialStatus, "Not configured")
         setIfChanged(\.braveSearchCredentialStatus, "Not configured")
         setIfChanged(\.mcpServers, [])
@@ -1743,6 +1845,7 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.anthropicTokenCountPreflightEnabled, settings.anthropicTokenCountPreflightEnabled)
         setIfChanged(\.geminiThinkingLevel, settings.geminiThinkingLevel)
         setIfChanged(\.cloudWebSearchMode, settings.cloudWebSearchMode)
+        setIfChanged(\.openRouterProviderPreferences, settings.openRouterProviderPreferences)
         setIfChanged(\.selectedThemeTemplate, PinesThemeTemplate(rawValue: settings.themeTemplate) ?? selectedThemeTemplate)
         setIfChanged(\.interfaceMode, PinesInterfaceMode(rawValue: settings.interfaceMode) ?? interfaceMode)
     }
@@ -1783,6 +1886,7 @@ final class PinesAppModel: ObservableObject {
                 Self.threadPreview(from: conversation, messages: []),
                 moveToFront: true
             )
+            scheduleCloudKitSync(services: services, reason: "conversation_created")
             emitHaptic(.primaryAction)
             return conversation.id
         } catch {
@@ -1805,6 +1909,7 @@ final class PinesAppModel: ObservableObject {
             let project = try await repository.createProject(name: name)
             setIfChanged(\.selectedProjectID, project.id)
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "project_created")
             emitHaptic(.primaryAction)
             return project.id
         } catch {
@@ -1819,6 +1924,25 @@ final class PinesAppModel: ObservableObject {
             guard let repository = services.projectRepository else { return }
             try await repository.setProjectVaultEnabled(enabled, projectID: projectID)
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "project_updated")
+            emitHaptic(.primaryAction)
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+            emitHaptic(.runFailed)
+        }
+    }
+
+    func renameProject(_ project: PinesProjectPreview, name: String, services: PinesAppServices) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            setIfChanged(\.serviceError, "Project names cannot be empty.")
+            return
+        }
+        do {
+            guard let repository = services.projectRepository else { return }
+            try await repository.updateProjectName(String(trimmed.prefix(80)), projectID: project.id)
+            await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "project_renamed")
             emitHaptic(.primaryAction)
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
@@ -1834,6 +1958,7 @@ final class PinesAppModel: ObservableObject {
                 setIfChanged(\.selectedProjectID, nil)
             }
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "project_deleted")
             emitHaptic(.destructiveAction)
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
@@ -1846,6 +1971,7 @@ final class PinesAppModel: ObservableObject {
             guard let repository = services.conversationRepository else { return }
             try await repository.moveConversation(thread.id, toProject: projectID)
             await refreshConversationPreviews(services: services)
+            scheduleCloudKitSync(services: services, reason: "conversation_moved")
             emitHaptic(.primaryAction)
         } catch {
             setChatError(error.localizedDescription)
@@ -2344,6 +2470,7 @@ final class PinesAppModel: ObservableObject {
             try await repository.setConversationArchived(archived, conversationID: thread.id)
             emitHaptic(archived ? .destructiveAction : .primaryAction)
             await refreshConversationPreviews(services: services)
+            scheduleCloudKitSync(services: services, reason: "conversation_archived")
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
@@ -2359,6 +2486,7 @@ final class PinesAppModel: ObservableObject {
             try await repository.setConversationPinned(pinned, conversationID: thread.id)
             emitHaptic(.primaryAction)
             await refreshConversationPreviews(services: services)
+            scheduleCloudKitSync(services: services, reason: "conversation_pinned")
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
@@ -2378,6 +2506,7 @@ final class PinesAppModel: ObservableObject {
             setIfChanged(\.threads, threads.filter { $0.id != thread.id })
             emitHaptic(.destructiveAction)
             await refreshConversationPreviews(services: services)
+            scheduleCloudKitSync(services: services, reason: "conversation_deleted")
         } catch {
             setChatError(error.localizedDescription)
             emitHaptic(.runFailed)
@@ -2420,6 +2549,9 @@ final class PinesAppModel: ObservableObject {
         var lastPersistedAt = Date.distantPast
         let isAgentMode = mode == .agent
         var runProviderMetadata = [String: String]()
+        defer {
+            scheduleCloudKitSync(services: services, reason: "chat_run_finished")
+        }
 
         func providerMetadataForRun(
             assistantMessageID: UUID?,
@@ -2860,8 +2992,15 @@ final class PinesAppModel: ObservableObject {
                 availableTools: availableTools,
                 vaultContextIDs: includePrivateContext ? (vaultContext?.documentIDs ?? []) : [],
                 executionContext: isAgentMode ? .agent : .chat,
-                anthropicOptions: anthropicRequestOptions(for: selectedProviderID, settings: settings, services: services)
+                anthropicOptions: anthropicRequestOptions(for: selectedProviderID, settings: settings, services: services),
+                openRouterOptions: openRouterRequestOptions(for: selectedProviderID, settings: settings, services: services)
             )
+            if let eligibilityFailure = openRouterModelEligibilityFailure(
+                providerID: selectedProviderID,
+                request: request
+            ) {
+                throw InferenceError.unsupportedCapability(eligibilityFailure)
+            }
             if request.resolvedAnthropicOptions.countTokensBeforeSend {
                 let body = Self.anthropicTokenCountPreflightBody(for: request)
                 let preflight = try await preflightAnthropicCountTokens(
@@ -2879,13 +3018,19 @@ final class PinesAppModel: ObservableObject {
                     providerMetadata: runProviderMetadata
                 )
             }
+            let maxWallTimeSeconds: Int
+            if isLocalRun {
+                maxWallTimeSeconds = isAgentMode ? 600 : 420
+            } else {
+                maxWallTimeSeconds = isAgentMode ? 180 : 120
+            }
             let session = AgentSession(
                 title: isAgentMode ? "Agent" : "Chat",
                 policy: AgentPolicy(
                     executionMode: settings?.executionMode ?? executionMode,
                     maxSteps: isAgentMode ? 10 : 1,
                     maxToolCalls: isAgentMode ? 8 : 0,
-                    maxWallTimeSeconds: isAgentMode ? 180 : 120,
+                    maxWallTimeSeconds: maxWallTimeSeconds,
                     requiresConsentForNetwork: false,
                     requiresConsentForBrowser: false,
                     allowsCloudContext: includePrivateContext,
@@ -2971,7 +3116,7 @@ final class PinesAppModel: ObservableObject {
                         case .cancelled:
                             status = .cancelled
                         case .length:
-                            status = .failed
+                            status = .complete
                         case .stop, .toolCall:
                             status = .complete
                         case .error:
@@ -2991,13 +3136,8 @@ final class PinesAppModel: ObservableObject {
                         } else {
                             try await flushAssistantUpdate(content: accumulated, messageStatus: status, threadStatus: .local, force: true, providerMetadata: finalProviderMetadata, toolCalls: completedToolCalls)
                             if finish.reason == .length {
-                                let message = messageWithProviderDiagnostics(
-                                    finish.message ?? "Local generation stopped before the model emitted a stop sequence.",
-                                    metadata: finalProviderMetadata
-                                )
-                                failureMessage = message
-                                setChatError(message)
-                                emitHaptic(.runFailed)
+                                clearChatError()
+                                emitHaptic(.runCompleted)
                             } else {
                                 clearChatError()
                                 emitHaptic(status == .cancelled ? .runCancelled : .runCompleted)
@@ -3007,7 +3147,13 @@ final class PinesAppModel: ObservableObject {
                 case let .failure(failure):
                     didReceiveTerminalEvent = true
                     failureMessage = failure.message
-                    try await flushAssistantUpdate(content: failure.message, messageStatus: .failed, threadStatus: .local, force: true)
+                    try await flushAssistantUpdate(
+                        content: failure.message,
+                        messageStatus: .failed,
+                        threadStatus: .local,
+                        force: true,
+                        providerMetadata: failure.providerMetadata
+                    )
                     setChatError(failure.message)
                     emitHaptic(.runFailed)
                 case let .metrics(metrics):
@@ -3421,9 +3567,44 @@ final class PinesAppModel: ObservableObject {
         let modelRecord = providerModelCapabilities.first { record in
             record.providerID == providerID && record.modelID == modelID
         }
+        let catalogModel: CloudProviderModel?
+        if cloudProviders.first(where: { $0.id == providerID })?.kind == .openRouter {
+            catalogModel = freshOpenRouterCatalogModel(providerID: providerID, modelID: modelID)
+        } else {
+            catalogModel = cloudModelCatalog[providerID]?.first { $0.id == modelID }
+        }
         return modelRecord?.contextWindowTokens
             ?? modelRecord?.capabilities.maxContextTokens
+            ?? catalogModel?.metadata?.contextLength
+            ?? catalogModel?.capabilities?.maxContextTokens
             ?? providerCapabilities.maxContextTokens
+    }
+
+    func openRouterModelEligibilityFailure(
+        providerID: ProviderID,
+        request: ChatRequest
+    ) -> String? {
+        guard cloudProviders.first(where: { $0.id == providerID })?.kind == .openRouter,
+              let model = freshOpenRouterCatalogModel(providerID: providerID, modelID: request.modelID)
+        else {
+            return nil
+        }
+        let report = model.eligibility(
+            requiredInputs: ProviderInputRequirements(messages: request.messages),
+            requiresTools: request.allowsTools && !request.availableTools.isEmpty,
+            structuredOutput: request.structuredOutput
+        )
+        guard !report.isEligible else { return nil }
+        return report.explanation.map { "\(model.displayName) is not eligible for this OpenRouter request. \($0)" }
+            ?? "The selected OpenRouter model is not eligible for this request."
+    }
+
+    private func freshOpenRouterCatalogModel(
+        providerID: ProviderID,
+        modelID: ModelID,
+        now: Date = Date()
+    ) -> CloudProviderModel? {
+        cloudModelCatalogSnapshots[providerID]?.model(id: modelID, at: now)
     }
 
     private func preferredModelSelection(services: PinesAppServices) -> ModelPickerOption? {
@@ -3529,7 +3710,7 @@ final class PinesAppModel: ObservableObject {
             return [.off, .automatic, .required]
         }
         switch providerKind {
-        case .openAI, .anthropic:
+        case .openAI, .anthropic, .openRouter:
             return [.off, .automatic, .required]
         case .gemini:
             return [.off, .automatic]
@@ -3573,6 +3754,7 @@ final class PinesAppModel: ObservableObject {
                 anthropicTokenCountPreflightEnabled: anthropicTokenCountPreflightEnabled,
                 geminiThinkingLevel: geminiThinkingLevel,
                 cloudWebSearchMode: cloudWebSearchMode,
+                openRouterProviderPreferences: openRouterProviderPreferences,
                 requireToolApproval: true,
                 braveSearchEnabled: braveSearchCredentialStatus.hasPrefix("Configured"),
                 onboardingCompleted: true,
@@ -3580,6 +3762,7 @@ final class PinesAppModel: ObservableObject {
                 interfaceMode: interfaceMode.rawValue
             )
             try await services.settingsRepository?.saveSettings(snapshot)
+            scheduleCloudKitSync(services: services, reason: "settings_changed")
         } catch {
             serviceError = error.localizedDescription
         }
@@ -3642,6 +3825,17 @@ final class PinesAppModel: ObservableObject {
             citations: AnthropicCitationOptions(enabled: settings?.anthropicCitationsEnabled ?? anthropicCitationsEnabled),
             countTokensBeforeSend: settings?.anthropicTokenCountPreflightEnabled ?? anthropicTokenCountPreflightEnabled
         )
+    }
+
+    func openRouterRequestOptions(
+        for providerID: ProviderID,
+        settings: AppSettingsSnapshot?,
+        services: PinesAppServices
+    ) -> OpenRouterProviderPreferences? {
+        guard providerID != services.mlxRuntime.localProviderID,
+              cloudProviders.first(where: { $0.id == providerID })?.kind == .openRouter
+        else { return nil }
+        return settings?.openRouterProviderPreferences ?? openRouterProviderPreferences
     }
 
     private static func anthropicTokenCountPreflightBody(for request: ChatRequest) -> JSONValue {
@@ -4200,6 +4394,7 @@ final class PinesAppModel: ObservableObject {
                 try await repository.moveDocument(document.id, toProject: selectedProjectID)
             }
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "vault_document_imported")
         } catch {
             serviceError = error.localizedDescription
         }
@@ -4355,6 +4550,7 @@ final class PinesAppModel: ObservableObject {
             try await repository.deleteChunk(id: chunk.id, documentID: documentID)
             await refreshAll(services: services)
             await loadVaultItemDetails(id: documentID, services: services)
+            scheduleCloudKitSync(services: services, reason: "vault_chunk_deleted")
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
@@ -4365,6 +4561,7 @@ final class PinesAppModel: ObservableObject {
             guard let repository = services.vaultRepository else { return }
             try await repository.deleteDocument(id: id)
             await refreshAll(services: services)
+            scheduleCloudKitSync(services: services, reason: "vault_document_deleted")
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
         }
@@ -4376,6 +4573,7 @@ final class PinesAppModel: ObservableObject {
             try await repository.moveDocument(id, toProject: projectID)
             await refreshAll(services: services)
             await loadVaultItemDetails(id: id, services: services)
+            scheduleCloudKitSync(services: services, reason: "vault_document_moved")
             emitHaptic(.primaryAction)
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
@@ -4534,6 +4732,7 @@ final class PinesAppModel: ObservableObject {
     }
 
     func saveCloudProvider(
+        providerID: ProviderID? = nil,
         kind: CloudProviderKind,
         displayName: String,
         baseURLString: String,
@@ -4559,23 +4758,45 @@ final class PinesAppModel: ObservableObject {
                 return false
             }
             try EndpointSecurityPolicy().validate(baseURL, useCase: .cloudProvider)
-            let providerID = ProviderID(rawValue: trimmedDisplayName.lowercased().replacingOccurrences(of: " ", with: "-"))
-            let existing = cloudProviders.first(where: { $0.id == providerID })
+            let resolvedProviderID = providerID ?? Self.makeCloudProviderID(kind: kind)
+            let existing: CloudProviderConfiguration?
+            if let providerID {
+                guard let configuredProvider = cloudProviders.first(where: { $0.id == providerID }) else {
+                    serviceError = "The provider being edited no longer exists. Refresh providers and try again."
+                    return false
+                }
+                existing = configuredProvider
+            } else {
+                existing = nil
+            }
+            let resolvedKind = existing?.kind ?? kind
+            if cloudProviders.contains(where: {
+                $0.id != resolvedProviderID
+                    && $0.displayName.compare(trimmedDisplayName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }) {
+                serviceError = "Another cloud provider already uses that display name."
+                return false
+            }
             let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            let shouldValidate = Self.cloudProviderRequiresValidation(
+                existing: existing,
+                updatedBaseURL: baseURL,
+                replacementAPIKey: trimmedAPIKey
+            )
             let provider = CloudProviderConfiguration(
-                id: providerID,
-                kind: kind,
+                id: resolvedProviderID,
+                kind: resolvedKind,
                 displayName: trimmedDisplayName,
                 baseURL: baseURL,
                 defaultModelID: existing?.defaultModelID,
-                validationStatus: trimmedAPIKey.isEmpty ? (existing?.validationStatus ?? .unvalidated) : .unvalidated,
-                lastValidationError: trimmedAPIKey.isEmpty ? existing?.lastValidationError : nil,
+                validationStatus: shouldValidate ? .unvalidated : (existing?.validationStatus ?? .unvalidated),
+                lastValidationError: shouldValidate ? nil : existing?.lastValidationError,
                 headers: existing?.headers ?? [],
                 keychainService: existing?.keychainService ?? "com.schtack.pines.cloud",
-                keychainAccount: existing?.keychainAccount ?? providerID.rawValue,
+                keychainAccount: existing?.keychainAccount ?? resolvedProviderID.rawValue,
                 allowInsecureLocalHTTP: existing?.allowInsecureLocalHTTP ?? false,
-                enabledForAgents: kind == .voyageAI ? false : enabledForAgents,
-                lastValidatedAt: trimmedAPIKey.isEmpty ? existing?.lastValidatedAt : nil
+                enabledForAgents: resolvedKind == .voyageAI ? false : enabledForAgents,
+                lastValidatedAt: shouldValidate ? nil : existing?.lastValidatedAt
             )
             try await service.saveProvider(provider, apiKey: trimmedAPIKey.isEmpty ? nil : trimmedAPIKey)
             upsertCloudProvider(provider)
@@ -4584,8 +4805,8 @@ final class PinesAppModel: ObservableObject {
             setIfChanged(\.serviceError, nil)
             Task { [weak self] in
                 await self?.finishSavedCloudProviderActivation(
-                    providerID: providerID,
-                    shouldValidate: !trimmedAPIKey.isEmpty,
+                    providerID: resolvedProviderID,
+                    shouldValidate: shouldValidate,
                     services: services
                 )
             }
@@ -4594,6 +4815,21 @@ final class PinesAppModel: ObservableObject {
             serviceError = error.localizedDescription
             return false
         }
+    }
+
+    nonisolated static func makeCloudProviderID(kind: CloudProviderKind, uuid: UUID = UUID()) -> ProviderID {
+        ProviderID(rawValue: "\(kind.rawValue)-\(uuid.uuidString.lowercased())")
+    }
+
+    nonisolated static func cloudProviderRequiresValidation(
+        existing: CloudProviderConfiguration?,
+        updatedBaseURL: URL,
+        replacementAPIKey: String
+    ) -> Bool {
+        if !replacementAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return existing.map { $0.baseURL != updatedBaseURL } ?? false
     }
 
     private func finishSavedCloudProviderActivation(
@@ -4731,9 +4967,10 @@ final class PinesAppModel: ObservableObject {
 
         repeat {
             needsCloudModelCatalogRefresh = false
-            var nextCatalog = cloudModelCatalog.filter { providerID, _ in
-                cloudProviders.contains(where: { $0.id == providerID })
-            }
+            let providerIDs = Set(cloudProviders.map(\.id))
+            let now = Date()
+            var nextSnapshots = cloudModelCatalogSnapshots.filter { providerIDs.contains($0.key) }
+            var nextCatalog = cloudModelCatalog.filter { providerIDs.contains($0.key) }
             for provider in cloudProviders {
                 do {
                     guard let apiKey = try await services.secretStore.read(
@@ -4741,21 +4978,84 @@ final class PinesAppModel: ObservableObject {
                         account: provider.keychainAccount
                     )?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
                         nextCatalog[provider.id] = nil
+                        nextSnapshots[provider.id] = nil
                         continue
                     }
                     let inferenceProvider = BYOKCloudInferenceProvider(configuration: provider, secretStore: services.secretStore)
                     let models = try await inferenceProvider.listTextModels()
                     nextCatalog[provider.id] = models.isEmpty ? nil : models
+                    if models.isEmpty {
+                        nextSnapshots[provider.id] = nil
+                        try? await services.cloudProviderRepository?.deleteModelCatalogSnapshot(providerID: provider.id)
+                    } else {
+                        let snapshot = CloudProviderModelCatalogSnapshot(
+                            providerID: provider.id,
+                            models: models,
+                            fetchedAt: now
+                        )
+                        nextSnapshots[provider.id] = snapshot
+                        do {
+                            try await services.cloudProviderRepository?.upsertModelCatalogSnapshot(snapshot)
+                        } catch {
+                            recordRecoverableIssue(
+                                "cloud.model_catalog.persist.\(provider.id.rawValue)",
+                                error: error,
+                                services: services
+                            )
+                        }
+                    }
                     if let firstModel = models.first {
                         await recordFirstCloudModelIfNeeded(firstModel.id, providerID: provider.id, services: services)
                     }
                 } catch {
                     recordRecoverableIssue("cloud.model_catalog.refresh.\(provider.id.rawValue)", error: error, services: services)
-                    continue
+                    if let snapshot = nextSnapshots[provider.id], snapshot.isFresh(at: now) {
+                        nextCatalog[provider.id] = snapshot.models
+                    } else {
+                        nextSnapshots[provider.id] = nil
+                        nextCatalog[provider.id] = nil
+                    }
                 }
             }
+            cloudModelCatalogSnapshots = nextSnapshots
             setIfChanged(\.cloudModelCatalog, nextCatalog)
         } while needsCloudModelCatalogRefresh
+    }
+
+    private func hydrateCloudModelCatalogSnapshots(
+        services: PinesAppServices,
+        now: Date = Date()
+    ) async {
+        guard let repository = services.cloudProviderRepository else { return }
+        do {
+            let configuredProviders = Dictionary(uniqueKeysWithValues: cloudProviders.map { ($0.id, $0) })
+            let storedSnapshots = try await repository.listModelCatalogSnapshots()
+            var freshSnapshots = [ProviderID: CloudProviderModelCatalogSnapshot]()
+            for snapshot in storedSnapshots where snapshot.isFresh(at: now) {
+                guard let provider = configuredProviders[snapshot.providerID] else { continue }
+                do {
+                    let apiKey = try await services.secretStore.read(
+                        service: provider.keychainService,
+                        account: provider.keychainAccount
+                    )?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard apiKey?.isEmpty == false else { continue }
+                    freshSnapshots[snapshot.providerID] = snapshot
+                } catch {
+                    recordRecoverableIssue(
+                        "cloud.model_catalog.credential.\(snapshot.providerID.rawValue)",
+                        error: error,
+                        services: services
+                    )
+                }
+            }
+            cloudModelCatalogSnapshots = freshSnapshots
+            setIfChanged(
+                \.cloudModelCatalog,
+                freshSnapshots.mapValues(\.models)
+            )
+        } catch {
+            recordRecoverableIssue("cloud.model_catalog.hydrate", error: error, services: services)
+        }
     }
 
     private func replaceCloudModelCatalog(_ models: [CloudProviderModel], for providerID: ProviderID) {
@@ -4830,7 +5130,15 @@ final class PinesAppModel: ObservableObject {
         }
 
         for provider in cloudProviders.sorted(by: { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }) {
-            let providerModels = (cloudModelCatalog[provider.id] ?? [])
+            let catalogModels: [CloudProviderModel]
+            if provider.kind == .openRouter {
+                catalogModels = cloudModelCatalogSnapshots[provider.id].flatMap { snapshot in
+                    snapshot.isFresh() ? snapshot.models : nil
+                } ?? []
+            } else {
+                catalogModels = cloudModelCatalog[provider.id] ?? []
+            }
+            let providerModels = catalogModels
                 .map { model in
                     ModelPickerOption(
                         providerID: provider.id,
@@ -4839,7 +5147,9 @@ final class PinesAppModel: ObservableObject {
                         modelID: model.id,
                         displayName: model.displayName,
                         isLocal: false,
-                        rank: model.rank
+                        rank: model.rank,
+                        capabilities: model.capabilities,
+                        modelMetadata: model.metadata
                     )
                 }
             guard !providerModels.isEmpty else { continue }
@@ -5234,6 +5544,10 @@ final class PinesAppModel: ObservableObject {
                     let downloads = snapshot.downloads
                     let downloadByRepository = Self.latestDownloadByRepository(downloads)
                     let installByRepository = Dictionary(uniqueKeysWithValues: installs.map { ($0.repository.lowercased(), $0) })
+                    let profileEvidenceByModelID = await Self.latestTurboQuantEvidenceByModelID(
+                        repository: services.turboQuantEvidenceRepository,
+                        enabled: snapshot.enrichRuntime
+                    )
                     await MainActor.run {
                         guard let self else { return }
                         if self.isShowingModelDiscoveryResults {
@@ -5266,6 +5580,7 @@ final class PinesAppModel: ObservableObject {
                                 installs: installs,
                                 downloads: downloads,
                                 runtime: services.mlxRuntime,
+                                profileEvidenceByModelID: profileEvidenceByModelID,
                                 enrichRuntime: snapshot.enrichRuntime
                             )
                             self.setIfChanged(\.models, previews)
@@ -5296,6 +5611,7 @@ final class PinesAppModel: ObservableObject {
                                 from: preview.install,
                                 runtime: services.mlxRuntime,
                                 download: downloadByRepository[key],
+                                profileEvidence: preview.runtimeProfileEvidence.map { [$0] } ?? [],
                                 enrichRuntime: self.isShowingModelDiscoveryResults ? false : self.shouldEnrichRuntimeModelPreviews
                             )
                         }
@@ -5469,13 +5785,36 @@ final class PinesAppModel: ObservableObject {
 
         let shouldEnrichRuntime = enrichRuntime ?? shouldEnrichRuntimeModelPreviews
         let installs = try await modelRepository.listInstalledAndCuratedModels()
+        let profileEvidenceByModelID = await Self.latestTurboQuantEvidenceByModelID(
+            repository: services.turboQuantEvidenceRepository,
+            enabled: shouldEnrichRuntime
+        )
         let previews = Self.modelPreviews(
             installs: installs,
             downloads: downloads,
             runtime: services.mlxRuntime,
+            profileEvidenceByModelID: profileEvidenceByModelID,
             enrichRuntime: shouldEnrichRuntime
         )
         return (downloads, previews)
+    }
+
+    private static func latestTurboQuantEvidenceByModelID(
+        repository: (any TurboQuantEvidenceRepository)?,
+        enabled: Bool
+    ) async -> [String: [RuntimeProfileEvidence]] {
+        guard enabled, let repository else { return [:] }
+        do {
+            let evidence = try await repository.listTurboQuantProfileEvidence(modelID: nil)
+            return Dictionary(
+                grouping: evidence,
+                by: { $0.modelID.lowercased() }
+            ).mapValues { records in
+                records.sorted { $0.createdAt > $1.createdAt }
+            }
+        } catch {
+            return [:]
+        }
     }
 
     private static func providerFilePreview(from record: ProviderFileRecord) -> PinesProviderFilePreview {

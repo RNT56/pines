@@ -4,15 +4,18 @@ public struct ModelPreflightClassifier: Sendable {
     public var supportedLLMTypes: Set<String>
     public var supportedVLMTypes: Set<String>
     public var supportedEmbedderTypes: Set<String>
+    public var turboQuantRuntimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry
 
     public init(
         supportedLLMTypes: Set<String> = Self.defaultSupportedLLMTypes,
         supportedVLMTypes: Set<String> = Self.defaultSupportedVLMTypes,
-        supportedEmbedderTypes: Set<String> = Self.defaultSupportedEmbedderTypes
+        supportedEmbedderTypes: Set<String> = Self.defaultSupportedEmbedderTypes,
+        turboQuantRuntimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry = .bundledFallback
     ) {
         self.supportedLLMTypes = supportedLLMTypes
         self.supportedVLMTypes = supportedVLMTypes
         self.supportedEmbedderTypes = supportedEmbedderTypes
+        self.turboQuantRuntimeCapabilities = turboQuantRuntimeCapabilities
     }
 
     public func classify(_ input: ModelPreflightInput) -> ModelPreflightResult {
@@ -46,12 +49,21 @@ public struct ModelPreflightClassifier: Sendable {
                     || lowerTag == "sentence-transformers"
                     || lowerTag == "embeddings"
             }
-        let hasVisionSignal = hasProcessorConfig
+        let modelTypes = Self.normalizedModelTypes(
+            from: config,
+            modelType: modelType,
+            textConfigModelType: textConfigModelType
+        )
+        let hasProcessorOnlyVisionSignal = hasProcessorConfig
             || processorClass?.localizedCaseInsensitiveContains("processor") == true
-            || input.tags.contains { tag in
-                let lowerTag = tag.lowercased()
-                return lowerTag == "image-text-to-text" || lowerTag == "any-to-any"
-            }
+        let hasExplicitVisionSignal = Self.hasExplicitVisionSignal(
+            repository: lowerRepository,
+            tags: input.tags,
+            processorClass: processorClass
+        )
+        let requiresExplicitVisionSignal = modelTypes.contains(where: Self.isQwen35Family)
+        let hasVisionSignal = hasExplicitVisionSignal
+            || (hasProcessorOnlyVisionSignal && !requiresExplicitVisionSignal)
         let hasAudioSignal = config?["audio_config"] != nil
             || config?["audio_tower"] != nil
             || lowerRepository.contains("audio")
@@ -156,7 +168,8 @@ public struct ModelPreflightClassifier: Sendable {
             keyHeadDimension: headDimensions.key,
             valueHeadDimension: headDimensions.value,
             routedExperts: routedExperts,
-            expertsPerToken: expertsPerToken
+            expertsPerToken: expertsPerToken,
+            runtimeCapabilities: turboQuantRuntimeCapabilities
         ) {
             verification = .verified
         } else {
@@ -205,8 +218,8 @@ public struct ModelPreflightClassifier: Sendable {
            let explicit = positiveInt(textConfig["head_dim"]) {
             return HeadDimensions(key: explicit, value: explicit)
         }
-        if let mistral4 = mistral4HeadDimensions(from: config) {
-            return mistral4
+        if let latentAttention = latentAttentionHeadDimensions(from: config) {
+            return latentAttention
         }
         if let runtimeDefault = runtimeDefaultHeadDimension(from: config, modelType: modelType) {
             return HeadDimensions(key: runtimeDefault, value: runtimeDefault)
@@ -275,6 +288,9 @@ public struct ModelPreflightClassifier: Sendable {
         if modelTypes.contains("llama") {
             return hasVisionSignal ? .visionLanguageAttention : .standardAttention
         }
+        if modelTypes.contains("lfm2") && hasNativeStateLayer(in: config) {
+            return .hybridAttentionAndNativeState
+        }
         if modelTypes.contains(where: unsupportedFullTurboQuantModelTypes.contains) {
             return .unsupported
         }
@@ -303,17 +319,31 @@ public struct ModelPreflightClassifier: Sendable {
         if modelTypes.contains("mllama") || topology == .unsupported {
             return .unsupportedTopology
         }
-        guard modalities.contains(.text) else { return .none }
+        guard modalities == [.text] else { return .none }
+        if modelTypes.contains("pixtral") {
+            return .none
+        }
         if modelTypes.contains(where: unsupportedFullTurboQuantModelTypes.contains) {
             return .none
         }
         let hasSupportedHeadShape = supportedAttentionHeadShape(key: keyHeadDimension, value: valueHeadDimension)
+        let hasSupportedSplitHeadShape = supportedSplitAttentionHeadShape(
+            key: keyHeadDimension, value: valueHeadDimension)
         switch topology {
         case .hybridAttentionAndNativeState:
-            return modelTypes.contains(where: isQwen35Family) && keyHeadDimension == 256 && valueHeadDimension == 256
-                ? .hybridFull
-                : .none
+            if modelTypes.contains(where: isQwen35Family)
+                && keyHeadDimension == 256 && valueHeadDimension == 256
+            {
+                return .hybridFull
+            }
+            if modelTypes.contains("lfm2") && hasSupportedHeadShape {
+                return .hybridFull
+            }
+            return .none
         case .standardAttention, .slidingAttention, .sharedKVAttention, .visionLanguageAttention:
+            if modelTypes.contains("glm4_moe_lite") {
+                return hasSupportedSplitHeadShape ? .attentionKVFull : .none
+            }
             guard hasSupportedHeadShape else { return .none }
             if modelTypes.contains(where: isBroadTurboQuantFamily) {
                 return .attentionKVFull
@@ -322,6 +352,55 @@ public struct ModelPreflightClassifier: Sendable {
         case .unsupported:
             return .unsupportedTopology
         }
+    }
+
+    private static func supportedSplitAttentionHeadShape(key: Int?, value: Int?) -> Bool {
+        guard let key, let value else { return false }
+        return [64, 80, 96, 112, 128, 160, 192, 256, 512].contains(key)
+            && [64, 80, 96, 112, 128, 160, 192, 256, 512].contains(value)
+    }
+
+    private static func isBroadTurboQuantFamily(_ modelType: String) -> Bool {
+        modelType == "llama"
+            || modelType == "mistral"
+            || modelType == "mistral3"
+            || modelType == "mistral4"
+            || modelType == "ministral3"
+            || modelType == "gemma"
+            || modelType == "gemma2"
+            || modelType == "qwen2"
+            || modelType == "qwen3"
+            || modelType == "qwen3_moe"
+            || modelType == "acereason"
+            || modelType == "phi"
+            || modelType == "phi3"
+            || modelType == "granite"
+            || modelType == "exaone"
+            || modelType == "exaone4"
+            || modelType == "smollm3"
+            || modelType == "glm4_moe_lite"
+            || isQwen35Family(modelType)
+            || isGemmaFamily(modelType)
+    }
+
+    private static let unsupportedFullTurboQuantModelTypes: Set<String> = [
+        "jamba", "gpt_oss", "deepseek_v2", "deepseek_v3", "deepseek_v32", "deepseek_v4",
+        "glm", "glm4", "glm4_moe", "llama4", "llama4_text", "mamba", "rwkv",
+    ]
+
+    private static func supportedAttentionHeadShape(key: Int?, value: Int?) -> Bool {
+        guard let key, let value, key == value else { return false }
+        return key == 64 || key == 80 || key == 96 || key == 112 || key == 128 || key == 160 || key == 192 || key == 256 || key == 512
+    }
+
+    private static func hasNativeStateLayer(in config: [String: Any]?) -> Bool {
+        guard let config else { return false }
+        for source in [config, config["text_config"] as? [String: Any]].compactMap({ $0 }) {
+            if stringArray(source["layer_types"]).contains(where: { $0.contains("conv") || $0.contains("mamba") || $0.contains("linear") }) {
+                return true
+            }
+        }
+        return false
     }
 
     private static func normalizedModelTypes(
@@ -360,22 +439,47 @@ public struct ModelPreflightClassifier: Sendable {
             || modelType == "gemma4_assistant"
     }
 
-    private static func isBroadTurboQuantFamily(_ modelType: String) -> Bool {
-        modelType == "llama"
-            || modelType == "gemma"
-            || modelType == "gemma2"
-            || isQwen35Family(modelType)
-            || isGemmaFamily(modelType)
-    }
-
-    private static let unsupportedFullTurboQuantModelTypes: Set<String> = [
-        "jamba", "gpt_oss", "deepseek_v2", "deepseek_v3", "deepseek_v32", "deepseek_v4",
-        "glm", "glm4", "glm4_moe", "glm4_moe_lite", "llama4", "llama4_text", "mamba", "rwkv",
-    ]
-
-    private static func supportedAttentionHeadShape(key: Int?, value: Int?) -> Bool {
-        guard let key, let value, key == value else { return false }
-        return key == 64 || key == 80 || key == 96 || key == 112 || key == 128 || key == 160 || key == 192 || key == 256 || key == 512
+    private static func hasExplicitVisionSignal(
+        repository: String,
+        tags: [String],
+        processorClass: String?
+    ) -> Bool {
+        if let processorClass {
+            let lower = processorClass.lowercased()
+            if lower.contains("vl")
+                || lower.contains("vision")
+                || lower.contains("visual")
+                || lower.contains("image")
+                || lower.contains("video")
+                || lower.contains("omni")
+                || lower.contains("multimodal")
+            {
+                return true
+            }
+        }
+        if repository.contains("-vl")
+            || repository.contains("_vl")
+            || repository.contains("vision")
+            || repository.contains("visual")
+            || repository.contains("image")
+            || repository.contains("video")
+            || repository.contains("omni")
+            || repository.contains("multimodal")
+        {
+            return true
+        }
+        return tags.contains { tag in
+            let lowerTag = tag.lowercased()
+            return lowerTag == "image-text-to-text"
+                || lowerTag == "visual-question-answering"
+                || lowerTag == "image-to-text"
+                || lowerTag == "video-text-to-text"
+                || lowerTag == "any-to-any"
+                || lowerTag.contains("vision")
+                || lowerTag.contains("image")
+                || lowerTag.contains("video")
+                || lowerTag.contains("multimodal")
+        }
     }
 
     private static func hasQwen35LinearAttention(in config: [String: Any]?) -> Bool {
@@ -440,7 +544,7 @@ public struct ModelPreflightClassifier: Sendable {
         return nil
     }
 
-    private static func mistral4HeadDimensions(from config: [String: Any]) -> HeadDimensions? {
+    private static func latentAttentionHeadDimensions(from config: [String: Any]) -> HeadDimensions? {
         let candidates = [
             config,
             config["text_config"] as? [String: Any],
@@ -450,7 +554,7 @@ public struct ModelPreflightClassifier: Sendable {
             let modelType = (candidate["model_type"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
-            guard modelType == "mistral4" else { continue }
+            guard modelType == "mistral4" || modelType == "glm4_moe_lite" else { continue }
             guard let nope = positiveInt(candidate["qk_nope_head_dim"]),
                   let rope = positiveInt(candidate["qk_rope_head_dim"]),
                   let value = positiveInt(candidate["v_head_dim"])

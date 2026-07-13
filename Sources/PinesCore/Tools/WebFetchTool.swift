@@ -83,6 +83,7 @@ public enum WebFetchTool {
                 throw AgentError.invalidToolArguments("web.fetch url must be an absolute HTTPS URL.")
             }
             try EndpointSecurityPolicy().validate(url, useCase: .webTool)
+            try EndpointSecurityPolicy.validateResolvedPublicAddresses(for: url)
             let maxCharacters = min(max(input.maxCharacters ?? 12_000, 1), 20_000)
             return try await fetch(url, maxCharacters)
         }
@@ -117,20 +118,35 @@ public enum WebFetchTool {
     }
 
     public static func defaultFetch(url: URL, maxCharacters: Int) async throws -> WebFetchOutput {
+        try EndpointSecurityPolicy().validate(url, useCase: .webTool)
+        try EndpointSecurityPolicy.validateResolvedPublicAddresses(for: url)
         var request = URLRequest(url: url)
         request.timeoutInterval = 12
         request.setValue("text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.1", forHTTPHeaderField: "Accept")
         request.setValue("Pines/1.0", forHTTPHeaderField: "User-Agent")
-        let (data, http) = try await URLSession.shared.data(for: request)
+        let redirectPolicy = WebFetchRedirectPolicy()
+        let (bytes, response) = try await URLSession.shared.bytes(for: request, delegate: redirectPolicy)
+        guard let http = response as? HTTPURLResponse else {
+            throw AgentError.permissionDenied("web.fetch received a non-HTTP response.")
+        }
         if let finalURL = http.url {
             try EndpointSecurityPolicy().validate(finalURL, useCase: .webTool)
         }
-        guard (200..<400).contains(http.statusCode) else {
+        guard (200..<300).contains(http.statusCode) else {
             throw AgentError.permissionDenied("web.fetch request failed with HTTP \(http.statusCode).")
         }
         let maxBytes = 1_500_000
-        let clippedData = data.count > maxBytes ? data.prefix(maxBytes) : data[...]
-        let parsed = readableText(data: Data(clippedData), contentType: http.value(forHTTPHeaderField: "Content-Type"))
+        var data = Data()
+        data.reserveCapacity(min(maxBytes, http.expectedContentLength > 0 ? Int(http.expectedContentLength) : 64 * 1024))
+        var exceededByteLimit = false
+        for try await byte in bytes {
+            if data.count == maxBytes {
+                exceededByteLimit = true
+                break
+            }
+            data.append(byte)
+        }
+        let parsed = readableText(data: data, contentType: http.value(forHTTPHeaderField: "Content-Type"))
         let clipped = parsed.text.count > maxCharacters
             ? String(parsed.text.prefix(maxCharacters))
             : parsed.text
@@ -141,7 +157,7 @@ public enum WebFetchTool {
             contentType: http.value(forHTTPHeaderField: "Content-Type"),
             title: parsed.title,
             text: clipped,
-            truncated: data.count > maxBytes || parsed.text.count > maxCharacters
+            truncated: exceededByteLimit || parsed.text.count > maxCharacters
         )
     }
 
@@ -217,5 +233,24 @@ public enum WebFetchTool {
             .map(normalizeWhitespace)
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
+    }
+}
+
+private final class WebFetchRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        guard let url = request.url,
+              (try? EndpointSecurityPolicy().validate(url, useCase: .webTool)) != nil,
+              (try? EndpointSecurityPolicy.validateResolvedPublicAddresses(for: url)) != nil
+        else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }

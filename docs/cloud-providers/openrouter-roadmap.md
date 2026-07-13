@@ -1,6 +1,12 @@
 # OpenRouter Production Parity Roadmap
 
-Last verified: 2026-05-19. Companion gap analysis: [openrouter.md](openrouter.md).
+Last verified: 2026-07-13. Companion gap analysis: [openrouter.md](openrouter.md).
+
+## Current Implementation State
+
+Pines now persists a normalized OpenRouter policy and applies it to Chat Completions requests. The shipped Settings controls cover explicit provider order, allow/deny lists, price/throughput/latency sorting, fallbacks, required-parameter enforcement, data-collection denial, zero-data-retention eligibility, and the preferred server web-search engine. Tool and structured-output requests automatically require parameter support. JSON object/schema response formats are mapped to `response_format`, requests opt in to OpenRouter routing metadata, and automatic/required web search maps to the beta `openrouter:web_search` server tool rather than deprecated plugin shortcuts. The terminal stream chunk is finalized into a privacy-minimized chat receipt with resolved route/fallback, usage, BYOK, cost, citations, and server-search request count.
+
+This is a meaningful Phase 1/2/3/4/7 foundation, not production parity. Policy is currently global rather than per-thread/per-provider; max-price and quantization controls, endpoint-level model/provider eligibility, aggregate/reconciled accounting, reasoning controls, response healing, caching/transforms, and output media remain incomplete. Phase 4 is contract-complete in Pines, but a live provider run still requires a user-configured OpenRouter key and a model/route that accepts the beta server tool.
 
 ## Product Goal
 
@@ -51,16 +57,18 @@ Goal: Give users control over where OpenRouter sends their request.
 
 Todos:
 
-- Add OpenRouter-specific request settings for provider order, allow/deny providers, allow fallbacks, require parameters, data collection, ZDR preference, and max price.
-- Default `require_parameters` for schema/tool/modality-critical requests.
-- Surface actual routed provider and fallback metadata in run details where available.
-- Add per-thread and per-provider defaults.
-- Add tests for strict provider order, fallback disabled, and unsupported parameter rejection.
-- Add routing control panel and route provenance UI.
+- [x] Add typed request settings for provider order, allow/deny providers, route sorting, fallbacks, required parameters, data collection, and ZDR preference.
+- [x] Default `require_parameters` for schema/tool-critical requests.
+- [x] Add persisted routing/privacy controls and direct request-construction tests.
+- [ ] Add max-price and quantization controls.
+- [x] Surface actual routed provider and fallback metadata in run details.
+- [ ] Add per-thread and per-provider overrides.
+- [x] Add privacy-minimized route provenance UI.
+- [ ] Add live unsupported-parameter rejection coverage.
 
 Possible hiccups:
 
-- Actual routed-provider metadata may be incomplete or returned out of band.
+- Router metadata is intentionally absent on OpenRouter cache hits and can be incomplete on early failures.
 - Tight routing constraints can make requests fail more often.
 - Privacy settings need clear wording, not acronyms only.
 
@@ -74,11 +82,14 @@ Goal: Make OpenRouter model selection capability-driven.
 
 Todos:
 
-- Cache model metadata: context length, modalities, pricing, architecture, supported parameters, provider availability, and rate/cost hints.
-- Filter model picker by requested feature: tools, images, PDFs, schemas, reasoning, audio/video, generation outputs.
-- Show pricing/context/modality badges.
-- Warn when selected model may drop a requested feature.
-- Add model picker badges and eligibility explanations.
+- [x] Retain a bounded session catalog for context/output limits, modalities, pricing, architecture labels, supported parameters, moderation, and lifecycle dates.
+- [x] Request text-output models in OpenRouter popularity order and expand the useful picker catalog beyond the previous 24-model truncation.
+- [x] Preflight known model incompatibilities for tools, images, audio/video input, PDFs/files, JSON mode, and strict schemas before inference spend.
+- [x] Show concise pricing, context, modality, tool, and schema details in the model picker.
+- [x] Return a specific eligibility explanation when current catalog metadata rejects a request.
+- [x] Persist bounded catalog snapshots in the encrypted local store with six-hour expiry, provider-deletion cascade, and cold-launch hydration.
+- [ ] Fetch endpoint-level provider availability, provider-specific parameter support, rate limits, and prices.
+- [ ] Add metadata-driven reasoning, generated-output, and server-tool selection once those request surfaces ship.
 
 Possible hiccups:
 
@@ -87,7 +98,7 @@ Possible hiccups:
 
 Production complete when:
 
-- Pines can explain why an OpenRouter model is eligible or ineligible for a request.
+- Pines can explain fresh catalog-level eligibility and refuses to use expired metadata for hard rejection. Phase 2 remains open until endpoint-specific variance is represented without implying that every upstream route has identical support.
 
 ## Phase 3: Structured Outputs And Response Reliability
 
@@ -95,10 +106,10 @@ Goal: Make extraction reliable across routed models.
 
 Todos:
 
-- Map provider-neutral schema requests to OpenRouter structured output format.
-- Set `require_parameters` when schema adherence is required.
-- Add optional response healing for non-streaming structured requests if still supported and useful.
-- Add model/provider capability checks before sending schemas.
+- [x] Map provider-neutral JSON object/schema requests to OpenRouter `response_format`.
+- [x] Set `require_parameters` when schema adherence is required.
+- [ ] Add optional response healing for non-streaming structured requests if still supported and useful.
+- [ ] Replace static provider capability with model/upstream metadata checks before sending schemas.
 
 Possible hiccups:
 
@@ -115,20 +126,22 @@ Goal: Expose OpenRouter-hosted tools consistently.
 
 Todos:
 
-- Add `openrouter:web_search` server tool support.
-- Parse annotations/citations/source metadata.
-- Add settings to choose OpenRouter search versus provider-native search when both exist.
-- Track server tool usage and cost.
-- Add server tool timeline rows and source panel.
+- [x] Add `openrouter:web_search` server tool support for automatic and required search modes.
+- [x] Parse nested/flat annotations into bounded public-URL citations and source metadata.
+- [x] Add settings for automatic, provider-native, Exa, Firecrawl, Parallel, and Perplexity search-engine selection.
+- [x] Track server web-search request count alongside OpenRouter's reported run cost.
+- [x] Add server-tool timeline rows, source citations, and receipt details.
 
 Possible hiccups:
 
+- OpenRouter currently labels server web search beta.
 - Server tool behavior differs from OpenAI/Anthropic/Gemini native search.
 - Search availability and pricing can vary by model/route.
+- Pines bounds requests to five results per search and ten total results, rejects disabled external-web access, prefers an explicit allowlist over a blocklist, and persists only public HTTP(S) citation URLs.
 
 Production complete when:
 
-- OpenRouter can provide source-backed web answers with citations and cost visibility.
+- [x] OpenRouter can provide source-backed web answers with citations and cost visibility. Request, parser, settings, and receipt contracts are covered locally; live availability remains provider/model/route dependent.
 
 ## Phase 5: Reasoning, Caching, And Transforms
 
@@ -177,15 +190,19 @@ Goal: Make OpenRouter cost transparent.
 
 Todos:
 
-- Parse prompt/completion/reasoning/cached tokens and cost fields.
-- Store upstream provider, model, route, and cost in metadata.
+- [x] Parse prompt/completion/total tokens, BYOK state, reported cost, and upstream inference cost.
+- [ ] Parse reasoning, cached, and media usage details.
+- [x] Parse server web-search request usage and show it in the run receipt/timeline.
+- [x] Store upstream provider, model, safe fallback route, and cost in metadata after the terminal stream chunk.
 - Add per-thread and per-provider spend summaries if product wants it.
-- Add cost inspector and run detail rows for routed provider/cost metadata.
+- [x] Add a progressively disclosed chat receipt for routed provider/cost metadata.
+- [ ] Add aggregate cost inspection and optional generation-endpoint reconciliation.
 
 Possible hiccups:
 
-- Cost can be returned after generation or through a separate accounting endpoint.
+- Cost and router metadata arrive after the ordinary finish-reason chunk; stream finalization must preserve the terminal receipt.
+- Cache hits omit router metadata, while generation accounting may require a separate authenticated lookup.
 
 Production complete when:
 
-- Users can inspect actual OpenRouter cost and route details for every run.
+- Users can inspect actual OpenRouter cost and route details whenever the provider returns them, with honest missing-data behavior for cache hits and early failures.

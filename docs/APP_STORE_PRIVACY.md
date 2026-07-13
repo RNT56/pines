@@ -15,6 +15,7 @@
 - Remote provider, MCP, OAuth, model catalog, web fetch, and provider-native web search endpoints must use HTTPS. Localhost HTTP is allowed only for explicitly marked local-development integrations.
 - Chat attachments are stored as protected local files excluded from backup. HEIC/HEIF selections are converted to JPEG during local staging. If cloud execution is selected, supported image, PDF, or text attachments can be encoded into the provider request for that turn.
 - Vault source documents are encrypted locally with AES-GCM and excluded from backup; extracted vault chunks and metadata live in the encrypted SQLite store.
+- TurboQuant KV snapshot blobs are encrypted local files, excluded from CloudKit sync by default, and deleted by model deletion/data-erasure flows. Snapshot restore is fail-closed on model, tokenizer, profile, RoPE, prefix, layout, or compatibility-pair mismatch.
 - Message row actions can copy message text or attachment names to the pasteboard, edit user-authored message text, and import local message attachments into Vault; Vault imports remain local unless the user separately enables cloud embedding or sync features.
 - API keys, OAuth tokens, bearer tokens, and secret-like custom headers are stored only in Keychain and are not written to SQLite, CloudKit, logs, or audit payloads.
 - Optional app lock uses LocalAuthentication when enabled by the user and shows a privacy cover while inactive/backgrounded.
@@ -29,6 +30,6 @@ Current manifest entries:
 
 `Info.plist` contains `NSFaceIDUsageDescription` for the optional app lock and `NSLocationWhenInUseUsageDescription` for user-approved provider web-search localization. Photo-library and camera usage strings are intentionally omitted until direct photo-library or camera entry points ship; current image imports use user-selected files.
 
-Final App Store submission must re-run this review after Xcode resolves the complete package graph for GRDB, SQLCipher, the pinned MLX forks, Swift Hugging Face, Swift Transformers, PDFKit, Vision, WebKit, and CloudKit.
+The current TurboQuant compatibility pair has passed the local Xcode package/app validation gate against the resolved package graph for GRDB, SQLCipher, the pinned MLX forks, Swift Hugging Face, Swift Transformers, PDFKit, Vision, WebKit, and CloudKit. Final App Store submission must still re-run this review for the signed archive that is uploaded to App Store Connect.
 
 CI runs `scripts/ci/check-privacy-manifest.sh` to lint the committed manifest shape, tracking flag, and required-reason API declarations. This is a repository guardrail only; it does not replace App Store Connect's final privacy review for a signed production build.

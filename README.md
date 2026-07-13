@@ -39,6 +39,8 @@ Pines treats the major cloud providers as specialists with visible capabilities,
 
 OpenAI uses official Responses features for reasoning controls, native web search, attachments, and state when those paths are needed, and Pines tracks OpenAI files, vector stores, batches, Deep Research, realtime/session records, and generated artifacts as provider resources. Anthropic brings Claude Messages, prompt caching, thinking controls, citations, hosted files, web search/fetch, batches, token counting, and provider-hosted tool provenance. Gemini brings Generate Content, Interactions, Google Search grounding, URL context metadata, Files API media flows, context caches, Live session records, Deep Research, generated media records, batches, and token counting.
 
+OpenRouter is treated as a routing platform rather than a generic text endpoint: its settings can constrain upstream provider order or allow/deny lists, fallbacks, parameter support, data collection, and zero-data-retention eligibility. Structured requests carry the schema and require a route that supports it. Completed chats retain the receipt fields OpenRouter returns—upstream provider/model, fallback attempts, token usage, BYOK state, and reported cost—in a privacy-minimized disclosure in the transcript.
+
 Provider-hosted files, vector stores, caches, batches, research runs, live sessions, generated artifacts, citations, and hosted tool calls are shown as provider resources. They are not confused with your local Vault, and they carry the same local-first rule: use cloud when you choose it, show what left the device, and keep deletion/import paths explicit.
 
 ## Local Mobile AI, Treated Like It Matters
@@ -47,7 +49,9 @@ Phones are becoming AI machines in their own right. Pines takes that seriously.
 
 A local model is not just a privacy checkbox. It is instant access. It is work that can happen close to your files. It is a way to ask ordinary questions without making every thought a network request. It is the beginning of a personal AI stack that lives where you already work.
 
-Pines is built around MLX Swift, model discovery, install flows, runtime guardrails, and a vault that can make your own material useful to the model. The goal is simple: make local mobile AI feel less like a benchmark and more like a daily instrument.
+Pines is built around MLX Swift, model discovery, install flows, runtime admission, memory zones, runtime guardrails, and a vault that can make your own material useful to the model. The local runtime consumes exact, currently non-green TurboQuant fork pins, records every admitted run through a decision ledger, keeps fallback behavior typed and explicit, and exposes compatibility state without pretending a device/model pair is verified before evidence exists.
+
+The goal is simple: make local mobile AI feel less like a benchmark and more like a daily instrument.
 
 ## Your Context Should Not Be Homeless
 
@@ -102,10 +106,13 @@ Pines is source-available. If you want to build it, audit it, understand the arc
 
 Useful field notes:
 
+- [Implementation Status](docs/STATUS.md)
+- [TurboQuant Integration](docs/TURBOQUANT.md)
 - [Security And Privacy](docs/SECURITY.md)
 - [MCP Support](docs/MCP.md)
 - [Design System](docs/DESIGN_SYSTEM.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Release Process](docs/RELEASES.md)
 
 ## License
 

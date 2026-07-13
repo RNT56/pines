@@ -73,10 +73,6 @@ require_mlx_helper() {
   [ "$required" = "1" ] || [ "$required" = "true" ]
 }
 
-escape_replacement() {
-  printf '%s' "$1" | sed 's/[&/\]/\\&/g'
-}
-
 if ! metal_path="$(find_developer_tool metal "${PINES_METAL_PATH:-}")"; then
   echo "Unable to locate the Metal compiler for CodeQL tracing." >&2
   exit 1
@@ -87,7 +83,7 @@ if ! metallib_path="$(find_developer_tool metallib "${PINES_METALLIB_PATH:-}")";
   exit 1
 fi
 
-script="build/DerivedData/SourcePackages/checkouts/mlx-swift/tools/build-swiftpm-metallib.sh"
+script="${PINES_CODEQL_MLX_HELPER:-build/DerivedData/SourcePackages/checkouts/mlx-swift/tools/build-swiftpm-metallib.sh}"
 if [ ! -f "$script" ]; then
   if require_mlx_helper; then
     echo "MLX SwiftPM Metal helper was not found; resolve Xcode packages into build/DerivedData before CodeQL build." >&2
@@ -98,13 +94,27 @@ if [ ! -f "$script" ]; then
   exit 0
 fi
 
-metal_replacement="$(escape_replacement "$metal_path")"
-metallib_replacement="$(escape_replacement "$metallib_path")"
+# MLX Swift used a fixed macOS SDK in older helpers and now derives the SDK
+# from the active Apple platform. Patch either form so CodeQL's injected
+# tracer never has to discover the separately installed Metal toolchain.
+METAL_REPLACEMENT="$metal_path" perl -0pi -e '
+  s{METAL=\$\(xcrun -sdk (?:macosx|"\$\{sdk\}") -find metal\)}{METAL="$ENV{METAL_REPLACEMENT}"}g
+' "$script"
+METALLIB_REPLACEMENT="$metallib_path" perl -0pi -e '
+  s{METALLIB=\$\(xcrun -sdk (?:macosx|"\$\{sdk\}") -find metallib\)}{METALLIB="$ENV{METALLIB_REPLACEMENT}"}g
+' "$script"
+perl -0pi -e 's/(?<!SEMMLE_PRELOAD_libtrace )"\$\{METAL\}"/env -u DYLD_INSERT_LIBRARIES -u SEMMLE_PRELOAD_libtrace "\${METAL}"/g' "$script"
+perl -0pi -e 's/(?<!SEMMLE_PRELOAD_libtrace )"\$\{METALLIB\}"/env -u DYLD_INSERT_LIBRARIES -u SEMMLE_PRELOAD_libtrace "\${METALLIB}"/g' "$script"
 
-perl -0pi -e "s/METAL=\\\$\\(xcrun -sdk macosx -find metal\\)/METAL=\"$metal_replacement\"/" "$script"
-perl -0pi -e "s/METALLIB=\\\$\\(xcrun -sdk macosx -find metallib\\)/METALLIB=\"$metallib_replacement\"/" "$script"
-perl -0pi -e 's/"\$\{METAL\}"/env -u DYLD_INSERT_LIBRARIES -u SEMMLE_PRELOAD_libtrace "\${METAL}"/g' "$script"
-perl -0pi -e 's/"\$\{METALLIB\}"/env -u DYLD_INSERT_LIBRARIES -u SEMMLE_PRELOAD_libtrace "\${METALLIB}"/g' "$script"
+if ! grep -Fq "METAL=\"$metal_path\"" "$script"; then
+  echo "Unable to patch the MLX Metal compiler assignment for CodeQL tracing." >&2
+  exit 1
+fi
+
+if ! grep -Fq "METALLIB=\"$metallib_path\"" "$script"; then
+  echo "Unable to patch the MLX metallib assignment for CodeQL tracing." >&2
+  exit 1
+fi
 
 echo "Prepared MLX SwiftPM Metal helper for CodeQL tracing."
 echo "metal: $metal_path"

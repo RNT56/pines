@@ -15,6 +15,8 @@ xcode_package_flags=(
   -skipPackagePluginValidation
   -onlyUsePackageVersionsFromResolvedFile
   -disableAutomaticPackageResolution
+  -scmProvider
+  system
 )
 
 mkdir -p "$log_dir"
@@ -208,20 +210,74 @@ run_tests() {
 run_xcode_test_phase() {
   local simulator_id="$1"
   local label="$2"
+  local timeout_seconds="${PINES_XCODE_TEST_TIMEOUT_SECONDS:-}"
   shift 2
 
-  echo "Running iOS runtime smoke tests ($label)..."
-  set -o pipefail
-  xcodebuild \
-    -project "$project" \
-    -scheme "$scheme" \
-    -destination "id=$simulator_id" \
-    -derivedDataPath "$derived_data" \
-    "${xcode_package_flags[@]}" \
-    CODE_SIGNING_ALLOWED=NO \
-    ONLY_ACTIVE_ARCH=YES \
-    "$@" \
-    test-without-building | tee -a "$log_dir/xcodebuild-test-run.log"
+  if [ -z "$timeout_seconds" ]; then
+    if [ "${CI:-}" = "true" ]; then
+      timeout_seconds=600
+    else
+      timeout_seconds=0
+    fi
+  fi
+
+  local attempt
+  for attempt in 1 2; do
+    prepare_test_simulator "$simulator_id"
+    echo "Running iOS runtime smoke tests ($label, attempt $attempt)..."
+    set -o pipefail
+    if run_with_timeout "$timeout_seconds" \
+      xcodebuild \
+        -project "$project" \
+        -scheme "$scheme" \
+        -destination "id=$simulator_id" \
+        -derivedDataPath "$derived_data" \
+        "${xcode_package_flags[@]}" \
+        CODE_SIGNING_ALLOWED=NO \
+        ONLY_ACTIVE_ARCH=YES \
+        "$@" \
+        test-without-building | tee -a "$log_dir/xcodebuild-test-run.log"; then
+      return 0
+    fi
+
+    local status="${PIPESTATUS[0]}"
+    if [ "$attempt" -eq 2 ]; then
+      echo "::error::$label failed after a fresh simulator retry (status $status)." >&2
+      return "$status"
+    fi
+
+    echo "::warning::$label did not complete (status $status); retrying with a freshly booted simulator." >&2
+  done
+}
+
+prepare_test_simulator() {
+  local simulator_id="$1"
+
+  if [ "${CI:-}" != "true" ]; then
+    return 0
+  fi
+
+  echo "Preparing simulator $simulator_id for runtime tests..."
+  xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
+  xcrun simctl erase "$simulator_id"
+  xcrun simctl boot "$simulator_id"
+  xcrun simctl bootstatus "$simulator_id" -b
+}
+
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+
+  if [ "$timeout_seconds" -le 0 ]; then
+    "$@"
+    return
+  fi
+
+  perl -e '
+    my $timeout = shift @ARGV;
+    alarm $timeout;
+    exec @ARGV or die "exec failed: $!\n";
+  ' "$timeout_seconds" "$@"
 }
 
 finalize_validation() {

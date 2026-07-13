@@ -15,15 +15,26 @@ public struct VerifiedModelFamilyManifest: Sendable {
         keyHeadDimension: Int?,
         valueHeadDimension: Int?,
         routedExperts: Int?,
-        expertsPerToken: Int?
+        expertsPerToken: Int?,
+        runtimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry = .bundledFallback
     ) -> Bool {
-        guard modalities.contains(.text) else { return false }
+        guard modalities == [.text] else { return false }
         guard turboQuantFamilySupport == .attentionKVFull || turboQuantFamilySupport == .hybridFull else {
             return false
         }
 
         let lowerRepository = repository.lowercased()
         guard !Self.isExplicitlyExcludedRepository(lowerRepository) else { return false }
+        guard TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+            repository: repository,
+            modelType: modelType,
+            textConfigModelType: textConfigModelType,
+            modalities: modalities,
+            familySupport: turboQuantFamilySupport,
+            runtimeCapabilities: runtimeCapabilities
+        ) else {
+            return false
+        }
 
         let modelTypes = [
             modelType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
@@ -37,18 +48,65 @@ public struct VerifiedModelFamilyManifest: Sendable {
                 && valueHeadDimension == 256
         }
 
+        if modelTypes.contains(where: Self.isQwen2Or3Family) {
+            return cacheTopology == .standardAttention
+                && turboQuantFamilySupport == .attentionKVFull
+                && Self.supportedStandardHeadDimension(keyHeadDimension)
+                && keyHeadDimension == valueHeadDimension
+        }
+
         if modelTypes.contains(where: Self.isGemmaFamily) {
             return turboQuantFamilySupport == .attentionKVFull
                 && Self.supportedGemmaHeadDimension(keyHeadDimension)
                 && keyHeadDimension == valueHeadDimension
         }
 
-        if modelTypes.contains("llama") {
+        if modelTypes.contains(where: Self.isMistralFamily) {
+            if modelTypes.contains("mistral4") {
+                return cacheTopology == .standardAttention
+                    && turboQuantFamilySupport == .attentionKVFull
+                    && keyHeadDimension == 128
+                    && valueHeadDimension == 128
+                    && routedExperts == 128
+                    && expertsPerToken == 4
+            }
+            return (cacheTopology == .standardAttention || cacheTopology == .slidingAttention)
+                && turboQuantFamilySupport == .attentionKVFull
+                && Self.supportedStandardHeadDimension(keyHeadDimension)
+                && keyHeadDimension == valueHeadDimension
+        }
+
+        if modelTypes.contains("llama")
+            || modelTypes.contains(where: Self.isSmallDenseFamily) {
             return !modalities.contains(.vision)
                 && cacheTopology == .standardAttention
                 && turboQuantFamilySupport == .attentionKVFull
-                && Self.supportedLlamaHeadDimension(keyHeadDimension)
+                && Self.supportedStandardHeadDimension(keyHeadDimension)
                 && keyHeadDimension == valueHeadDimension
+        }
+
+        if modelTypes.contains("exaone4") || modelTypes.contains("exaone") {
+            return !modalities.contains(.vision)
+                && (cacheTopology == .standardAttention || cacheTopology == .slidingAttention)
+                && turboQuantFamilySupport == .attentionKVFull
+                && Self.supportedStandardHeadDimension(keyHeadDimension)
+                && keyHeadDimension == valueHeadDimension
+        }
+
+        if modelTypes.contains("lfm2") {
+            return !modalities.contains(.vision)
+                && (cacheTopology == .standardAttention || cacheTopology == .hybridAttentionAndNativeState)
+                && (turboQuantFamilySupport == .attentionKVFull || turboQuantFamilySupport == .hybridFull)
+                && Self.supportedStandardHeadDimension(keyHeadDimension)
+                && keyHeadDimension == valueHeadDimension
+        }
+
+        if modelTypes.contains("glm4_moe_lite") {
+            return !modalities.contains(.vision)
+                && cacheTopology == .standardAttention
+                && turboQuantFamilySupport == .attentionKVFull
+                && Self.supportedSplitHeadDimension(keyHeadDimension)
+                && Self.supportedSplitHeadDimension(valueHeadDimension)
         }
 
         return false
@@ -61,7 +119,7 @@ public struct VerifiedModelFamilyManifest: Sendable {
             || repository.contains("llava")
             || repository.contains("deepseek-v2")
             || repository.contains("deepseek-v3")
-            || repository.contains("glm")
+            || repository.contains("pixtral")
             || repository.contains("jamba")
             || repository.contains("gpt-oss")
             || repository.contains("rwkv")
@@ -84,11 +142,36 @@ public struct VerifiedModelFamilyManifest: Sendable {
             || modelType == "gemma4_assistant"
     }
 
+    private static func isQwen2Or3Family(_ modelType: String) -> Bool {
+        modelType == "qwen2"
+            || modelType == "qwen3"
+            || modelType == "qwen3_moe"
+            || modelType == "acereason"
+    }
+
+    private static func isMistralFamily(_ modelType: String) -> Bool {
+        modelType == "mistral"
+            || modelType == "mistral3"
+            || modelType == "mistral4"
+            || modelType == "ministral3"
+    }
+
+    private static func isSmallDenseFamily(_ modelType: String) -> Bool {
+        modelType == "phi"
+            || modelType == "phi3"
+            || modelType == "granite"
+            || modelType == "smollm3"
+    }
+
     private static func supportedGemmaHeadDimension(_ value: Int?) -> Bool {
         value == 128 || value == 256 || value == 512
     }
 
-    private static func supportedLlamaHeadDimension(_ value: Int?) -> Bool {
+    private static func supportedStandardHeadDimension(_ value: Int?) -> Bool {
         value == 64 || value == 80 || value == 96 || value == 112 || value == 128 || value == 160 || value == 192 || value == 256
+    }
+
+    private static func supportedSplitHeadDimension(_ value: Int?) -> Bool {
+        value == 64 || value == 80 || value == 96 || value == 112 || value == 128 || value == 160 || value == 192 || value == 256 || value == 512
     }
 }

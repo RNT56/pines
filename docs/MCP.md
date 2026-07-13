@@ -23,6 +23,8 @@ Remote production servers should use HTTPS. Plain HTTP is intended only for expl
 
 Pines supports MCP tools as registered, policy-gated functions. Enabled MCP tools are namespaced and added to the shared `ToolRegistry`, but normal chat currently keeps its advertised tool list empty unless a future tool mode opts in.
 
+Tool safety annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`) are decoded and persisted with discovery state. Pines maps an explicit read-only hint to an external read and a destructive hint to a sensitive action. Because MCP annotations are advisory and optional, tools with no annotation default to remote-state-changing rather than read-only.
+
 Server methods used:
 
 - `tools/list`

@@ -13,7 +13,7 @@ Jobs:
 - `secret-scan`: pinned gitleaks source scan with explicit allowlists for synthetic test fixtures and ignored build outputs.
 - `dependency-review`: GitHub dependency review on pull requests, failing on high-severity dependency changes.
 - `repo-hygiene`: shell-script syntax validation, public-repo hygiene, license and notice checks, privacy manifest linting, MLX package-pin checks, tracked-artifact checks, secret-pattern scanning, and high-assurance security-boundary checks.
-- `site`: Netlify/Astro site dependency install, build, and `site/dist/index.html` artifact verification.
+- `site`: Netlify/Astro dependency install, zero-tolerance npm audit, build, and `site/dist/index.html` artifact verification.
 - `swift-package-build`: Swift package build with automatic resolution disabled.
 - `swift-package-tests`: Swift package tests with automatic resolution disabled.
 - `core-verification`: `PinesCoreTestRunner` with automatic resolution disabled.
@@ -63,7 +63,7 @@ Until signing and App Store Connect automation are configured, releases publish 
 
 Do not publish an unsigned `.ipa`.
 
-Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed.
+Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed. The current TurboQuant compatibility pair is non-green: focused local gates, exact-pin physical-device synthetic smoke, and a small 4K Qwen 3.5 0.8B real-model comparison pass, but the required acceptance matrix and imported product tuple remain incomplete. The latest Mac real-model baseline keeps dense K8/V4 as the compressed reference; K8/V3, K8/V2, and Sparse-V remain non-promoted until real-model benchmark/quality/fallback evidence and broader iOS evidence pass.
 
 ## v0.1.0 Preview Readiness
 
@@ -77,9 +77,11 @@ Before pushing the tag, verify:
 - `bash scripts/ci/check-public-hygiene.sh`
 - `swift test --disable-automatic-resolution`
 - `swift run --disable-automatic-resolution PinesCoreTestRunner`
-- `npm --prefix site ci && npm --prefix site run build`
-- `bash scripts/ci/run-xcode-validation.sh`
+- `npm --prefix site ci && npm --prefix site audit --audit-level=low && npm --prefix site run build`
+- `bash scripts/ci/run-xcode-validation.sh all`
 - `bash scripts/ci/package-release.sh v0.1.0`
+
+For TurboQuant-related release candidates, also verify that `docs/turboquant-implementation/compatibility-pair.json` is synchronized with `project.yml`, `Pines.xcodeproj`, the Xcode `Package.resolved`, and `MLXRuntimeBridge.turboQuantCompatibilityPairID`. A green compatibility pair requires native backend performance, real-model-inference performance parity or explicitly scoped capacity-mode status, current real-device app-host evidence, benchmark matrix coverage, lower-V/Sparse-V fallback evidence, and quality/memory/fallback gates; real-device profile evidence is still required before product compatibility labels can become `Verified` or `Certified`.
 
 ## Future TestFlight Pipeline
 

@@ -202,7 +202,11 @@ struct GeminiProviderService {
     }
 
     private func send(_ request: URLRequest) async throws -> GeminiProviderResponse {
-        let (data, http) = try await urlSession.data(for: request)
+        let (data, http) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: urlSession,
+            maxBytes: BoundedHTTPResponse.fileLimit
+        )
         let providerResponse = GeminiProviderResponse(data: data, httpResponse: http)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(

@@ -37,7 +37,7 @@ Rules:
 ## Fallback contract type
 
 ```swift
-public struct LocalFallbackContract: Codable, Sendable {
+public struct TurboQuantFallbackContract: Codable, Sendable {
     public var allowPackedFallback: Bool
     public var allowDecodedLayerLocalFallback: Bool
     public var allowFullDecodedFallback: Bool

@@ -68,6 +68,189 @@ public enum TurboQuantFamilySupport: String, Codable, Sendable, CaseIterable {
     }
 }
 
+public enum PinesTurboQuantCacheTopology: String, Codable, Sendable, CaseIterable {
+    case standardAttentionKV
+    case hybridAttentionKVAndNativeState
+    case gatedVLMOrDualModel
+    case unsupported
+}
+
+public struct PinesTurboQuantRuntimeModelCapability: Hashable, Codable, Sendable {
+    public var modelType: String
+    public var supportsThrowingTurboQuantAttention: Bool
+    public var cacheTopology: PinesTurboQuantCacheTopology
+    public var note: String?
+
+    public init(
+        modelType: String,
+        supportsThrowingTurboQuantAttention: Bool,
+        cacheTopology: PinesTurboQuantCacheTopology,
+        note: String? = nil
+    ) {
+        self.modelType = Self.normalize(modelType)
+        self.supportsThrowingTurboQuantAttention = supportsThrowingTurboQuantAttention
+        self.cacheTopology = cacheTopology
+        self.note = note
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+    }
+}
+
+public struct PinesTurboQuantRuntimeCapabilityRegistry: Hashable, Codable, Sendable {
+    public var capabilitiesByModelType: [String: PinesTurboQuantRuntimeModelCapability]
+
+    public init(capabilities: [PinesTurboQuantRuntimeModelCapability]) {
+        capabilitiesByModelType = Dictionary(
+            uniqueKeysWithValues: capabilities.map { ($0.modelType, $0) }
+        )
+    }
+
+    public static let bundledFallback = PinesTurboQuantRuntimeCapabilityRegistry(capabilities: [
+        .standard("llama"),
+        .standard("mistral"),
+        .standard("ministral3"),
+        .standard("mistral3"),
+        .standard("mistral4"),
+        .standard("gemma"),
+        .standard("gemma2"),
+        .standard("gemma3"),
+        .standard("gemma3_text"),
+        .standard("gemma3n"),
+        .standard("gemma3n_text"),
+        .standard("gemma4"),
+        .standard("gemma4_text"),
+        .gated("gemma4_assistant", note: "Gemma4 assistant is draft-only MTP and requires explicit dual-model orchestration."),
+        .standard("qwen2"),
+        .standard("qwen3"),
+        .standard("qwen3_moe"),
+        .hybrid("qwen3_5"),
+        .hybrid("qwen3_5_text"),
+        .hybrid("qwen3_5_moe"),
+        .hybrid("qwen3_5_moe_text"),
+        .standard("acereason"),
+        .standard("phi"),
+        .standard("phi3"),
+        .standard("granite"),
+        .standard("exaone4"),
+        .standard("smollm3"),
+        .hybrid("lfm2"),
+        .standard("glm4_moe_lite"),
+    ])
+
+    public func capability(for modelType: String?) -> PinesTurboQuantRuntimeModelCapability? {
+        guard let modelType else { return nil }
+        return capabilitiesByModelType[Self.normalize(modelType)]
+    }
+
+    public func supportsThrowingTurboQuantAttention(modelTypes: Set<String>) -> Bool {
+        modelTypes.contains {
+            capability(for: $0)?.supportsThrowingTurboQuantAttention == true
+        }
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+    }
+}
+
+private extension PinesTurboQuantRuntimeModelCapability {
+    static func standard(_ modelType: String) -> Self {
+        Self(
+            modelType: modelType,
+            supportsThrowingTurboQuantAttention: true,
+            cacheTopology: .standardAttentionKV
+        )
+    }
+
+    static func hybrid(_ modelType: String) -> Self {
+        Self(
+            modelType: modelType,
+            supportsThrowingTurboQuantAttention: true,
+            cacheTopology: .hybridAttentionKVAndNativeState
+        )
+    }
+
+    static func gated(_ modelType: String, note: String) -> Self {
+        Self(
+            modelType: modelType,
+            supportsThrowingTurboQuantAttention: false,
+            cacheTopology: .gatedVLMOrDualModel,
+            note: note
+        )
+    }
+}
+
+public enum TurboQuantRuntimeSupport: Sendable {
+    public static let nonThrowingRuntimeReason =
+        "TurboQuant profile metadata is available, but the linked MLX runtime model does not yet implement typed throwing TurboQuant attention."
+
+    public static func supportsThrowingAttentionGeneration(
+        repository: String,
+        modelType: String?,
+        textConfigModelType: String?,
+        modalities: Set<ModelModality>,
+        familySupport: TurboQuantFamilySupport,
+        runtimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry = .bundledFallback
+    ) -> Bool {
+        _ = repository
+        guard modalities == [.text] else { return false }
+        guard familySupport == .attentionKVFull || familySupport == .hybridFull else {
+            return false
+        }
+
+        let modelTypes = normalizedModelTypes(modelType, textConfigModelType)
+        return runtimeCapabilities.supportsThrowingTurboQuantAttention(modelTypes: modelTypes)
+    }
+
+    public static func defaultDisabledReason(
+        repository: String,
+        modelType: String?,
+        textConfigModelType: String?,
+        modalities: Set<ModelModality>,
+        familySupport: TurboQuantFamilySupport,
+        runtimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry = .bundledFallback
+    ) -> String? {
+        guard familySupport == .attentionKVFull || familySupport == .hybridFull else {
+            return nil
+        }
+        guard !supportsThrowingAttentionGeneration(
+            repository: repository,
+            modelType: modelType,
+            textConfigModelType: textConfigModelType,
+            modalities: modalities,
+            familySupport: familySupport,
+            runtimeCapabilities: runtimeCapabilities
+        ) else {
+            return nil
+        }
+        return nonThrowingRuntimeReason
+    }
+
+    private static func normalizedModelTypes(_ values: String?...) -> Set<String> {
+        Set(
+            values.compactMap {
+                $0?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                    .replacingOccurrences(of: "-", with: "_")
+            }.filter { !$0.isEmpty }
+        )
+    }
+}
+
+public enum TurboQuantLayoutVersion: Sendable {
+    public static let legacy = 4
+    public static let current = 5
+}
+
 public enum QuantizationAlgorithm: String, Codable, Sendable, CaseIterable {
     case none
     case mlxAffine
@@ -79,6 +262,7 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
     case turbo3_5
     case turbo4
     case turbo4v2
+    case turbo8
 
     public static let defaultGeneration: Self = .turbo4v2
     public static let conservativeFallback: Self = .turbo3_5
@@ -94,6 +278,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             "TurboQuant 4-bit"
         case .turbo4v2:
             "TurboQuant 4-bit V2"
+        case .turbo8:
+            "TurboQuant 8-bit"
         }
     }
 
@@ -103,6 +289,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             2
         case .turbo3_5, .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 
@@ -114,6 +302,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             3
         case .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 
@@ -123,6 +313,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             3
         case .turbo3_5, .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 
@@ -134,6 +326,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             3.5
         case .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 
@@ -143,6 +337,8 @@ public enum TurboQuantPreset: String, Codable, Sendable, CaseIterable {
             2
         case .turbo3_5, .turbo4, .turbo4v2:
             4
+        case .turbo8:
+            8
         }
     }
 }
@@ -165,24 +361,45 @@ public enum TurboQuantRuntimeBackend: String, Codable, Sendable, CaseIterable {
 }
 
 public enum TurboQuantAttentionPath: String, Codable, Sendable, CaseIterable {
+    case nativeMLXCompressed
     case onlineFused
     case tiledOnlineFused
+    case sparseValueTwoStageCompressed
     case twoStageCompressed
+    case affineInt4Native
+    case affineK8V4Native
+    case affineK8VxNative
+    case affineK8VxResidual
     case mlxPackedFallback
     case baseline
+    case unavailable
 
     public var displayName: String {
         switch self {
+        case .nativeMLXCompressed:
+            "Native MLX compressed"
         case .onlineFused:
             "Online fused compressed"
         case .tiledOnlineFused:
             "Tiled online fused compressed"
+        case .sparseValueTwoStageCompressed:
+            "Sparse-V two-stage compressed"
         case .twoStageCompressed:
             "Two-stage compressed"
+        case .affineInt4Native:
+            "Native affine int4"
+        case .affineK8V4Native:
+            "Native affine K8/V4"
+        case .affineK8VxNative:
+            "Native affine K8/Vx"
+        case .affineK8VxResidual:
+            "Native affine K8/Vx residual"
         case .mlxPackedFallback:
             "MLX packed fallback"
         case .baseline:
             "Baseline"
+        case .unavailable:
+            "Unavailable"
         }
     }
 }
@@ -191,6 +408,7 @@ public enum TurboQuantKernelProfile: String, Codable, Sendable, CaseIterable {
     case portableA16A17
     case wideA18A19
     case sustainedA19Pro
+    case macAppleSilicon
     case mlxPackedFallback
 
     public var displayName: String {
@@ -201,6 +419,8 @@ public enum TurboQuantKernelProfile: String, Codable, Sendable, CaseIterable {
             "Wide A18/A19"
         case .sustainedA19Pro:
             "Sustained A19 Pro"
+        case .macAppleSilicon:
+            "Mac Apple Silicon"
         case .mlxPackedFallback:
             "MLX packed fallback"
         }
@@ -284,10 +504,206 @@ public enum TurboQuantFallbackPolicy: String, Codable, Sendable, CaseIterable {
     }
 }
 
+public enum TurboQuantRuntimeMode: String, Codable, Sendable, CaseIterable {
+    case auto
+    case rawPreferred
+    case throughputTurboQuant
+    case capacityTurboQuant
+}
+
+public enum TurboQuantKeyPrecision: String, Codable, Sendable, CaseIterable {
+    case fp16OrQ8
+    case fp16
+    case affineQ8
+    case turbo8
+    case turbo4v2
+    case turbo3_5
+    case turbo2_5
+}
+
+public enum TurboQuantValuePrecision: String, Codable, Sendable, CaseIterable {
+    case fp16
+    case turbo8
+    case turbo4v2
+    case turbo3_5
+    case turbo2_5
+}
+
+public enum TurboQuantBoundaryPolicy: Hashable, Codable, Sendable {
+    case profileDefault
+    case disabled
+    case protectedEdges(first: Int, last: Int)
+    case custom([Int])
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case first
+        case last
+        case layers
+    }
+
+    private enum Kind: String, Codable {
+        case profileDefault
+        case disabled
+        case protectedEdges
+        case custom
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(),
+           let legacy = try? single.decode(String.self) {
+            switch legacy {
+            case "profileDefault":
+                self = .profileDefault
+            case "disabled":
+                self = .disabled
+            default:
+                self = .custom([])
+            }
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(Kind.self, forKey: .kind)
+        switch kind {
+        case .profileDefault:
+            self = .profileDefault
+        case .disabled:
+            self = .disabled
+        case .protectedEdges:
+            self = .protectedEdges(
+                first: try container.decodeIfPresent(Int.self, forKey: .first) ?? 0,
+                last: try container.decodeIfPresent(Int.self, forKey: .last) ?? 0
+            )
+        case .custom:
+            self = .custom(try container.decodeIfPresent([Int].self, forKey: .layers) ?? [])
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .profileDefault:
+            try container.encode(Kind.profileDefault, forKey: .kind)
+        case .disabled:
+            try container.encode(Kind.disabled, forKey: .kind)
+        case .protectedEdges(let first, let last):
+            try container.encode(Kind.protectedEdges, forKey: .kind)
+            try container.encode(max(0, first), forKey: .first)
+            try container.encode(max(0, last), forKey: .last)
+        case .custom(let layers):
+            try container.encode(Kind.custom, forKey: .kind)
+            try container.encode(layers.map { max(0, $0) }, forKey: .layers)
+        }
+    }
+}
+
+public enum TurboQuantSparseValuePolicy: Hashable, Codable, Sendable {
+    case off
+    case auto(threshold: Float)
+    case force(threshold: Float)
+
+    public static let defaultAutoThreshold: Float = 1e-6
+    public static let productDefault = TurboQuantSparseValuePolicy.off
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case threshold
+    }
+
+    private enum Kind: String, Codable {
+        case off
+        case auto
+        case force
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try container.decode(Kind.self, forKey: .kind)
+        let threshold =
+            try container.decodeIfPresent(Float.self, forKey: .threshold)
+            ?? Self.defaultAutoThreshold
+        switch kind {
+        case .off:
+            self = .off
+        case .auto:
+            self = .auto(threshold: max(0, threshold))
+        case .force:
+            self = .force(threshold: max(0, threshold))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .off:
+            try container.encode(Kind.off, forKey: .kind)
+        case .auto(let threshold):
+            try container.encode(Kind.auto, forKey: .kind)
+            try container.encode(max(0, threshold), forKey: .threshold)
+        case .force(let threshold):
+            try container.encode(Kind.force, forKey: .kind)
+            try container.encode(max(0, threshold), forKey: .threshold)
+        }
+    }
+
+    public var threshold: Float? {
+        switch self {
+        case .off:
+            nil
+        case .auto(let threshold), .force(let threshold):
+            max(0, threshold)
+        }
+    }
+
+    public func resolvedThreshold(
+        runtimeMode: TurboQuantRuntimeMode,
+        contextLength: Int,
+        minimumAutoContextLength: Int = 16_384
+    ) -> Float? {
+        switch self {
+        case .off:
+            nil
+        case .auto(let threshold):
+            runtimeMode == .capacityTurboQuant && contextLength >= minimumAutoContextLength
+                ? max(0, threshold)
+                : nil
+        case .force(let threshold):
+            runtimeMode == .capacityTurboQuant ? max(0, threshold) : nil
+        }
+    }
+}
+
+public enum TurboQuantAttentionBackendEngine: String, Codable, Sendable, CaseIterable {
+    case rawSDPA
+    case swiftMetalKernel
+    case nativeMLX
+    case decodedReference
+    case unavailable
+}
+
+public struct TurboQuantKVPrecisionPolicy: Hashable, Codable, Sendable {
+    public var key: TurboQuantKeyPrecision
+    public var value: TurboQuantValuePrecision
+    public var boundary: TurboQuantBoundaryPolicy
+
+    public init(
+        key: TurboQuantKeyPrecision = .fp16OrQ8,
+        value: TurboQuantValuePrecision = .turbo4v2,
+        boundary: TurboQuantBoundaryPolicy = .profileDefault
+    ) {
+        self.key = key
+        self.value = value
+        self.boundary = boundary
+    }
+}
+
 public enum TurboQuantAdmissionDowngradeReason: String, Codable, Sendable, CaseIterable {
     case releasedRawShadow
     case disabledPackedFallback
     case loweredValueBits
+    case loweredValuePrecision
+    case keyPrecisionEvidenceRequired
     case movedBalancedToMaxContext
     case reducedContext
     case rollingSummaryMemory
@@ -302,6 +718,10 @@ public enum TurboQuantAdmissionDowngradeReason: String, Codable, Sendable, CaseI
             "Disabled packed fallback"
         case .loweredValueBits:
             "Lowered value bits"
+        case .loweredValuePrecision:
+            "Lowered value precision"
+        case .keyPrecisionEvidenceRequired:
+            "Key precision evidence required"
         case .movedBalancedToMaxContext:
             "Balanced moved to Max Context"
         case .reducedContext:
@@ -460,9 +880,18 @@ public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
     public var valueBits: Int
     public var groupSize: Int
     public var fallbackPolicy: TurboQuantFallbackPolicy
+    public var requestedRuntimeMode: TurboQuantRuntimeMode?
+    public var resolvedRuntimeMode: TurboQuantRuntimeMode?
+    public var precisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var runtimeFallbackReason: String?
+    public var kvLayerPolicyHash: String?
+    public var kvLayerPolicySummary: String?
     public var rawBytesPerToken: Int
     public var packedFallbackBytesPerToken: Int
     public var compressedBytesPerToken: Int
+    public var compressedKeyBytes: Int?
+    public var compressedValueBytes: Int?
+    public var decodedActiveKVBytes: Int?
     public var layerFootprint: TurboQuantLayerCacheFootprint?
     public var usesRawShadow: Bool
     public var packedFallbackEnabled: Bool
@@ -478,9 +907,18 @@ public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
         valueBits: Int,
         groupSize: Int,
         fallbackPolicy: TurboQuantFallbackPolicy,
+        requestedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        resolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        precisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        runtimeFallbackReason: String? = nil,
+        kvLayerPolicyHash: String? = nil,
+        kvLayerPolicySummary: String? = nil,
         rawBytesPerToken: Int,
         packedFallbackBytesPerToken: Int,
         compressedBytesPerToken: Int,
+        compressedKeyBytes: Int? = nil,
+        compressedValueBytes: Int? = nil,
+        decodedActiveKVBytes: Int? = nil,
         layerFootprint: TurboQuantLayerCacheFootprint? = nil,
         usesRawShadow: Bool,
         packedFallbackEnabled: Bool,
@@ -495,9 +933,18 @@ public struct TurboQuantMemoryPlan: Hashable, Codable, Sendable {
         self.valueBits = valueBits
         self.groupSize = groupSize
         self.fallbackPolicy = fallbackPolicy
+        self.requestedRuntimeMode = requestedRuntimeMode
+        self.resolvedRuntimeMode = resolvedRuntimeMode
+        self.precisionPolicy = precisionPolicy
+        self.runtimeFallbackReason = runtimeFallbackReason
+        self.kvLayerPolicyHash = kvLayerPolicyHash
+        self.kvLayerPolicySummary = kvLayerPolicySummary
         self.rawBytesPerToken = rawBytesPerToken
         self.packedFallbackBytesPerToken = packedFallbackBytesPerToken
         self.compressedBytesPerToken = compressedBytesPerToken
+        self.compressedKeyBytes = compressedKeyBytes
+        self.compressedValueBytes = compressedValueBytes
+        self.decodedActiveKVBytes = decodedActiveKVBytes
         self.layerFootprint = layerFootprint
         self.usesRawShadow = usesRawShadow
         self.packedFallbackEnabled = packedFallbackEnabled
@@ -510,6 +957,9 @@ public struct TurboQuantAdmission: Hashable, Codable, Sendable {
     public var admitted: Bool
     public var requestedContextLength: Int
     public var admittedContextLength: Int
+    /// When true, the admitted context fits an uncompressed FP16 KV cache within the live memory
+    /// budget — the runtime should use plain SDPA (faster, higher quality) instead of TurboQuant.
+    public var recommendsPlainKVCache: Bool
     public var requestedMode: TurboQuantUserMode
     public var selectedMode: TurboQuantUserMode
     public var memoryPlan: TurboQuantMemoryPlan?
@@ -530,11 +980,13 @@ public struct TurboQuantAdmission: Hashable, Codable, Sendable {
         memoryPlan: TurboQuantMemoryPlan? = nil,
         downgradeReasons: [TurboQuantAdmissionDowngrade] = [],
         rejectedPaths: [RejectedPath] = [],
-        userMessage: String
+        userMessage: String,
+        recommendsPlainKVCache: Bool = false
     ) {
         self.admitted = admitted
         self.requestedContextLength = requestedContextLength
         self.admittedContextLength = admittedContextLength
+        self.recommendsPlainKVCache = recommendsPlainKVCache
         self.requestedMode = requestedMode
         self.selectedMode = selectedMode
         self.memoryPlan = memoryPlan
@@ -548,6 +1000,172 @@ public enum KVCacheStrategy: String, Codable, Sendable, CaseIterable {
     case none
     case mlxAffine
     case turboQuant
+}
+
+public enum KVLayerCodec: Hashable, Codable, Sendable {
+    case inherit
+    case rawFP16
+    case mlxAffine(bits: Int, groupSize: Int)
+    case affineK8V4
+    case affineInt4
+    case turboQuant(
+        preset: TurboQuantPreset,
+        valueBits: Int?,
+        groupSize: Int,
+        backend: TurboQuantRuntimeBackend
+    )
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case bits
+        case groupSize
+        case preset
+        case valueBits
+        case backend
+    }
+
+    private enum Kind: String, Codable {
+        case inherit
+        case rawFP16
+        case mlxAffine
+        case affineK8V4
+        case affineInt4
+        case turboQuant
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .inherit:
+            self = .inherit
+        case .rawFP16:
+            self = .rawFP16
+        case .mlxAffine:
+            self = .mlxAffine(
+                bits: try container.decode(Int.self, forKey: .bits),
+                groupSize: try container.decodeIfPresent(Int.self, forKey: .groupSize) ?? 64
+            )
+        case .affineK8V4:
+            self = .affineK8V4
+        case .affineInt4:
+            self = .affineInt4
+        case .turboQuant:
+            self = .turboQuant(
+                preset: try container.decode(TurboQuantPreset.self, forKey: .preset),
+                valueBits: try container.decodeIfPresent(Int.self, forKey: .valueBits),
+                groupSize: try container.decodeIfPresent(Int.self, forKey: .groupSize) ?? 64,
+                backend: try container.decodeIfPresent(TurboQuantRuntimeBackend.self, forKey: .backend)
+                    ?? .metalPolarQJL
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .inherit:
+            try container.encode(Kind.inherit, forKey: .kind)
+        case .rawFP16:
+            try container.encode(Kind.rawFP16, forKey: .kind)
+        case .mlxAffine(let bits, let groupSize):
+            try container.encode(Kind.mlxAffine, forKey: .kind)
+            try container.encode(bits, forKey: .bits)
+            try container.encode(groupSize, forKey: .groupSize)
+        case .affineK8V4:
+            try container.encode(Kind.affineK8V4, forKey: .kind)
+        case .affineInt4:
+            try container.encode(Kind.affineInt4, forKey: .kind)
+        case .turboQuant(let preset, let valueBits, let groupSize, let backend):
+            try container.encode(Kind.turboQuant, forKey: .kind)
+            try container.encode(preset, forKey: .preset)
+            try container.encodeIfPresent(valueBits, forKey: .valueBits)
+            try container.encode(groupSize, forKey: .groupSize)
+            try container.encode(backend, forKey: .backend)
+        }
+    }
+
+    public var summary: String {
+        switch self {
+        case .inherit:
+            "inherit"
+        case .rawFP16:
+            "rawFP16"
+        case .mlxAffine(let bits, let groupSize):
+            "mlxAffine\(bits)g\(groupSize)"
+        case .affineK8V4:
+            "affineK8V4"
+        case .affineInt4:
+            "affineInt4"
+        case .turboQuant(let preset, let valueBits, let groupSize, let backend):
+            "turboQuant(\(preset.rawValue),v\(valueBits.map(String.init) ?? "default"),g\(groupSize),\(backend.rawValue))"
+        }
+    }
+
+    fileprivate var canonicalString: String {
+        switch self {
+        case .inherit:
+            "inherit"
+        case .rawFP16:
+            "rawFP16"
+        case .mlxAffine(let bits, let groupSize):
+            "mlxAffine(bits:\(bits),groupSize:\(groupSize))"
+        case .affineK8V4:
+            "affineK8V4"
+        case .affineInt4:
+            "affineInt4"
+        case .turboQuant(let preset, let valueBits, let groupSize, let backend):
+            "turboQuant(preset:\(preset.rawValue),valueBits:\(valueBits.map(String.init) ?? "nil"),groupSize:\(groupSize),backend:\(backend.rawValue))"
+        }
+    }
+}
+
+public struct KVLayerRule: Hashable, Codable, Sendable {
+    public var layerIndex: Int
+    public var codec: KVLayerCodec
+
+    public init(layerIndex: Int, codec: KVLayerCodec) {
+        self.layerIndex = layerIndex
+        self.codec = codec
+    }
+}
+
+public struct KVLayerPolicy: Hashable, Codable, Sendable {
+    public var defaultCodec: KVLayerCodec?
+    public var rules: [KVLayerRule]
+
+    public init(defaultCodec: KVLayerCodec? = nil, rules: [KVLayerRule] = []) {
+        self.defaultCodec = defaultCodec
+        self.rules = rules
+    }
+
+    public var stableHash: String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in canonicalString.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x0000_0100_0000_01b3
+        }
+        return String(format: "%016llx", hash)
+    }
+
+    public func summary(maxRules: Int = 8) -> String {
+        let visible = rules.sorted { $0.layerIndex < $1.layerIndex }
+            .prefix(max(0, maxRules))
+            .map { "\($0.layerIndex):\($0.codec.summary)" }
+        let suffix = rules.count > visible.count ? ",+\(rules.count - visible.count)" : ""
+        return "default=\(defaultCodec?.summary ?? "inherit");layers=[\(visible.joined(separator: ","))\(suffix)]"
+    }
+
+    private var canonicalString: String {
+        var parts = ["default:\(defaultCodec?.canonicalString ?? "nil")"]
+        for rule in rules.sorted(by: { lhs, rhs in
+            lhs.layerIndex == rhs.layerIndex
+                ? lhs.codec.canonicalString < rhs.codec.canonicalString
+                : lhs.layerIndex < rhs.layerIndex
+        }) {
+            parts.append("\(rule.layerIndex):\(rule.codec.canonicalString)")
+        }
+        return parts.joined(separator: "|")
+    }
 }
 
 public enum DevicePerformanceClass: String, Codable, Sendable, CaseIterable {
@@ -735,6 +1353,15 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
     public var devicePerformanceClass: DevicePerformanceClass?
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy?
     public var turboQuantValueBits: Int?
+    public var turboQuantRuntimeMode: TurboQuantRuntimeMode?
+    public var turboQuantResolvedRuntimeMode: TurboQuantRuntimeMode?
+    public var turboQuantKeyPrecision: TurboQuantKeyPrecision?
+    public var turboQuantValuePrecision: TurboQuantValuePrecision?
+    public var turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy?
+    public var turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine?
+    public var turboQuantNativeBackendVersion: String?
+    public var turboQuantDecodedActiveKVBytes: Int64?
     public var thermalDownshiftActive: Bool?
     public var runtimePressureReason: RuntimePressureReason?
     public var turboQuantProfileID: String?
@@ -749,6 +1376,9 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
     public var partitionSummary: String?
     public var mtpAcceptanceRate: Double?
     public var audioCapability: Bool?
+    public var turboQuantSpeculativeTelemetry: TurboQuantSpeculativeTelemetry?
+    public var turboQuantSpeculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision?
+    public var turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate]?
 
     public init(
         requestedAlgorithm: QuantizationAlgorithm = .turboQuant,
@@ -766,6 +1396,15 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         devicePerformanceClass: DevicePerformanceClass? = nil,
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy? = nil,
         turboQuantValueBits: Int? = nil,
+        turboQuantRuntimeMode: TurboQuantRuntimeMode? = nil,
+        turboQuantResolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        turboQuantKeyPrecision: TurboQuantKeyPrecision? = nil,
+        turboQuantValuePrecision: TurboQuantValuePrecision? = nil,
+        turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
+        turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        turboQuantNativeBackendVersion: String? = nil,
+        turboQuantDecodedActiveKVBytes: Int64? = nil,
         thermalDownshiftActive: Bool? = nil,
         runtimePressureReason: RuntimePressureReason? = nil,
         turboQuantProfileID: String? = nil,
@@ -779,7 +1418,10 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         ssdAvgChunkLatencyMS: Double? = nil,
         partitionSummary: String? = nil,
         mtpAcceptanceRate: Double? = nil,
-        audioCapability: Bool? = nil
+        audioCapability: Bool? = nil,
+        turboQuantSpeculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
+        turboQuantSpeculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil,
+        turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate]? = nil
     ) {
         self.requestedAlgorithm = requestedAlgorithm
         self.activeAlgorithm = activeAlgorithm
@@ -796,6 +1438,15 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         self.devicePerformanceClass = devicePerformanceClass
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
         self.turboQuantValueBits = turboQuantValueBits
+        self.turboQuantRuntimeMode = turboQuantRuntimeMode
+        self.turboQuantResolvedRuntimeMode = turboQuantResolvedRuntimeMode
+        self.turboQuantKeyPrecision = turboQuantKeyPrecision
+        self.turboQuantValuePrecision = turboQuantValuePrecision
+        self.turboQuantPrecisionPolicy = turboQuantPrecisionPolicy
+        self.turboQuantSparseValuePolicy = turboQuantSparseValuePolicy
+        self.turboQuantEffectiveBackend = turboQuantEffectiveBackend
+        self.turboQuantNativeBackendVersion = turboQuantNativeBackendVersion
+        self.turboQuantDecodedActiveKVBytes = turboQuantDecodedActiveKVBytes.map { max(0, $0) }
         self.thermalDownshiftActive = thermalDownshiftActive
         self.runtimePressureReason = runtimePressureReason
         self.turboQuantProfileID = turboQuantProfileID
@@ -810,6 +1461,9 @@ public struct RuntimeQuantizationDiagnostics: Hashable, Codable, Sendable {
         self.partitionSummary = partitionSummary
         self.mtpAcceptanceRate = mtpAcceptanceRate
         self.audioCapability = audioCapability
+        self.turboQuantSpeculativeTelemetry = turboQuantSpeculativeTelemetry
+        self.turboQuantSpeculativeAutoDisableDecision = turboQuantSpeculativeAutoDisableDecision
+        self.turboQuantPlatformFeatureGates = turboQuantPlatformFeatureGates
     }
 }
 
@@ -834,6 +1488,17 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var devicePerformanceClass: DevicePerformanceClass?
     public var turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy
     public var turboQuantValueBits: Int?
+    public var turboQuantRuntimeMode: TurboQuantRuntimeMode
+    public var turboQuantResolvedRuntimeMode: TurboQuantRuntimeMode?
+    public var turboQuantKeyPrecision: TurboQuantKeyPrecision?
+    public var turboQuantValuePrecision: TurboQuantValuePrecision?
+    public var turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var turboQuantKVLayerPolicy: KVLayerPolicy?
+    public var turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy?
+    public var turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine?
+    public var turboQuantNativeBackendVersion: String?
+    public var turboQuantDecodedActiveKVBytes: Int64?
+    public var turboQuantLayoutVersion: Int?
     public var thermalDownshiftActive: Bool
     public var runtimePressureReason: RuntimePressureReason
     public var turboQuantProfileID: String?
@@ -844,6 +1509,10 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
     public var memoryCounters: RuntimeMemoryCounters
     public var turboQuantUserMode: TurboQuantUserMode
     public var turboQuantAdmission: TurboQuantAdmission?
+    public var turboQuantSpeculativeSettings: TurboQuantSpeculativeSettings?
+    public var turboQuantSpeculativeTelemetry: TurboQuantSpeculativeTelemetry?
+    public var turboQuantSpeculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision?
+    public var turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate]
 
     private enum CodingKeys: String, CodingKey {
         case weightBits
@@ -866,6 +1535,17 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case devicePerformanceClass
         case turboQuantOptimizationPolicy
         case turboQuantValueBits
+        case turboQuantRuntimeMode
+        case turboQuantResolvedRuntimeMode
+        case turboQuantKeyPrecision
+        case turboQuantValuePrecision
+        case turboQuantPrecisionPolicy
+        case turboQuantKVLayerPolicy
+        case turboQuantSparseValuePolicy
+        case turboQuantEffectiveBackend
+        case turboQuantNativeBackendVersion
+        case turboQuantDecodedActiveKVBytes
+        case turboQuantLayoutVersion
         case thermalDownshiftActive
         case runtimePressureReason
         case turboQuantProfileID
@@ -876,6 +1556,10 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         case memoryCounters
         case turboQuantUserMode
         case turboQuantAdmission
+        case turboQuantSpeculativeSettings
+        case turboQuantSpeculativeTelemetry
+        case turboQuantSpeculativeAutoDisableDecision
+        case turboQuantPlatformFeatureGates
     }
 
     public init(
@@ -899,6 +1583,17 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         devicePerformanceClass: DevicePerformanceClass? = nil,
         turboQuantOptimizationPolicy: TurboQuantOptimizationPolicy = .auto,
         turboQuantValueBits: Int? = nil,
+        turboQuantRuntimeMode: TurboQuantRuntimeMode = .auto,
+        turboQuantResolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        turboQuantKeyPrecision: TurboQuantKeyPrecision? = nil,
+        turboQuantValuePrecision: TurboQuantValuePrecision? = nil,
+        turboQuantPrecisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        turboQuantKVLayerPolicy: KVLayerPolicy? = nil,
+        turboQuantSparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
+        turboQuantEffectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        turboQuantNativeBackendVersion: String? = nil,
+        turboQuantDecodedActiveKVBytes: Int64? = nil,
+        turboQuantLayoutVersion: Int? = nil,
         thermalDownshiftActive: Bool = false,
         runtimePressureReason: RuntimePressureReason = .none,
         turboQuantProfileID: String? = nil,
@@ -908,7 +1603,11 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         activeFallbackReason: String? = nil,
         memoryCounters: RuntimeMemoryCounters = RuntimeMemoryCounters(),
         turboQuantUserMode: TurboQuantUserMode = .balanced,
-        turboQuantAdmission: TurboQuantAdmission? = nil
+        turboQuantAdmission: TurboQuantAdmission? = nil,
+        turboQuantSpeculativeSettings: TurboQuantSpeculativeSettings? = nil,
+        turboQuantSpeculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
+        turboQuantSpeculativeAutoDisableDecision: TurboQuantSpeculativeAutoDisableDecision? = nil,
+        turboQuantPlatformFeatureGates: [TurboQuantPlatformFeatureGate] = TurboQuantPlatformFeatureGate.wave7DisabledDefaults
     ) {
         self.weightBits = weightBits
         self.kvBits = kvBits
@@ -930,6 +1629,17 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.devicePerformanceClass = devicePerformanceClass
         self.turboQuantOptimizationPolicy = turboQuantOptimizationPolicy
         self.turboQuantValueBits = turboQuantValueBits
+        self.turboQuantRuntimeMode = turboQuantRuntimeMode
+        self.turboQuantResolvedRuntimeMode = turboQuantResolvedRuntimeMode
+        self.turboQuantKeyPrecision = turboQuantKeyPrecision
+        self.turboQuantValuePrecision = turboQuantValuePrecision
+        self.turboQuantPrecisionPolicy = turboQuantPrecisionPolicy
+        self.turboQuantKVLayerPolicy = turboQuantKVLayerPolicy
+        self.turboQuantSparseValuePolicy = turboQuantSparseValuePolicy
+        self.turboQuantEffectiveBackend = turboQuantEffectiveBackend
+        self.turboQuantNativeBackendVersion = turboQuantNativeBackendVersion
+        self.turboQuantDecodedActiveKVBytes = turboQuantDecodedActiveKVBytes.map { max(0, $0) }
+        self.turboQuantLayoutVersion = turboQuantLayoutVersion
         self.thermalDownshiftActive = thermalDownshiftActive
         self.runtimePressureReason = runtimePressureReason
         self.turboQuantProfileID = turboQuantProfileID
@@ -940,6 +1650,10 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         self.memoryCounters = memoryCounters
         self.turboQuantUserMode = turboQuantUserMode
         self.turboQuantAdmission = turboQuantAdmission
+        self.turboQuantSpeculativeSettings = turboQuantSpeculativeSettings
+        self.turboQuantSpeculativeTelemetry = turboQuantSpeculativeTelemetry
+        self.turboQuantSpeculativeAutoDisableDecision = turboQuantSpeculativeAutoDisableDecision
+        self.turboQuantPlatformFeatureGates = turboQuantPlatformFeatureGates
     }
 
     public init(from decoder: Decoder) throws {
@@ -964,6 +1678,17 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         devicePerformanceClass = try container.decodeIfPresent(DevicePerformanceClass.self, forKey: .devicePerformanceClass)
         turboQuantOptimizationPolicy = try container.decodeIfPresent(TurboQuantOptimizationPolicy.self, forKey: .turboQuantOptimizationPolicy) ?? .auto
         turboQuantValueBits = try container.decodeIfPresent(Int.self, forKey: .turboQuantValueBits)
+        turboQuantRuntimeMode = try container.decodeIfPresent(TurboQuantRuntimeMode.self, forKey: .turboQuantRuntimeMode) ?? .auto
+        turboQuantResolvedRuntimeMode = try container.decodeIfPresent(TurboQuantRuntimeMode.self, forKey: .turboQuantResolvedRuntimeMode)
+        turboQuantKeyPrecision = try container.decodeIfPresent(TurboQuantKeyPrecision.self, forKey: .turboQuantKeyPrecision)
+        turboQuantValuePrecision = try container.decodeIfPresent(TurboQuantValuePrecision.self, forKey: .turboQuantValuePrecision)
+        turboQuantPrecisionPolicy = try container.decodeIfPresent(TurboQuantKVPrecisionPolicy.self, forKey: .turboQuantPrecisionPolicy)
+        turboQuantKVLayerPolicy = try container.decodeIfPresent(KVLayerPolicy.self, forKey: .turboQuantKVLayerPolicy)
+        turboQuantSparseValuePolicy = try container.decodeIfPresent(TurboQuantSparseValuePolicy.self, forKey: .turboQuantSparseValuePolicy)
+        turboQuantEffectiveBackend = try container.decodeIfPresent(TurboQuantAttentionBackendEngine.self, forKey: .turboQuantEffectiveBackend)
+        turboQuantNativeBackendVersion = try container.decodeIfPresent(String.self, forKey: .turboQuantNativeBackendVersion)
+        turboQuantDecodedActiveKVBytes = try container.decodeIfPresent(Int64.self, forKey: .turboQuantDecodedActiveKVBytes)
+        turboQuantLayoutVersion = try container.decodeIfPresent(Int.self, forKey: .turboQuantLayoutVersion)
         thermalDownshiftActive = try container.decodeIfPresent(Bool.self, forKey: .thermalDownshiftActive) ?? false
         runtimePressureReason = try container.decodeIfPresent(RuntimePressureReason.self, forKey: .runtimePressureReason) ?? .none
         turboQuantProfileID = try container.decodeIfPresent(String.self, forKey: .turboQuantProfileID)
@@ -974,6 +1699,16 @@ public struct QuantizationProfile: Hashable, Codable, Sendable {
         memoryCounters = try container.decodeIfPresent(RuntimeMemoryCounters.self, forKey: .memoryCounters) ?? RuntimeMemoryCounters()
         turboQuantUserMode = try container.decodeIfPresent(TurboQuantUserMode.self, forKey: .turboQuantUserMode) ?? .balanced
         turboQuantAdmission = try container.decodeIfPresent(TurboQuantAdmission.self, forKey: .turboQuantAdmission)
+        turboQuantSpeculativeSettings = try container.decodeIfPresent(TurboQuantSpeculativeSettings.self, forKey: .turboQuantSpeculativeSettings)
+        turboQuantSpeculativeTelemetry = try container.decodeIfPresent(TurboQuantSpeculativeTelemetry.self, forKey: .turboQuantSpeculativeTelemetry)
+        turboQuantSpeculativeAutoDisableDecision = try container.decodeIfPresent(
+            TurboQuantSpeculativeAutoDisableDecision.self,
+            forKey: .turboQuantSpeculativeAutoDisableDecision
+        )
+        turboQuantPlatformFeatureGates = try container.decodeIfPresent(
+            [TurboQuantPlatformFeatureGate].self,
+            forKey: .turboQuantPlatformFeatureGates
+        ) ?? TurboQuantPlatformFeatureGate.wave7DisabledDefaults
     }
 }
 
@@ -997,6 +1732,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
     public var promptCacheIdentifier: String?
     public var speculativeDraftModelID: ModelID?
     public var speculativeDecodingEnabled: Bool
+    public var speculativeSettings: TurboQuantSpeculativeSettings?
     public var unloadOnMemoryPressure: Bool
     public var repetitionContextSize: Int
     public var maxConcurrentSessions: Int
@@ -1015,6 +1751,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
         promptCacheIdentifier: String? = nil,
         speculativeDraftModelID: ModelID? = nil,
         speculativeDecodingEnabled: Bool = false,
+        speculativeSettings: TurboQuantSpeculativeSettings? = nil,
         unloadOnMemoryPressure: Bool = true,
         repetitionContextSize: Int = 20,
         maxConcurrentSessions: Int = 1
@@ -1032,6 +1769,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
         self.promptCacheIdentifier = promptCacheIdentifier
         self.speculativeDraftModelID = speculativeDraftModelID
         self.speculativeDecodingEnabled = speculativeDecodingEnabled
+        self.speculativeSettings = speculativeSettings
         self.unloadOnMemoryPressure = unloadOnMemoryPressure
         self.repetitionContextSize = repetitionContextSize
         self.maxConcurrentSessions = maxConcurrentSessions
@@ -1051,6 +1789,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
         case promptCacheIdentifier
         case speculativeDraftModelID
         case speculativeDecodingEnabled
+        case speculativeSettings
         case unloadOnMemoryPressure
         case repetitionContextSize
         case maxConcurrentSessions
@@ -1071,6 +1810,7 @@ public struct RuntimeProfile: Hashable, Codable, Sendable {
         promptCacheIdentifier = try container.decodeIfPresent(String.self, forKey: .promptCacheIdentifier)
         speculativeDraftModelID = try container.decodeIfPresent(ModelID.self, forKey: .speculativeDraftModelID)
         speculativeDecodingEnabled = try container.decodeIfPresent(Bool.self, forKey: .speculativeDecodingEnabled) ?? false
+        speculativeSettings = try container.decodeIfPresent(TurboQuantSpeculativeSettings.self, forKey: .speculativeSettings)
         unloadOnMemoryPressure = try container.decodeIfPresent(Bool.self, forKey: .unloadOnMemoryPressure) ?? true
         repetitionContextSize = try container.decodeIfPresent(Int.self, forKey: .repetitionContextSize) ?? 20
         maxConcurrentSessions = try container.decodeIfPresent(Int.self, forKey: .maxConcurrentSessions) ?? 1
@@ -1198,6 +1938,163 @@ public struct ModelInstall: Identifiable, Hashable, Codable, Sendable {
         cacheTopology = try container.decodeIfPresent(ModelCacheTopology.self, forKey: .cacheTopology) ?? .standardAttention
         turboQuantFamilySupport = try container.decodeIfPresent(TurboQuantFamilySupport.self, forKey: .turboQuantFamilySupport) ?? .attentionKVFull
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    }
+}
+
+public extension ModelInstall {
+    var resolvedParameterCount: Int64? {
+        parameterCount
+            ?? ModelDiscoveryResourcePolicy.inferredParameterCount(repository: repository, tags: [])
+    }
+
+    var effectiveTurboQuantModalities: Set<ModelModality> {
+        guard modalities.contains(.text),
+              modalities.contains(.vision),
+              turboQuantModelTypeHints.contains(where: Self.isQwen35TurboQuantFamily),
+              cacheTopology == .hybridAttentionAndNativeState,
+              keyHeadDimension == 256,
+              valueHeadDimension == 256,
+              !hasExplicitVisionInstallSignal
+        else {
+            return modalities
+        }
+        return [.text]
+    }
+
+    var effectiveTurboQuantFamilySupport: TurboQuantFamilySupport {
+        if turboQuantFamilySupport == .attentionKVFull
+            || turboQuantFamilySupport == .hybridFull {
+            return turboQuantFamilySupport
+        }
+        if turboQuantFamilySupport == .unsupportedTopology,
+           effectiveTurboQuantModalities != [.text] {
+            return turboQuantFamilySupport
+        }
+        guard effectiveTurboQuantModalities == [.text] else { return turboQuantFamilySupport }
+
+        let modelTypes = turboQuantModelTypeHints
+        let supportedHeadShape = Self.supportedTurboQuantAttentionHeadShape(
+            key: keyHeadDimension,
+            value: valueHeadDimension
+        )
+        switch cacheTopology {
+        case .hybridAttentionAndNativeState:
+            if modelTypes.contains(where: Self.isQwen35TurboQuantFamily)
+                && keyHeadDimension == 256 && valueHeadDimension == 256
+            {
+                return .hybridFull
+            }
+            if modelTypes.contains("lfm2"), supportedHeadShape {
+                return .hybridFull
+            }
+            return turboQuantFamilySupport
+        case .standardAttention, .slidingAttention, .sharedKVAttention:
+            guard supportedHeadShape else { return turboQuantFamilySupport }
+            if modelTypes.contains(where: Self.isBroadTurboQuantTextFamily) {
+                return .attentionKVFull
+            }
+            return turboQuantFamilySupport
+        case .visionLanguageAttention, .unsupported:
+            return turboQuantFamilySupport
+        }
+    }
+
+    var isSmallTextGenerationModel: Bool {
+        guard effectiveTurboQuantModalities == [.text], let resolvedParameterCount else { return false }
+        return resolvedParameterCount <= 2_000_000_000
+    }
+
+    private var hasExplicitVisionInstallSignal: Bool {
+        if cacheTopology == .visionLanguageAttention {
+            return true
+        }
+        for value in [repository, displayName, modelType, textConfigModelType] {
+            guard let value else { continue }
+            let lowercased = value
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let normalized = lowercased
+                .replacingOccurrences(of: "-", with: "_")
+                .replacingOccurrences(of: ".", with: "_")
+            if lowercased.contains("vision")
+                || lowercased.contains("visual")
+                || lowercased.contains("image")
+                || lowercased.contains("video")
+                || lowercased.contains("omni")
+                || lowercased.contains("multimodal")
+                || lowercased.contains("vlprocessor")
+                || lowercased.contains("qwen2vl")
+                || lowercased.contains("qwen3vl")
+            {
+                return true
+            }
+            if normalized.contains("_vl")
+                || normalized.contains("/vl")
+                || normalized.hasPrefix("vl_")
+                || normalized.contains("qwen2_vl")
+                || normalized.contains("qwen3_vl")
+                || normalized.contains("qwen3_5_vl")
+            {
+                return true
+            }
+        }
+        return false
+    }
+
+    private var turboQuantModelTypeHints: Set<String> {
+        var hints = Set<String>()
+        for value in [modelType, textConfigModelType, repository, displayName] {
+            guard let value else { continue }
+            let normalized = value
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "-", with: "_")
+                .replacingOccurrences(of: ".", with: "_")
+            guard !normalized.isEmpty else { continue }
+            hints.insert(normalized)
+        }
+        return hints
+    }
+
+    private static func supportedTurboQuantAttentionHeadShape(key: Int?, value: Int?) -> Bool {
+        guard let key, let value, key == value else { return false }
+        return [64, 80, 96, 112, 128, 160, 192, 256, 512].contains(key)
+    }
+
+    private static func isQwen35TurboQuantFamily(_ value: String) -> Bool {
+        value == "qwen3_5"
+            || value == "qwen3_5_text"
+            || value == "qwen3_5_moe"
+            || value == "qwen3_5_moe_text"
+            || value.contains("qwen3_5")
+    }
+
+    private static func isBroadTurboQuantTextFamily(_ value: String) -> Bool {
+        value == "llama"
+            || value == "mistral"
+            || value == "mistral3"
+            || value == "mistral4"
+            || value == "ministral3"
+            || value == "gemma"
+            || value == "gemma2"
+            || value == "gemma3"
+            || value == "gemma3_text"
+            || value == "gemma3n"
+            || value == "gemma3n_text"
+            || value == "gemma4"
+            || value == "gemma4_text"
+            || value == "qwen2"
+            || value == "qwen3"
+            || value == "qwen3_moe"
+            || value == "acereason"
+            || value == "phi"
+            || value == "phi3"
+            || value == "granite"
+            || value == "exaone"
+            || value == "exaone4"
+            || value == "smollm3"
+            || value == "glm4_moe_lite"
+            || isQwen35TurboQuantFamily(value)
     }
 }
 
@@ -1834,33 +2731,126 @@ public struct LocalGenerationPipelinePlan: Hashable, Codable, Sendable {
         safety: LocalRuntimeSafetyAssessment,
         availableMemoryBytes: Int64?
     ) -> Int? {
-        guard safety.constrainedModeActive else { return nil }
-        let policyLimit: Int?
+        let pressureLimit: Int?
         switch safety.pressureReason {
         case .lowMemory:
             if let availableMemoryBytes {
                 if availableMemoryBytes < 1_000_000_000 {
-                    policyLimit = 128
+                    pressureLimit = 128
                 } else if availableMemoryBytes < 1_200_000_000 {
-                    policyLimit = 256
+                    pressureLimit = 256
                 } else if availableMemoryBytes < LocalRuntimeSafetyPolicy.constrainedAvailableMemoryBytes {
-                    policyLimit = 512
+                    pressureLimit = 512
                 } else {
-                    policyLimit = 1_024
+                    pressureLimit = 1_024
                 }
             } else {
-                policyLimit = 512
+                pressureLimit = 512
             }
         case .thermalFair, .thermalSerious, .thinThermal:
-            policyLimit = 768
+            pressureLimit = 768
         case .lowPower:
-            policyLimit = 1_024
+            pressureLimit = 1_024
         case .none, .thermalCritical:
-            policyLimit = nil
+            pressureLimit = nil
         }
 
+        let loadedTurboQuantHeadroomLimit = Self.loadedTurboQuantHeadroomCompletionLimit(
+            profile: profile,
+            availableMemoryBytes: availableMemoryBytes
+        )
+        let policyLimit: Int?
+        if safety.constrainedModeActive {
+            policyLimit = [pressureLimit, loadedTurboQuantHeadroomLimit]
+                .compactMap { $0 }
+                .min()
+        } else {
+            policyLimit = loadedTurboQuantHeadroomLimit
+        }
         guard let policyLimit else { return nil }
         return min(profile.quantization.maxKVSize ?? policyLimit, policyLimit)
+    }
+
+    private static func loadedTurboQuantHeadroomCompletionLimit(
+        profile: RuntimeProfile,
+        availableMemoryBytes: Int64?
+    ) -> Int? {
+        guard profile.quantization.kvCacheStrategy == .turboQuant,
+              let availableMemoryBytes else {
+            return nil
+        }
+        let headroomLimit: Int?
+        if availableMemoryBytes < 1_000_000_000 {
+            headroomLimit = 128
+        } else if availableMemoryBytes < 1_200_000_000 {
+            headroomLimit = 256
+        } else if availableMemoryBytes < 1_800_000_000 {
+            headroomLimit = 384
+        } else if availableMemoryBytes < 2_600_000_000 {
+            headroomLimit = 512
+        } else if availableMemoryBytes < 3_000_000_000 {
+            headroomLimit = 768
+        } else {
+            headroomLimit = nil
+        }
+        return [
+            headroomLimit,
+            hybridTurboQuantCompletionLimit(profile: profile, availableMemoryBytes: availableMemoryBytes),
+            qualityGuardedTurboQuantCompletionLimit(profile: profile, availableMemoryBytes: availableMemoryBytes),
+        ]
+            .compactMap { $0 }
+            .min()
+    }
+
+    private static func qualityGuardedTurboQuantCompletionLimit(
+        profile: RuntimeProfile,
+        availableMemoryBytes: Int64
+    ) -> Int? {
+        guard profile.quantization.kvCacheStrategy == .turboQuant else { return nil }
+        let profileID = profile.quantization.turboQuantProfileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let profileID, !profileID.isEmpty else { return nil }
+
+        if profileID == "gemma-3-1b" {
+            return availableMemoryBytes < 3_000_000_000 ? 256 : 384
+        }
+        if profileID == "llama-3.2-3b" {
+            return availableMemoryBytes < 2_000_000_000 ? 128 : 192
+        }
+        if (profileID.hasPrefix("qwen3.5-") || profileID.hasPrefix("qwen3.6-")),
+           profileID != "qwen3.5-0.8b" {
+            return availableMemoryBytes < 3_200_000_000 ? 192 : 256
+        }
+        return nil
+    }
+
+    private static func hybridTurboQuantCompletionLimit(
+        profile: RuntimeProfile,
+        availableMemoryBytes: Int64
+    ) -> Int? {
+        guard isHybridTurboQuantRuntimeProfile(profile) else { return nil }
+        if availableMemoryBytes < 3_200_000_000 {
+            return 256
+        }
+        if availableMemoryBytes < 4_000_000_000 {
+            return 384
+        }
+        if availableMemoryBytes < 5_000_000_000 {
+            return 512
+        }
+        return nil
+    }
+
+    private static func isHybridTurboQuantRuntimeProfile(_ profile: RuntimeProfile) -> Bool {
+        guard profile.quantization.kvCacheStrategy == .turboQuant else { return false }
+        let profileID = profile.quantization.turboQuantProfileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let profileID, !profileID.isEmpty else { return false }
+        return profileID.contains("qwen3.5")
+            || profileID.contains("qwen3.6")
+            || profileID.contains("lfm2")
     }
 
     private mutating func fitKVCacheToPreparedPrompt(

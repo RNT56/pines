@@ -63,7 +63,8 @@ struct AnthropicProviderService: Sendable {
             method: .get,
             path: "files/\(fileID)/content",
             accept: "application/octet-stream",
-            betaHeaders: [Self.filesAPIBeta]
+            betaHeaders: [Self.filesAPIBeta],
+            maxResponseBytes: BoundedHTTPResponse.fileLimit
         )
     }
 
@@ -99,7 +100,8 @@ struct AnthropicProviderService: Sendable {
         try await send(
             method: .get,
             path: "messages/batches/\(batchID)/results",
-            accept: "application/x-jsonlines"
+            accept: "application/x-jsonlines",
+            maxResponseBytes: BoundedHTTPResponse.fileLimit
         )
     }
 
@@ -128,7 +130,8 @@ struct AnthropicProviderService: Sendable {
         body: Data? = nil,
         contentType: String? = nil,
         accept: String? = nil,
-        betaHeaders: [String] = []
+        betaHeaders: [String] = [],
+        maxResponseBytes: Int = BoundedHTTPResponse.jsonLimit
     ) async throws -> AnthropicProviderResponse {
         guard let apiKey = try await readAPIKey() else {
             throw CloudProviderError.missingAPIKey
@@ -156,7 +159,7 @@ struct AnthropicProviderService: Sendable {
 
         var lastRetryableResponse: AnthropicProviderResponse?
         for attempt in 0..<3 {
-            let (data, http) = try await urlSession.data(for: request)
+            let (data, http) = try await BoundedHTTPResponse.data(for: request, session: urlSession, maxBytes: maxResponseBytes)
             let providerResponse = AnthropicProviderResponse(data: data, httpResponse: http)
             if (200..<300).contains(http.statusCode) {
                 return providerResponse

@@ -33,7 +33,7 @@ Allowed execution modes:
 
 If cloud is required but not configured, execution must fail with a consent/configuration path. Local vault and MCP resource context is not sent to cloud automatically; the app presents a per-turn approval sheet so the user can send without that context or explicitly include it.
 
-All remote endpoints must use HTTPS. `EndpointSecurityPolicy` is shared by BYOK providers, MCP endpoints, OAuth authorization/token URLs, model catalog calls, and `web.fetch`. `http://localhost`, `http://127.0.0.1`, and `http://[::1]` are allowed only when the integration has an explicit local-development flag. RFC1918/LAN HTTP is never treated as local.
+All remote endpoints must use HTTPS. `EndpointSecurityPolicy` is shared by BYOK providers, MCP endpoints, OAuth authorization/token URLs, model catalog calls, `web.fetch`, and browser top-level navigation. `http://localhost`, `http://127.0.0.1`, and `http://[::1]` are allowed only when the integration has an explicit local-development flag. RFC1918/LAN HTTP is never treated as local. Web/browser targets additionally reject private, loopback, link-local, multicast, documentation, and local-name hosts; `web.fetch` validates DNS results, redirects, and final URLs and streams at most 1.5 MB of response data.
 
 Provider-hosted resources are explicit cloud resources. OpenAI files/vector stores, Anthropic files, Gemini files/context caches, provider batches, generated media, generated files, realtime/live sessions, and Deep Research runs are shown through provider lifecycle records and must stay visually distinct from local Vault documents. Uploading a Vault document to a provider, importing a provider artifact into Vault, deleting a local Vault file, and deleting a provider-hosted copy are separate user-visible actions.
 
@@ -50,11 +50,13 @@ Tools are deny-by-default. Tool specs include:
 - timeout
 - explanation requirement
 
-Web and browser outputs should be treated as untrusted content. Browser automation must require visible user approval for login, checkout, posting, upload, credential-adjacent, or remote-state-changing actions. Local private-data tools for vault, attachment, and conversation reads are scoped through repository and run context rather than arbitrary filesystem paths, and they carry the cloud-context permission so BYOK runs require explicit private-context approval. Normal chat does not advertise all registered tools by default; tool-enabled agent flows and MCP sampling keep their own policy checks.
+Web and browser outputs should be treated as untrusted content. Browser action specs are classified as remote-state-changing and top-level navigations are public-HTTPS-only. Browser automation must require visible user approval for login, checkout, posting, upload, credential-adjacent, or remote-state-changing actions. Local private-data tools for vault, attachment, and conversation reads are scoped through repository and run context rather than arbitrary filesystem paths, and they carry the cloud-context permission so BYOK runs require explicit private-context approval. Normal chat does not advertise all registered tools by default; tool-enabled agent flows and MCP sampling keep their own policy checks. MCP tool annotations are persisted; absent annotations are treated conservatively as remote-state-changing and destructive hints as sensitive.
+
+Provider, model-catalog, MCP, OAuth, Brave Search, and credential-validation services stream finite responses into bounded buffers and reject cross-origin redirects so credentials cannot follow a response to another host. Provider JSON is capped at 32 MB, ordinary downloaded files/audio/batch results at 64 MB, generated video at 512 MB, model-catalog responses at 16 MB, MCP JSON-RPC bodies at 8 MB, Brave Search at 2 MB, and OAuth/credential responses at 1 MB. Responses with an excessive declared or observed size fail before they are persisted or base64-expanded.
 
 ## Sync Boundary
 
-Optional iCloud sync may sync settings, conversations, messages, vault metadata, and vault chunks after user opt-in.
+Optional iCloud sync may sync settings, Project Spaces, conversations, messages, vault metadata, and vault chunks after user opt-in.
 
 CloudKit repository merge/apply code lives in `GRDBPinesStore+CloudKit.swift` so the sync boundary stays isolated from the base local-store implementation.
 
@@ -67,9 +69,12 @@ Do not sync:
 - prompt caches
 - provider-hosted file contents, provider context caches, provider batch payloads, realtime/live session payloads, or generated provider artifacts unless a later explicit sync/export workflow encrypts them first
 - generated embeddings and compressed vector codes by default
+- TurboQuant KV snapshots by default
 - transient tool/browser state
 
 Generated embeddings and compressed vector codes sync only when private iCloud sync and the separate embedding sync toggle are both enabled. Chat attachments remain local files; when a user chooses cloud execution, supported image/PDF/text attachments can be encoded into the provider request for that turn according to provider capability checks.
+
+TurboQuant KV snapshots are local encrypted blobs. They are bound to model, tokenizer, profile, RoPE, prefix, layout, and compatibility-pair identity, and restore fails closed on mismatch or corruption. Snapshot deletion is included in model deletion and data-erasure flows.
 
 Chat attachment imports use user-selected files, stage local copies under app support storage, and reject empty or oversized files before request construction. HEIC/HEIF inputs are converted to JPEG at import time, so the original local file is not sent directly to providers. Message row actions can copy content, edit user-authored text while no run is active, or import local message attachments into Vault; Vault import follows the normal local ingestion and embedding-approval flow.
 
@@ -85,6 +90,10 @@ Every production release must pass:
 
 - `swift test --disable-automatic-resolution`
 - `scripts/ci/check-public-hygiene.sh`
+- `scripts/ci/check-mlx-package-pins.sh`
+- `scripts/ci/run-xcode-validation.sh all`
 - encrypted-store migration verification against a plaintext fixture
 - CloudKit encrypted-zone verification showing no plaintext payload fields in `PinesPrivateEncryptedV1`
-- App Store privacy manifest review
+- App Store privacy manifest review for the signed archive
+
+TurboQuant model/device/mode compatibility claims require separate real-device evidence. A green runtime compatibility pair is necessary for local release, but it is not sufficient to label a model profile `Verified` or `Certified`.

@@ -13,10 +13,73 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-    public static let currentVersion = 19
+  public static let currentVersion = 27
+
+    /// Durable application tables that must survive plaintext-to-SQLCipher migration and must be
+    /// cleared by a full local-data reset. Keep this catalog aligned with every non-FTS table
+    /// created by `migrations`; persistence adapters use it as the single source of truth.
+    public static let durableUserTableNames = [
+        "conversations",
+        "messages",
+        "attachments",
+        "model_installs",
+        "vault_documents",
+        "vault_chunks",
+        "audit_events",
+        "app_settings",
+        "cloud_providers",
+        "cloud_model_catalog_snapshots",
+        "model_downloads",
+        "sync_records",
+        "chat_runs",
+        "agent_sessions",
+        "tool_runs",
+        "vault_import_jobs",
+        "browser_actions",
+        "vault_embeddings",
+        "mcp_servers",
+        "mcp_tools",
+        "mcp_resources",
+        "mcp_resource_templates",
+        "mcp_prompts",
+        "vault_embeddings_v2",
+        "vault_embedding_profiles",
+        "vault_embedding_jobs",
+        "vault_retrieval_events",
+        "vault_embeddings_v3",
+        "openai_provider_files",
+        "openai_vector_stores",
+        "openai_vector_store_files",
+        "openai_hosted_tool_calls",
+        "openai_artifacts",
+        "openai_background_responses",
+        "openai_realtime_sessions",
+        "openai_batch_jobs",
+        "openai_structured_output_results",
+        "provider_files",
+        "provider_artifacts",
+        "provider_caches",
+        "provider_batches",
+        "provider_live_sessions",
+        "provider_structured_outputs",
+        "provider_model_capabilities",
+        "provider_research_runs",
+        "projects",
+        "turboquant_profile_evidence",
+        "turboquant_evidence_revocations",
+        "turboquant_memory_calibration_samples",
+        "turboquant_memory_calibrations",
+        "kv_snapshot_manifest",
+        "kv_snapshot_blob",
+        "kv_snapshot_reference",
+        "kv_snapshot_restore_attempt",
+        "kv_snapshot_quarantine",
+    ]
 
     public static let migrations: [DatabaseMigration] = [
-        DatabaseMigration(version: 1, name: "initial-local-first-schema", sql: [
+    DatabaseMigration(
+      version: 1, name: "initial-local-first-schema",
+      sql: [
             """
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -135,7 +198,9 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_vault_chunks_document ON vault_chunks(document_id, ordinal);",
             "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at);",
         ]),
-        DatabaseMigration(version: 2, name: "production-runtime-state", sql: [
+    DatabaseMigration(
+      version: 2, name: "production-runtime-state",
+      sql: [
             """
             CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
                 INSERT INTO messages_fts(rowid, content, conversation_id, message_id)
@@ -293,7 +358,9 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_tool_runs_session ON tool_runs(agent_session_id, created_at);",
             "CREATE INDEX IF NOT EXISTS idx_sync_records_state ON sync_records(state);",
         ]),
-        DatabaseMigration(version: 3, name: "vault-turboquant-embeddings", sql: [
+    DatabaseMigration(
+      version: 3, name: "vault-turboquant-embeddings",
+      sql: [
             """
             CREATE TABLE IF NOT EXISTS vault_embeddings (
                 chunk_id TEXT PRIMARY KEY NOT NULL REFERENCES vault_chunks(id) ON DELETE CASCADE,
@@ -311,7 +378,9 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_model ON vault_embeddings(embedding_model_id, dimensions);",
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_document ON vault_embeddings(document_id);",
         ]),
-        DatabaseMigration(version: 4, name: "remote-mcp-tools", sql: [
+    DatabaseMigration(
+      version: 4, name: "remote-mcp-tools",
+      sql: [
             """
             CREATE TABLE IF NOT EXISTS mcp_servers (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -349,7 +418,9 @@ public enum PinesDatabaseSchema {
             """,
             "CREATE INDEX IF NOT EXISTS idx_mcp_tools_server ON mcp_tools(server_id);",
         ]),
-        DatabaseMigration(version: 5, name: "mcp-resources-prompts-sampling", sql: [
+    DatabaseMigration(
+      version: 5, name: "mcp-resources-prompts-sampling",
+      sql: [
             "ALTER TABLE mcp_servers ADD COLUMN resources_enabled INTEGER NOT NULL DEFAULT 0;",
             "ALTER TABLE mcp_servers ADD COLUMN prompts_enabled INTEGER NOT NULL DEFAULT 0;",
             "ALTER TABLE mcp_servers ADD COLUMN sampling_enabled INTEGER NOT NULL DEFAULT 0;",
@@ -402,17 +473,23 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_mcp_resources_server ON mcp_resources(server_id);",
             "CREATE INDEX IF NOT EXISTS idx_mcp_prompts_server ON mcp_prompts(server_id);",
         ]),
-        DatabaseMigration(version: 6, name: "retrieval-and-sync-indexes", sql: [
+    DatabaseMigration(
+      version: 6, name: "retrieval-and-sync-indexes",
+      sql: [
             "CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_conversations_list ON conversations(deleted_at, pinned DESC, updated_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_vault_documents_sync_updated ON vault_documents(sync_state, updated_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_scan ON vault_embeddings(dimensions, embedding_model_id, chunk_id);",
             "CREATE INDEX IF NOT EXISTS idx_vault_chunks_document_ordinal ON vault_chunks(document_id, ordinal);",
         ]),
-        DatabaseMigration(version: 7, name: "conversation-provider-selection", sql: [
-            "ALTER TABLE conversations ADD COLUMN default_provider_id TEXT;",
+    DatabaseMigration(
+      version: 7, name: "conversation-provider-selection",
+      sql: [
+        "ALTER TABLE conversations ADD COLUMN default_provider_id TEXT;"
         ]),
-        DatabaseMigration(version: 8, name: "cloudkit-message-and-embedding-merge-keys", sql: [
+    DatabaseMigration(
+      version: 8, name: "cloudkit-message-and-embedding-merge-keys",
+      sql: [
             "ALTER TABLE messages ADD COLUMN updated_at REAL;",
             "ALTER TABLE messages ADD COLUMN deleted_at REAL;",
             "ALTER TABLE messages ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'local';",
@@ -447,10 +524,14 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_document ON vault_embeddings(document_id);",
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_scan ON vault_embeddings(dimensions, embedding_model_id, chunk_id);",
         ]),
-        DatabaseMigration(version: 9, name: "message-provider-metadata", sql: [
-            "ALTER TABLE messages ADD COLUMN provider_metadata_json TEXT;",
+    DatabaseMigration(
+      version: 9, name: "message-provider-metadata",
+      sql: [
+        "ALTER TABLE messages ADD COLUMN provider_metadata_json TEXT;"
         ]),
-        DatabaseMigration(version: 10, name: "vault-embedding-profiles", sql: [
+    DatabaseMigration(
+      version: 10, name: "vault-embedding-profiles",
+      sql: [
             """
             CREATE TABLE IF NOT EXISTS vault_embedding_profiles (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -574,11 +655,15 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_document ON vault_embeddings(document_id);",
             "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_scan ON vault_embeddings(dimensions, profile_id, chunk_id);",
         ]),
-        DatabaseMigration(version: 11, name: "message-tool-call-payloads", sql: [
+    DatabaseMigration(
+      version: 11, name: "message-tool-call-payloads",
+      sql: [
             "ALTER TABLE messages ADD COLUMN tool_name TEXT;",
             "ALTER TABLE messages ADD COLUMN tool_calls_json TEXT;",
         ]),
-        DatabaseMigration(version: 12, name: "fts-delete-triggers", sql: [
+    DatabaseMigration(
+      version: 12, name: "fts-delete-triggers",
+      sql: [
             "DROP TRIGGER IF EXISTS messages_ad;",
             "DROP TRIGGER IF EXISTS messages_au;",
             "DROP TRIGGER IF EXISTS vault_chunks_ad;",
@@ -608,7 +693,9 @@ public enum PinesDatabaseSchema {
             END;
             """,
         ]),
-        DatabaseMigration(version: 13, name: "high-assurance-security-reset", sql: [
+    DatabaseMigration(
+      version: 13, name: "high-assurance-security-reset",
+      sql: [
             "ALTER TABLE cloud_providers ADD COLUMN headers_json TEXT;",
             "ALTER TABLE cloud_providers ADD COLUMN allow_insecure_local_http INTEGER NOT NULL DEFAULT 0;",
             "UPDATE cloud_providers SET headers_json = NULL, extra_headers_json = NULL, validation_status = 'unvalidated', last_validation_error = NULL;",
@@ -632,7 +719,9 @@ public enum PinesDatabaseSchema {
             );
             """,
         ]),
-        DatabaseMigration(version: 14, name: "openai-parity-contracts", sql: [
+    DatabaseMigration(
+      version: 14, name: "openai-parity-contracts",
+      sql: [
             "ALTER TABLE chat_runs ADD COLUMN provider_kind TEXT;",
             "ALTER TABLE chat_runs ADD COLUMN provider_base_url TEXT;",
             "ALTER TABLE chat_runs ADD COLUMN provider_request_id TEXT;",
@@ -814,7 +903,9 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_openai_batch_jobs_provider ON openai_batch_jobs(provider_id, created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_openai_structured_output_results_response ON openai_structured_output_results(response_id);",
         ]),
-        DatabaseMigration(version: 15, name: "generic-provider-persistence", sql: [
+    DatabaseMigration(
+      version: 15, name: "generic-provider-persistence",
+      sql: [
             """
             CREATE TABLE IF NOT EXISTS provider_files (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -1051,7 +1142,9 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_response ON provider_research_runs(provider_kind, response_id);",
             "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_status ON provider_research_runs(status, updated_at);",
         ]),
-        DatabaseMigration(version: 16, name: "project-spaces", sql: [
+    DatabaseMigration(
+      version: 16, name: "project-spaces",
+      sql: [
             """
             CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -1068,20 +1161,251 @@ public enum PinesDatabaseSchema {
             "CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id, updated_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_vault_documents_project ON vault_documents(project_id, updated_at DESC);",
         ]),
-        DatabaseMigration(version: 17, name: "model-install-runtime-metadata", sql: [
+    DatabaseMigration(
+      version: 17, name: "model-install-runtime-metadata",
+      sql: [
             "ALTER TABLE model_installs ADD COLUMN parameter_count INTEGER;",
             "ALTER TABLE model_installs ADD COLUMN key_head_dimension INTEGER;",
             "ALTER TABLE model_installs ADD COLUMN value_head_dimension INTEGER;",
         ]),
-        DatabaseMigration(version: 18, name: "model-install-nested-runtime-metadata", sql: [
+    DatabaseMigration(
+      version: 18, name: "model-install-nested-runtime-metadata",
+      sql: [
             "ALTER TABLE model_installs ADD COLUMN text_config_model_type TEXT;",
             "ALTER TABLE model_installs ADD COLUMN routed_experts INTEGER;",
             "ALTER TABLE model_installs ADD COLUMN experts_per_token INTEGER;",
         ]),
-        DatabaseMigration(version: 19, name: "model-install-cache-topology-support", sql: [
+    DatabaseMigration(
+      version: 19, name: "model-install-cache-topology-support",
+      sql: [
             "ALTER TABLE model_installs ADD COLUMN cache_topology TEXT NOT NULL DEFAULT 'standardAttention';",
             "ALTER TABLE model_installs ADD COLUMN turbo_quant_family_support TEXT NOT NULL DEFAULT 'attentionKVFull';",
         ]),
+    DatabaseMigration(
+      version: 20, name: "turboquant-evidence-loop",
+      sql: [
+            """
+            CREATE TABLE IF NOT EXISTS turboquant_profile_evidence (
+                id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                evidence_level TEXT NOT NULL,
+                compatibility_pair_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                model_revision TEXT,
+                tokenizer_hash TEXT,
+                profile_hash TEXT,
+                fallback_contract_hash TEXT NOT NULL,
+                device_class TEXT NOT NULL,
+                hardware_model TEXT,
+                os_build TEXT NOT NULL,
+                user_mode TEXT NOT NULL,
+                turboquant_preset TEXT,
+                value_bits INTEGER,
+                group_size INTEGER,
+                layout_version INTEGER,
+                active_attention_path TEXT,
+                admitted_context_tokens INTEGER NOT NULL,
+                peak_memory_bytes INTEGER NOT NULL,
+                prompt_tokens_per_second REAL,
+                decode_tokens_per_second_p50 REAL,
+                decode_tokens_per_second_p95 REAL,
+                first_token_latency_ms REAL,
+                quality_gate_json TEXT NOT NULL,
+                memory_calibration_sample_id TEXT,
+                revoked_reason TEXT,
+                created_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS turboquant_evidence_revocations (
+                id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                evidence_id TEXT NOT NULL REFERENCES turboquant_profile_evidence(id) ON DELETE CASCADE,
+                revoked_at REAL NOT NULL,
+                reason TEXT NOT NULL,
+                replacement_evidence_id TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS turboquant_memory_calibration_samples (
+                id TEXT PRIMARY KEY NOT NULL,
+                sample_json TEXT NOT NULL,
+                compatibility_pair_id TEXT,
+                model_id TEXT NOT NULL,
+                model_revision TEXT,
+                device_class TEXT NOT NULL,
+                user_mode TEXT NOT NULL,
+                attention_path TEXT,
+                run_outcome TEXT NOT NULL,
+                requested_context_tokens INTEGER NOT NULL,
+                admitted_context_tokens INTEGER NOT NULL,
+                observed_peak_memory_bytes INTEGER,
+                memory_warnings_seen INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS turboquant_memory_calibrations (
+                id TEXT PRIMARY KEY NOT NULL,
+                calibration_json TEXT NOT NULL,
+                device_class TEXT NOT NULL,
+                model_family TEXT NOT NULL,
+                attention_path TEXT NOT NULL,
+                sample_count INTEGER NOT NULL,
+                estimated_to_actual_peak_ratio_p95 REAL NOT NULL,
+                scratch_multiplier REAL NOT NULL,
+                fallback_multiplier REAL NOT NULL,
+                safety_reserve_bytes INTEGER NOT NULL,
+                stale_after REAL,
+                updated_at REAL NOT NULL
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_lookup ON turboquant_profile_evidence(model_id, compatibility_pair_id, device_class, user_mode, fallback_contract_hash, evidence_level, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_tuple ON turboquant_profile_evidence(model_id, model_revision, tokenizer_hash, profile_hash, layout_version, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_memory_samples_lookup ON turboquant_memory_calibration_samples(model_id, device_class, user_mode, attention_path, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_memory_calibrations_lookup ON turboquant_memory_calibrations(device_class, model_family, attention_path, updated_at DESC);",
+        ]),
+    DatabaseMigration(
+      version: 21, name: "turboquant-kv-snapshot-store",
+      sql: [
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_manifest (
+                snapshot_id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                model_id TEXT NOT NULL REFERENCES model_installs(repository) ON DELETE CASCADE,
+                model_revision TEXT,
+                tokenizer_hash TEXT NOT NULL,
+                profile_hash TEXT NOT NULL,
+                turboquant_layout_version INTEGER NOT NULL,
+                rope_config_hash TEXT NOT NULL,
+                token_prefix_hash TEXT NOT NULL,
+                fallback_contract_hash TEXT,
+                logical_length INTEGER NOT NULL,
+                pinned_prefix_length INTEGER NOT NULL,
+                compressed_key_bytes INTEGER NOT NULL,
+                compressed_value_bytes INTEGER NOT NULL,
+                blob_byte_count INTEGER NOT NULL,
+                encryption_key_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                invalidated_reason TEXT,
+                created_at REAL NOT NULL,
+                last_validated_at REAL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_blob (
+                snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES kv_snapshot_manifest(snapshot_id) ON DELETE CASCADE,
+                storage_location TEXT NOT NULL,
+                relative_path TEXT,
+                encrypted_blob BLOB,
+                encrypted_byte_count INTEGER NOT NULL,
+                integrity_checksum TEXT NOT NULL,
+                encryption_key_id TEXT NOT NULL,
+                cloud_sync_allowed INTEGER NOT NULL DEFAULT 0,
+                excluded_from_backup INTEGER NOT NULL DEFAULT 1,
+                created_at REAL NOT NULL,
+                committed_at REAL,
+                last_verified_at REAL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_reference (
+                id TEXT PRIMARY KEY NOT NULL,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                snapshot_id TEXT NOT NULL REFERENCES kv_snapshot_manifest(snapshot_id) ON DELETE CASCADE,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL DEFAULT 'active',
+                created_at REAL NOT NULL,
+                last_used_at REAL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_restore_attempt (
+                id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                snapshot_id TEXT,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                attempted_at REAL NOT NULL,
+                result TEXT NOT NULL,
+                failure_reason TEXT,
+                expected_identity_json TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS kv_snapshot_quarantine (
+                id TEXT PRIMARY KEY NOT NULL,
+                schema_version INTEGER NOT NULL,
+                snapshot_id TEXT,
+                conversation_id TEXT,
+                stage TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                blob_byte_count INTEGER NOT NULL,
+                quarantined_at REAL NOT NULL,
+                resolved_at REAL
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_manifest_conversation ON kv_snapshot_manifest(conversation_id, status, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_manifest_model ON kv_snapshot_manifest(model_id, model_revision, status, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_manifest_identity ON kv_snapshot_manifest(model_id, model_revision, tokenizer_hash, profile_hash, turboquant_layout_version, rope_config_hash, token_prefix_hash, logical_length);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_reference_conversation ON kv_snapshot_reference(conversation_id, state, last_used_at DESC, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_restore_attempt_conversation ON kv_snapshot_restore_attempt(conversation_id, attempted_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_kv_snapshot_quarantine_snapshot ON kv_snapshot_quarantine(snapshot_id, quarantined_at DESC);",
+        ]),
+    DatabaseMigration(
+      version: 22, name: "turboquant-speculative-evidence",
+      sql: [
+            "ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_dimensions_json TEXT;",
+            "ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_telemetry_json TEXT;",
+            "ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json TEXT;",
+            "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_speculative ON turboquant_profile_evidence(model_id, user_mode, layout_version, created_at DESC);",
+        ]),
+    DatabaseMigration(
+      version: 23, name: "turboquant-platform-evidence",
+      sql: [
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN platform_evidence_dimensions_json TEXT;",
+        "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_platform ON turboquant_profile_evidence(model_id, user_mode, layout_version, created_at DESC);",
+      ]),
+    DatabaseMigration(
+      version: 24, name: "turboquant-runtime-evidence-dimensions",
+      sql: [
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN requested_runtime_mode TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN resolved_runtime_mode TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN key_precision TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN value_precision TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN precision_policy_json TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN sparse_value_policy_json TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN effective_backend TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN native_backend_version TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN decoded_active_kv_bytes INTEGER;",
+        "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_runtime_tuple ON turboquant_profile_evidence(model_id, compatibility_pair_id, resolved_runtime_mode, effective_backend, key_precision, value_precision, layout_version, created_at DESC);",
+      ]),
+    DatabaseMigration(
+      version: 25, name: "project-space-cloudkit-sync-state",
+      sql: [
+        "ALTER TABLE projects ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'local';",
+        "CREATE INDEX IF NOT EXISTS idx_projects_sync_state ON projects(sync_state, updated_at ASC);",
+      ]),
+    DatabaseMigration(
+      version: 26, name: "mcp-tool-safety-annotations",
+      sql: [
+        "ALTER TABLE mcp_tools ADD COLUMN annotations_json TEXT;",
+      ]),
+    DatabaseMigration(
+      version: 27, name: "cloud-model-catalog-snapshots",
+      sql: [
+        """
+        CREATE TABLE IF NOT EXISTS cloud_model_catalog_snapshots (
+            provider_id TEXT PRIMARY KEY NOT NULL REFERENCES cloud_providers(id) ON DELETE CASCADE,
+            schema_version INTEGER NOT NULL,
+            models_json TEXT NOT NULL,
+            fetched_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_cloud_model_catalog_expiry ON cloud_model_catalog_snapshots(expires_at ASC);",
+      ]),
     ]
 }
 

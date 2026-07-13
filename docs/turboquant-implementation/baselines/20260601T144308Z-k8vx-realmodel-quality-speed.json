@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-06-01T14:43:08Z",
+  "artifactRun": "turboquant-k8vx-realmodel-20260601T144308Z",
+  "artifactSummary": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-k8vx-realmodel-20260601T144308Z/k8vx-quality-speed-summary.md",
+  "host": {
+    "hardware": "Mac14,10",
+    "memoryBytes": 17179869184
+  },
+  "model": {
+    "path": "/Users/mt/.cache/huggingface/hub/models--mlx-community--Qwen3.5-2B-4bit/snapshots/674aaa7240b91e8012fcad5d791b7dfe5ba90207"
+  },
+  "tool": "TurboQuantInferenceParity",
+  "generateTokens": 8,
+  "speedRows": [
+    { "contextTokens": 32768, "config": "fp16", "decodeTokensPerSecond": 20.50, "prefillTokensPerSecond": 710.6, "ratioVsFP16": 1.0 },
+    { "contextTokens": 32768, "config": "affineK8V4", "decodeTokensPerSecond": 32.40, "prefillTokensPerSecond": 809.4, "ratioVsFP16": 1.581 },
+    { "contextTokens": 32768, "config": "affineK8V3", "decodeTokensPerSecond": 14.16, "prefillTokensPerSecond": 796.7, "ratioVsFP16": 0.691 },
+    { "contextTokens": 32768, "config": "affineK8V2", "decodeTokensPerSecond": 15.54, "prefillTokensPerSecond": 729.3, "ratioVsFP16": 0.758 },
+    { "contextTokens": 65536, "config": "fp16", "decodeTokensPerSecond": 43.06, "prefillTokensPerSecond": 684.9, "ratioVsFP16": 1.0 },
+    { "contextTokens": 65536, "config": "affineK8V4", "decodeTokensPerSecond": 21.54, "prefillTokensPerSecond": 616.2, "ratioVsFP16": 0.500 },
+    { "contextTokens": 65536, "config": "affineK8V3", "decodeTokensPerSecond": 21.39, "prefillTokensPerSecond": 700.1, "ratioVsFP16": 0.497 },
+    { "contextTokens": 65536, "config": "affineK8V2", "decodeTokensPerSecond": 21.36, "prefillTokensPerSecond": 710.6, "ratioVsFP16": 0.496 },
+    { "contextTokens": 131072, "config": "affineK8V4", "decodeTokensPerSecond": 15.72, "prefillTokensPerSecond": 448.5, "ratioVsFP16": null },
+    { "contextTokens": 131072, "config": "affineK8V3", "decodeTokensPerSecond": 13.24, "prefillTokensPerSecond": 543.7, "ratioVsFP16": null },
+    { "contextTokens": 131072, "config": "affineK8V2", "decodeTokensPerSecond": 8.54, "prefillTokensPerSecond": 502.9, "ratioVsFP16": null }
+  ],
+  "qualityThresholds": {
+    "top1Match": 1.0,
+    "meanKLMax": 0.10,
+    "p95MaxAbsMax": 2.0
+  },
+  "qualityRows": [
+    { "contextTokens": 32768, "candidate": "affineK8V4", "reference": "fp16", "top1": 1.0, "kl": 0.000004, "p95MaxAbs": 1.0625, "cosine": 0.9934, "passed": true },
+    { "contextTokens": 32768, "candidate": "affineK8V3", "reference": "fp16", "top1": 1.0, "kl": 0.000035, "p95MaxAbs": 2.7656, "cosine": 0.9638, "passed": false },
+    { "contextTokens": 32768, "candidate": "affineK8V2", "reference": "fp16", "top1": 1.0, "kl": 0.000262, "p95MaxAbs": 4.5586, "cosine": 0.8914, "passed": false },
+    { "contextTokens": 65536, "candidate": "affineK8V4", "reference": "fp16", "top1": 1.0, "kl": 0.000006, "p95MaxAbs": 1.1328, "cosine": 0.9888, "passed": true },
+    { "contextTokens": 65536, "candidate": "affineK8V3", "reference": "fp16", "top1": 1.0, "kl": 0.000057, "p95MaxAbs": 2.8828, "cosine": 0.9348, "passed": false },
+    { "contextTokens": 65536, "candidate": "affineK8V2", "reference": "fp16", "top1": 1.0, "kl": 0.000048, "p95MaxAbs": 4.4004, "cosine": 0.8720, "passed": false },
+    { "contextTokens": 131072, "candidate": "affineK8V3", "reference": "affineK8V4", "top1": 1.0, "kl": 0.000121, "p95MaxAbs": 2.9375, "cosine": 0.9656, "passed": false },
+    { "contextTokens": 131072, "candidate": "affineK8V2", "reference": "affineK8V4", "top1": 1.0, "kl": 0.000096, "p95MaxAbs": 5.3984, "cosine": 0.8606, "passed": false }
+  ],
+  "verdict": {
+    "denseK8V4PromotionCandidate": true,
+    "affineK8V3Promotable": false,
+    "affineK8V2Promotable": false,
+    "sparseVPromotable": false,
+    "notes": [
+      "K8/V4 passes current FP16-referenced real-model logit gates at 32K and 64K.",
+      "K8/V3 and K8/V2 preserve top-1 but fail P95 max-logit-error thresholds.",
+      "128K FP16 was not run because raw FP16 KV alone is approximately 16 GiB for this shape on a 16 GB Mac."
+    ]
+  }
+}

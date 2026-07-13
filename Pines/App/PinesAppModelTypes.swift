@@ -182,6 +182,8 @@ struct ModelPickerOption: Identifiable, Hashable {
     let displayName: String
     let isLocal: Bool
     let rank: Double
+    var capabilities: ProviderCapabilities? = nil
+    var modelMetadata: CloudProviderModelMetadata? = nil
 }
 
 struct ChatQuickSettingsAvailability: Hashable {
@@ -299,6 +301,8 @@ struct PinesModelPreview: Identifiable, Hashable, Sendable {
     let readiness: Double
     let downloadProgress: ModelDownloadProgress?
     let compatibilityWarnings: [String]
+    let runtimeProfileEvidence: RuntimeProfileEvidence?
+    let runtimeCompatibilityState: RuntimeCompatibilityState
 }
 
 extension PinesModelPreview {

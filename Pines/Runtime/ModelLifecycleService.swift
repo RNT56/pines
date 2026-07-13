@@ -1085,7 +1085,12 @@ struct ModelLifecycleService: Sendable {
             request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
 
-        let (_, http) = try await URLSession.shared.data(for: request)
+        let (_, http) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: .shared,
+            maxBytes: 64 * 1024,
+            redirectScope: .publicHTTPS
+        )
         guard (200 ..< 300).contains(http.statusCode) else {
             throw ModelDownloadTransferError.httpStatus(
                 code: http.statusCode,
