@@ -14,6 +14,7 @@ protocol CloudKitSyncRepository: Sendable {
 
 struct CloudKitLocalSnapshot: Sendable {
     var settings: CloudKitSettingsSnapshot
+    var projects: [CloudKitProjectSnapshot]
     var conversations: [CloudKitConversationSnapshot]
     var messages: [CloudKitMessageSnapshot]
     var documents: [CloudKitVaultDocumentSnapshot]
@@ -23,6 +24,7 @@ struct CloudKitLocalSnapshot: Sendable {
 
 struct CloudKitRemoteSnapshot: Sendable {
     var settings: CloudKitSettingsSnapshot?
+    var projects: [CloudKitProjectSnapshot] = []
     var conversations: [CloudKitConversationSnapshot] = []
     var messages: [CloudKitMessageSnapshot] = []
     var documents: [CloudKitVaultDocumentSnapshot] = []
@@ -33,6 +35,7 @@ struct CloudKitRemoteSnapshot: Sendable {
 
     var isEmpty: Bool {
         settings == nil
+            && projects.isEmpty
             && conversations.isEmpty
             && messages.isEmpty
             && documents.isEmpty
@@ -47,6 +50,7 @@ struct CloudKitRemoteSnapshot: Sendable {
                 self.settings = settings
             }
         }
+        projects.append(contentsOf: other.projects)
         conversations.append(contentsOf: other.conversations)
         messages.append(contentsOf: other.messages)
         documents.append(contentsOf: other.documents)
@@ -62,6 +66,15 @@ struct CloudKitSettingsSnapshot: Hashable, Codable, Sendable {
     var updatedAt: Date
 }
 
+struct CloudKitProjectSnapshot: Hashable, Codable, Sendable {
+    var id: UUID
+    var name: String
+    var vaultEnabled: Bool
+    var createdAt: Date
+    var updatedAt: Date
+    var deletedAt: Date?
+}
+
 struct CloudKitConversationSnapshot: Hashable, Codable, Sendable {
     var id: UUID
     var title: String
@@ -69,6 +82,7 @@ struct CloudKitConversationSnapshot: Hashable, Codable, Sendable {
     var deletedAt: Date?
     var defaultModelID: ModelID?
     var defaultProviderID: ProviderID?
+    var projectID: UUID?
     var archived: Bool
     var pinned: Bool
 }
@@ -94,6 +108,7 @@ struct CloudKitVaultDocumentSnapshot: Hashable, Codable, Sendable {
     var id: UUID
     var title: String
     var sourceType: String
+    var projectID: UUID?
     var updatedAt: Date
     var deletedAt: Date?
     var chunkCount: Int
@@ -124,28 +139,22 @@ struct CloudKitSyncService {
     private let legacyZoneID = CKRecordZone.ID(zoneName: "PinesPrivate", ownerName: CKCurrentUserDefaultName)
     private let recordCipher: CloudKitRecordCipher
 
-    let conversationRepository: any ConversationRepository
-    let vaultRepository: any VaultRepository
     let settingsRepository: any SettingsRepository
-    let syncRepository: (any CloudKitSyncRepository)?
+    let syncRepository: any CloudKitSyncRepository
     let auditRepository: (any AuditEventRepository)?
 
     init(
         containerIdentifier: String = Self.defaultContainerIdentifier,
-        conversationRepository: any ConversationRepository,
-        vaultRepository: any VaultRepository,
+        syncRepository: any CloudKitSyncRepository,
         settingsRepository: any SettingsRepository,
-        syncRepository: (any CloudKitSyncRepository)? = nil,
         secureKeyStore: SecureKeyStore,
         auditRepository: (any AuditEventRepository)?
     ) {
         container = CKContainer(identifier: containerIdentifier)
         database = container.privateCloudDatabase
         recordCipher = CloudKitRecordCipher(secureKeyStore: secureKeyStore)
-        self.conversationRepository = conversationRepository
-        self.vaultRepository = vaultRepository
         self.settingsRepository = settingsRepository
-        self.syncRepository = syncRepository ?? (conversationRepository as? any CloudKitSyncRepository)
+        self.syncRepository = syncRepository
         self.auditRepository = auditRepository
     }
 
@@ -161,13 +170,6 @@ struct CloudKitSyncService {
         let settings = try await settingsRepository.loadSettings()
         guard settings.storeConfiguration.iCloudSyncEnabled else { return }
         guard Self.hasRequiredEntitlements() else { return }
-        guard let syncRepository else {
-            try await auditRepository?.append(
-                AuditEvent(category: .security, summary: "Skipped iCloud sync because the local store does not expose merge APIs.")
-            )
-            return
-        }
-
         try await ensureZone()
 
         let hadServerChangeToken = try await syncRepository.cloudKitServerChangeTokenData(zoneName: zoneID.zoneName) != nil
@@ -217,7 +219,7 @@ struct CloudKitSyncService {
                 throw error
             }
         }
-        try await syncRepository?.saveCloudKitServerChangeTokenData(nil, zoneName: zoneID.zoneName)
+        try await syncRepository.saveCloudKitServerChangeTokenData(nil, zoneName: zoneID.zoneName)
         try await auditRepository?.append(
             AuditEvent(category: .security, summary: "Deleted iCloud private sync records.")
         )
@@ -288,6 +290,9 @@ struct CloudKitSyncService {
     private func records(from snapshot: CloudKitLocalSnapshot) async throws -> [CKRecord] {
         var records = [CKRecord]()
         records.append(try await encryptedRecord(type: "AppSettings", name: "app", payload: snapshot.settings, updatedAt: snapshot.settings.updatedAt))
+        for project in snapshot.projects {
+            records.append(try await encryptedRecord(type: "Project", name: project.id.uuidString, payload: project, updatedAt: project.updatedAt, tombstone: project.deletedAt != nil))
+        }
         for conversation in snapshot.conversations {
             records.append(try await encryptedRecord(type: "Conversation", name: conversation.id.uuidString, payload: conversation, updatedAt: conversation.updatedAt, tombstone: conversation.deletedAt != nil))
         }
@@ -328,113 +333,12 @@ struct CloudKitSyncService {
         return record
     }
 
-    private func settingsRecord(_ settings: CloudKitSettingsSnapshot) throws -> CKRecord {
-        let record = CKRecord(recordType: "AppSettings", recordID: CKRecord.ID(recordName: "app", zoneID: zoneID))
-        let data = try JSONEncoder().encode(settings.value)
-        record["valueJSON"] = String(decoding: data, as: UTF8.self) as CKRecordValue
-        record["updatedAt"] = settings.updatedAt as CKRecordValue
-        return record
-    }
-
-    private func conversationRecord(_ conversation: CloudKitConversationSnapshot) -> CKRecord {
-        let record = CKRecord(recordType: "Conversation", recordID: CKRecord.ID(recordName: conversation.id.uuidString, zoneID: zoneID))
-        record["title"] = conversation.title as CKRecordValue
-        record["updatedAt"] = conversation.updatedAt as CKRecordValue
-        record["deletedAt"] = conversation.deletedAt as CKRecordValue?
-        record["defaultModelID"] = conversation.defaultModelID?.rawValue as CKRecordValue?
-        record["defaultProviderID"] = conversation.defaultProviderID?.rawValue as CKRecordValue?
-        record["archived"] = conversation.archived as CKRecordValue
-        record["pinned"] = conversation.pinned as CKRecordValue
-        return record
-    }
-
-    private func messageRecord(_ message: CloudKitMessageSnapshot) -> CKRecord {
-        let record = CKRecord(recordType: "Message", recordID: CKRecord.ID(recordName: message.id.uuidString, zoneID: zoneID))
-        record["conversationID"] = message.conversationID.uuidString as CKRecordValue
-        record["role"] = message.role.rawValue as CKRecordValue
-        record["content"] = message.content as CKRecordValue
-        record["createdAt"] = message.createdAt as CKRecordValue
-        record["updatedAt"] = message.updatedAt as CKRecordValue
-        record["deletedAt"] = message.deletedAt as CKRecordValue?
-        record["status"] = message.status.rawValue as CKRecordValue
-        record["modelID"] = message.modelID?.rawValue as CKRecordValue?
-        record["providerID"] = message.providerID?.rawValue as CKRecordValue?
-        record["toolCallID"] = message.toolCallID as CKRecordValue?
-        record["toolName"] = message.toolName as CKRecordValue?
-        record["toolCallsJSON"] = Self.encodeToolCalls(message.toolCalls) as CKRecordValue?
-        record["providerMetadataJSON"] = Self.encodeProviderMetadata(message.providerMetadata) as CKRecordValue?
-        return record
-    }
-
-    private func vaultDocumentRecord(_ document: CloudKitVaultDocumentSnapshot) -> CKRecord {
-        let record = CKRecord(recordType: "VaultDocument", recordID: CKRecord.ID(recordName: document.id.uuidString, zoneID: zoneID))
-        record["title"] = document.title as CKRecordValue
-        record["sourceType"] = document.sourceType as CKRecordValue
-        record["updatedAt"] = document.updatedAt as CKRecordValue
-        record["deletedAt"] = document.deletedAt as CKRecordValue?
-        record["chunkCount"] = document.chunkCount as CKRecordValue
-        return record
-    }
-
-    private func vaultChunkRecord(_ chunk: CloudKitVaultChunkSnapshot) -> CKRecord {
-        let record = CKRecord(recordType: "VaultChunk", recordID: CKRecord.ID(recordName: chunk.id, zoneID: zoneID))
-        record["documentID"] = chunk.documentID.uuidString as CKRecordValue
-        record["ordinal"] = chunk.ordinal as CKRecordValue
-        record["text"] = chunk.text as CKRecordValue
-        record["tokenEstimate"] = chunk.tokenEstimate as CKRecordValue
-        record["checksum"] = chunk.checksum as CKRecordValue
-        record["createdAt"] = chunk.createdAt as CKRecordValue
-        return record
-    }
-
-    private func vaultEmbeddingRecord(_ embedding: VaultStoredEmbedding) -> CKRecord {
-        let recordName = "\(embedding.chunkID)-\(Self.stableRecordSuffix(embedding.modelID.rawValue))"
-        let record = CKRecord(recordType: "VaultEmbedding", recordID: CKRecord.ID(recordName: recordName, zoneID: zoneID))
-        record["chunkID"] = embedding.chunkID as CKRecordValue
-        record["documentID"] = embedding.documentID.uuidString as CKRecordValue
-        record["modelID"] = embedding.modelID.rawValue as CKRecordValue
-        record["dimensions"] = embedding.dimensions as CKRecordValue
-        record["fp16Embedding"] = embedding.fp16Embedding as NSData
-        record["turboQuantCode"] = embedding.turboQuantCode as NSData
-        record["norm"] = embedding.norm as CKRecordValue
-        record["codecVersion"] = embedding.codecVersion as CKRecordValue
-        record["checksum"] = embedding.checksum as CKRecordValue
-        record["createdAt"] = embedding.createdAt as CKRecordValue
-        return record
-    }
-
     private static func encodeChangeToken(_ token: CKServerChangeToken) throws -> Data {
         try NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
     }
 
     private static func decodeChangeToken(from data: Data) throws -> CKServerChangeToken? {
         try NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: data)
-    }
-
-    private static func encodeProviderMetadata(_ metadata: [String: String]) -> String? {
-        guard !metadata.isEmpty else {
-            return nil
-        }
-        do {
-            let data = try JSONEncoder().encode(metadata)
-            return String(decoding: data, as: UTF8.self)
-        } catch {
-            cloudKitSyncLogger.error("Failed to encode CloudKit provider metadata: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-    }
-
-    private static func encodeToolCalls(_ toolCalls: [ToolCallDelta]) -> String? {
-        guard !toolCalls.isEmpty else {
-            return nil
-        }
-        do {
-            let data = try JSONEncoder().encode(toolCalls)
-            return String(decoding: data, as: UTF8.self)
-        } catch {
-            cloudKitSyncLogger.error("Failed to encode CloudKit tool calls: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
     }
 
     fileprivate static func stableRecordSuffix(_ value: String) -> String {
@@ -478,6 +382,7 @@ private extension CloudKitRemoteSnapshot {
                     deletedAt: record["deletedAt"] as? Date,
                     defaultModelID: (record["defaultModelID"] as? String).map(ModelID.init(rawValue:)),
                     defaultProviderID: (record["defaultProviderID"] as? String).map(ProviderID.init(rawValue:)),
+                    projectID: (record["projectID"] as? String).flatMap(UUID.init(uuidString:)),
                     archived: Self.bool("archived", in: record),
                     pinned: Self.bool("pinned", in: record)
                 )
@@ -523,6 +428,7 @@ private extension CloudKitRemoteSnapshot {
                     id: id,
                     title: title,
                     sourceType: sourceType,
+                    projectID: (record["projectID"] as? String).flatMap(UUID.init(uuidString:)),
                     updatedAt: updatedAt,
                     deletedAt: record["deletedAt"] as? Date,
                     chunkCount: Self.int("chunkCount", in: record)
@@ -594,6 +500,8 @@ private extension CloudKitRemoteSnapshot {
         switch payloadType {
         case "AppSettings":
             settings = try await cipher.open(encrypted, as: CloudKitSettingsSnapshot.self, recordType: payloadType, recordName: payloadName)
+        case "Project":
+            projects.append(try await cipher.open(encrypted, as: CloudKitProjectSnapshot.self, recordType: payloadType, recordName: payloadName))
         case "Conversation":
             conversations.append(try await cipher.open(encrypted, as: CloudKitConversationSnapshot.self, recordType: payloadType, recordName: payloadName))
         case "Message":
@@ -631,19 +539,6 @@ private extension CloudKitRemoteSnapshot {
         if let value = record[key] as? Data { return value }
         if let value = record[key] as? NSData { return value as Data }
         return nil
-    }
-
-    private static func encodeProviderMetadata(_ metadata: [String: String]) -> String? {
-        guard !metadata.isEmpty else {
-            return nil
-        }
-        do {
-            let data = try JSONEncoder().encode(metadata)
-            return String(decoding: data, as: UTF8.self)
-        } catch {
-            cloudKitSyncLogger.error("Failed to encode CloudKit provider metadata: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
     }
 
     private static func decodeProviderMetadata(_ rawValue: String?) -> [String: String] {

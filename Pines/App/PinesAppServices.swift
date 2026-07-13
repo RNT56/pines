@@ -57,7 +57,7 @@ final class PinesAppServices: @unchecked Sendable {
         secretStore: any SecretStore = KeychainSecretStore(),
         secureKeyStore: SecureKeyStore = SecureKeyStore(),
         modelCatalog: HuggingFaceModelCatalogService = HuggingFaceModelCatalogService(),
-        preflightClassifier: ModelPreflightClassifier = ModelPreflightClassifier(),
+        preflightClassifier: ModelPreflightClassifier? = nil,
         executionRouter: ExecutionRouter = ExecutionRouter(),
         toolRegistry: ToolRegistry = ToolRegistry(),
         toolPolicyGate: ToolPolicyGate = ToolPolicyGate(),
@@ -87,6 +87,9 @@ final class PinesAppServices: @unchecked Sendable {
         self.secureKeyStore = secureKeyStore
         self.modelCatalog = modelCatalog
         self.preflightClassifier = preflightClassifier
+            ?? ModelPreflightClassifier(
+                turboQuantRuntimeCapabilities: MLXRuntimeBridge.turboQuantRuntimeCapabilities
+            )
         self.executionRouter = executionRouter
         self.toolRegistry = toolRegistry
         self.toolPolicyGate = toolPolicyGate
@@ -493,14 +496,13 @@ final class PinesAppServices: @unchecked Sendable {
         guard
             CloudKitSyncService.hasRequiredEntitlements(),
             let conversationRepository,
-            let vaultRepository,
-            let settingsRepository
+            let settingsRepository,
+            let syncRepository = conversationRepository as? any CloudKitSyncRepository
         else {
             return nil
         }
         return CloudKitSyncService(
-            conversationRepository: conversationRepository,
-            vaultRepository: vaultRepository,
+            syncRepository: syncRepository,
             settingsRepository: settingsRepository,
             secureKeyStore: secureKeyStore,
             auditRepository: auditRepository

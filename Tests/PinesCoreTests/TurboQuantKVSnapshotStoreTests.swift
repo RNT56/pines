@@ -194,7 +194,7 @@ struct TurboQuantKVSnapshotStoreTests {
             modelRevision: "rev-a",
             tokenizerHash: "tokenizer-hash",
             profileHash: "profile-hash",
-            turboQuantLayoutVersion: 4,
+            turboQuantLayoutVersion: TurboQuantLayoutVersion.current,
             ropeConfigHash: "rope-hash",
             tokenPrefixHash: "prefix-hash",
             fallbackContractHash: "fallback-hash",

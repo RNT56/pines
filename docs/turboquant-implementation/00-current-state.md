@@ -2,19 +2,47 @@
 
 This document records the observed local repository state at the start of the implementation-doc pass. It is intentionally factual and was used by W25 before implementation branches began.
 
-## Current release-green status
+## Current failed status
 
-After the Wave 7 and production pin closeout, the active local compatibility pair is green:
+After the Wave 0 baseline capture on 2026-05-31, the active local compatibility pair is failed/non-green:
 
-| Repo | Branch | Release-green commit |
+| Repo | Branch | Validation commit/pin |
 | --- | --- | --- |
-| `pines` | `tq/integration-pin-mlx-production` | `4d9d89eb801de2e5bb2635d8b81e81b27cd39b83` |
-| `mlx-swift` | `tq/wave7-core-platform` | `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772` |
-| `mlx-swift-lm` | `tq/wave7-lm-platform` | `6d2d791a12e60dc1bd7534d6c95454a2284edf8c` |
+| `pines` | `tq/real-device-evidence-acceptance` | `ebc1d80aba9466da5e72690b26d9155aec72836d` dirty validation base before this evidence update |
+| `mlx-swift` | `tq/layout-v5-default-device-tests` | `bcf93af23f11428f6f01efb0bb4b9020cd2eb383` pushed SwiftPM 6.2-compatible platform-aware Metal and Apple-mobile JIT compatibility pin |
+| `mlx-swift-lm` | `tq/lm-layout-v5-default-device-tests` | `aeaa8e3024a82b25969741b53c749b28ddc64d1a` pushed exact-core integration pin |
 
-Pines pins `MLXSwift` to `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772` and `MLXSwiftLM` to `6d2d791a12e60dc1bd7534d6c95454a2284edf8c` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
+Pines pins `MLXSwift` to `bcf93af23f11428f6f01efb0bb4b9020cd2eb383` and `MLXSwiftLM` to `aeaa8e3024a82b25969741b53c749b28ddc64d1a` across `project.yml`, the generated Xcode project, the Xcode package lockfile, `docs/TURBOQUANT.md`, `MLXRuntimeBridge.turboQuantCompatibilityPairID`, and `compatibility-pair.json`.
 
-Local release gates are green, including full SwiftPM validation and `bash scripts/ci/run-xcode-validation.sh all`. Real-device model/device/mode evidence remains pending and is still required before any `Verified` or `Certified` product claim.
+Wave 0 evidence recorded passing Pines pin/build gates and Mac benchmark artifacts, while `mlx-swift swift test --filter TurboQuant` failed lower-bit QK reference checks and the Wave 0 app-hosted iOS smoke ended `failed_environmental` before install/launch. The continuation pass resolves the local TurboQuant test blocker and wires native affine K8/V4 mixed quantized SDPA through the MLX Swift LM cache path. Physical-device app-host smoke on `iPhone16,2` is recorded in `20260712T150706Z-ios-exact-pair-smoke.md`, and a focused Qwen 3.5 0.8B `real-model-inference-v1` comparison passed at 4K in `20260712T151432Z-ios-qwen35-08b-realmodel-smoke.md`. Those runs belong to the immediately prior immutable pair: the current core revision changes only the SwiftPM tools-version manifest and the LM revision only repins that core, but exact pair identity still changed. The runs are therefore historical, and their two-repeat throughput interval is wide with selected-path diagnostics absent. Mac real-model inference evidence exists for Qwen3.5-2B at 32K and 64K, but it also belongs to an earlier tuple. Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only; it does not override the current failed status. Layout V4 is the production default for new MLX attention layout requests; Layout V5/V6 remain supported for explicit experimental, benchmark, and compatibility runs only. The current exact pins remain unverified and a complete imported real-device model/device/mode evidence tuple remains required before any `Verified` or `Certified` product claim.
+
+### Adopted N2 self-speculation (lever ①) + N4 codec surface
+
+`mlx-swift-lm` `aeaa8e3024a82b25969741b53c749b28ddc64d1a` exposes
+draft-model-free self-speculation as a product API: `GenerateParameters.selfSpeculationMode`
+(`.off` default | `.promptLookup`) routed via `makeGenerationIterator(...)`, bit-exact for
+greedy/no-processor and falling back to exact decode otherwise (incl. non-trimmable hybrid
+caches). It pairs with the validated N7 async-prefetch path (16K long-doc 1.43→1.76×). `mlx-swift`
+also adds the data-free Gaussian Lloyd-Max payload codec format
+(`TurboQuantReferenceFormat.gaussianLloydMax`, 3.2× at equal quality), pending a Metal decode kernel.
+
+The integration pair now pins mlx-swift `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`
+plus mlx-swift-lm `aeaa8e3024a82b25969741b53c749b28ddc64d1a`, and Pines wires
+`selfSpeculationMode` into `MLXRuntimeBridge.GenerateParameters`. The pair remains
+`failed`/`unverified` until exact-pair A-series evidence and the remaining release gates land.
+Self-speculation ships default-off, so it is inert until explicitly enabled and device-validated.
+
+Current continuation work adds explicit benchmark coverage and labels for
+`affineK8V4`, `affineK8V3`, `affineK8V2`, `mlxAffine-q8`, `affineInt4`,
+`turbo4v2`, `turbo3_5`, and `turbo8`; long-context scheduling/chunking fixes for
+128K K8/Vx runs; native Sparse-V threshold, top-k, cumulative-mass, and hybrid
+diagnostics; and `real-model-inference-v1` quality gates in
+`TurboQuantInferenceParity`. The latest Mac artifact
+`turboquant-k8vx-realmodel-20260601T144308Z` shows dense K8/V4 passing current
+32K/64K FP16-referenced logit gates, while K8/V3 and K8/V2 preserve top-1 but
+fail P95 max-logit-error gates. This is useful evidence, but it is still Mac
+evidence and does not change the non-green compatibility status without the
+required iOS real-model tuple.
 
 ## Observed workspace
 
@@ -118,13 +146,12 @@ long-context target:
 - final privacy-manifest validation against the resolved package graph;
 - encrypted KV snapshot persistence and restore.
 
-After the Wave 7 production closeout, the local runtime-pair gates listed above
-are complete except for real-device model/device/mode evidence and signed App
-Store distribution. Runtime admission, memory zones, memory calibration records,
-typed failure mapping, RunDecision metadata, compatibility UI states, privacy
-manifest validation against the local resolved graph, and encrypted snapshot
-storage are implemented. `Verified` and `Certified` product labels still require
-matching imported real-device evidence.
+After the Wave 7 production closeout, runtime admission, memory zones, memory
+calibration records, typed failure mapping, RunDecision metadata, compatibility
+UI states, privacy manifest validation against the local resolved graph, and
+encrypted snapshot storage are implemented. The current Wave 0 pair remains
+failed/non-green until all required gates have current evidence. `Verified` and
+`Certified` product labels still require matching imported real-device evidence.
 
 ## Immediate implementation blockers
 
@@ -136,7 +163,8 @@ Closed Wave 0 blockers:
 4. Pines type-family decision: reuse existing `TurboQuant*` DTOs.
 5. Mode/fallback contract hashing in Pines.
 
-Wave 1+ implementation work is now closed through the production pin closeout:
+Wave 1+ implementation work is implemented through the production pin closeout,
+but release status remains failed/non-green for the current pair:
 
 1. Admission service.
 2. RunDecision ledger integration.

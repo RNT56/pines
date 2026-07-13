@@ -184,7 +184,7 @@ struct PinesCoreTestRunner {
                 tags: ["mlx", "gemma4", "any-to-any"]
             )
         )
-        try expectEqual(gemma4.verification, .verified)
+        try expectEqual(gemma4.verification, .installable)
         try expectEqual(gemma4.modalities, [.text, .vision])
 
         let qwen35 = ModelPreflightClassifier().classify(
@@ -569,7 +569,9 @@ struct PinesCoreTestRunner {
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_dimensions_json"), "missing speculative evidence dimensions column")
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_telemetry_json"), "missing speculative telemetry column")
         try expect(sql.contains("ALTER TABLE turboquant_profile_evidence ADD COLUMN speculative_auto_disable_json"), "missing speculative auto-disable column")
-        try expectEqual(PinesDatabaseSchema.currentVersion, 23)
+        try expect(sql.contains("CREATE TABLE IF NOT EXISTS cloud_model_catalog_snapshots"), "missing cloud model catalog snapshot table")
+        try expect(sql.contains("expires_at REAL NOT NULL"), "cloud model catalog snapshots must expire")
+        try expectEqual(PinesDatabaseSchema.currentVersion, 27)
 
         let config = LocalStoreConfiguration(iCloudSyncEnabled: true)
         try expect(config.iCloudSyncEnabled, "iCloud should be enabled")
@@ -851,7 +853,7 @@ struct PinesCoreTestRunner {
         try expectEqual(runtimeProfile.quantization.activeBackend, .mlxPacked)
         try expectEqual(runtimeProfile.quantization.metalCodecAvailable, false)
         try expectEqual(runtimeProfile.quantization.turboQuantUserMode, .balanced)
-        try expectEqual(TurboQuantPreset.allCases, [.turbo2_5, .turbo3_5, .turbo4, .turbo4v2])
+        try expectEqual(TurboQuantPreset.allCases, [.turbo2_5, .turbo3_5, .turbo4, .turbo4v2, .turbo8])
         try expectEqual(TurboQuantUserMode.allCases, [.fastest, .balanced, .maxContext, .batterySaver])
         try expectEqual(TurboQuantPreset.defaultGeneration, .turbo4v2)
         try expectEqual(TurboQuantPreset.conservativeFallback, .turbo3_5)
@@ -860,6 +862,10 @@ struct PinesCoreTestRunner {
         try expectEqual(TurboQuantPreset.turbo4v2.baseBits, 4)
         try expectEqual(TurboQuantPreset.turbo4v2.outlierBits, 4)
         try expectEqual(TurboQuantPreset.turbo4v2.defaultValueBits, 4)
+        try expectEqual(TurboQuantPreset.turbo8.effectiveBits, 8)
+        try expectEqual(TurboQuantPreset.turbo8.baseBits, 8)
+        try expectEqual(TurboQuantPreset.turbo8.outlierBits, 8)
+        try expectEqual(TurboQuantPreset.turbo8.defaultValueBits, 8)
         let legacyQuantization = try JSONDecoder().decode(
             QuantizationProfile.self,
             from: #"{"kvBits":8,"kvGroupSize":64,"quantizedKVStart":256}"#.data(using: .utf8)!
@@ -1173,10 +1179,14 @@ struct PinesCoreTestRunner {
             namespacedName: "mcp.local.search",
             displayName: "search",
             description: "Search",
-            inputSchema: schema
+            inputSchema: schema,
+            annotations: MCPToolAnnotations(readOnlyHint: true, destructiveHint: false)
         )
         let decoded = try JSONDecoder().decode(MCPToolRecord.self, from: JSONEncoder().encode(record))
         try expectEqual(decoded, record)
+        try expectEqual(decoded.annotations?.sideEffectLevel, .readsExternalData)
+        try expectEqual(MCPToolAnnotations(destructiveHint: true).sideEffectLevel, .sensitive)
+        try expectEqual(MCPToolAnnotations().sideEffectLevel, .changesRemoteState)
 
         let policy = MCPClientFeaturePolicy(samplingEnabled: true)
         let capabilities = try expectDictionary(policy.initializeCapabilities.anySendable, "sampling policy must encode object")

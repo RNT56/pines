@@ -441,7 +441,14 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         }
 
         if let remoteURL = artifact.remoteURL {
-            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+            try EndpointSecurityPolicy().validate(remoteURL, useCase: .webTool)
+            try EndpointSecurityPolicy.validateResolvedPublicAddresses(for: remoteURL)
+            let (data, response) = try await BoundedHTTPResponse.data(
+                for: URLRequest(url: remoteURL),
+                session: .shared,
+                maxBytes: BoundedHTTPResponse.fileLimit,
+                redirectScope: .publicHTTPS
+            )
             guard !data.isEmpty else {
                 throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) could not be downloaded.")
             }

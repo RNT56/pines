@@ -112,15 +112,10 @@ struct ArtifactsResourceRow: View {
 }
 
 struct ArtifactsResourceActionBar: View {
-    @Environment(\.pinesTheme) private var theme
     let actions: [ArtifactsResourceAction]
 
-    private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 128), spacing: theme.spacing.xsmall)]
-    }
-
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: theme.spacing.xsmall) {
+        PinesActionBar {
             ForEach(actions) { action in
                 Button(action: action.perform) {
                     Label(action.title, systemImage: action.systemImage)
@@ -131,7 +126,6 @@ struct ArtifactsResourceActionBar: View {
                 .pinesButtonStyle(action.kind, fillWidth: true)
             }
         }
-        .pinesSurface(.inset, padding: theme.spacing.xsmall)
     }
 }
 
@@ -218,9 +212,13 @@ private struct ArtifactsGalleryCard: View {
     let select: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
+        PinesArtifactCard(
+            isSelected: isSelected,
+            minHeight: 260,
+            select: select,
+            preview: {
             ArtifactsArtifactPreviewSurface(artifact: artifact, maxHeight: 170)
-
+        }, details: {
             VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
                 Text(summary.title)
                     .font(theme.typography.callout.weight(.semibold))
@@ -233,33 +231,17 @@ private struct ArtifactsGalleryCard: View {
                     .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(1)
             }
-
+        }, actions: {
             HStack(spacing: theme.spacing.xsmall) {
                 PinesStatusChip(status: summary.status, compact: true)
                 Spacer(minLength: 0)
                 if let url = artifact.galleryURL {
-                    Button {
+                    PinesCompactIconButton(title: "Open artifact", systemImage: "arrow.up.forward.app") {
                         openURL(url)
-                    } label: {
-                        Label("Open", systemImage: "arrow.up.forward.app")
-                            .labelStyle(.iconOnly)
                     }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Open artifact")
                 }
             }
-        }
-        .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
-        .padding(theme.spacing.small)
-        .background(theme.colors.elevatedSurface, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
-                .strokeBorder(isSelected ? theme.colors.accent.opacity(0.46) : theme.colors.controlBorder, lineWidth: isSelected ? theme.stroke.selected : theme.stroke.hairline)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: select)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        })
     }
 }
 

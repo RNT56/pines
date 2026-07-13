@@ -1480,6 +1480,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public static let defaultAnthropicThinkingBudgetTokens = 4096
     public static let defaultGeminiThinkingLevel: GeminiThinkingLevel = .medium
     public static let defaultCloudWebSearchMode: CloudWebSearchMode = .off
+    public static let defaultOpenRouterProviderPreferences = OpenRouterProviderPreferences()
     public static let defaultCloudAccessMode: CloudAccessMode = .byok
     public static let defaultProEntitlementStatus: ProEntitlementStatus = .inactive
     public static let defaultManagedCloudConsent: ManagedCloudConsent = .notAsked
@@ -1509,6 +1510,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
     public var anthropicTokenCountPreflightEnabled: Bool
     public var geminiThinkingLevel: GeminiThinkingLevel
     public var cloudWebSearchMode: CloudWebSearchMode
+    public var openRouterProviderPreferences: OpenRouterProviderPreferences
     public var requireToolApproval: Bool
     public var braveSearchEnabled: Bool
     public var onboardingCompleted: Bool
@@ -1540,6 +1542,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         case anthropicTokenCountPreflightEnabled
         case geminiThinkingLevel
         case cloudWebSearchMode
+        case openRouterProviderPreferences
         case requireToolApproval
         case braveSearchEnabled
         case onboardingCompleted
@@ -1572,6 +1575,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         anthropicTokenCountPreflightEnabled: Bool = false,
         geminiThinkingLevel: GeminiThinkingLevel = Self.defaultGeminiThinkingLevel,
         cloudWebSearchMode: CloudWebSearchMode = Self.defaultCloudWebSearchMode,
+        openRouterProviderPreferences: OpenRouterProviderPreferences = Self.defaultOpenRouterProviderPreferences,
         requireToolApproval: Bool = true,
         braveSearchEnabled: Bool = false,
         onboardingCompleted: Bool = false,
@@ -1602,6 +1606,7 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         self.anthropicTokenCountPreflightEnabled = anthropicTokenCountPreflightEnabled
         self.geminiThinkingLevel = geminiThinkingLevel
         self.cloudWebSearchMode = cloudWebSearchMode
+        self.openRouterProviderPreferences = openRouterProviderPreferences
         self.requireToolApproval = requireToolApproval
         self.braveSearchEnabled = braveSearchEnabled
         self.onboardingCompleted = onboardingCompleted
@@ -1643,6 +1648,10 @@ public struct AppSettingsSnapshot: Hashable, Codable, Sendable {
         anthropicTokenCountPreflightEnabled = try container.decodeIfPresent(Bool.self, forKey: .anthropicTokenCountPreflightEnabled) ?? false
         geminiThinkingLevel = try container.decodeIfPresent(GeminiThinkingLevel.self, forKey: .geminiThinkingLevel) ?? Self.defaultGeminiThinkingLevel
         cloudWebSearchMode = try container.decodeIfPresent(CloudWebSearchMode.self, forKey: .cloudWebSearchMode) ?? Self.defaultCloudWebSearchMode
+        openRouterProviderPreferences = try container.decodeIfPresent(
+            OpenRouterProviderPreferences.self,
+            forKey: .openRouterProviderPreferences
+        ) ?? Self.defaultOpenRouterProviderPreferences
         requireToolApproval = try container.decodeIfPresent(Bool.self, forKey: .requireToolApproval) ?? true
         braveSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .braveSearchEnabled) ?? false
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false

@@ -204,6 +204,12 @@ extension PinesAppModel {
             availableTools: tools,
             anthropicOptions: anthropicRequestOptions(for: cloudProvider.id, settings: settings, services: services)
         )
+        if let eligibilityFailure = openRouterModelEligibilityFailure(
+            providerID: cloudProvider.id,
+            request: cloudChatRequest
+        ) {
+            throw InferenceError.unsupportedCapability(eligibilityFailure)
+        }
         let provider = BYOKCloudInferenceProvider(configuration: cloudProvider, secretStore: services.secretStore)
         let result = try await runMCPSampling(
             cloudChatRequest,
@@ -325,7 +331,7 @@ extension PinesAppModel {
     }
 
     func localModelScore(_ install: ModelInstall) -> Double {
-        let parameterScale = min(Double(install.parameterCount ?? 0) / 10_000_000_000, 10)
+        let parameterScale = min(Double(install.resolvedParameterCount ?? 0) / 10_000_000_000, 10)
         let byteScale = min(Double(install.estimatedBytes ?? 0) / 10_000_000_000, 10)
         return parameterScale * 10 + byteScale
     }
@@ -364,7 +370,7 @@ extension PinesAppModel {
         if install.modelID == defaultModelID {
             score += 12
         }
-        let parameterScale = min(Double(install.parameterCount ?? 0) / 10_000_000_000, 1)
+        let parameterScale = min(Double(install.resolvedParameterCount ?? 0) / 10_000_000_000, 1)
         let byteScale = min(Double(install.estimatedBytes ?? 0) / 10_000_000_000, 1)
         score += preference.intelligencePriority * parameterScale * 24
         score += preference.speedPriority * (1 - max(parameterScale, byteScale)) * 18

@@ -46,7 +46,7 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
             inputSchema: BuiltInToolSpecs.browserActionSpec().inputSchema,
             outputSchema: BuiltInToolSpecs.browserActionSpec().outputSchema,
             permissions: [.browser, .network],
-            sideEffect: .readsExternalData,
+            sideEffect: .changesRemoteState,
             networkPolicy: .userApproved,
             timeoutSeconds: 10,
             explanationRequired: true
@@ -135,7 +135,24 @@ final class WKWebViewBrowserRuntime: NSObject, WKNavigationDelegate {
         navigationContinuation = nil
     }
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url,
+              (try? EndpointSecurityPolicy().validate(url, useCase: .webTool)) != nil,
+              (try? EndpointSecurityPolicy.validateResolvedPublicAddresses(for: url)) != nil
+        else {
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
     private func navigate(to url: URL) async throws {
+        try EndpointSecurityPolicy().validate(url, useCase: .webTool)
+        try EndpointSecurityPolicy.validateResolvedPublicAddresses(for: url)
         ensureWebView().load(URLRequest(url: url))
         await waitForNavigation()
     }

@@ -17,6 +17,18 @@ public enum LocalProviderMetadataKeys {
     public static let turboQuantRequestedBackend = "local.turboquant.requested_backend"
     public static let turboQuantActiveBackend = "local.turboquant.active_backend"
     public static let turboQuantValueBits = "local.turboquant.value_bits"
+    public static let turboQuantRuntimeMode = "local.turboquant.runtime_mode"
+    public static let turboQuantResolvedRuntimeMode = "local.turboquant.resolved_runtime_mode"
+    public static let turboQuantKeyPrecision = "local.turboquant.key_precision"
+    public static let turboQuantValuePrecision = "local.turboquant.value_precision"
+    public static let turboQuantPrecisionPolicyJSON = "local.turboquant.precision_policy_json"
+    public static let turboQuantKVLayerPolicyJSON = "local.turboquant.kv_layer_policy_json"
+    public static let turboQuantKVLayerPolicyHash = "local.turboquant.kv_layer_policy_hash"
+    public static let turboQuantKVLayerPolicySummary = "local.turboquant.kv_layer_policy_summary"
+    public static let turboQuantSparseValuePolicyJSON = "local.turboquant.sparse_value_policy_json"
+    public static let turboQuantEffectiveBackend = "local.turboquant.effective_backend"
+    public static let turboQuantNativeBackendVersion = "local.turboquant.native_backend_version"
+    public static let turboQuantDecodedActiveKVBytes = "local.turboquant.decoded_active_kv_bytes"
     public static let turboQuantAttentionPath = "local.turboquant.attention_path"
     public static let turboQuantKernelProfile = "local.turboquant.kernel_profile"
     public static let turboQuantSelfTestStatus = "local.turboquant.self_test_status"
@@ -88,6 +100,7 @@ public enum LocalProviderMetadataKeys {
     public static let generationPrepareElapsedSeconds = "local.generation.prepare_elapsed_seconds"
     public static let generationCacheCreateElapsedSeconds = "local.generation.cache_create_elapsed_seconds"
     public static let generationPreflightAttempts = "local.generation.preflight_attempts"
+    public static let generationRepetitionPenalty = "local.generation.repetition_penalty"
     public static let generationRequestedMaxTokens = "local.generation.requested_max_tokens"
     public static let generationEffectiveMaxTokens = "local.generation.effective_max_tokens"
     public static let generationMaxTokensClamped = "local.generation.max_tokens_clamped"
@@ -1392,6 +1405,117 @@ public struct AnthropicRequestOptions: Hashable, Codable, Sendable {
     }
 }
 
+public enum OpenRouterDataCollectionPolicy: String, Hashable, Codable, Sendable, CaseIterable {
+    case allow
+    case deny
+}
+
+public enum OpenRouterProviderSort: String, Hashable, Codable, Sendable, CaseIterable {
+    case automatic
+    case price
+    case throughput
+    case latency
+}
+
+public enum OpenRouterWebSearchEngine: String, Hashable, Codable, Sendable, CaseIterable {
+    case automatic = "auto"
+    case native
+    case exa
+    case firecrawl
+    case parallel
+    case perplexity
+}
+
+public struct OpenRouterProviderPreferences: Hashable, Codable, Sendable {
+    public var order: [String]
+    public var only: [String]
+    public var ignore: [String]
+    public var allowFallbacks: Bool
+    public var requireParameters: Bool
+    public var dataCollection: OpenRouterDataCollectionPolicy
+    public var zeroDataRetention: Bool
+    public var sort: OpenRouterProviderSort
+    public var webSearchEngine: OpenRouterWebSearchEngine
+
+    public init(
+        order: [String] = [],
+        only: [String] = [],
+        ignore: [String] = [],
+        allowFallbacks: Bool = true,
+        requireParameters: Bool = false,
+        dataCollection: OpenRouterDataCollectionPolicy = .allow,
+        zeroDataRetention: Bool = false,
+        sort: OpenRouterProviderSort = .automatic,
+        webSearchEngine: OpenRouterWebSearchEngine = .automatic
+    ) {
+        let normalizedOrder = Self.normalizedProviderSlugs(order)
+        let normalizedOnly = Self.normalizedProviderSlugs(only)
+        self.order = normalizedOrder
+        self.only = normalizedOnly
+        self.ignore = Self.normalizedProviderSlugs(ignore).filter { !normalizedOnly.contains($0) }
+        self.allowFallbacks = allowFallbacks
+        self.requireParameters = requireParameters
+        self.dataCollection = dataCollection
+        self.zeroDataRetention = zeroDataRetention
+        self.sort = normalizedOrder.isEmpty ? sort : .automatic
+        self.webSearchEngine = webSearchEngine
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case order
+        case only
+        case ignore
+        case allowFallbacks
+        case requireParameters
+        case dataCollection
+        case zeroDataRetention
+        case sort
+        case webSearchEngine
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            order: try container.decodeIfPresent([String].self, forKey: .order) ?? [],
+            only: try container.decodeIfPresent([String].self, forKey: .only) ?? [],
+            ignore: try container.decodeIfPresent([String].self, forKey: .ignore) ?? [],
+            allowFallbacks: try container.decodeIfPresent(Bool.self, forKey: .allowFallbacks) ?? true,
+            requireParameters: try container.decodeIfPresent(Bool.self, forKey: .requireParameters) ?? false,
+            dataCollection: try container.decodeIfPresent(
+                OpenRouterDataCollectionPolicy.self,
+                forKey: .dataCollection
+            ) ?? .allow,
+            zeroDataRetention: try container.decodeIfPresent(Bool.self, forKey: .zeroDataRetention) ?? false,
+            sort: try container.decodeIfPresent(OpenRouterProviderSort.self, forKey: .sort) ?? .automatic,
+            webSearchEngine: try container.decodeIfPresent(
+                OpenRouterWebSearchEngine.self,
+                forKey: .webSearchEngine
+            ) ?? .automatic
+        )
+    }
+
+    public var isDefault: Bool {
+        order.isEmpty
+            && only.isEmpty
+            && ignore.isEmpty
+            && allowFallbacks
+            && !requireParameters
+            && dataCollection == .allow
+            && !zeroDataRetention
+            && sort == .automatic
+            && webSearchEngine == .automatic
+    }
+
+    private static func normalizedProviderSlugs(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.compactMap { value in
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { return nil }
+            return normalized
+        }
+    }
+}
+
 public struct ChatRequest: Hashable, Codable, Sendable {
     public enum ExecutionContext: String, Hashable, Codable, Sendable {
         case chat
@@ -1413,6 +1537,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
     public var openAIResponseOptions: OpenAIResponseRequestOptions?
     public var geminiOptions: GeminiRequestOptions?
     public var anthropicOptions: AnthropicRequestOptions?
+    public var openRouterOptions: OpenRouterProviderPreferences?
 
     public init(
         id: UUID = UUID(),
@@ -1429,7 +1554,8 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         executionContext: ExecutionContext = .chat,
         openAIResponseOptions: OpenAIResponseRequestOptions? = nil,
         geminiOptions: GeminiRequestOptions? = nil,
-        anthropicOptions: AnthropicRequestOptions? = nil
+        anthropicOptions: AnthropicRequestOptions? = nil,
+        openRouterOptions: OpenRouterProviderPreferences? = nil
     ) {
         self.id = id
         self.modelID = modelID
@@ -1446,6 +1572,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         self.openAIResponseOptions = openAIResponseOptions
         self.geminiOptions = geminiOptions
         self.anthropicOptions = anthropicOptions
+        self.openRouterOptions = openRouterOptions
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1464,6 +1591,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         case openAIResponseOptions
         case geminiOptions
         case anthropicOptions
+        case openRouterOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -1483,6 +1611,7 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         openAIResponseOptions = try container.decodeIfPresent(OpenAIResponseRequestOptions.self, forKey: .openAIResponseOptions)
         geminiOptions = try container.decodeIfPresent(GeminiRequestOptions.self, forKey: .geminiOptions)
         anthropicOptions = try container.decodeIfPresent(AnthropicRequestOptions.self, forKey: .anthropicOptions)
+        openRouterOptions = try container.decodeIfPresent(OpenRouterProviderPreferences.self, forKey: .openRouterOptions)
     }
 
     public func replacing(
@@ -1506,7 +1635,8 @@ public struct ChatRequest: Hashable, Codable, Sendable {
             executionContext: executionContext ?? self.executionContext,
             openAIResponseOptions: openAIResponseOptions,
             geminiOptions: geminiOptions,
-            anthropicOptions: anthropicOptions
+            anthropicOptions: anthropicOptions,
+            openRouterOptions: openRouterOptions
         )
     }
 

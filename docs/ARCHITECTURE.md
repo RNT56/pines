@@ -66,7 +66,7 @@ Repository protocols separate UI from storage:
 - `ModelDownloadRepository`
 - `AuditEventRepository`
 
-The production local store is GRDB on SQLCipher with optional E2E-encrypted CloudKit private-database sync for user-enabled settings, conversations, messages, vault metadata, and vault chunks. API keys, model binaries, prompt caches, browser state, chat attachment files, and transient tool state do not sync. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
+The production local store is GRDB on SQLCipher with optional E2E-encrypted CloudKit private-database sync for user-enabled settings, Project Spaces, conversations, messages, vault metadata, and vault chunks. Project identifiers are preserved across chat and Vault records, and project tombstones unlink child records on every device. API keys, model binaries, prompt caches, browser state, chat attachment files, transient tool state, and provider model-catalog snapshots do not sync. Model catalogs are bounded, encrypted locally, tied to their provider row, and expire before they can drive hard capability rejection. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
 
 `SecureKeyStore` owns data keys for the encrypted database, encrypted blob store, and CloudKit sync. Device-local keys are non-migrating Keychain items; the CloudKit content key is synchronizable through iCloud Keychain. `SecurityResetCoordinator` runs before normal repository use and clears sensitive configuration from previous versions while preserving user content.
 
@@ -80,7 +80,7 @@ The GRDB implementation is split by repository concern: encrypted local-store op
 
 ## Security Model
 
-`EndpointSecurityPolicy` is the shared network gate for BYOK providers, MCP servers, OAuth authorization and token exchange, model catalog calls, and web fetch. Remote URLs must be HTTPS. HTTP is permitted only for `localhost`, `127.0.0.1`, and `[::1]` when the integration explicitly opts into local development; LAN/private HTTP remains blocked.
+`EndpointSecurityPolicy` is the shared network gate for BYOK providers, MCP servers, OAuth authorization and token exchange, model catalog calls, web fetch, and in-app browser top-level navigation. Remote URLs must use HTTPS. HTTP is permitted only for `localhost`, `127.0.0.1`, and `[::1]` when the integration explicitly opts into local development; LAN/private HTTP remains blocked. Arbitrary web tools additionally reject local/private/link-local/special-use hosts, validate resolved addresses immediately before requests, and revalidate redirects and final URLs.
 
 `CloudProviderHeader` replaces raw custom header JSON. Plaintext header values are rejected for secret-like names, while secret headers must reference Keychain items. `Redactor` is applied before audit persistence and covers provider keys, bearer/OAuth/JWT/cookie values, private keys, and generic long credential shapes.
 
@@ -107,10 +107,10 @@ Vault retrieval stores both FP16 embeddings and compressed TurboQuant vector cod
 
 The app links MLX through exact fork pins in `project.yml`:
 
-- `https://github.com/RNT56/mlx-swift` at `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772`
-- `https://github.com/RNT56/mlx-swift-lm` at `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`
-- Nested `mlx` inside `RNT56/mlx-swift` at `75b756717154890033209aaba4ffc89b113c5998`
-- Nested `mlx-c` inside `RNT56/mlx-swift` at `2abc34daff6ded246054d9e15b98870b5cd08b97`
+- `https://github.com/RNT56/mlx-swift` at `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`
+- `https://github.com/RNT56/mlx-swift-lm` at `aeaa8e3024a82b25969741b53c749b28ddc64d1a`
+- Nested `mlx` inside `RNT56/mlx-swift` at `e230d124a1fdcb5f4b3daab6321744a7a8b6a9f2`
+- Nested `mlx-c` inside `RNT56/mlx-swift` at `2fbeccd5a6ec6f7aadedaf1d3dfb2894ef44fbc1`
 
 Compatibility implementations for model families not yet present in linked MLX packages are split into `MLXCompatibleModels+Llama4.swift` and `MLXCompatibleModels+DeepseekV4.swift`.
 
@@ -159,7 +159,7 @@ The agent replacement seam has three contracts:
 - `AgentToolCatalog` supplies the Agent-mode tool inventory independently from chat orchestration.
 - `AgentRuntimeCallbacks` carries human-in-the-loop approval and activity/progress reporting, keeping UI concerns out of agent execution.
 
-MCP sampling can forward server-supplied tool definitions to the selected local or BYOK provider while the MCP server owns its tool loop.
+MCP sampling can forward server-supplied tool definitions to the selected local or BYOK provider while the MCP server owns its tool loop. Discovered MCP tool annotations are persisted and mapped to Pines side-effect levels; missing annotations default to `changesRemoteState`, read-only hints map to external reads, and destructive hints map to sensitive actions.
 
 ## Source Organization Notes
 

@@ -169,6 +169,21 @@ final class PinesVaultState: ObservableObject {
     }
 }
 
+enum PinesCloudKitSyncPhase: Equatable {
+    case idle
+    case syncing
+    case succeeded
+    case failed
+}
+
+struct PinesCloudKitSyncStatus: Equatable {
+    var phase: PinesCloudKitSyncPhase = .idle
+    var lastAttemptAt: Date?
+    var lastSuccessAt: Date?
+    var lastError: String?
+    var trigger: String?
+}
+
 @MainActor
 final class PinesSettingsState: ObservableObject {
     @Published var settingsSections: [PinesSettingsSection]
@@ -202,10 +217,12 @@ final class PinesSettingsState: ObservableObject {
     @Published var anthropicTokenCountPreflightEnabled: Bool
     @Published var geminiThinkingLevel: GeminiThinkingLevel
     @Published var cloudWebSearchMode: CloudWebSearchMode
+    @Published var openRouterProviderPreferences: OpenRouterProviderPreferences
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]]
     @Published var isRefreshingCloudModels: Bool
     @Published var isSavingCloudProvider: Bool
     @Published var validatingCloudProviderIDs: Set<ProviderID>
+    @Published var cloudKitSyncStatus: PinesCloudKitSyncStatus
     @Published var huggingFaceCredentialStatus: String
     @Published var braveSearchCredentialStatus: String
 
@@ -241,10 +258,12 @@ final class PinesSettingsState: ObservableObject {
         anthropicTokenCountPreflightEnabled: Bool = false,
         geminiThinkingLevel: GeminiThinkingLevel = AppSettingsSnapshot.defaultGeminiThinkingLevel,
         cloudWebSearchMode: CloudWebSearchMode = AppSettingsSnapshot.defaultCloudWebSearchMode,
+        openRouterProviderPreferences: OpenRouterProviderPreferences = AppSettingsSnapshot.defaultOpenRouterProviderPreferences,
         cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:],
         isRefreshingCloudModels: Bool = false,
         isSavingCloudProvider: Bool = false,
         validatingCloudProviderIDs: Set<ProviderID> = [],
+        cloudKitSyncStatus: PinesCloudKitSyncStatus = .init(),
         huggingFaceCredentialStatus: String = "Not configured",
         braveSearchCredentialStatus: String = "Not configured"
     ) {
@@ -279,10 +298,12 @@ final class PinesSettingsState: ObservableObject {
         self.anthropicTokenCountPreflightEnabled = anthropicTokenCountPreflightEnabled
         self.geminiThinkingLevel = geminiThinkingLevel
         self.cloudWebSearchMode = cloudWebSearchMode
+        self.openRouterProviderPreferences = openRouterProviderPreferences
         self.cloudModelCatalog = cloudModelCatalog
         self.isRefreshingCloudModels = isRefreshingCloudModels
         self.isSavingCloudProvider = isSavingCloudProvider
         self.validatingCloudProviderIDs = validatingCloudProviderIDs
+        self.cloudKitSyncStatus = cloudKitSyncStatus
         self.huggingFaceCredentialStatus = huggingFaceCredentialStatus
         self.braveSearchCredentialStatus = braveSearchCredentialStatus
     }

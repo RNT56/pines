@@ -39,6 +39,9 @@ The finished system should behave like this:
 14. [Validation and Release Gates](12-validation-and-release-gates.md)
 15. [Complete Task Inventory](13-complete-task-inventory.md)
 16. [PR and Merge Plan](15-pr-merge-plan.md)
+17. [Current Paths and Benchmark Matrix](16-current-paths-and-benchmarks.md)
+18. [Lower-V and Sparse-V Optimization Plan](17-lower-v-sparse-v-optimization-plan.md)
+19. [Multi-Worker Execution](18-multi-worker-execution.md)
 
 ## How to execute the packet
 
@@ -58,6 +61,15 @@ Use [Worker Ownership](08-worker-ownership.md) for file ownership and PR rules, 
 
 Use [PR and Merge Plan](15-pr-merge-plan.md) for branch targets, worker PR sequencing, wave promotion, compatibility pin validation, and final default-branch merge gates.
 
+Use [Multi-Worker Execution](18-multi-worker-execution.md) and its
+machine-readable [manifest](18-multi-worker-execution-manifest.json) when
+launching parallel agents or validating worker dispatch rules:
+
+```bash
+python3 scripts/diagnostics/turboquant-worker-plan.py --validate --compatibility
+python3 scripts/diagnostics/turboquant-worker-plan.py --wave wave-3
+```
+
 Machine-readable compatibility-pair files:
 
 - [compatibility-pair.schema.json](compatibility-pair.schema.json)
@@ -65,9 +77,12 @@ Machine-readable compatibility-pair files:
 
 Current status:
 
-- The active compatibility pair is green for local release gates.
-- Pines pins `mlx-swift` `21a897c5d1ae1930bd7c7a47bb3ed6c9fe8c8772` and `mlx-swift-lm` `6d2d791a12e60dc1bd7534d6c95454a2284edf8c`.
-- Full local Xcode validation has passed for the pair.
+- The active compatibility pair is failed/non-green after the Wave 0 baseline `turboquant-wave0-20260531T024557Z`.
+- Pines pins `mlx-swift` `609e8333671419ee1dbe928eeee7f48a24682631` and `mlx-swift-lm` `725add5dd15ef6c1c01073ce9f81412957fa5c6d`.
+- Layout V4 is the production default for new TurboQuant attention layout requests; Layout V5/V6 remain supported for explicit experimental, benchmark, and compatibility runs.
+- Current continuation evidence includes passing local TurboQuant gates and exact-pin physical-device app-host smoke on `iPhone16,2`, but that smoke is synthetic attention-shape evidence. Release comparisons now require `real-model-inference-v1`; native backend performance parity and the full release benchmark/quality/fallback matrix remain incomplete.
+- The latest Mac real-model K8/Vx baseline is [20260601T144308Z](baselines/20260601T144308Z-k8vx-realmodel-quality-speed.md): dense K8/V4 passes the current 32K/64K FP16-referenced logit gates, while K8/V3 and K8/V2 preserve top-1 but fail P95 max-logit-error gates. Native Sparse-V threshold/top-k/cumulative/hybrid modes are implemented and reportable, but remain disabled by default until real-model and iOS evidence passes.
+- Historical pass, smoke, simulator, and Mac proof evidence is retained for audit only and cannot make the current pair green.
 - Real-device model/device/mode evidence is still required before any product surface may claim `Verified` or `Certified` compatibility.
 
 Wave handoff logs:
@@ -110,7 +125,7 @@ These apply to all repos and all branches.
 Wave 7 implements W29+/MVP 6 platform contracts end to end while keeping every
 platform feature disabled by default, kill-switched, and evidence-required.
 
-Compatibility-pair `green` closes the local runtime-pair validation gate only. Evidence-backed model claims still require real hardware benchmark import through the evidence pipeline.
+Compatibility-pair `green` closes the local runtime-pair validation gate only. Exact pins alone establish an unverified compatibility identity; evidence-backed model claims still require real hardware benchmark import through the evidence pipeline.
 
 ## Implementation principle
 

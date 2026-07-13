@@ -8,6 +8,14 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
     public var compatibilityPairID: String?
     public var admission: LocalRuntimeAdmissionPlan?
     public var selectedAttentionPath: TurboQuantAttentionPath?
+    public var requestedRuntimeMode: TurboQuantRuntimeMode?
+    public var resolvedRuntimeMode: TurboQuantRuntimeMode?
+    public var keyPrecision: TurboQuantKeyPrecision?
+    public var valuePrecision: TurboQuantValuePrecision?
+    public var precisionPolicy: TurboQuantKVPrecisionPolicy?
+    public var sparseValuePolicy: TurboQuantSparseValuePolicy?
+    public var effectiveBackend: TurboQuantAttentionBackendEngine?
+    public var nativeBackendVersion: String?
     public var rejectedPaths: [RejectedPath]
     public var cacheLifecycle: String?
     public var actualKeyBitsPerValue: Double?
@@ -18,6 +26,7 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
     public var packedFallbackAllocated: Bool?
     public var compressedKeyBytes: Int64?
     public var compressedValueBytes: Int64?
+    public var decodedActiveKVBytes: Int64?
     public var inputTokens: Int?
     public var outputTokens: Int?
     public var speculativeTelemetry: TurboQuantSpeculativeTelemetry?
@@ -33,6 +42,14 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
         compatibilityPairID: String? = nil,
         admission: LocalRuntimeAdmissionPlan? = nil,
         selectedAttentionPath: TurboQuantAttentionPath? = nil,
+        requestedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        resolvedRuntimeMode: TurboQuantRuntimeMode? = nil,
+        keyPrecision: TurboQuantKeyPrecision? = nil,
+        valuePrecision: TurboQuantValuePrecision? = nil,
+        precisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        sparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
+        effectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        nativeBackendVersion: String? = nil,
         rejectedPaths: [RejectedPath] = [],
         cacheLifecycle: String? = nil,
         actualKeyBitsPerValue: Double? = nil,
@@ -43,6 +60,7 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
         packedFallbackAllocated: Bool? = nil,
         compressedKeyBytes: Int64? = nil,
         compressedValueBytes: Int64? = nil,
+        decodedActiveKVBytes: Int64? = nil,
         inputTokens: Int? = nil,
         outputTokens: Int? = nil,
         speculativeTelemetry: TurboQuantSpeculativeTelemetry? = nil,
@@ -57,6 +75,14 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
         self.compatibilityPairID = compatibilityPairID
         self.admission = admission
         self.selectedAttentionPath = selectedAttentionPath
+        self.requestedRuntimeMode = requestedRuntimeMode
+        self.resolvedRuntimeMode = resolvedRuntimeMode
+        self.keyPrecision = keyPrecision
+        self.valuePrecision = valuePrecision
+        self.precisionPolicy = precisionPolicy
+        self.sparseValuePolicy = sparseValuePolicy
+        self.effectiveBackend = effectiveBackend
+        self.nativeBackendVersion = nativeBackendVersion
         self.rejectedPaths = rejectedPaths
         self.cacheLifecycle = cacheLifecycle
         self.actualKeyBitsPerValue = actualKeyBitsPerValue
@@ -67,6 +93,7 @@ public struct TurboQuantRunDecision: Hashable, Codable, Sendable {
         self.packedFallbackAllocated = packedFallbackAllocated
         self.compressedKeyBytes = compressedKeyBytes.map { max(0, $0) }
         self.compressedValueBytes = compressedValueBytes.map { max(0, $0) }
+        self.decodedActiveKVBytes = decodedActiveKVBytes.map { max(0, $0) }
         self.inputTokens = inputTokens.map { max(0, $0) }
         self.outputTokens = outputTokens.map { max(0, $0) }
         self.speculativeTelemetry = speculativeTelemetry

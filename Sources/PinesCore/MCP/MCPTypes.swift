@@ -239,6 +239,7 @@ public struct MCPToolRecord: Identifiable, Hashable, Codable, Sendable {
     public var displayName: String
     public var description: String
     public var inputSchema: JSONValue
+    public var annotations: MCPToolAnnotations?
     public var enabled: Bool
     public var lastDiscoveredAt: Date
     public var lastError: String?
@@ -250,6 +251,7 @@ public struct MCPToolRecord: Identifiable, Hashable, Codable, Sendable {
         displayName: String,
         description: String,
         inputSchema: JSONValue,
+        annotations: MCPToolAnnotations? = nil,
         enabled: Bool = true,
         lastDiscoveredAt: Date = Date(),
         lastError: String? = nil
@@ -260,6 +262,7 @@ public struct MCPToolRecord: Identifiable, Hashable, Codable, Sendable {
         self.displayName = displayName
         self.description = description
         self.inputSchema = inputSchema
+        self.annotations = annotations
         self.enabled = enabled
         self.lastDiscoveredAt = lastDiscoveredAt
         self.lastError = lastError
@@ -297,17 +300,25 @@ public struct MCPToolDefinition: Codable, Hashable, Sendable {
     public var name: String
     public var description: String?
     public var inputSchema: JSONValue
+    public var annotations: MCPToolAnnotations?
 
     enum CodingKeys: String, CodingKey {
         case name
         case description
         case inputSchema
+        case annotations
     }
 
-    public init(name: String, description: String?, inputSchema: JSONValue) {
+    public init(
+        name: String,
+        description: String?,
+        inputSchema: JSONValue,
+        annotations: MCPToolAnnotations? = nil
+    ) {
         self.name = name
         self.description = description
         self.inputSchema = inputSchema
+        self.annotations = annotations
     }
 
     public init(from decoder: Decoder) throws {
@@ -315,6 +326,35 @@ public struct MCPToolDefinition: Codable, Hashable, Sendable {
         name = try container.decode(String.self, forKey: .name)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         inputSchema = try container.decodeIfPresent(JSONValue.self, forKey: .inputSchema) ?? JSONValue.objectSchema()
+        annotations = try container.decodeIfPresent(MCPToolAnnotations.self, forKey: .annotations)
+    }
+}
+
+public struct MCPToolAnnotations: Codable, Hashable, Sendable {
+    public var title: String?
+    public var readOnlyHint: Bool?
+    public var destructiveHint: Bool?
+    public var idempotentHint: Bool?
+    public var openWorldHint: Bool?
+
+    public init(
+        title: String? = nil,
+        readOnlyHint: Bool? = nil,
+        destructiveHint: Bool? = nil,
+        idempotentHint: Bool? = nil,
+        openWorldHint: Bool? = nil
+    ) {
+        self.title = title
+        self.readOnlyHint = readOnlyHint
+        self.destructiveHint = destructiveHint
+        self.idempotentHint = idempotentHint
+        self.openWorldHint = openWorldHint
+    }
+
+    public var sideEffectLevel: SideEffectLevel {
+        if destructiveHint == true { return .sensitive }
+        if readOnlyHint == true { return .readsExternalData }
+        return .changesRemoteState
     }
 }
 

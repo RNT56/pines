@@ -172,7 +172,11 @@ struct MCPOAuthService {
             .map { "\($0.key.urlFormEncoded)=\($0.value.urlFormEncoded)" }
             .joined(separator: "&")
             .data(using: .utf8)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: .shared,
+            maxBytes: 1024 * 1024
+        )
         guard (200..<300).contains(response.statusCode) else {
             throw InferenceError.invalidRequest("OAuth token exchange failed.")
         }
@@ -249,7 +253,11 @@ struct MCPOAuthDiscoveryService {
             ],
         ])
         do {
-            let (_, response) = try await urlSession.data(for: request)
+            let (_, response) = try await BoundedHTTPResponse.data(
+                for: request,
+                session: urlSession,
+                maxBytes: 1024 * 1024
+            )
             if let metadata = MCPStreamableHTTPClient.resourceMetadataURL(from: response),
                let metadataURL = URL(string: metadata) {
                 return metadataURL
@@ -270,8 +278,12 @@ struct MCPOAuthDiscoveryService {
     }
 
     private func fetchProtectedResourceMetadata(_ url: URL) async throws -> ProtectedResourceMetadata {
-        let (data, response) = try await urlSession.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        let (data, response) = try await BoundedHTTPResponse.data(
+            for: URLRequest(url: url),
+            session: urlSession,
+            maxBytes: 1024 * 1024
+        )
+        guard (200..<300).contains(response.statusCode) else {
             throw InferenceError.invalidRequest("Could not fetch OAuth protected resource metadata.")
         }
         return try JSONDecoder().decode(ProtectedResourceMetadata.self, from: data)
@@ -282,9 +294,12 @@ struct MCPOAuthDiscoveryService {
         var lastError: Error?
         for candidate in candidates {
             do {
-                let (data, response) = try await urlSession.data(from: candidate)
-                guard let http = response as? HTTPURLResponse,
-                      (200..<300).contains(http.statusCode)
+                let (data, response) = try await BoundedHTTPResponse.data(
+                    for: URLRequest(url: candidate),
+                    session: urlSession,
+                    maxBytes: 1024 * 1024
+                )
+                guard (200..<300).contains(response.statusCode)
                 else {
                     continue
                 }
@@ -319,7 +334,11 @@ struct MCPOAuthDiscoveryService {
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
         ])
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: urlSession,
+            maxBytes: 1024 * 1024
+        )
         guard (200..<300).contains(response.statusCode) else {
             return nil
         }

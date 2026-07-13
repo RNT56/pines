@@ -5,8 +5,8 @@ MLX_SWIFT_REPO="${MLX_SWIFT_REPO:-https://github.com/RNT56/mlx-swift}"
 MLX_SWIFT_LM_REPO="${MLX_SWIFT_LM_REPO:-https://github.com/RNT56/mlx-swift-lm}"
 MLX_SWIFT_MIN_REVISION="6820f3c6b85bdd73a288f5796ba78c4cd40efd91"
 MLX_SWIFT_LM_MIN_REVISION="861a9bd0e581317ddfce7446d306cbbb7916a75f"
-MLX_SWIFT_NESTED_MLX_REVISION="75b756717154890033209aaba4ffc89b113c5998"
-MLX_SWIFT_NESTED_MLX_C_REVISION="2abc34daff6ded246054d9e15b98870b5cd08b97"
+MLX_SWIFT_NESTED_MLX_REVISION="e230d124a1fdcb5f4b3daab6321744a7a8b6a9f2"
+MLX_SWIFT_NESTED_MLX_C_REVISION="2fbeccd5a6ec6f7aadedaf1d3dfb2894ef44fbc1"
 PROJECT_FILE="Pines.xcodeproj/project.pbxproj"
 XCODE_PACKAGE_RESOLVED="Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 TURBOQUANT_DOC="docs/TURBOQUANT.md"
@@ -14,6 +14,10 @@ COMPATIBILITY_PAIR_JSON="docs/turboquant-implementation/compatibility-pair.json"
 MLX_RUNTIME_BRIDGE="Pines/Runtime/MLXRuntimeBridge.swift"
 
 OLD_MLX_SWIFT_REVISIONS=(
+  "7a662770e0279d2693d4e3e93cb1b52cde34a321"
+  "b187523536c6923562e3a81613e169da9321f812"
+  "425d765aa7fa2b2cf111b9c43430054d82d02d07"
+  "c96dd8c7b374fa50d64b35bf8c5d7739df7d9984"
   "8f0718404a323698c7b5730f2de3af2b5e21f854"
   "48375f1d8f0694dee2ce8aab7f46be50c5297aec"
   "5db40d34a96a9c6889b6583d6cc09f8b8f05ea5e"
@@ -25,6 +29,10 @@ OLD_MLX_SWIFT_REVISIONS=(
   "2b0bd735a0cf18e0bdb87d1b066e2e9127299e08"
 )
 OLD_MLX_SWIFT_LM_REVISIONS=(
+  "65fd39b3c8f02585fbcd62cf9d46eec893ca0328"
+  "1bf1cc246e17c48527a32c99fffcde41b84cd725"
+  "6335ec8a2e25cff94c93992cb921d7a0345b4a22"
+  "c8a544503bcdad21ee736feec68f0ed7e07a9b29"
   "915a08dc8315b825b7f86109f12ba4d62d34f186"
   "bf7bab132f9810d8ab3e5c6e0adbcf3db0b40551"
   "bb5f6f837896503b1f660eaeed2850fb0f232a64"
@@ -37,6 +45,8 @@ OLD_MLX_SWIFT_LM_REVISIONS=(
   "51cd9cb986f941c352902bf121173b16947316ad"
   "2178543c34f6ff86989a485b60670f01f6c125a3"
   "c596b40cf3ac831f26006ee046dbabbb580b7c3b"
+  "ef88592d1a4f72b73a869bea39c627801cd13517"
+  "21fd68a54433c560e7f78b0475713f14499a164a"
   "eafe506864b61434929e88d1b07d523b00703fd1"
   "0c3863ae7e6d6a7cb160e924eee0898c9b49e6ff"
   "50e5bd416da5d144616a5e1f91758fa05ac792a7"
@@ -163,6 +173,32 @@ verify_nested_mlx_revisions() {
   rm -rf "$tmp_dir"
 }
 
+verify_compatibility_pair_policy() {
+  local expected_pair_id="$1"
+
+  python3 - "$COMPATIBILITY_PAIR_JSON" "$expected_pair_id" <<'PY'
+import json
+import sys
+
+path, expected_pair_id = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+
+pair_id = data.get("compatibilityPairID")
+promotion_pair_id = (data.get("productionPinPromotion") or {}).get("compatibilityPairID")
+if pair_id != expected_pair_id or promotion_pair_id != expected_pair_id:
+    raise SystemExit(
+        f"{path} does not keep the authoritative compatibility pair ID synchronized with pins."
+    )
+
+claim_policy = data.get("claimPolicy") or {}
+if claim_policy.get("pinsOnlyEvidenceLevel") != "unverified":
+    raise SystemExit(f"{path} must keep pins-only evidence at Unverified.")
+if claim_policy.get("verifiedOrCertifiedProductClaimsAllowed") is not False:
+    raise SystemExit(f"{path} must not allow Verified/Certified product claims from pins.")
+PY
+}
+
 echo "Checking MLX fork package pins..."
 
 project_mlx_swift_revision="$(project_yml_revision MLXSwift)"
@@ -220,9 +256,10 @@ fi
 if ! grep -q "$expected_pair_id" "$MLX_RUNTIME_BRIDGE"; then
   fail "$MLX_RUNTIME_BRIDGE does not expose the expected compatibility pair ID $expected_pair_id."
 fi
+verify_compatibility_pair_policy "$expected_pair_id"
 
 verify_not_below_minimum "mlx-swift" "$MLX_SWIFT_REPO" "$project_mlx_swift_revision" "$MLX_SWIFT_MIN_REVISION"
 verify_not_below_minimum "mlx-swift-lm" "$MLX_SWIFT_LM_REPO" "$project_mlx_swift_lm_revision" "$MLX_SWIFT_LM_MIN_REVISION"
 verify_nested_mlx_revisions "$project_mlx_swift_revision"
 
-echo "MLX fork package pins are aligned and at or above the known-good minimum revisions."
+echo "MLX fork package pins are aligned and at or above the known-good minimum revisions. Pin alignment is not Verified/Certified evidence."

@@ -153,6 +153,15 @@ extension GRDBPinesStore {
             userMode: TurboQuantUserMode(rawValue: row["user_mode"]) ?? .balanced,
             turboQuantPreset: row["turboquant_preset"] as String?,
             valueBits: row["value_bits"] as Int?,
+            requestedRuntimeMode: (row["requested_runtime_mode"] as String?).flatMap(TurboQuantRuntimeMode.init(rawValue:)),
+            resolvedRuntimeMode: (row["resolved_runtime_mode"] as String?).flatMap(TurboQuantRuntimeMode.init(rawValue:)),
+            keyPrecision: (row["key_precision"] as String?).flatMap(TurboQuantKeyPrecision.init(rawValue:)),
+            valuePrecision: (row["value_precision"] as String?).flatMap(TurboQuantValuePrecision.init(rawValue:)),
+            precisionPolicy: decodeJSON(row["precision_policy_json"] as String?),
+            sparseValuePolicy: decodeJSON(row["sparse_value_policy_json"] as String?),
+            effectiveBackend: (row["effective_backend"] as String?).flatMap(TurboQuantAttentionBackendEngine.init(rawValue:)),
+            nativeBackendVersion: row["native_backend_version"] as String?,
+            decodedActiveKVBytes: row["decoded_active_kv_bytes"] as Int64?,
             groupSize: row["group_size"] as Int?,
             layoutVersion: row["layout_version"] as Int?,
             activeAttentionPath: (row["active_attention_path"] as String?).flatMap(TurboQuantAttentionPath.init(rawValue:)),
@@ -731,6 +740,7 @@ extension GRDBPinesStore {
             displayName: row["display_name"],
             description: row["description"],
             inputSchema: schema,
+            annotations: decodeJSON(row["annotations_json"] as String?),
             enabled: (row["enabled"] as Int) == 1,
             lastDiscoveredAt: Date(timeIntervalSinceReferenceDate: row["last_discovered_at"]),
             lastError: row["last_error"] as String?
@@ -739,12 +749,15 @@ extension GRDBPinesStore {
 
     static func insertMCPTool(_ tool: MCPToolRecord, db: Database) throws {
         let schemaJSON = String(decoding: try JSONEncoder().encode(tool.inputSchema), as: UTF8.self)
+        let annotationsJSON = try tool.annotations.map {
+            String(decoding: try JSONEncoder().encode($0), as: UTF8.self)
+        }
         try db.execute(
             sql: """
             INSERT INTO mcp_tools
                 (server_id, original_name, namespaced_name, display_name, description, input_schema_json,
-                 enabled, last_discovered_at, last_error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 annotations_json, enabled, last_discovered_at, last_error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [
                 tool.serverID.rawValue,
@@ -753,6 +766,7 @@ extension GRDBPinesStore {
                 tool.displayName,
                 tool.description,
                 schemaJSON,
+                annotationsJSON,
                 tool.enabled ? 1 : 0,
                 tool.lastDiscoveredAt.timeIntervalSinceReferenceDate,
                 tool.lastError,

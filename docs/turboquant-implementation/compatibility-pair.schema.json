@@ -7,6 +7,10 @@
   "required": [
     "schemaVersion",
     "status",
+    "statusReason",
+    "compatibilityPairID",
+    "claimPolicy",
+    "releaseReadiness",
     "pines",
     "mlxSwift",
     "mlxSwiftLM",
@@ -22,15 +26,110 @@
       "type": "string",
       "enum": ["pending", "green", "failed", "revoked"]
     },
+    "statusReason": { "type": "string" },
+    "compatibilityPairID": { "type": "string" },
+    "claimPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pinsOnlyEvidenceLevel",
+        "verifiedOrCertifiedProductClaimsAllowed",
+        "requiresRealDeviceEvidence",
+        "notes"
+      ],
+      "properties": {
+        "pinsOnlyEvidenceLevel": {
+          "type": "string",
+          "enum": ["unverified", "smokeTested", "verified", "certified", "revoked"]
+        },
+        "verifiedOrCertifiedProductClaimsAllowed": { "type": "boolean" },
+        "requiresRealDeviceEvidence": { "type": "boolean" },
+        "notes": { "type": "string" }
+      }
+    },
+    "releaseReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "greenAllowed",
+        "requiredEvidenceForGreen",
+        "nativeBackendEvidence",
+        "performanceParityEvidence",
+        "appHostHybridNativeDiagnosticsRequired",
+        "currentBlockers",
+        "notes"
+      ],
+      "properties": {
+        "greenAllowed": { "type": "boolean" },
+        "requiredEvidenceForGreen": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "native_backend_performance",
+              "performance_parity",
+              "real_model_inference",
+              "real_device_app_host",
+              "benchmark_matrix",
+              "quality_memory_fallback"
+            ]
+          }
+        },
+        "nativeBackendEvidence": {
+          "type": "string",
+          "enum": ["missing", "api_contract_only", "failed", "passed"]
+        },
+        "performanceParityEvidence": {
+          "type": "string",
+          "enum": ["missing", "failed", "passed"]
+        },
+        "appHostHybridNativeDiagnosticsRequired": { "type": "boolean" },
+        "currentBlockers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "notes": { "type": "string" }
+      }
+    },
     "pines": { "$ref": "#/$defs/repoRef" },
     "mlxSwift": { "$ref": "#/$defs/repoRef" },
     "mlxSwiftLM": { "$ref": "#/$defs/repoRef" },
+    "wave0Baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runID",
+        "createdAt",
+        "mlxArtifactsPath",
+        "pinesArtifactsPath",
+        "repoStatePath",
+        "validationEventsPath",
+        "summaryPath",
+        "performanceParity",
+        "stabilityParity",
+        "supportParity"
+      ],
+      "properties": {
+        "runID": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "mlxArtifactsPath": { "type": "string" },
+        "pinesArtifactsPath": { "type": "string" },
+        "repoStatePath": { "type": "string" },
+        "validationEventsPath": { "type": "string" },
+        "summaryPath": { "type": "string" },
+        "benchmarkCSVPath": { "type": "string" },
+        "performanceParity": { "type": "boolean" },
+        "stabilityParity": { "type": "string" },
+        "supportParity": { "type": "string" },
+        "deviceSmokeResult": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
     "productionPinPromotion": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "branch",
-        "status",
         "pinnedMLXSwift",
         "pinnedMLXSwiftLM",
         "compatibilityPairID",
@@ -38,7 +137,6 @@
       ],
       "properties": {
         "branch": { "type": "string" },
-        "status": { "type": "string" },
         "pinnedMLXSwift": { "type": "string" },
         "pinnedMLXSwiftLM": { "type": "string" },
         "compatibilityPairID": { "type": "string" },
@@ -55,16 +153,25 @@
     },
     "validationCommands": {
       "type": "array",
+      "items": { "$ref": "#/$defs/validationCommand" }
+    },
+    "historicalValidationCommands": {
+      "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["command", "repo", "result"],
-        "properties": {
-          "repo": { "type": "string" },
-          "command": { "type": "string" },
-          "result": { "type": "string", "enum": ["pending", "passed", "failed", "skipped"] },
-          "notes": { "type": "string" }
-        }
+        "allOf": [
+          { "$ref": "#/$defs/validationCommand" },
+          {
+            "type": "object",
+            "required": ["historicalStatus", "supersededByRunID"],
+            "properties": {
+              "historicalStatus": {
+                "type": "string",
+                "enum": ["superseded", "reference-only"]
+              },
+              "supersededByRunID": { "type": "string" }
+            }
+          }
+        ]
       }
     },
     "signoffs": {
@@ -89,6 +196,29 @@
         "branch": { "type": "string" },
         "commit": { "type": "string" },
         "dirtyAtValidation": { "type": "boolean" }
+      }
+    },
+    "validationCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "repo", "result"],
+      "properties": {
+        "repo": { "type": "string" },
+        "command": { "type": "string" },
+        "result": {
+          "type": "string",
+          "enum": ["pending", "passed", "failed", "failed_environmental", "skipped"]
+        },
+        "notes": { "type": "string" },
+        "artifactPath": { "type": "string" },
+        "runID": { "type": "string" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": "string", "format": "date-time" },
+        "historicalStatus": {
+          "type": "string",
+          "enum": ["superseded", "reference-only"]
+        },
+        "supersededByRunID": { "type": "string" }
       }
     },
     "signoff": {

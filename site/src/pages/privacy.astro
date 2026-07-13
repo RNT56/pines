@@ -18,11 +18,11 @@ const policies = [
   },
   {
     title: "Optional sync",
-    body: "CloudKit sync is opt-in and excludes API keys, model binaries, prompt caches, transient tool state, browser state, and generated embeddings by default.",
+    body: "Encrypted CloudKit sync is opt-in for settings, Project Spaces, chats, and enabled Vault content. It excludes API keys, model binaries, prompt caches, transient tool state, browser state, and generated embeddings by default.",
   },
   {
     title: "Tool boundaries",
-    body: "Tools declare permissions, network policy, side-effect level, timeout, and explanation requirements. Private local data tools are scoped through app repositories.",
+    body: "Tools declare permissions, network policy, side-effect level, timeout, and explanation requirements. Web fetches are public-network-only and bounded; unannotated MCP tools are treated as remote-state-changing.",
   },
 ];
 ---
@@ -34,7 +34,7 @@ const policies = [
 >
   <div class="page-shell">
     <SiteNav />
-    <main class="content-page">
+    <main class="content-page" id="main-content">
       <section class="content-hero">
         <span class="section-kicker">Privacy</span>
         <h1>Local-first is the product boundary.</h1>

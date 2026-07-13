@@ -56,6 +56,18 @@ actor GRDBPinesStore:
         runtimeMetrics.recordStartupPhase("store_seed", elapsedSeconds: Date().timeIntervalSince(seedStartedAt))
     }
 
+    #if DEBUG
+    static func makeTestingStore(at url: URL) throws -> GRDBPinesStore {
+        let database = try DatabasePool(path: url.path)
+        try migrator.migrate(database)
+        return GRDBPinesStore(database: database)
+    }
+
+    private init(database: DatabasePool) {
+        self.database = database
+    }
+    #endif
+
     private static func databaseURL(fileName: String) throws -> URL {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -142,7 +154,7 @@ actor GRDBPinesStore:
             try db.execute(sql: "ATTACH DATABASE ? AS plaintext KEY ''", arguments: [url.path])
             defer { try? db.execute(sql: "DETACH DATABASE plaintext") }
 
-            for table in plaintextMigrationTables {
+            for table in PinesDatabaseSchema.durableUserTableNames {
                 guard try tableExists(table, in: "main", db: db),
                       try tableExists(table, in: "plaintext", db: db)
                 else {
@@ -171,61 +183,6 @@ actor GRDBPinesStore:
         try removeDatabaseFiles(at: encryptedURL)
         try removeDatabaseSidecars(for: url)
     }
-
-    private static let plaintextMigrationTables = [
-        "conversations",
-        "messages",
-        "attachments",
-        "model_installs",
-        "vault_documents",
-        "vault_chunks",
-        "audit_events",
-        "app_settings",
-        "cloud_providers",
-        "model_downloads",
-        "sync_records",
-        "chat_runs",
-        "agent_sessions",
-        "tool_runs",
-        "vault_import_jobs",
-        "browser_actions",
-        "vault_embeddings",
-        "mcp_servers",
-        "mcp_tools",
-        "mcp_resources",
-        "mcp_resource_templates",
-        "mcp_prompts",
-        "vault_embeddings_v2",
-        "vault_embedding_profiles",
-        "vault_embedding_jobs",
-        "vault_retrieval_events",
-        "vault_embeddings_v3",
-        "openai_provider_files",
-        "openai_vector_stores",
-        "openai_vector_store_files",
-        "openai_hosted_tool_calls",
-        "openai_artifacts",
-        "openai_background_responses",
-        "openai_realtime_sessions",
-        "openai_batch_jobs",
-        "openai_structured_output_results",
-        "provider_files",
-        "provider_artifacts",
-        "provider_caches",
-        "provider_batches",
-        "provider_live_sessions",
-        "provider_structured_outputs",
-        "provider_model_capabilities",
-        "provider_research_runs",
-        "projects",
-        "kv_snapshot_manifest",
-        "kv_snapshot_blob",
-        "kv_snapshot_reference",
-        "kv_snapshot_restore_attempt",
-        "kv_snapshot_quarantine",
-    ]
-
-    private static let userResetTables = plaintextMigrationTables
 
     private static let criticalMigrationTables = [
         "conversations",
@@ -365,7 +322,7 @@ actor GRDBPinesStore:
             defer {
                 try? db.execute(sql: "PRAGMA foreign_keys = ON")
             }
-            for table in Self.userResetTables.reversed() {
+            for table in PinesDatabaseSchema.durableUserTableNames.reversed() {
                 guard try Self.tableExists(table, in: "main", db: db) else { continue }
                 try db.execute(sql: "DELETE FROM \(Self.quotedIdentifier(table))")
             }
@@ -447,8 +404,8 @@ actor GRDBPinesStore:
         try await database.write { db in
             try db.execute(
                 sql: """
-                INSERT INTO projects (id, name, vault_enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO projects (id, name, vault_enabled, created_at, updated_at, sync_state)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 arguments: [
                     record.id.uuidString,
@@ -456,6 +413,7 @@ actor GRDBPinesStore:
                     record.vaultEnabled ? 1 : 0,
                     record.createdAt.timeIntervalSinceReferenceDate,
                     record.updatedAt.timeIntervalSinceReferenceDate,
+                    SyncState.local.rawValue,
                 ]
             )
         }
@@ -465,8 +423,13 @@ actor GRDBPinesStore:
     func updateProjectName(_ name: String, projectID: UUID) async throws {
         try await database.write { db in
             try db.execute(
-                sql: "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
-                arguments: [name.trimmingCharacters(in: .whitespacesAndNewlines), Date().timeIntervalSinceReferenceDate, projectID.uuidString]
+                sql: "UPDATE projects SET name = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [
+                    name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    Date().timeIntervalSinceReferenceDate,
+                    SyncState.local.rawValue,
+                    projectID.uuidString,
+                ]
             )
         }
     }
@@ -474,8 +437,13 @@ actor GRDBPinesStore:
     func setProjectVaultEnabled(_ enabled: Bool, projectID: UUID) async throws {
         try await database.write { db in
             try db.execute(
-                sql: "UPDATE projects SET vault_enabled = ?, updated_at = ? WHERE id = ?",
-                arguments: [enabled ? 1 : 0, Date().timeIntervalSinceReferenceDate, projectID.uuidString]
+                sql: "UPDATE projects SET vault_enabled = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [
+                    enabled ? 1 : 0,
+                    Date().timeIntervalSinceReferenceDate,
+                    SyncState.local.rawValue,
+                    projectID.uuidString,
+                ]
             )
         }
     }
@@ -483,9 +451,18 @@ actor GRDBPinesStore:
     func deleteProject(id: UUID) async throws {
         try await database.write { db in
             let now = Date().timeIntervalSinceReferenceDate
-            try db.execute(sql: "UPDATE projects SET deleted_at = ?, updated_at = ? WHERE id = ?", arguments: [now, now, id.uuidString])
-            try db.execute(sql: "UPDATE conversations SET project_id = NULL, updated_at = ? WHERE project_id = ?", arguments: [now, id.uuidString])
-            try db.execute(sql: "UPDATE vault_documents SET project_id = NULL, updated_at = ? WHERE project_id = ?", arguments: [now, id.uuidString])
+            try db.execute(
+                sql: "UPDATE projects SET deleted_at = ?, updated_at = ?, sync_state = ? WHERE id = ?",
+                arguments: [now, now, SyncState.local.rawValue, id.uuidString]
+            )
+            try db.execute(
+                sql: "UPDATE conversations SET project_id = NULL, updated_at = ?, sync_state = ? WHERE project_id = ?",
+                arguments: [now, SyncState.local.rawValue, id.uuidString]
+            )
+            try db.execute(
+                sql: "UPDATE vault_documents SET project_id = NULL, updated_at = ?, sync_state = ? WHERE project_id = ?",
+                arguments: [now, SyncState.local.rawValue, id.uuidString]
+            )
         }
     }
 
@@ -1101,14 +1078,17 @@ actor GRDBPinesStore:
                     (id, schema_version, evidence_level, compatibility_pair_id, model_id,
                      model_revision, tokenizer_hash, profile_hash, fallback_contract_hash,
                      device_class, hardware_model, os_build, user_mode, turboquant_preset,
-                     value_bits, group_size, layout_version, active_attention_path,
+                     value_bits, requested_runtime_mode, resolved_runtime_mode,
+                     key_precision, value_precision, precision_policy_json,
+                     sparse_value_policy_json, effective_backend, native_backend_version,
+                     decoded_active_kv_bytes, group_size, layout_version, active_attention_path,
                      speculative_dimensions_json, speculative_telemetry_json, speculative_auto_disable_json,
                      platform_evidence_dimensions_json,
                      admitted_context_tokens, peak_memory_bytes, prompt_tokens_per_second,
                      decode_tokens_per_second_p50, decode_tokens_per_second_p95,
                      first_token_latency_ms, quality_gate_json, memory_calibration_sample_id,
                      revoked_reason, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     evidence_level = excluded.evidence_level,
                     compatibility_pair_id = excluded.compatibility_pair_id,
@@ -1123,6 +1103,15 @@ actor GRDBPinesStore:
                     user_mode = excluded.user_mode,
                     turboquant_preset = excluded.turboquant_preset,
                     value_bits = excluded.value_bits,
+                    requested_runtime_mode = excluded.requested_runtime_mode,
+                    resolved_runtime_mode = excluded.resolved_runtime_mode,
+                    key_precision = excluded.key_precision,
+                    value_precision = excluded.value_precision,
+                    precision_policy_json = excluded.precision_policy_json,
+                    sparse_value_policy_json = excluded.sparse_value_policy_json,
+                    effective_backend = excluded.effective_backend,
+                    native_backend_version = excluded.native_backend_version,
+                    decoded_active_kv_bytes = excluded.decoded_active_kv_bytes,
                     group_size = excluded.group_size,
                     layout_version = excluded.layout_version,
                     active_attention_path = excluded.active_attention_path,
@@ -1157,6 +1146,15 @@ actor GRDBPinesStore:
                     evidence.userMode.rawValue,
                     evidence.turboQuantPreset,
                     evidence.valueBits,
+                    evidence.requestedRuntimeMode?.rawValue,
+                    evidence.resolvedRuntimeMode?.rawValue,
+                    evidence.keyPrecision?.rawValue,
+                    evidence.valuePrecision?.rawValue,
+                    Self.encodeJSON(evidence.precisionPolicy),
+                    Self.encodeJSON(evidence.sparseValuePolicy),
+                    evidence.effectiveBackend?.rawValue,
+                    evidence.nativeBackendVersion,
+                    evidence.decodedActiveKVBytes,
                     evidence.groupSize,
                     evidence.layoutVersion,
                     evidence.activeAttentionPath?.rawValue,
@@ -1191,6 +1189,10 @@ actor GRDBPinesStore:
         mode: TurboQuantUserMode,
         fallbackContractHash: String? = nil,
         layoutVersion: Int? = nil,
+        runtimeMode: TurboQuantRuntimeMode? = nil,
+        effectiveBackend: TurboQuantAttentionBackendEngine? = nil,
+        precisionPolicy: TurboQuantKVPrecisionPolicy? = nil,
+        sparseValuePolicy: TurboQuantSparseValuePolicy? = nil,
         speculativeDimensions: TurboQuantSpeculativeEvidenceDimensions? = nil,
         platformEvidenceDimensions: TurboQuantPlatformEvidenceDimensions? = nil,
         minimumContextTokens: Int = 0
@@ -1239,6 +1241,24 @@ actor GRDBPinesStore:
                 _ = arguments.append(contentsOf: StatementArguments([layoutVersion]))
             } else {
                 conditions.append("layout_version IS NULL")
+            }
+            if let runtimeMode {
+                conditions.append("(resolved_runtime_mode = ? OR (resolved_runtime_mode IS NULL AND requested_runtime_mode = ?))")
+                _ = arguments.append(contentsOf: StatementArguments([runtimeMode.rawValue, runtimeMode.rawValue]))
+            }
+            if let effectiveBackend {
+                conditions.append("effective_backend = ?")
+                _ = arguments.append(contentsOf: StatementArguments([effectiveBackend.rawValue]))
+            }
+            if let precisionPolicy {
+                conditions.append("precision_policy_json = ?")
+                _ = arguments.append(contentsOf: StatementArguments([Self.encodeJSON(precisionPolicy) ?? "null"]))
+            }
+            if let sparseValuePolicy {
+                conditions.append("(sparse_value_policy_json = ? OR (sparse_value_policy_json IS NULL AND ? = ?))")
+                let encoded = Self.encodeJSON(sparseValuePolicy) ?? "null"
+                let off = Self.encodeJSON(TurboQuantSparseValuePolicy.off) ?? "null"
+                _ = arguments.append(contentsOf: StatementArguments([encoded, encoded, off]))
             }
             if let speculativeDimensions {
                 conditions.append("speculative_dimensions_json = ?")
@@ -2241,6 +2261,71 @@ actor GRDBPinesStore:
     func deleteProvider(id: ProviderID) async throws {
         try await database.write { db in
             try db.execute(sql: "DELETE FROM cloud_providers WHERE id = ?", arguments: [id.rawValue])
+        }
+    }
+
+    func listModelCatalogSnapshots() async throws -> [CloudProviderModelCatalogSnapshot] {
+        try await database.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                SELECT provider_id, schema_version, models_json, fetched_at, expires_at
+                FROM cloud_model_catalog_snapshots
+                ORDER BY provider_id
+                """
+            ).compactMap { row in
+                let providerID = ProviderID(rawValue: row["provider_id"] as String)
+                let version = row["schema_version"] as Int
+                let modelsJSON = row["models_json"] as String
+                guard version == CloudProviderModelCatalogSnapshot.schemaVersion,
+                      let models = try? JSONDecoder().decode([CloudProviderModel].self, from: Data(modelsJSON.utf8))
+                else {
+                    return nil
+                }
+                return CloudProviderModelCatalogSnapshot(
+                    providerID: providerID,
+                    models: models,
+                    fetchedAt: Date(timeIntervalSinceReferenceDate: row["fetched_at"] as Double),
+                    expiresAt: Date(timeIntervalSinceReferenceDate: row["expires_at"] as Double),
+                    version: version
+                )
+            }
+        }
+    }
+
+    func upsertModelCatalogSnapshot(_ snapshot: CloudProviderModelCatalogSnapshot) async throws {
+        let modelsJSON = String(decoding: try encoder.encode(snapshot.models), as: UTF8.self)
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO cloud_model_catalog_snapshots
+                    (provider_id, schema_version, models_json, fetched_at, expires_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(provider_id) DO UPDATE SET
+                    schema_version = excluded.schema_version,
+                    models_json = excluded.models_json,
+                    fetched_at = excluded.fetched_at,
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at
+                """,
+                arguments: [
+                    snapshot.providerID.rawValue,
+                    snapshot.version,
+                    modelsJSON,
+                    snapshot.fetchedAt.timeIntervalSinceReferenceDate,
+                    snapshot.expiresAt.timeIntervalSinceReferenceDate,
+                    Date().timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func deleteModelCatalogSnapshot(providerID: ProviderID) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "DELETE FROM cloud_model_catalog_snapshots WHERE provider_id = ?",
+                arguments: [providerID.rawValue]
+            )
         }
     }
 

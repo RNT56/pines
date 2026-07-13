@@ -166,6 +166,19 @@ struct CoreContractTests {
     }
 
     @Test
+    func turboQuantEightBitPresetRoundTripsThroughCoreContracts() throws {
+        #expect(TurboQuantPreset(rawValue: "turbo8") == .turbo8)
+        #expect(TurboQuantPreset.turbo8.effectiveBits == 8)
+        #expect(TurboQuantPreset.turbo8.baseBits == 8)
+        #expect(TurboQuantPreset.turbo8.outlierBits == 8)
+        #expect(TurboQuantPreset.turbo8.defaultValueBits == 8)
+
+        let encoded = try JSONEncoder().encode(TurboQuantPreset.turbo8)
+        let decoded = try JSONDecoder().decode(TurboQuantPreset.self, from: encoded)
+        #expect(decoded == .turbo8)
+    }
+
+    @Test
     func chatContextPackerAnchorsCurrentUserAndDropsStaleFutureTurns() {
         let anchorID = UUID()
         let staleID = UUID()
@@ -1036,6 +1049,33 @@ struct CoreContractTests {
                 allowsExplicitLocalHTTP: true
             )
         }
+
+        for target in [
+            "https://localhost/admin",
+            "https://127.0.0.1/admin",
+            "https://10.0.0.1/admin",
+            "https://169.254.169.254/latest/meta-data",
+            "https://192.168.1.10/admin",
+            "https://[::1]/admin",
+            "https://service.local/admin",
+        ] {
+            #expect(throws: EndpointSecurityError.self) {
+                try policy.validate(URL(string: target)!, useCase: .webTool)
+            }
+        }
+        try policy.validate(URL(string: "https://example.com/article")!, useCase: .webTool)
+        #expect(EndpointSecurityPolicy.isSameOrigin(
+            URL(string: "https://example.com/a")!,
+            URL(string: "https://EXAMPLE.com:443/b")!
+        ))
+        #expect(!EndpointSecurityPolicy.isSameOrigin(
+            URL(string: "https://example.com/a")!,
+            URL(string: "https://other.example.com/b")!
+        ))
+        #expect(!EndpointSecurityPolicy.isSameOrigin(
+            URL(string: "https://example.com/a")!,
+            URL(string: "https://example.com:8443/b")!
+        ))
     }
 
     @Test
@@ -1194,6 +1234,188 @@ struct CoreContractTests {
       finish?.providerMetadata[CloudProviderMetadataKeys.openAIChatCompletionID] == "chatcmpl_1")
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAIModel] == "gpt-4.1")
         #expect(finish?.providerMetadata[CloudProviderMetadataKeys.openAISystemFingerprint] == "fp_123")
+    }
+
+    @Test
+    func openRouterTerminalReceiptPreservesRouteUsageAndCostAfterFinishReason() throws {
+        var parser = CloudProviderStreamParser()
+        let finishPayload = #"{"id":"gen-route-1","object":"chat.completion.chunk","model":"anthropic/claude-sonnet-4.6","provider":"Anthropic","service_tier":"priority","choices":[{"index":0,"delta":{},"finish_reason":"stop","native_finish_reason":"end_turn"}]}"#
+        let receiptPayload = #"{"id":"gen-route-1","object":"chat.completion.chunk","model":"anthropic/claude-sonnet-4.6","choices":[],"usage":{"prompt_tokens":120,"completion_tokens":30,"total_tokens":150,"cost":0.00125,"is_byok":false,"cost_details":{"upstream_inference_cost":0.001},"future_usage":{"sensitive":"excluded"}},"openrouter_metadata":{"requested":"openrouter/auto","strategy":"fallback","region":"iad","summary":"available=2, selected=Anthropic","attempt":2,"is_byok":false,"endpoints":{"total":2,"available":[{"provider":"OpenAI","model":"openai/gpt-4.1","selected":false},{"provider":"Anthropic","model":"anthropic/claude-sonnet-4.6","selected":true}]},"attempts":[{"provider":"OpenAI","model":"openai/gpt-4.1","status":503},{"provider":"Anthropic","model":"anthropic/claude-sonnet-4.6","status":200}],"future_addition":{"accepted":true}}}"#
+
+        let finishOutput = parser.parse(
+            data: Data(finishPayload.utf8),
+            format: .chatCompletions,
+            providerKind: .openRouter
+        )
+        let receiptOutput = parser.parse(
+            data: Data(receiptPayload.utf8),
+            format: .chatCompletions,
+            providerKind: .openRouter
+        )
+        let finish = parser.finalizedFinish(
+            finishOutput.finish,
+            format: .chatCompletions,
+            providerKind: .openRouter,
+            modelID: "openrouter/auto",
+            usesOfficialOpenAIReasoningChat: false
+        )
+
+        #expect(receiptOutput.finish == nil)
+        #expect(receiptOutput.events == [.metrics(InferenceMetrics(promptTokens: 120, completionTokens: 30))])
+        #expect(finish.reason == .stop)
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterGenerationID] == "gen-route-1")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterProvider] == "Anthropic")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterSelectedProvider] == "Anthropic")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterSelectedModel] == "anthropic/claude-sonnet-4.6")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterRequestedModel] == "openrouter/auto")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterStrategy] == "fallback")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterAttempt] == "2")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterAttemptCount] == "2")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterPromptTokens] == "120")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterCompletionTokens] == "30")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterTotalTokens] == "150")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterCostCredits] == "0.00125")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterUpstreamInferenceCost] == "0.001")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterIsBYOK] == "false")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterNativeFinishReason] == "end_turn")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterServiceTier] == "priority")
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterMetadataJSON]?.contains("future_addition") == false)
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterAttemptsJSON]?.contains("Anthropic") == true)
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterUsageJSON]?.contains("cost_details") == true)
+        #expect(finish.providerMetadata[CloudProviderMetadataKeys.openRouterUsageJSON]?.contains("future_usage") == false)
+
+        let provenance = try #require(OpenRouterRunProvenance(metadata: finish.providerMetadata))
+        #expect(provenance.generationID == "gen-route-1")
+        #expect(provenance.model == "anthropic/claude-sonnet-4.6")
+        #expect(provenance.selectedProvider == "Anthropic")
+        #expect(provenance.effectiveAttemptCount == 2)
+        #expect(provenance.routeAttempts.count == 2)
+        #expect(provenance.routeAttempts.first?.provider == "OpenAI")
+        #expect(provenance.routeAttempts.first?.status == 503)
+        #expect(provenance.promptTokens == 120)
+        #expect(provenance.completionTokens == 30)
+        #expect(provenance.totalTokens == 150)
+        #expect(provenance.costCredits == 0.00125)
+        #expect(provenance.upstreamInferenceCost == 0.001)
+        #expect(provenance.isBYOK == false)
+    }
+
+    @Test
+    func openRouterWebSearchCapturesNestedAnnotationsUsageAndHostedTimeline() throws {
+        var parser = CloudProviderStreamParser()
+        let answerPayload = #"""
+        {
+          "id": "gen-search-1",
+          "object": "chat.completion.chunk",
+          "model": "openai/gpt-5-mini",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "content": "Current answer [1]",
+              "annotations": [
+                {
+                  "type": "url_citation",
+                  "url_citation": {
+                    "url": "https://example.com/news?item=1",
+                    "title": "Example release",
+                    "content": "Bounded source excerpt.",
+                    "start_index": 15,
+                    "end_index": 18
+                  }
+                },
+                {
+                  "type": "url_citation",
+                  "url_citation": {
+                    "url": "http://127.0.0.1/private",
+                    "title": "Must not persist"
+                  }
+                }
+              ]
+            },
+            "finish_reason": "stop"
+          }]
+        }
+        """#
+        let receiptPayload = #"""
+        {
+          "id": "gen-search-1",
+          "object": "chat.completion.chunk",
+          "model": "openai/gpt-5-mini",
+          "choices": [],
+          "usage": {
+            "prompt_tokens": 30,
+            "completion_tokens": 8,
+            "total_tokens": 38,
+            "cost": 0.006,
+            "server_tool_use": {
+              "web_search_requests": 2,
+              "future_counter": 99
+            }
+          }
+        }
+        """#
+
+        let answer = parser.parse(
+            data: Data(answerPayload.utf8),
+            format: .chatCompletions,
+            providerKind: .openRouter
+        )
+        _ = parser.parse(
+            data: Data(receiptPayload.utf8),
+            format: .chatCompletions,
+            providerKind: .openRouter
+        )
+        let finish = parser.finalizedFinish(
+            answer.finish,
+            format: .chatCompletions,
+            providerKind: .openRouter,
+            modelID: "openai/gpt-5-mini",
+            usesOfficialOpenAIReasoningChat: false
+        )
+        let metadata = finish.providerMetadata
+        let citationData = try #require(
+            metadata[CloudProviderMetadataKeys.webSearchCitationsJSON]?.data(using: .utf8)
+        )
+        let citations = try JSONDecoder().decode([WebSearchCitation].self, from: citationData)
+        let providerCitations = metadata.providerCitations
+        let timeline = metadata.hostedToolAuditEntries
+        let provenance = try #require(OpenRouterRunProvenance(metadata: metadata))
+
+        #expect(answer.events.contains(.token(TokenDelta(kind: .token, text: "Current answer [1]", tokenCount: 1))))
+        #expect(citations.count == 1)
+        #expect(citations.first?.title == "Example release")
+        #expect(citations.first?.source == "OpenRouter")
+        #expect(providerCitations.count == 1)
+        #expect(providerCitations.first?.providerKind == .openRouter)
+        #expect(providerCitations.first?.sourceType == .web)
+        #expect(providerCitations.first?.startOffset == 15)
+        #expect(providerCitations.first?.endOffset == 18)
+        #expect(providerCitations.first?.citedText == "Bounded source excerpt.")
+        #expect(metadata[CloudProviderMetadataKeys.openRouterWebSearchRequests] == "2")
+        #expect(metadata[CloudProviderMetadataKeys.openRouterUsageJSON]?.contains("web_search_requests") == true)
+        #expect(metadata[CloudProviderMetadataKeys.openRouterUsageJSON]?.contains("future_counter") == false)
+        #expect(timeline.count == 1)
+        #expect(timeline.first?.kind == .webSearch)
+        #expect(timeline.first?.status == .completed)
+        #expect(timeline.first?.name == "OpenRouter web search (2 requests)")
+        #expect(provenance.webSearchRequests == 2)
+        #expect(provenance.costCredits == 0.006)
+    }
+
+    @Test
+    func openAICompatibleChunksDoNotMasqueradeAsOpenRouterReceipts() {
+        var parser = CloudProviderStreamParser()
+        let payload = #"{"id":"chatcmpl-1","model":"custom/model","provider":"Example","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5,"cost":12.5},"openrouter_metadata":{"requested":"ignored","attempt":1}}"#
+
+        _ = parser.parse(
+            data: Data(payload.utf8),
+            format: .chatCompletions,
+            providerKind: .openAICompatible
+        )
+
+        #expect(parser.state.openAIProviderMetadata[CloudProviderMetadataKeys.openAIChatCompletionID] == "chatcmpl-1")
+        #expect(parser.state.openAIProviderMetadata[CloudProviderMetadataKeys.openRouterGenerationID] == nil)
+        #expect(OpenRouterRunProvenance(metadata: parser.state.openAIProviderMetadata) == nil)
     }
 
     @Test
@@ -2299,6 +2521,7 @@ struct CoreContractTests {
         #expect(decoded.anthropicTokenCountPreflightEnabled == false)
         #expect(decoded.geminiThinkingLevel == .medium)
         #expect(decoded.cloudWebSearchMode == .off)
+        #expect(decoded.openRouterProviderPreferences == .init())
         #expect(decoded.cloudAccessMode == .byok)
         #expect(decoded.proEntitlementStatus == .inactive)
         #expect(decoded.managedCloudConsent == .notAsked)
@@ -2316,7 +2539,18 @@ struct CoreContractTests {
             anthropicEffort: .xhigh,
             anthropicTokenCountPreflightEnabled: true,
             geminiThinkingLevel: .high,
-            cloudWebSearchMode: .automatic
+            cloudWebSearchMode: .automatic,
+            openRouterProviderPreferences: OpenRouterProviderPreferences(
+                order: [" Anthropic ", "OPENAI", "anthropic"],
+                only: ["azure"],
+                ignore: ["AZURE", "deepinfra"],
+                allowFallbacks: false,
+                requireParameters: true,
+                dataCollection: .deny,
+                zeroDataRetention: true,
+                sort: .throughput,
+                webSearchEngine: .exa
+            )
         )
         #expect(clamped.cloudMaxCompletionTokens == AppSettingsSnapshot.minCompletionTokens)
         #expect(clamped.localMaxCompletionTokens == AppSettingsSnapshot.maxCompletionTokens)
@@ -2328,6 +2562,11 @@ struct CoreContractTests {
         #expect(clamped.anthropicTokenCountPreflightEnabled == true)
         #expect(clamped.geminiThinkingLevel == .high)
         #expect(clamped.cloudWebSearchMode == .automatic)
+        #expect(clamped.openRouterProviderPreferences.order == ["anthropic", "openai"])
+        #expect(clamped.openRouterProviderPreferences.only == ["azure"])
+        #expect(clamped.openRouterProviderPreferences.ignore == ["deepinfra"])
+        #expect(clamped.openRouterProviderPreferences.sort == .automatic)
+        #expect(clamped.openRouterProviderPreferences.webSearchEngine == .exa)
         #expect(clamped.cloudAccessMode == .managedPro)
         #expect(clamped.proEntitlementStatus == .active)
         #expect(clamped.managedCloudConsent == .optedIn)
@@ -2557,7 +2796,14 @@ struct CoreContractTests {
                 previousResponseID: "resp_previous",
                 hostedTools: [OpenAIHostedToolRequest(kind: .fileSearch, vectorStoreIDs: ["vs_1"])]
             ),
-            geminiOptions: GeminiRequestOptions(cachedContentName: "cachedContents/1")
+            geminiOptions: GeminiRequestOptions(cachedContentName: "cachedContents/1"),
+            openRouterOptions: OpenRouterProviderPreferences(
+                order: ["anthropic", "openai"],
+                allowFallbacks: false,
+                dataCollection: .deny,
+                zeroDataRetention: true,
+                webSearchEngine: .parallel
+            )
         )
 
         let rebuilt = request.replacing(
@@ -2576,6 +2822,8 @@ struct CoreContractTests {
         #expect(rebuilt.openAIResponseOptions?.previousResponseID == "resp_previous")
         #expect(rebuilt.openAIResponseOptions?.hostedTools.first?.vectorStoreIDs == ["vs_1"])
         #expect(rebuilt.geminiOptions?.cachedContentName == "cachedContents/1")
+        #expect(rebuilt.openRouterOptions == request.openRouterOptions)
+        #expect(rebuilt.openRouterOptions?.webSearchEngine == .parallel)
         #expect(rebuilt.webSearchOptions?.allowedDomains == ["example.com"])
         #expect(rebuilt.vaultContextIDs == request.vaultContextIDs)
     }
@@ -2619,7 +2867,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-    #expect(PinesDatabaseSchema.currentVersion == 23)
+    #expect(PinesDatabaseSchema.currentVersion == 27)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
     let genericProviderMigration = try #require(
       PinesDatabaseSchema.migrations.first { $0.version == 15 })
@@ -2735,6 +2983,33 @@ struct CoreContractTests {
     #expect(
       platformSQL.contains(
         "ALTER TABLE turboquant_profile_evidence ADD COLUMN platform_evidence_dimensions_json"))
+
+    let runtimeEvidenceMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 24 })
+    let runtimeEvidenceSQL = runtimeEvidenceMigration.sql.joined(separator: "\n")
+    for column in [
+      "requested_runtime_mode",
+      "resolved_runtime_mode",
+      "key_precision",
+      "value_precision",
+      "precision_policy_json",
+      "sparse_value_policy_json",
+      "effective_backend",
+      "native_backend_version",
+      "decoded_active_kv_bytes",
+    ] {
+      #expect(
+        runtimeEvidenceSQL.contains(
+          "ALTER TABLE turboquant_profile_evidence ADD COLUMN \(column)"))
+    }
+
+    let catalogMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 27 })
+    let catalogSQL = catalogMigration.sql.joined(separator: "\n")
+    #expect(catalogSQL.contains("CREATE TABLE IF NOT EXISTS cloud_model_catalog_snapshots"))
+    #expect(catalogSQL.contains("REFERENCES cloud_providers(id) ON DELETE CASCADE"))
+    #expect(catalogSQL.contains("models_json TEXT NOT NULL"))
+    #expect(catalogSQL.contains("expires_at REAL NOT NULL"))
     }
 
     @Test
@@ -3501,9 +3776,13 @@ struct CoreContractTests {
 
         for spec in qwenTurboQuantProfileCases {
             let result = classifier.classify(spec.preflightInput)
+            let expectedFamilySupport: TurboQuantFamilySupport =
+                spec.modalities == [.text] ? .hybridFull : .none
+            let expectedVerification: ModelVerificationState =
+                spec.modalities == [.text] ? .verified : .installable
 
             #expect(result.repository == spec.repository)
-            #expect(result.verification == .verified)
+            #expect(result.verification == expectedVerification)
             #expect(result.modalities == spec.modalities)
             #expect(result.modelType == spec.modelType)
             #expect(result.processorClass == spec.processorClass)
@@ -3511,7 +3790,7 @@ struct CoreContractTests {
             #expect(result.keyHeadDimension == spec.headDimension)
             #expect(result.valueHeadDimension == spec.headDimension)
             #expect(result.cacheTopology == .hybridAttentionAndNativeState)
-            #expect(result.turboQuantFamilySupport == .hybridFull)
+            #expect(result.turboQuantFamilySupport == expectedFamilySupport)
             #expect(result.estimatedBytes == spec.expectedDownloadBytes)
             #expect(result.reasons.isEmpty)
 
@@ -3541,7 +3820,7 @@ struct CoreContractTests {
             #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.cacheTopology == .hybridAttentionAndNativeState)
-            #expect(roundTrippedInstall.turboQuantFamilySupport == .hybridFull)
+            #expect(roundTrippedInstall.turboQuantFamilySupport == expectedFamilySupport)
 
             let hints = ModelRuntimeConfigurationHints.infer(
                 repository: spec.repository,
@@ -3558,6 +3837,77 @@ struct CoreContractTests {
     }
 
     @Test
+    func qwenTextModelsWithGenericProcessorConfigStillAdvertiseTurboQuant() throws {
+        let classifier = ModelPreflightClassifier()
+        let result = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+                configJSON: Data(
+                    #"{"model_type":"qwen3_5","head_dim":256,"full_attention_interval":4,"linear_num_value_heads":8,"linear_conv_kernel_dim":4}"#
+                        .utf8
+                ),
+                processorConfigJSON: Data(#"{"processor_class":"QwenProcessor"}"#.utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 700_000_000),
+                ],
+                tags: ["mlx", "qwen3_5", "4bit"]
+            )
+        )
+
+        #expect(result.verification == .verified)
+        #expect(result.modalities == [.text])
+        #expect(result.cacheTopology == .hybridAttentionAndNativeState)
+        #expect(result.turboQuantFamilySupport == .hybridFull)
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: result.repository,
+                modelType: result.modelType,
+                textConfigModelType: result.textConfigModelType,
+                modalities: result.modalities,
+                familySupport: result.turboQuantFamilySupport
+            )
+        )
+    }
+
+    @Test
+    func qwenVisionModelsRemainGatedUntilVLMTurboQuantTopologyIsExplicit() throws {
+        let classifier = ModelPreflightClassifier()
+        let result = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen3.5-VL-2B-Instruct-4bit",
+                configJSON: Data(
+                    #"{"model_type":"qwen3_5","head_dim":256,"full_attention_interval":4,"linear_num_value_heads":8,"linear_conv_kernel_dim":4}"#
+                        .utf8
+                ),
+                processorConfigJSON: Data(#"{"processor_class":"Qwen2VLProcessor"}"#.utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 8_000_000),
+                    ModelFileInfo(path: "processor_config.json", size: 12_000),
+                    ModelFileInfo(path: "model.safetensors", size: 1_550_000_000),
+                ],
+                tags: ["mlx", "qwen3_5", "image-text-to-text", "4bit"]
+            )
+        )
+
+        #expect(result.modalities == [.text, .vision])
+        #expect(result.cacheTopology == .hybridAttentionAndNativeState)
+        #expect(result.turboQuantFamilySupport == .none)
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: result.repository,
+                modelType: result.modelType,
+                textConfigModelType: result.textConfigModelType,
+                modalities: result.modalities,
+                familySupport: result.turboQuantFamilySupport
+            )
+        )
+    }
+
+    @Test
     func qwenTurboQuantResourcePolicyKeepsLargeModelsBehindDownloadGates() throws {
         let compactPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 3_800_000_000)
         let proPolicy = ModelDiscoveryResourcePolicy(maxDownloadBytes: 5_500_000_000)
@@ -3567,6 +3917,7 @@ struct CoreContractTests {
         for repository in [
             "mlx-community/Qwen3.5-0.8B-MLX-4bit",
             "mlx-community/Qwen3.5-2B-MLX-4bit",
+            "mlx-community/Qwen3.5-2B-OptiQ-4bit",
         ] {
             let spec = try #require(specsByRepository[repository])
             let decision = compactPolicy.evaluate(spec.preflightInput, modalities: spec.modalities)
@@ -3608,21 +3959,409 @@ struct CoreContractTests {
     }
 
     @Test
+    func modelInstallInfersSmallTextGenerationModelsFromRepositoryWhenMetadataIsMissing() {
+        let qwen08 = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Qwen3.5-0.8B-MLX-4bit"),
+            displayName: "Qwen3.5 0.8B",
+            repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+            modalities: [.text],
+            verification: .installable,
+            parameterCount: nil,
+            modelType: "qwen3_5"
+        )
+        let qwen2 = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Qwen3.5-2B-OptiQ-4bit"),
+            displayName: "Qwen3.5 2B OptiQ",
+            repository: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
+            modalities: [.text],
+            verification: .installable,
+            parameterCount: nil,
+            modelType: "qwen3_5"
+        )
+        let llama3B = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Llama-3.2-3B-Instruct-4bit"),
+            displayName: "Llama 3.2 3B",
+            repository: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            modalities: [.text],
+            verification: .installable,
+            parameterCount: nil,
+            modelType: "llama"
+        )
+        let gemma1B = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/gemma-3-1b-it-4bit"),
+            displayName: "Gemma 3 1B",
+            repository: "mlx-community/gemma-3-1b-it-4bit",
+            modalities: [.text],
+            verification: .installable,
+            parameterCount: nil,
+            modelType: "gemma3_text"
+        )
+
+        #expect(qwen08.resolvedParameterCount == 800_000_000)
+        #expect(qwen08.isSmallTextGenerationModel)
+        #expect(qwen2.resolvedParameterCount == 2_000_000_000)
+        #expect(qwen2.isSmallTextGenerationModel)
+        #expect(llama3B.resolvedParameterCount == 3_000_000_000)
+        #expect(!llama3B.isSmallTextGenerationModel)
+        #expect(gemma1B.resolvedParameterCount == 1_000_000_000)
+        #expect(gemma1B.isSmallTextGenerationModel)
+    }
+
+    @Test
+    func modelInstallRepairsStaleTurboQuantFamilySupportForAdmittedTextModels() {
+        let staleQwen08 = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Qwen3.5-0.8B-MLX-4bit"),
+            displayName: "Qwen3.5 0.8B",
+            repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+            modalities: [.text, .vision],
+            verification: .installable,
+            modelType: "qwen3_5",
+            textConfigModelType: "qwen3_5_text",
+            processorClass: "QwenProcessor",
+            keyHeadDimension: 256,
+            valueHeadDimension: 256,
+            cacheTopology: .hybridAttentionAndNativeState,
+            turboQuantFamilySupport: .none
+        )
+        let staleLlama3B = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Llama-3.2-3B-Instruct-4bit"),
+            displayName: "Llama 3.2 3B",
+            repository: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            modalities: [.text],
+            verification: .installable,
+            modelType: "llama",
+            keyHeadDimension: 128,
+            valueHeadDimension: 128,
+            cacheTopology: .standardAttention,
+            turboQuantFamilySupport: .none
+        )
+        let qwenVL = ModelInstall(
+            modelID: ModelID(rawValue: "mlx-community/Qwen3.5-VL-2B-Instruct-4bit"),
+            displayName: "Qwen3.5 VL 2B",
+            repository: "mlx-community/Qwen3.5-VL-2B-Instruct-4bit",
+            modalities: [.text, .vision],
+            verification: .installable,
+            modelType: "qwen3_5",
+            processorClass: "Qwen2VLProcessor",
+            keyHeadDimension: 256,
+            valueHeadDimension: 256,
+            cacheTopology: .hybridAttentionAndNativeState,
+            turboQuantFamilySupport: .none
+        )
+
+        #expect(staleQwen08.effectiveTurboQuantModalities == [.text])
+        #expect(staleQwen08.effectiveTurboQuantFamilySupport == .hybridFull)
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: staleQwen08.repository,
+                modelType: staleQwen08.modelType,
+                textConfigModelType: staleQwen08.textConfigModelType,
+                modalities: staleQwen08.effectiveTurboQuantModalities,
+                familySupport: staleQwen08.effectiveTurboQuantFamilySupport
+            )
+        )
+        #expect(staleLlama3B.effectiveTurboQuantFamilySupport == .attentionKVFull)
+        #expect(qwenVL.effectiveTurboQuantModalities == [.text, .vision])
+        #expect(qwenVL.effectiveTurboQuantFamilySupport == .none)
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: qwenVL.repository,
+                modelType: qwenVL.modelType,
+                textConfigModelType: qwenVL.textConfigModelType,
+                modalities: qwenVL.effectiveTurboQuantModalities,
+                familySupport: qwenVL.effectiveTurboQuantFamilySupport
+            )
+        )
+    }
+
+    @Test
+    func turboQuantRuntimeSupportDefaultsForProfileBackedFamilies() throws {
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-3-1b-it-4bit",
+                modelType: "gemma3",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+                modelType: "qwen3_5",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .hybridFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
+                modelType: "qwen3_5",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .hybridFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Llama-3.2-3B-Instruct-4bit",
+                modelType: "llama",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-3n-E2B-it-4bit",
+                modelType: "gemma3n",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-4-e2b-it-4bit",
+                modelType: "gemma4",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+                modelType: "qwen2",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Mistral-Small-4-119B-A6B-Instruct-4bit",
+                modelType: "mistral3",
+                textConfigModelType: "mistral4",
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Phi-4-mini-instruct-4bit",
+                modelType: "phi3",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/granite-3.3-2b-instruct-4bit",
+                modelType: "granite",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/LFM2-1.2B-Instruct-4bit",
+                modelType: "lfm2",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .hybridFull
+            )
+        )
+        #expect(
+            TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/GLM-4.7-Flash-4bit",
+                modelType: "glm4_moe_lite",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Qwen3.5-0.8B-MLX-4bit",
+                modelType: nil,
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .hybridFull
+            )
+        )
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/Pixtral-12B-4bit",
+                modelType: "pixtral",
+                textConfigModelType: nil,
+                modalities: [.text, .vision],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-3n-E4B-it-4bit",
+                modelType: "gemma3n",
+                textConfigModelType: "gemma3n_text",
+                modalities: [.text, .vision],
+                familySupport: .attentionKVFull
+            )
+        )
+        #expect(
+            !TurboQuantRuntimeSupport.supportsThrowingAttentionGeneration(
+                repository: "mlx-community/gemma-4-e2b-it-4bit",
+                modelType: "gemma4_assistant",
+                textConfigModelType: nil,
+                modalities: [.text],
+                familySupport: .attentionKVFull
+            )
+        )
+    }
+
+    @Test
+    func preflightRequiresRuntimeCapabilityRegistryForVerifiedTurboQuantClaim() throws {
+        let classifier = ModelPreflightClassifier(
+            turboQuantRuntimeCapabilities: PinesTurboQuantRuntimeCapabilityRegistry(capabilities: [])
+        )
+        let result = classifier.classify(
+            ModelPreflightInput(
+                repository: "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+                configJSON: Data(#"{"model_type":"qwen2","hidden_size":2048,"num_attention_heads":16}"#.utf8),
+                files: [
+                    ModelFileInfo(path: "config.json", size: 10_000),
+                    ModelFileInfo(path: "tokenizer.json", size: 2_000_000),
+                    ModelFileInfo(path: "model.safetensors", size: 1_000_000_000),
+                ],
+                tags: ["mlx", "4bit"]
+            )
+        )
+
+        #expect(result.turboQuantFamilySupport == .attentionKVFull)
+        #expect(result.verification == .installable)
+    }
+
+    @Test
+    func broadTurboQuantRuntimeFamiliesPreflightAsSupported() throws {
+        let classifier = ModelPreflightClassifier()
+        let cases: [(String, String, ModelCacheTopology, TurboQuantFamilySupport, Int, Int)] = [
+            (
+                "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+                #"{"model_type":"qwen2","hidden_size":2048,"num_attention_heads":16}"#,
+                .standardAttention,
+                .attentionKVFull,
+                128,
+                128
+            ),
+            (
+                "mlx-community/Phi-4-mini-instruct-4bit",
+                #"{"model_type":"phi3","hidden_size":3072,"num_attention_heads":32}"#,
+                .standardAttention,
+                .attentionKVFull,
+                96,
+                96
+            ),
+            (
+                "mlx-community/granite-3.3-2b-instruct-4bit",
+                #"{"model_type":"granite","hidden_size":4096,"num_attention_heads":32}"#,
+                .standardAttention,
+                .attentionKVFull,
+                128,
+                128
+            ),
+            (
+                "mlx-community/EXAONE-4.0-1.2B-4bit",
+                #"{"model_type":"exaone4","head_dim":128,"sliding_window":4096}"#,
+                .slidingAttention,
+                .attentionKVFull,
+                128,
+                128
+            ),
+            (
+                "mlx-community/SmolLM3-3B-4bit",
+                #"{"model_type":"smollm3","hidden_size":2048,"num_attention_heads":32}"#,
+                .standardAttention,
+                .attentionKVFull,
+                64,
+                64
+            ),
+            (
+                "mlx-community/LFM2-1.2B-Instruct-4bit",
+                #"{"model_type":"lfm2","hidden_size":1024,"num_attention_heads":16,"layer_types":["full_attention","conv"]}"#,
+                .hybridAttentionAndNativeState,
+                .hybridFull,
+                64,
+                64
+            ),
+            (
+                "mlx-community/GLM-4.7-Flash-4bit",
+                #"{"model_type":"glm4_moe_lite","qk_nope_head_dim":128,"qk_rope_head_dim":64,"v_head_dim":128}"#,
+                .standardAttention,
+                .attentionKVFull,
+                192,
+                128
+            ),
+        ]
+
+        for (repository, configJSON, topology, familySupport, keyDimension, valueDimension) in cases {
+            let result = classifier.classify(
+                ModelPreflightInput(
+                    repository: repository,
+                    configJSON: Data(configJSON.utf8),
+                    files: [
+                        ModelFileInfo(path: "config.json", size: 10_000),
+                        ModelFileInfo(path: "tokenizer.json", size: 2_000_000),
+                        ModelFileInfo(path: "model.safetensors", size: 1_000_000_000),
+                    ],
+                    tags: ["mlx", "4bit"]
+                )
+            )
+
+            #expect(result.verification == .verified)
+            #expect(result.modalities == [.text])
+            #expect(result.cacheTopology == topology)
+            #expect(result.turboQuantFamilySupport == familySupport)
+            #expect(result.keyHeadDimension == keyDimension)
+            #expect(result.valueHeadDimension == valueDimension)
+            #expect(result.reasons.isEmpty)
+        }
+    }
+
+    @Test
+    func modelInstallDecodingPreservesLegacyTurboQuantDefault() throws {
+        let payload = """
+        {
+          "modelID": "local-test",
+          "displayName": "Local Test",
+          "repository": "local/test",
+          "modalities": ["text"]
+        }
+        """
+        let install = try JSONDecoder().decode(ModelInstall.self, from: Data(payload.utf8))
+        #expect(install.turboQuantFamilySupport == .attentionKVFull)
+    }
+
+    @Test
     func gemmaTurboQuantPreflightCarriesProfileMetadataForExpandedFamilies() throws {
         let classifier = ModelPreflightClassifier()
 
         for spec in gemmaTurboQuantProfileCases {
             let result = classifier.classify(spec.preflightInput)
-      let isPromotedFamily = [
-        "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant",
-      ]
+            let isPromotedFamily = [
+                "gemma3", "gemma3_text", "gemma3n", "gemma4", "gemma4_text", "gemma4_assistant",
+            ]
                 .contains(spec.modelType)
+            let expectedFamilySupport: TurboQuantFamilySupport =
+                spec.modalities == [.text] ? .attentionKVFull : .none
 
             #expect(result.repository == spec.repository)
-      let expectedVerification: ModelVerificationState =
-        spec.modelType == "gemma4_assistant"
+            let expectedVerification: ModelVerificationState =
+                spec.modelType == "gemma4_assistant"
                 ? .experimental
-                : (isPromotedFamily ? .verified : .installable)
+                : (isPromotedFamily && spec.modalities == [.text] ? .verified : .installable)
             #expect(result.verification == expectedVerification)
             #expect(result.modalities == spec.modalities)
             #expect(result.modelType == spec.modelType)
@@ -3631,7 +4370,7 @@ struct CoreContractTests {
             #expect(result.keyHeadDimension == spec.headDimension)
             #expect(result.valueHeadDimension == spec.headDimension)
             #expect(result.cacheTopology == spec.expectedCacheTopology)
-            #expect(result.turboQuantFamilySupport == .attentionKVFull)
+            #expect(result.turboQuantFamilySupport == expectedFamilySupport)
             #expect(result.estimatedBytes == spec.expectedDownloadBytes)
             #expect(result.reasons.isEmpty)
 
@@ -3661,7 +4400,7 @@ struct CoreContractTests {
             #expect(roundTrippedInstall.keyHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.valueHeadDimension == spec.headDimension)
             #expect(roundTrippedInstall.cacheTopology == spec.expectedCacheTopology)
-            #expect(roundTrippedInstall.turboQuantFamilySupport == .attentionKVFull)
+            #expect(roundTrippedInstall.turboQuantFamilySupport == expectedFamilySupport)
 
             let hints = ModelRuntimeConfigurationHints.infer(
                 repository: spec.repository,
@@ -3690,6 +4429,7 @@ struct CoreContractTests {
         for repository in [
             "mlx-community/gemma-3-270m-it-qat-4bit",
             "mlx-community/gemma-3-1b-it-qat-4bit",
+            "mlx-community/gemma-3-1b-it-4bit",
             "mlx-community/gemma-3n-E2B-it-lm-4bit",
         ] {
             let spec = try #require(specsByRepository[repository])
@@ -3824,13 +4564,15 @@ struct CoreContractTests {
         #expect(llama.cacheTopology == .standardAttention)
         #expect(llama.turboQuantFamilySupport == .attentionKVFull)
 
-        #expect(mistralSmall4.verification == .installable)
+        #expect(mistralSmall4.verification == .verified)
         #expect(mistralSmall4.modelType == "mistral3")
         #expect(mistralSmall4.textConfigModelType == "mistral4")
         #expect(mistralSmall4.keyHeadDimension == 128)
         #expect(mistralSmall4.valueHeadDimension == 128)
         #expect(mistralSmall4.routedExperts == 128)
         #expect(mistralSmall4.expertsPerToken == 4)
+        #expect(mistralSmall4.cacheTopology == .standardAttention)
+        #expect(mistralSmall4.turboQuantFamilySupport == .attentionKVFull)
 
         #expect(pixtral.verification == .installable)
         #expect(pixtral.modalities == [.text, .vision])
@@ -3838,6 +4580,7 @@ struct CoreContractTests {
         #expect(pixtral.textConfigModelType == "mistral")
         #expect(pixtral.keyHeadDimension == 128)
         #expect(pixtral.valueHeadDimension == 128)
+        #expect(pixtral.turboQuantFamilySupport == .none)
 
         #expect(llama4.verification == .unsupported)
         #expect(llama4.modalities.isEmpty)
@@ -3988,11 +4731,9 @@ struct CoreContractTests {
                 ModelPreflightInput(
                     repository: repository,
                     configJSON: Data(configJSON.utf8),
-                    processorConfigJSON: #"{"processor_class":"Gemma3Processor"}"#.data(using: .utf8),
                     files: [
                         ModelFileInfo(path: "model.safetensors"),
                         ModelFileInfo(path: "tokenizer.json"),
-                        ModelFileInfo(path: "processor_config.json"),
                     ]
                 )
             )
@@ -4213,7 +4954,17 @@ struct CoreContractTests {
 
     @Test
     func localGenerationPipelinePlanDoesNotClampOrdinaryLoadedModelHeadroom() {
-        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let profile = RuntimeProfile(
+            quantization: QuantizationProfile(
+                maxKVSize: 4_096,
+                algorithm: .none,
+                kvCacheStrategy: .none,
+                preset: nil,
+                requestedBackend: nil,
+                activeBackend: nil,
+                activeAttentionPath: nil
+            )
+        )
         let safety = LocalRuntimeSafetyPolicy.assess(
             snapshot: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 8_000_000_000,
@@ -4260,10 +5011,101 @@ struct CoreContractTests {
             initialAvailableMemoryBytes: 1_800_000_000
         )
 
-        #expect(plan.pressureCompletionTokenLimit == nil)
+        #expect(plan.pressureCompletionTokenLimit == 512)
         #expect(plan.reservedCompletionTokens == 20)
         #expect(plan.effectiveMaxTokens == 20)
         #expect(!plan.maxTokensClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanCapsTurboQuantCompletionForLoadedModelHeadroom() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 16_384))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_533_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 2_533_000_000
+        )
+
+        #expect(safety.pressureReason == .none)
+        #expect(plan.pressureCompletionTokenLimit == 512)
+        #expect(plan.reservedCompletionTokens == 512)
+        #expect(plan.effectiveMaxTokens == 512)
+        #expect(plan.maxTokensClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanCapsHybridTurboQuantCompletionForNativeStateHeadroom() {
+        let profile = RuntimeProfile(
+            quantization: QuantizationProfile(
+                maxKVSize: 16_384,
+                turboQuantProfileID: "qwen3.5-0.8b",
+                turboQuantProfileSource: "bundled"
+            )
+        )
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_900_000_000,
+                thermalState: "nominal"
+            )
+        )
+        let plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 2_900_000_000
+        )
+
+        #expect(safety.pressureReason == .none)
+        #expect(plan.pressureCompletionTokenLimit == 256)
+        #expect(plan.reservedCompletionTokens == 256)
+        #expect(plan.effectiveMaxTokens == 256)
+        #expect(plan.maxTokensClamped)
+    }
+
+    @Test
+    func localGenerationPipelinePlanCapsQualitySensitiveTurboQuantFamilies() {
+        let cases: [(String, Int64, Int)] = [
+            ("gemma-3-1b", 2_900_000_000, 256),
+            ("llama-3.2-3b", 1_600_000_000, 128),
+            ("qwen3.5-2b", 2_900_000_000, 192),
+        ]
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 2_900_000_000,
+                thermalState: "nominal"
+            )
+        )
+
+        for (profileID, availableMemoryBytes, expectedLimit) in cases {
+            let profile = RuntimeProfile(
+                quantization: QuantizationProfile(
+                    maxKVSize: 16_384,
+                    turboQuantProfileID: profileID,
+                    turboQuantProfileSource: "bundled"
+                )
+            )
+            let plan = LocalGenerationPipelinePlan(
+                requestedCompletionTokens: 2_048,
+                profile: profile,
+                safety: safety,
+                initialAvailableMemoryBytes: availableMemoryBytes
+            )
+
+            #expect(plan.pressureCompletionTokenLimit == expectedLimit)
+            #expect(plan.reservedCompletionTokens == expectedLimit)
+            #expect(plan.effectiveMaxTokens == expectedLimit)
+            #expect(plan.maxTokensClamped)
+        }
     }
 
     @Test
@@ -4293,8 +5135,8 @@ struct CoreContractTests {
     }
 
     @Test
-    func localGenerationPipelinePlanRightSizesKVWindowAfterTokenization() {
-        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+    func localGenerationPipelinePlanClampsContinuationBeforeContextFailure() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 16_384))
         let safety = LocalRuntimeSafetyPolicy.assess(
             snapshot: RuntimeMemorySnapshot(
                 physicalMemoryBytes: 8_000_000_000,
@@ -4307,6 +5149,39 @@ struct CoreContractTests {
             profile: profile,
             safety: safety,
             initialAvailableMemoryBytes: 1_800_000_000
+        )
+
+        let continuationFits = plan.fitPreparedPrompt(
+            promptTokenCount: 15_900,
+            maxContextTokens: 16_384
+        )
+        #expect(continuationFits)
+        #expect(plan.reservedCompletionTokens == 484)
+        #expect(plan.effectiveMaxTokens == 484)
+        #expect(plan.maxTokensClamped)
+
+        let promptTooLarge = plan.fitPreparedPrompt(
+            promptTokenCount: 16_385,
+            maxContextTokens: 16_384
+        )
+        #expect(!promptTooLarge)
+    }
+
+    @Test
+    func localGenerationPipelinePlanRightSizesKVWindowAfterTokenization() {
+        let profile = RuntimeProfile(quantization: QuantizationProfile(maxKVSize: 4_096))
+        let safety = LocalRuntimeSafetyPolicy.assess(
+            snapshot: RuntimeMemorySnapshot(
+                physicalMemoryBytes: 8_000_000_000,
+                availableMemoryBytes: 3_200_000_000,
+                thermalState: "nominal"
+            )
+        )
+        var plan = LocalGenerationPipelinePlan(
+            requestedCompletionTokens: 2_048,
+            profile: profile,
+            safety: safety,
+            initialAvailableMemoryBytes: 3_200_000_000
         )
 
         let fitsContext = plan.fitPreparedPrompt(promptTokenCount: 47, maxContextTokens: 4_096)
@@ -5227,6 +6102,13 @@ private var qwenTurboQuantProfileCases: [QwenTurboQuantProfileCase] {
                 modelBytes: 1_550_000_000
             ),
             QwenTurboQuantProfileCase(
+                repository: "mlx-community/Qwen3.5-2B-OptiQ-4bit",
+                displayName: "Qwen3.5 2B OptiQ 4-bit",
+                modelType: "qwen3_5",
+                parameterCount: 2_000_000_000,
+                modelBytes: 1_550_000_000
+            ),
+            QwenTurboQuantProfileCase(
                 repository: "mlx-community/Qwen3.5-4B-MLX-4bit",
                 displayName: "Qwen3.5 4B MLX 4-bit",
                 modelType: "qwen3_5_text",
@@ -5409,6 +6291,14 @@ private var gemmaTurboQuantProfileCases: [GemmaTurboQuantProfileCase] {
             GemmaTurboQuantProfileCase(
                 repository: "mlx-community/gemma-3-1b-it-qat-4bit",
                 displayName: "Gemma 3 1B IT QAT 4-bit",
+                modelType: "gemma3_text",
+                parameterCount: 1_000_000_000,
+                headDimension: 256,
+                modelBytes: 770_000_000
+            ),
+            GemmaTurboQuantProfileCase(
+                repository: "mlx-community/gemma-3-1b-it-4bit",
+                displayName: "Gemma 3 1B IT 4-bit",
                 modelType: "gemma3_text",
                 parameterCount: 1_000_000_000,
                 headDimension: 256,

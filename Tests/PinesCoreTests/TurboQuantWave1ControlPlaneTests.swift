@@ -50,6 +50,32 @@ struct TurboQuantWave1ControlPlaneTests {
         #expect(plan.downgradeReason != nil)
     }
 
+    @Test func admissionSeparatesLoadedWeightsFromIncrementalGenerationBudget() {
+        let loadedRequest = Self.request(
+            availableMemoryBytes: 1_700 * 1_024 * 1_024,
+            requestedContextTokens: 2_304,
+            compressedKVBytesPerToken: 32 * 1_024,
+            estimatedModelWeightsBytes: 0,
+            userMode: .batterySaver
+        )
+        let doubleCountedRequest = Self.request(
+            availableMemoryBytes: 1_700 * 1_024 * 1_024,
+            requestedContextTokens: 2_304,
+            compressedKVBytesPerToken: 32 * 1_024,
+            estimatedModelWeightsBytes: 1_550_000_000,
+            userMode: .batterySaver
+        )
+
+        let loadedPlan = LocalRuntimeAdmissionService().admit(loadedRequest)
+        let doubleCountedPlan = LocalRuntimeAdmissionService().admit(doubleCountedRequest)
+
+        #expect(loadedPlan.admitted)
+        #expect(loadedPlan.memoryZones.modelWeightsBytes == 0)
+        #expect(loadedPlan.memoryCushionBytes > 0)
+        #expect(!doubleCountedPlan.admitted)
+        #expect(doubleCountedPlan.rejectionReason == LocalInferenceFailureKind.memoryAdmissionFailed.rawValue)
+    }
+
     @Test func runDecisionRequiresFallbackReason() {
         let invalid = TurboQuantRunDecision(fallbackUsed: true)
         let valid = TurboQuantRunDecision(
@@ -60,6 +86,101 @@ struct TurboQuantWave1ControlPlaneTests {
 
         #expect(invalid.validationErrors.contains("fallbackUsed requires fallbackReason"))
         #expect(valid.validationErrors.isEmpty)
+    }
+
+    @Test func wave1RuntimePolicyDTOsRoundTripCodable() throws {
+        #expect(TurboQuantSparseValuePolicy.productDefault == .off)
+
+        let precisionPolicy = TurboQuantKVPrecisionPolicy(
+            key: .fp16OrQ8,
+            value: .turbo4v2,
+            boundary: .profileDefault
+        )
+        let quantization = QuantizationProfile(
+            turboQuantRuntimeMode: .auto,
+            turboQuantResolvedRuntimeMode: .throughputTurboQuant,
+            turboQuantKeyPrecision: .fp16OrQ8,
+            turboQuantValuePrecision: .turbo4v2,
+            turboQuantPrecisionPolicy: precisionPolicy,
+            turboQuantSparseValuePolicy: .productDefault,
+            turboQuantEffectiveBackend: .swiftMetalKernel,
+            turboQuantDecodedActiveKVBytes: 4096
+        )
+        let decision = TurboQuantRunDecision(
+            requestedRuntimeMode: .auto,
+            resolvedRuntimeMode: .throughputTurboQuant,
+            keyPrecision: .fp16OrQ8,
+            valuePrecision: .turbo4v2,
+            precisionPolicy: precisionPolicy,
+            compressedKeyBytes: 512,
+            compressedValueBytes: 256,
+            decodedActiveKVBytes: 4096
+        )
+        let fallbackContract = TurboQuantFallbackContract.productDefault(for: .balanced)
+        let runtime = TurboQuantBenchmarkRuntime(
+            userMode: .balanced,
+            fallbackContractHash: fallbackContract.contractHash,
+            preset: "turbo8",
+            valueBits: 4,
+            requestedRuntimeMode: .auto,
+            resolvedRuntimeMode: .throughputTurboQuant,
+            keyPrecision: .fp16OrQ8,
+            valuePrecision: .turbo4v2,
+            precisionPolicy: precisionPolicy,
+            sparseValuePolicy: .productDefault,
+            effectiveBackend: .swiftMetalKernel,
+            admittedContextTokens: 8192,
+            reservedCompletionTokens: 512
+        )
+        let metrics = TurboQuantBenchmarkMetrics(
+            contextTokens: 8192,
+            compressedKVBytes: 1024,
+            compressedKeyBytes: 512,
+            compressedValueBytes: 512,
+            decodedActiveKVBytes: 4096,
+            memoryWarningsSeen: 0,
+            fallbackUsed: false,
+            jetsamObserved: false
+        )
+
+        try roundTrip(precisionPolicy)
+        try roundTrip(quantization)
+        try roundTrip(decision)
+        try roundTrip(runtime)
+        try roundTrip(metrics)
+    }
+
+    @Test func wave1ProviderMetadataKeysAreStable() {
+        #expect(LocalProviderMetadataKeys.turboQuantRuntimeMode == "local.turboquant.runtime_mode")
+        #expect(
+            LocalProviderMetadataKeys.turboQuantResolvedRuntimeMode
+                == "local.turboquant.resolved_runtime_mode"
+        )
+        #expect(LocalProviderMetadataKeys.turboQuantKeyPrecision == "local.turboquant.key_precision")
+        #expect(
+            LocalProviderMetadataKeys.turboQuantValuePrecision
+                == "local.turboquant.value_precision"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantPrecisionPolicyJSON
+                == "local.turboquant.precision_policy_json"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantSparseValuePolicyJSON
+                == "local.turboquant.sparse_value_policy_json"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantEffectiveBackend
+                == "local.turboquant.effective_backend"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantNativeBackendVersion
+                == "local.turboquant.native_backend_version"
+        )
+        #expect(
+            LocalProviderMetadataKeys.turboQuantDecodedActiveKVBytes
+                == "local.turboquant.decoded_active_kv_bytes"
+        )
     }
 
     @Test func streamFailureCarriesWave2ProviderMetadata() throws {
@@ -144,14 +265,16 @@ struct TurboQuantWave1ControlPlaneTests {
     private static func request(
         availableMemoryBytes: Int64,
         requestedContextTokens: Int = 8192,
-        compressedKVBytesPerToken: Int64 = 256 * 1_024
+        compressedKVBytesPerToken: Int64 = 256 * 1_024,
+        estimatedModelWeightsBytes: Int64? = nil,
+        userMode: TurboQuantUserMode = .balanced
     ) -> LocalRuntimeAdmissionRequest {
         LocalRuntimeAdmissionRequest(
             modelID: "test-model",
             requestedContextTokens: requestedContextTokens,
             reservedCompletionTokens: 512,
-            userMode: .balanced,
-            fallbackContract: .productDefault(for: .balanced),
+            userMode: userMode,
+            fallbackContract: .productDefault(for: userMode),
             deviceClass: .a17Pro,
             osBuild: "test",
             memoryCounters: RuntimeMemoryCounters(
@@ -159,6 +282,7 @@ struct TurboQuantWave1ControlPlaneTests {
                 processResidentMemoryBytes: 128 * 1_024 * 1_024
             ),
             quantizationDiagnostics: RuntimeQuantizationDiagnostics(activeAttentionPath: .twoStageCompressed),
+            estimatedModelWeightsBytes: estimatedModelWeightsBytes,
             compressedKVBytesPerToken: compressedKVBytesPerToken,
             rawShadowBytes: 32 * 1_024 * 1_024,
             packedFallbackBytesPerToken: 16 * 1_024,

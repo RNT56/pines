@@ -13,7 +13,68 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-  public static let currentVersion = 23
+  public static let currentVersion = 27
+
+    /// Durable application tables that must survive plaintext-to-SQLCipher migration and must be
+    /// cleared by a full local-data reset. Keep this catalog aligned with every non-FTS table
+    /// created by `migrations`; persistence adapters use it as the single source of truth.
+    public static let durableUserTableNames = [
+        "conversations",
+        "messages",
+        "attachments",
+        "model_installs",
+        "vault_documents",
+        "vault_chunks",
+        "audit_events",
+        "app_settings",
+        "cloud_providers",
+        "cloud_model_catalog_snapshots",
+        "model_downloads",
+        "sync_records",
+        "chat_runs",
+        "agent_sessions",
+        "tool_runs",
+        "vault_import_jobs",
+        "browser_actions",
+        "vault_embeddings",
+        "mcp_servers",
+        "mcp_tools",
+        "mcp_resources",
+        "mcp_resource_templates",
+        "mcp_prompts",
+        "vault_embeddings_v2",
+        "vault_embedding_profiles",
+        "vault_embedding_jobs",
+        "vault_retrieval_events",
+        "vault_embeddings_v3",
+        "openai_provider_files",
+        "openai_vector_stores",
+        "openai_vector_store_files",
+        "openai_hosted_tool_calls",
+        "openai_artifacts",
+        "openai_background_responses",
+        "openai_realtime_sessions",
+        "openai_batch_jobs",
+        "openai_structured_output_results",
+        "provider_files",
+        "provider_artifacts",
+        "provider_caches",
+        "provider_batches",
+        "provider_live_sessions",
+        "provider_structured_outputs",
+        "provider_model_capabilities",
+        "provider_research_runs",
+        "projects",
+        "turboquant_profile_evidence",
+        "turboquant_evidence_revocations",
+        "turboquant_memory_calibration_samples",
+        "turboquant_memory_calibrations",
+        "kv_snapshot_manifest",
+        "kv_snapshot_blob",
+        "kv_snapshot_reference",
+        "kv_snapshot_restore_attempt",
+        "kv_snapshot_quarantine",
+    ]
 
     public static let migrations: [DatabaseMigration] = [
     DatabaseMigration(
@@ -1304,6 +1365,46 @@ public enum PinesDatabaseSchema {
       sql: [
         "ALTER TABLE turboquant_profile_evidence ADD COLUMN platform_evidence_dimensions_json TEXT;",
         "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_platform ON turboquant_profile_evidence(model_id, user_mode, layout_version, created_at DESC);",
+      ]),
+    DatabaseMigration(
+      version: 24, name: "turboquant-runtime-evidence-dimensions",
+      sql: [
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN requested_runtime_mode TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN resolved_runtime_mode TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN key_precision TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN value_precision TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN precision_policy_json TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN sparse_value_policy_json TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN effective_backend TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN native_backend_version TEXT;",
+        "ALTER TABLE turboquant_profile_evidence ADD COLUMN decoded_active_kv_bytes INTEGER;",
+        "CREATE INDEX IF NOT EXISTS idx_turboquant_profile_evidence_runtime_tuple ON turboquant_profile_evidence(model_id, compatibility_pair_id, resolved_runtime_mode, effective_backend, key_precision, value_precision, layout_version, created_at DESC);",
+      ]),
+    DatabaseMigration(
+      version: 25, name: "project-space-cloudkit-sync-state",
+      sql: [
+        "ALTER TABLE projects ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'local';",
+        "CREATE INDEX IF NOT EXISTS idx_projects_sync_state ON projects(sync_state, updated_at ASC);",
+      ]),
+    DatabaseMigration(
+      version: 26, name: "mcp-tool-safety-annotations",
+      sql: [
+        "ALTER TABLE mcp_tools ADD COLUMN annotations_json TEXT;",
+      ]),
+    DatabaseMigration(
+      version: 27, name: "cloud-model-catalog-snapshots",
+      sql: [
+        """
+        CREATE TABLE IF NOT EXISTS cloud_model_catalog_snapshots (
+            provider_id TEXT PRIMARY KEY NOT NULL REFERENCES cloud_providers(id) ON DELETE CASCADE,
+            schema_version INTEGER NOT NULL,
+            models_json TEXT NOT NULL,
+            fetched_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_cloud_model_catalog_expiry ON cloud_model_catalog_snapshots(expires_at ASC);",
       ]),
     ]
 }
