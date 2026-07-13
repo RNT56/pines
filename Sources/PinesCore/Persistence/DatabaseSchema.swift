@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-  public static let currentVersion = 26
+  public static let currentVersion = 27
 
     /// Durable application tables that must survive plaintext-to-SQLCipher migration and must be
     /// cleared by a full local-data reset. Keep this catalog aligned with every non-FTS table
@@ -28,6 +28,7 @@ public enum PinesDatabaseSchema {
         "audit_events",
         "app_settings",
         "cloud_providers",
+        "cloud_model_catalog_snapshots",
         "model_downloads",
         "sync_records",
         "chat_runs",
@@ -1389,6 +1390,21 @@ public enum PinesDatabaseSchema {
       version: 26, name: "mcp-tool-safety-annotations",
       sql: [
         "ALTER TABLE mcp_tools ADD COLUMN annotations_json TEXT;",
+      ]),
+    DatabaseMigration(
+      version: 27, name: "cloud-model-catalog-snapshots",
+      sql: [
+        """
+        CREATE TABLE IF NOT EXISTS cloud_model_catalog_snapshots (
+            provider_id TEXT PRIMARY KEY NOT NULL REFERENCES cloud_providers(id) ON DELETE CASCADE,
+            schema_version INTEGER NOT NULL,
+            models_json TEXT NOT NULL,
+            fetched_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_cloud_model_catalog_expiry ON cloud_model_catalog_snapshots(expires_at ASC);",
       ]),
     ]
 }

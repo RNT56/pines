@@ -45,6 +45,7 @@
 		47623D156F0438C9C37D545F /* OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3707ADF58DFE724BF12B2B2F /* OpenAIProviderLifecycleCoordinator+MediaWorkflows.swift */; };
 		4A8B7ADED7E800D30BC296A1 /* PinesCore in Frameworks */ = {isa = PBXBuildFile; productRef = 2F62656B16557CFACC3CBFF7 /* PinesCore */; };
 		4DF47F98AF7E14D4A934D9D7 /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 907CAD8C8D83C6A5B614EB5A /* HighlightSwift */; };
+		4FFEA75D80CEC7DFCE69B41B /* CloudModelCatalogPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D85A1C753848B351F4565683 /* CloudModelCatalogPersistenceTests.swift */; };
 		51178ED2596CD94C977B39BF /* GeminiProviderRecordMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB652D0FDD899D4E676252F1 /* GeminiProviderRecordMapper.swift */; };
 		515C28B0B0B103A7A64AB34C /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = 85E4D304B541EE6A90CEFD6F /* MLXEmbedders */; };
 		51F0003C051BEA5B35753F1D /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 7CB37824DF7BF3CFC294142D /* GRDB */; };
@@ -282,6 +283,7 @@
 		CA094EF84EDF89325F7E0DAB /* CloudKitSyncPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitSyncPersistenceTests.swift; sourceTree = "<group>"; };
 		D6EEEEF241E72FF35E46A640 /* PinesTurboQuantBenchmarkDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinesTurboQuantBenchmarkDiagnostics.swift; sourceTree = "<group>"; };
 		D71AF1F71FC9A37490CF1D04 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
+		D85A1C753848B351F4565683 /* CloudModelCatalogPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModelCatalogPersistenceTests.swift; sourceTree = "<group>"; };
 		D8CF846797DB3246FDC4FE5F /* SecurityResetCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityResetCoordinator.swift; sourceTree = "<group>"; };
 		DA300803A417F81AEA21D094 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DB652D0FDD899D4E676252F1 /* GeminiProviderRecordMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiProviderRecordMapper.swift; sourceTree = "<group>"; };
@@ -415,6 +417,7 @@
 			children = (
 				E146838846B476DD76171BB2 /* BoundedHTTPResponseTests.swift */,
 				CA094EF84EDF89325F7E0DAB /* CloudKitSyncPersistenceTests.swift */,
+				D85A1C753848B351F4565683 /* CloudModelCatalogPersistenceTests.swift */,
 				989263AE706043656C31B580 /* CoreSurfaceTests.swift */,
 				4DCE6D93751290B9E24557E6 /* MCPToolAnnotationPersistenceTests.swift */,
 				FF525EBBEA1C9D3330E352F3 /* MLXTurboQuantRuntimeSmokeTests.swift */,
@@ -993,6 +996,7 @@
 			files = (
 				72E9FD20785D66F46A2E07C4 /* BoundedHTTPResponseTests.swift in Sources */,
 				09D075532ED88BFF8A4F162A /* CloudKitSyncPersistenceTests.swift in Sources */,
+				4FFEA75D80CEC7DFCE69B41B /* CloudModelCatalogPersistenceTests.swift in Sources */,
 				E30D2CC16F579D56D14DA498 /* CoreSurfaceTests.swift in Sources */,
 				E6389B1E94D595D33725A8AC /* MCPToolAnnotationPersistenceTests.swift in Sources */,
 				9CAF8AA54EE5B61702B8103C /* MLXTurboQuantRuntimeSmokeTests.swift in Sources */,

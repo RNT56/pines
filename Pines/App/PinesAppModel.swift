@@ -587,6 +587,7 @@ final class PinesAppModel: ObservableObject {
     private var didStartMCPServers = false
     private var shouldEnrichRuntimeModelPreviews = false
     private var needsCloudModelCatalogRefresh = false
+    private var cloudModelCatalogSnapshots: [ProviderID: CloudProviderModelCatalogSnapshot] = [:]
     private var repositoryObservationTasks: [Task<Void, Never>] = []
     private var currentRunTask: Task<Void, Never>?
     private var currentRunToken: UUID?
@@ -1085,6 +1086,7 @@ final class PinesAppModel: ObservableObject {
             if let cloudProviderRepository = services.cloudProviderRepository {
                 setIfChanged(\.cloudProviders, try await cloudProviderRepository.listProviders())
             }
+            await hydrateCloudModelCatalogSnapshots(services: services)
 
             await repairInterruptedChatRuns(services: services)
             try await services.modelLifecycleService?.validateInstalledModels()
@@ -1248,6 +1250,7 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.auditEvents, [])
         setIfChanged(\.cloudProviders, [])
         setIfChanged(\.cloudModelCatalog, [:])
+        cloudModelCatalogSnapshots = [:]
         setIfChanged(\.isRefreshingCloudModels, false)
         setIfChanged(\.isSavingCloudProvider, false)
         setIfChanged(\.validatingCloudProviderIDs, [])
@@ -3564,7 +3567,12 @@ final class PinesAppModel: ObservableObject {
         let modelRecord = providerModelCapabilities.first { record in
             record.providerID == providerID && record.modelID == modelID
         }
-        let catalogModel = cloudModelCatalog[providerID]?.first { $0.id == modelID }
+        let catalogModel: CloudProviderModel?
+        if cloudProviders.first(where: { $0.id == providerID })?.kind == .openRouter {
+            catalogModel = freshOpenRouterCatalogModel(providerID: providerID, modelID: modelID)
+        } else {
+            catalogModel = cloudModelCatalog[providerID]?.first { $0.id == modelID }
+        }
         return modelRecord?.contextWindowTokens
             ?? modelRecord?.capabilities.maxContextTokens
             ?? catalogModel?.metadata?.contextLength
@@ -3577,7 +3585,7 @@ final class PinesAppModel: ObservableObject {
         request: ChatRequest
     ) -> String? {
         guard cloudProviders.first(where: { $0.id == providerID })?.kind == .openRouter,
-              let model = cloudModelCatalog[providerID]?.first(where: { $0.id == request.modelID })
+              let model = freshOpenRouterCatalogModel(providerID: providerID, modelID: request.modelID)
         else {
             return nil
         }
@@ -3589,6 +3597,14 @@ final class PinesAppModel: ObservableObject {
         guard !report.isEligible else { return nil }
         return report.explanation.map { "\(model.displayName) is not eligible for this OpenRouter request. \($0)" }
             ?? "The selected OpenRouter model is not eligible for this request."
+    }
+
+    private func freshOpenRouterCatalogModel(
+        providerID: ProviderID,
+        modelID: ModelID,
+        now: Date = Date()
+    ) -> CloudProviderModel? {
+        cloudModelCatalogSnapshots[providerID]?.model(id: modelID, at: now)
     }
 
     private func preferredModelSelection(services: PinesAppServices) -> ModelPickerOption? {
@@ -4951,9 +4967,10 @@ final class PinesAppModel: ObservableObject {
 
         repeat {
             needsCloudModelCatalogRefresh = false
-            var nextCatalog = cloudModelCatalog.filter { providerID, _ in
-                cloudProviders.contains(where: { $0.id == providerID })
-            }
+            let providerIDs = Set(cloudProviders.map(\.id))
+            let now = Date()
+            var nextSnapshots = cloudModelCatalogSnapshots.filter { providerIDs.contains($0.key) }
+            var nextCatalog = cloudModelCatalog.filter { providerIDs.contains($0.key) }
             for provider in cloudProviders {
                 do {
                     guard let apiKey = try await services.secretStore.read(
@@ -4961,21 +4978,84 @@ final class PinesAppModel: ObservableObject {
                         account: provider.keychainAccount
                     )?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
                         nextCatalog[provider.id] = nil
+                        nextSnapshots[provider.id] = nil
                         continue
                     }
                     let inferenceProvider = BYOKCloudInferenceProvider(configuration: provider, secretStore: services.secretStore)
                     let models = try await inferenceProvider.listTextModels()
                     nextCatalog[provider.id] = models.isEmpty ? nil : models
+                    if models.isEmpty {
+                        nextSnapshots[provider.id] = nil
+                        try? await services.cloudProviderRepository?.deleteModelCatalogSnapshot(providerID: provider.id)
+                    } else {
+                        let snapshot = CloudProviderModelCatalogSnapshot(
+                            providerID: provider.id,
+                            models: models,
+                            fetchedAt: now
+                        )
+                        nextSnapshots[provider.id] = snapshot
+                        do {
+                            try await services.cloudProviderRepository?.upsertModelCatalogSnapshot(snapshot)
+                        } catch {
+                            recordRecoverableIssue(
+                                "cloud.model_catalog.persist.\(provider.id.rawValue)",
+                                error: error,
+                                services: services
+                            )
+                        }
+                    }
                     if let firstModel = models.first {
                         await recordFirstCloudModelIfNeeded(firstModel.id, providerID: provider.id, services: services)
                     }
                 } catch {
                     recordRecoverableIssue("cloud.model_catalog.refresh.\(provider.id.rawValue)", error: error, services: services)
-                    continue
+                    if let snapshot = nextSnapshots[provider.id], snapshot.isFresh(at: now) {
+                        nextCatalog[provider.id] = snapshot.models
+                    } else {
+                        nextSnapshots[provider.id] = nil
+                        nextCatalog[provider.id] = nil
+                    }
                 }
             }
+            cloudModelCatalogSnapshots = nextSnapshots
             setIfChanged(\.cloudModelCatalog, nextCatalog)
         } while needsCloudModelCatalogRefresh
+    }
+
+    private func hydrateCloudModelCatalogSnapshots(
+        services: PinesAppServices,
+        now: Date = Date()
+    ) async {
+        guard let repository = services.cloudProviderRepository else { return }
+        do {
+            let configuredProviders = Dictionary(uniqueKeysWithValues: cloudProviders.map { ($0.id, $0) })
+            let storedSnapshots = try await repository.listModelCatalogSnapshots()
+            var freshSnapshots = [ProviderID: CloudProviderModelCatalogSnapshot]()
+            for snapshot in storedSnapshots where snapshot.isFresh(at: now) {
+                guard let provider = configuredProviders[snapshot.providerID] else { continue }
+                do {
+                    let apiKey = try await services.secretStore.read(
+                        service: provider.keychainService,
+                        account: provider.keychainAccount
+                    )?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard apiKey?.isEmpty == false else { continue }
+                    freshSnapshots[snapshot.providerID] = snapshot
+                } catch {
+                    recordRecoverableIssue(
+                        "cloud.model_catalog.credential.\(snapshot.providerID.rawValue)",
+                        error: error,
+                        services: services
+                    )
+                }
+            }
+            cloudModelCatalogSnapshots = freshSnapshots
+            setIfChanged(
+                \.cloudModelCatalog,
+                freshSnapshots.mapValues(\.models)
+            )
+        } catch {
+            recordRecoverableIssue("cloud.model_catalog.hydrate", error: error, services: services)
+        }
     }
 
     private func replaceCloudModelCatalog(_ models: [CloudProviderModel], for providerID: ProviderID) {
@@ -5050,7 +5130,15 @@ final class PinesAppModel: ObservableObject {
         }
 
         for provider in cloudProviders.sorted(by: { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }) {
-            let providerModels = (cloudModelCatalog[provider.id] ?? [])
+            let catalogModels: [CloudProviderModel]
+            if provider.kind == .openRouter {
+                catalogModels = cloudModelCatalogSnapshots[provider.id].flatMap { snapshot in
+                    snapshot.isFresh() ? snapshot.models : nil
+                } ?? []
+            } else {
+                catalogModels = cloudModelCatalog[provider.id] ?? []
+            }
+            let providerModels = catalogModels
                 .map { model in
                     ModelPickerOption(
                         providerID: provider.id,

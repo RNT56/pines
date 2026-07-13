@@ -5,6 +5,55 @@ import Testing
 @Suite("Cloud provider model metadata")
 struct CloudProviderModelMetadataTests {
     @Test
+    func catalogSnapshotBoundsModelsAndEnforcesFreshness() throws {
+        let fetchedAt = Date(timeIntervalSinceReferenceDate: 10_000)
+        let models = (0..<CloudProviderModelCatalogSnapshot.maximumModelCount + 12).map { index in
+            CloudProviderModel(id: ModelID(rawValue: "example/model-\(index)"), displayName: "Model \(index)")
+        }
+        let snapshot = CloudProviderModelCatalogSnapshot(
+            providerID: "openrouter",
+            models: models,
+            fetchedAt: fetchedAt
+        )
+
+        #expect(snapshot.models.count == CloudProviderModelCatalogSnapshot.maximumModelCount)
+        #expect(snapshot.expiresAt == fetchedAt.addingTimeInterval(CloudProviderModelCatalogSnapshot.defaultTimeToLive))
+        #expect(snapshot.isFresh(at: fetchedAt))
+        #expect(snapshot.model(id: "example/model-0", at: fetchedAt)?.displayName == "Model 0")
+        #expect(!snapshot.isFresh(at: snapshot.expiresAt))
+        #expect(snapshot.model(id: "example/model-0", at: snapshot.expiresAt) == nil)
+
+        let futureDated = CloudProviderModelCatalogSnapshot(
+            providerID: "openrouter",
+            models: [models[0]],
+            fetchedAt: fetchedAt.addingTimeInterval(301),
+            expiresAt: fetchedAt.addingTimeInterval(600)
+        )
+        #expect(!futureDated.isFresh(at: fetchedAt))
+
+        let unsupportedVersion = CloudProviderModelCatalogSnapshot(
+            providerID: "openrouter",
+            models: [models[0]],
+            fetchedAt: fetchedAt,
+            version: CloudProviderModelCatalogSnapshot.schemaVersion + 1
+        )
+        #expect(!unsupportedVersion.isFresh(at: fetchedAt))
+
+        let oversizedData = try JSONEncoder().encode(
+            UnboundedCatalogSnapshotFixture(
+                providerID: "openrouter",
+                models: models,
+                fetchedAt: fetchedAt,
+                expiresAt: fetchedAt.addingTimeInterval(CloudProviderModelCatalogSnapshot.defaultTimeToLive * 4),
+                version: CloudProviderModelCatalogSnapshot.schemaVersion
+            )
+        )
+        let decoded = try JSONDecoder().decode(CloudProviderModelCatalogSnapshot.self, from: oversizedData)
+        #expect(decoded.models.count == CloudProviderModelCatalogSnapshot.maximumModelCount)
+        #expect(decoded.expiresAt == fetchedAt.addingTimeInterval(CloudProviderModelCatalogSnapshot.defaultTimeToLive))
+    }
+
+    @Test
     func metadataAndPricingRoundTrip() throws {
         let model = CloudProviderModel(
             id: "example/vision-chat",
@@ -87,4 +136,12 @@ struct CloudProviderModelMetadataTests {
         #expect(model.supportedParameters.isEmpty)
         #expect(model.supportedGenerationMethods.isEmpty)
     }
+}
+
+private struct UnboundedCatalogSnapshotFixture: Codable {
+    var providerID: ProviderID
+    var models: [CloudProviderModel]
+    var fetchedAt: Date
+    var expiresAt: Date
+    var version: Int
 }

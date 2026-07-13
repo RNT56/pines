@@ -6,7 +6,7 @@ Last verified: 2026-07-13. Companion gap analysis: [openrouter.md](openrouter.md
 
 Pines now persists a normalized OpenRouter policy and applies it to Chat Completions requests. The shipped Settings controls cover explicit provider order, allow/deny lists, price/throughput/latency sorting, fallbacks, required-parameter enforcement, data-collection denial, and zero-data-retention eligibility. Tool and structured-output requests automatically require parameter support. JSON object/schema response formats are mapped to `response_format`, and requests opt in to OpenRouter routing metadata. The terminal stream chunk is finalized into a privacy-minimized chat receipt with resolved route/fallback, usage, BYOK, and cost data.
 
-This is a meaningful Phase 1/3/7 foundation, not production parity. Policy is currently global rather than per-thread/per-provider; max-price and quantization controls, aggregate/reconciled accounting, metadata-driven model eligibility, server tools, reasoning controls, response healing, caching/transforms, and output media remain incomplete.
+This is a meaningful Phase 1/2/3/7 foundation, not production parity. Policy is currently global rather than per-thread/per-provider; max-price and quantization controls, endpoint-level model/provider eligibility, aggregate/reconciled accounting, server tools, reasoning controls, response healing, caching/transforms, and output media remain incomplete.
 
 ## Product Goal
 
@@ -87,7 +87,7 @@ Todos:
 - [x] Preflight known model incompatibilities for tools, images, audio/video input, PDFs/files, JSON mode, and strict schemas before inference spend.
 - [x] Show concise pricing, context, modality, tool, and schema details in the model picker.
 - [x] Return a specific eligibility explanation when current catalog metadata rejects a request.
-- [ ] Persist catalog snapshots with freshness/expiry semantics.
+- [x] Persist bounded catalog snapshots in the encrypted local store with six-hour expiry, provider-deletion cascade, and cold-launch hydration.
 - [ ] Fetch endpoint-level provider availability, provider-specific parameter support, rate limits, and prices.
 - [ ] Add metadata-driven reasoning, generated-output, and server-tool selection once those request surfaces ship.
 
@@ -98,7 +98,7 @@ Possible hiccups:
 
 Production complete when:
 
-- Pines can explain catalog-level eligibility now. Phase 2 remains open until endpoint-specific variance and metadata freshness are represented without implying that every upstream route has identical support.
+- Pines can explain fresh catalog-level eligibility and refuses to use expired metadata for hard rejection. Phase 2 remains open until endpoint-specific variance is represented without implying that every upstream route has identical support.
 
 ## Phase 3: Structured Outputs And Response Reliability
 

@@ -113,6 +113,64 @@ public struct CloudProviderModelEligibilityReport: Hashable, Codable, Sendable {
     }
 }
 
+public struct CloudProviderModelCatalogSnapshot: Hashable, Codable, Sendable {
+    public static let schemaVersion = 1
+    public static let maximumModelCount = 128
+    public static let defaultTimeToLive: TimeInterval = 6 * 60 * 60
+
+    public var providerID: ProviderID
+    public private(set) var models: [CloudProviderModel]
+    public var fetchedAt: Date
+    public var expiresAt: Date
+    public var version: Int
+
+    public init(
+        providerID: ProviderID,
+        models: [CloudProviderModel],
+        fetchedAt: Date = Date(),
+        expiresAt: Date? = nil,
+        version: Int = Self.schemaVersion
+    ) {
+        self.providerID = providerID
+        self.models = Array(models.prefix(Self.maximumModelCount))
+        self.fetchedAt = fetchedAt
+        let maximumExpiry = fetchedAt.addingTimeInterval(Self.defaultTimeToLive)
+        self.expiresAt = min(expiresAt ?? maximumExpiry, maximumExpiry)
+        self.version = version
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case providerID
+        case models
+        case fetchedAt
+        case expiresAt
+        case version
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            providerID: try container.decode(ProviderID.self, forKey: .providerID),
+            models: try container.decode([CloudProviderModel].self, forKey: .models),
+            fetchedAt: try container.decode(Date.self, forKey: .fetchedAt),
+            expiresAt: try container.decode(Date.self, forKey: .expiresAt),
+            version: try container.decode(Int.self, forKey: .version)
+        )
+    }
+
+    public func isFresh(at date: Date = Date()) -> Bool {
+        version == Self.schemaVersion
+            && !models.isEmpty
+            && fetchedAt <= date.addingTimeInterval(5 * 60)
+            && expiresAt > date
+    }
+
+    public func model(id: ModelID, at date: Date = Date()) -> CloudProviderModel? {
+        guard isFresh(at: date) else { return nil }
+        return models.first { $0.id == id }
+    }
+}
+
 public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
     public var id: ModelID
     public var displayName: String

@@ -2264,6 +2264,71 @@ actor GRDBPinesStore:
         }
     }
 
+    func listModelCatalogSnapshots() async throws -> [CloudProviderModelCatalogSnapshot] {
+        try await database.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                SELECT provider_id, schema_version, models_json, fetched_at, expires_at
+                FROM cloud_model_catalog_snapshots
+                ORDER BY provider_id
+                """
+            ).compactMap { row in
+                let providerID = ProviderID(rawValue: row["provider_id"] as String)
+                let version = row["schema_version"] as Int
+                let modelsJSON = row["models_json"] as String
+                guard version == CloudProviderModelCatalogSnapshot.schemaVersion,
+                      let models = try? JSONDecoder().decode([CloudProviderModel].self, from: Data(modelsJSON.utf8))
+                else {
+                    return nil
+                }
+                return CloudProviderModelCatalogSnapshot(
+                    providerID: providerID,
+                    models: models,
+                    fetchedAt: Date(timeIntervalSinceReferenceDate: row["fetched_at"] as Double),
+                    expiresAt: Date(timeIntervalSinceReferenceDate: row["expires_at"] as Double),
+                    version: version
+                )
+            }
+        }
+    }
+
+    func upsertModelCatalogSnapshot(_ snapshot: CloudProviderModelCatalogSnapshot) async throws {
+        let modelsJSON = String(decoding: try encoder.encode(snapshot.models), as: UTF8.self)
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO cloud_model_catalog_snapshots
+                    (provider_id, schema_version, models_json, fetched_at, expires_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(provider_id) DO UPDATE SET
+                    schema_version = excluded.schema_version,
+                    models_json = excluded.models_json,
+                    fetched_at = excluded.fetched_at,
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at
+                """,
+                arguments: [
+                    snapshot.providerID.rawValue,
+                    snapshot.version,
+                    modelsJSON,
+                    snapshot.fetchedAt.timeIntervalSinceReferenceDate,
+                    snapshot.expiresAt.timeIntervalSinceReferenceDate,
+                    Date().timeIntervalSinceReferenceDate,
+                ]
+            )
+        }
+    }
+
+    func deleteModelCatalogSnapshot(providerID: ProviderID) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "DELETE FROM cloud_model_catalog_snapshots WHERE provider_id = ?",
+                arguments: [providerID.rawValue]
+            )
+        }
+    }
+
     // MARK: - Provider Lifecycle Records
 
     func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord] {

@@ -147,9 +147,9 @@ Implementation notes:
 
 ### 9. Model metadata filtering
 
-Pines now requests OpenRouter's text-output catalog in popularity order and retains a bounded, allowlisted session catalog for context/output limits, input/output modalities, supported parameters, architecture labels, moderation, lifecycle dates, and per-unit pricing. The chat picker shows concise context, input/output price, modality, tool, and schema details; context packing uses the model limit; and request preflight rejects known-incompatible image, audio, video, PDF/file, tool, JSON, and strict-schema requests before inference spend.
+Pines now requests OpenRouter's text-output catalog in popularity order and retains bounded, allowlisted metadata for context/output limits, input/output modalities, supported parameters, architecture labels, moderation, lifecycle dates, and per-unit pricing. A provider-scoped snapshot is stored in the encrypted local database, capped at 128 models, expires after six hours, cascades on provider deletion, and hydrates the picker at cold launch while a network refresh runs. The chat picker shows concise context, input/output price, modality, tool, and schema details; context packing uses the model limit; and request preflight rejects known-incompatible image, audio, video, PDF/file, tool, JSON, and strict-schema requests before inference spend.
 
-Unknown metadata remains permissive rather than creating false incompatibility claims. Pines does not yet fetch the endpoint details feed, so it cannot show provider-by-provider availability, provider-specific feature variance, rate limits, or per-endpoint prices.
+Unknown or expired metadata remains permissive rather than creating false incompatibility claims. Pines does not yet fetch the endpoint details feed, so it cannot show provider-by-provider availability, provider-specific feature variance, rate limits, or per-endpoint prices.
 
 Value:
 
@@ -157,7 +157,6 @@ Value:
 
 Implementation notes:
 
-- Persist catalog snapshots with an explicit freshness policy instead of keeping them only for the app session.
 - Fetch endpoint details before claiming that every routed upstream supports a catalog-level feature.
 - Drive OpenRouter reasoning and other quick settings from supported parameters instead of model-name heuristics.
 

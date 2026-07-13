@@ -2761,7 +2761,7 @@ struct CoreContractTests {
 
     @Test
     func openAIParityMigrationAddsTablesAndRunProvenance() throws {
-    #expect(PinesDatabaseSchema.currentVersion == 26)
+    #expect(PinesDatabaseSchema.currentVersion == 27)
         let openAIMigration = try #require(PinesDatabaseSchema.migrations.first { $0.version == 14 })
     let genericProviderMigration = try #require(
       PinesDatabaseSchema.migrations.first { $0.version == 15 })
@@ -2896,6 +2896,14 @@ struct CoreContractTests {
         runtimeEvidenceSQL.contains(
           "ALTER TABLE turboquant_profile_evidence ADD COLUMN \(column)"))
     }
+
+    let catalogMigration = try #require(
+      PinesDatabaseSchema.migrations.first { $0.version == 27 })
+    let catalogSQL = catalogMigration.sql.joined(separator: "\n")
+    #expect(catalogSQL.contains("CREATE TABLE IF NOT EXISTS cloud_model_catalog_snapshots"))
+    #expect(catalogSQL.contains("REFERENCES cloud_providers(id) ON DELETE CASCADE"))
+    #expect(catalogSQL.contains("models_json TEXT NOT NULL"))
+    #expect(catalogSQL.contains("expires_at REAL NOT NULL"))
     }
 
     @Test

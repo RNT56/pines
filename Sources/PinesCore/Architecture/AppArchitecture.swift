@@ -561,6 +561,15 @@ public protocol CloudProviderRepository: Sendable {
     func observeProviders() -> AsyncStream<[CloudProviderConfiguration]>
     func upsertProvider(_ provider: CloudProviderConfiguration) async throws
     func deleteProvider(id: ProviderID) async throws
+    func listModelCatalogSnapshots() async throws -> [CloudProviderModelCatalogSnapshot]
+    func upsertModelCatalogSnapshot(_ snapshot: CloudProviderModelCatalogSnapshot) async throws
+    func deleteModelCatalogSnapshot(providerID: ProviderID) async throws
+}
+
+public extension CloudProviderRepository {
+    func listModelCatalogSnapshots() async throws -> [CloudProviderModelCatalogSnapshot] { [] }
+    func upsertModelCatalogSnapshot(_ snapshot: CloudProviderModelCatalogSnapshot) async throws {}
+    func deleteModelCatalogSnapshot(providerID: ProviderID) async throws {}
 }
 
 public struct ProviderFileRecord: Identifiable, Hashable, Codable, Sendable {
