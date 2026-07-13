@@ -13,7 +13,7 @@ public struct DatabaseMigration: Hashable, Codable, Sendable {
 }
 
 public enum PinesDatabaseSchema {
-  public static let currentVersion = 27
+  public static let currentVersion = 28
 
     /// Durable application tables that must survive plaintext-to-SQLCipher migration and must be
     /// cleared by a full local-data reset. Keep this catalog aligned with every non-FTS table
@@ -64,6 +64,8 @@ public enum PinesDatabaseSchema {
         "provider_structured_outputs",
         "provider_model_capabilities",
         "provider_research_runs",
+        "provider_transfers",
+        "cloudkit_conflicts",
         "projects",
         "turboquant_profile_evidence",
         "turboquant_evidence_revocations",
@@ -1405,6 +1407,53 @@ public enum PinesDatabaseSchema {
         );
         """,
         "CREATE INDEX IF NOT EXISTS idx_cloud_model_catalog_expiry ON cloud_model_catalog_snapshots(expires_at ASC);",
+      ]),
+    DatabaseMigration(
+      version: 28, name: "production-ux-state",
+      sql: [
+        """
+        CREATE TABLE IF NOT EXISTS provider_transfers (
+            id TEXT PRIMARY KEY NOT NULL,
+            provider_id TEXT NOT NULL REFERENCES cloud_providers(id) ON DELETE CASCADE,
+            provider_kind TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_reference TEXT NOT NULL,
+            staged_local_path TEXT,
+            file_name TEXT NOT NULL,
+            content_type TEXT,
+            purpose TEXT,
+            status TEXT NOT NULL,
+            completed_bytes INTEGER NOT NULL DEFAULT 0,
+            total_bytes INTEGER,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            provider_object_id TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            completed_at REAL,
+            last_error TEXT
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_provider_transfers_status ON provider_transfers(status, updated_at DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_transfers_provider ON provider_transfers(provider_id, updated_at DESC);",
+        """
+        CREATE TABLE IF NOT EXISTS cloudkit_conflicts (
+            id TEXT PRIMARY KEY NOT NULL,
+            entity TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            device_summary TEXT NOT NULL,
+            icloud_summary TEXT NOT NULL,
+            device_payload_json TEXT NOT NULL,
+            icloud_payload_json TEXT NOT NULL,
+            device_updated_at REAL NOT NULL,
+            icloud_updated_at REAL NOT NULL,
+            resolution TEXT NOT NULL DEFAULT 'unresolved',
+            detected_at REAL NOT NULL,
+            resolved_at REAL
+        );
+        """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_cloudkit_conflicts_unresolved_entity ON cloudkit_conflicts(entity, entity_id) WHERE resolution = 'unresolved';",
+        "CREATE INDEX IF NOT EXISTS idx_cloudkit_conflicts_resolution ON cloudkit_conflicts(resolution, detected_at DESC);",
       ]),
     ]
 }

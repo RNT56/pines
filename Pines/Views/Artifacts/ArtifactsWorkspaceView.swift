@@ -1469,7 +1469,6 @@ private struct ArtifactsFilesWorkspace: View {
     @Binding var selection: ArtifactsSelection?
     @Binding var pendingConfirmation: ArtifactsConfirmation?
     @State private var isImporterPresented = false
-    @State private var isUploading = false
     @State private var selectedVaultDocumentID: UUID?
     @State private var purpose = "assistants"
 
@@ -1479,6 +1478,15 @@ private struct ArtifactsFilesWorkspace: View {
 
     private var summaries: [ArtifactsResourceSummary] {
         ArtifactsWorkspaceDeriver.fileSummaries(files: providerState.providerFiles, filter: .init(providerScope: providerScope))
+    }
+
+    private var transfers: [ProviderTransferRecord] {
+        providerState.providerTransfers.filter { transfer in
+            switch providerScope {
+            case .all: true
+            case .provider(let providerID): transfer.providerID == providerID
+            }
+        }
     }
 
     var body: some View {
@@ -1496,9 +1504,9 @@ private struct ArtifactsFilesWorkspace: View {
                         Button {
                             isImporterPresented = true
                         } label: {
-                            Label(isUploading ? "Uploading" : "Create Cloud Copy", systemImage: isUploading ? "hourglass" : "square.and.arrow.up")
+                            Label("Create Cloud Copy", systemImage: "square.and.arrow.up")
                         }
-                        .disabled(provider == nil || isUploading)
+                        .disabled(provider == nil)
                         .pinesButtonStyle(.primary)
 
                         Button {
@@ -1529,6 +1537,20 @@ private struct ArtifactsFilesWorkspace: View {
             }
             .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
                 Task { await handleImport(result) }
+            }
+
+            if !transfers.isEmpty {
+                PinesCardSection(
+                    "Transfer Queue",
+                    subtitle: "Transfers survive relaunch. Cancelled, interrupted, and failed uploads keep their staged source for retry.",
+                    systemImage: "arrow.up.arrow.down.circle"
+                ) {
+                    VStack(spacing: theme.spacing.small) {
+                        ForEach(transfers) { transfer in
+                            transferRow(transfer)
+                        }
+                    }
+                }
             }
 
             ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No provider files", emptyDetail: "Provider-hosted files appear here after upload or provider refresh.")
@@ -1579,30 +1601,85 @@ private struct ArtifactsFilesWorkspace: View {
         }
     }
 
+    @ViewBuilder
+    private func transferRow(_ transfer: ProviderTransferRecord) -> some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            HStack(alignment: .firstTextBaseline, spacing: theme.spacing.small) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(transfer.fileName)
+                        .font(theme.typography.callout.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                        .lineLimit(1)
+                    Text("\(transfer.providerKind.pinesLifecycleTitle) - \(transfer.status.pinesTransferLabel)")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+                Spacer(minLength: theme.spacing.small)
+                if transfer.status.isActive {
+                    Button("Cancel", role: .destructive) {
+                        Task { await appModel.cancelProviderTransfer(id: transfer.id, services: services) }
+                    }
+                    .font(theme.typography.caption.weight(.semibold))
+                } else if transfer.status.canRetry {
+                    Button("Retry") {
+                        Task { await appModel.retryProviderTransfer(id: transfer.id, services: services) }
+                    }
+                    .font(theme.typography.caption.weight(.semibold))
+                    Button("Remove", role: .destructive) {
+                        Task { await appModel.removeProviderTransfer(id: transfer.id, services: services) }
+                    }
+                    .font(theme.typography.caption.weight(.semibold))
+                } else {
+                    Button("Clear") {
+                        Task { await appModel.removeProviderTransfer(id: transfer.id, services: services) }
+                    }
+                    .font(theme.typography.caption.weight(.semibold))
+                }
+            }
+
+            if transfer.status.isActive {
+                if let progress = transfer.progressFraction,
+                   transfer.status == .transferring,
+                   transfer.completedBytes > 0 {
+                    ProgressView(value: progress)
+                        .accessibilityLabel("Upload progress")
+                        .accessibilityValue("\(Int(progress * 100)) percent")
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel(transfer.status.pinesTransferLabel)
+                }
+            }
+            if let total = transfer.totalBytes {
+                Text(transfer.completedBytes > 0
+                    ? "\(providerByteCountLabel(transfer.completedBytes)) of \(providerByteCountLabel(total)) - attempt \(transfer.retryCount + 1)"
+                    : "\(providerByteCountLabel(total)) staged - attempt \(transfer.retryCount + 1)")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+            }
+            if let error = transfer.lastError, !error.isEmpty {
+                Text(error)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .pinesSurface(.inset, padding: theme.spacing.small)
+    }
+
     @MainActor
     private func handleImport(_ result: Result<[URL], Error>) async {
         guard let provider else { return }
         do {
             guard let url = try result.get().first else { return }
-            isUploading = true
-            defer { isUploading = false }
-            let byteCount = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
-            switch provider.kind {
-            case .openAI:
-                let consent = PinesOpenAIProviderStorageConsent(isGranted: true, sourceDescription: url.lastPathComponent, destinationDescription: "OpenAI Files API for \(provider.displayName)", byteCount: byteCount)
-                _ = try await appModel.uploadOpenAILocalFile(providerID: provider.id, fileURL: url, purpose: purpose, consent: consent, services: services)
-            case .anthropic:
-                let consent = PinesAnthropicProviderStorageConsent(isGranted: true, sourceDescription: url.lastPathComponent, destinationDescription: "Anthropic Files API for \(provider.displayName)", byteCount: byteCount)
-                _ = try await appModel.uploadAnthropicLocalFile(providerID: provider.id, fileURL: url, consent: consent, services: services)
-            case .gemini:
-                let consent = PinesGeminiProviderStorageConsent(isGranted: true, sourceDescription: url.lastPathComponent, destinationDescription: "Gemini Files API for \(provider.displayName)", byteCount: byteCount)
-                _ = try await appModel.uploadGeminiLocalFile(providerID: provider.id, fileURL: url, consent: consent, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) file upload is not supported here.")
-            }
+            try await appModel.enqueueProviderFileTransfer(
+                provider: provider,
+                fileURL: url,
+                purpose: provider.kind == .openAI ? purpose : nil,
+                services: services
+            )
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
-            isUploading = false
         }
     }
 
@@ -1610,16 +1687,14 @@ private struct ArtifactsFilesWorkspace: View {
     private func uploadVaultDocument() async {
         guard let provider, let selectedVaultDocumentID else { return }
         do {
-            switch provider.kind {
-            case .openAI:
-                let consent = PinesOpenAIProviderStorageConsent(isGranted: true, sourceDescription: "Vault document \(selectedVaultDocumentID.uuidString)", destinationDescription: "OpenAI Files API for \(provider.displayName)")
-                _ = try await appModel.uploadOpenAIVaultDocument(providerID: provider.id, documentID: selectedVaultDocumentID, purpose: purpose, consent: consent, services: services)
-            case .anthropic:
-                let consent = PinesAnthropicProviderStorageConsent(isGranted: true, sourceDescription: "Vault document \(selectedVaultDocumentID.uuidString)", destinationDescription: "Anthropic Files API for \(provider.displayName)")
-                _ = try await appModel.uploadAnthropicVaultDocument(providerID: provider.id, documentID: selectedVaultDocumentID, consent: consent, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) Vault document upload is not supported here.")
-            }
+            let title = vaultState.vaultItems.first(where: { $0.id == selectedVaultDocumentID })?.title ?? "Vault document"
+            try await appModel.enqueueVaultProviderTransfer(
+                provider: provider,
+                documentID: selectedVaultDocumentID,
+                documentTitle: title,
+                purpose: provider.kind == .openAI ? purpose : nil,
+                services: services
+            )
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -1668,6 +1743,21 @@ private struct ArtifactsFilesWorkspace: View {
             _ = try await appModel.downloadAnthropicProviderFileContent(providerID: file.providerID, fileID: file.id, fileName: file.fileName, services: services)
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+}
+
+private extension ProviderTransferStatus {
+    var pinesTransferLabel: String {
+        switch self {
+        case .queued: "Queued"
+        case .preparing: "Preparing durable source"
+        case .transferring: "Uploading"
+        case .verifying: "Verifying cloud copy"
+        case .completed: "Completed"
+        case .failed: "Failed"
+        case .cancelled: "Cancelled"
+        case .interrupted: "Interrupted"
         }
     }
 }

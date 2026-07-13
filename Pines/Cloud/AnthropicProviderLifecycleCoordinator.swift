@@ -28,14 +28,15 @@ struct AnthropicProviderLifecycleCoordinator: Sendable {
         contentType: String,
         data: Data,
         localURL: URL? = nil,
-        fields: [String: String] = [:]
+        fields: [String: String] = [:],
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> ProviderFileRecord {
         let response = try await service.uploadFile(AnthropicFileUploadRequest(
             fileName: fileName,
             contentType: contentType,
             data: data,
             fields: fields
-        ))
+        ), uploadProgress: uploadProgress)
         guard var record = response.json.flatMap({ AnthropicProviderRecordMapper.providerFile(from: $0, providerID: providerID) }) else {
             throw CloudProviderError.invalidResponse
         }

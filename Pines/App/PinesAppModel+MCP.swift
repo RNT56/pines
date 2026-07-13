@@ -3,6 +3,54 @@ import PinesCore
 
 @MainActor
 extension PinesAppModel {
+    func requestHostedToolApproval(
+        _ request: HostedToolApprovalRequest,
+        services: PinesAppServices
+    ) async -> Bool {
+        hostedToolApprovalContinuation?.resume(returning: false)
+        hostedToolApprovalContinuation = nil
+        pendingHostedToolApproval = nil
+        await appendAuditEvent(
+            AuditEvent(
+                category: .consent,
+                summary: "Requested approval for provider-hosted tools: \(request.descriptors.map(\.displayName).joined(separator: ", ")).",
+                redactedPayload: "Environment and data-egress details were presented before execution.",
+                providerID: request.providerID,
+                modelID: request.modelID,
+                networkDomains: request.descriptors.flatMap(\.networkDestinations)
+            ),
+            services: services,
+            component: "hosted_tool_approval_requested"
+        )
+        return await withCheckedContinuation { continuation in
+            hostedToolApprovalContinuation = continuation
+            pendingHostedToolApproval = request
+            emitHaptic(.toolApprovalNeeded)
+        }
+    }
+
+    func resolvePendingHostedToolApproval(_ approved: Bool, services: PinesAppServices?) {
+        guard let request = pendingHostedToolApproval else { return }
+        pendingHostedToolApproval = nil
+        emitHaptic(approved ? .primaryAction : .runCancelled)
+        hostedToolApprovalContinuation?.resume(returning: approved)
+        hostedToolApprovalContinuation = nil
+        guard let services else { return }
+        Task {
+            await appendAuditEvent(
+                AuditEvent(
+                    category: .consent,
+                    summary: approved ? "Approved provider-hosted tool execution." : "Denied provider-hosted tool execution.",
+                    providerID: request.providerID,
+                    modelID: request.modelID,
+                    networkDomains: request.descriptors.flatMap(\.networkDestinations)
+                ),
+                services: services,
+                component: approved ? "hosted_tool_approval_granted" : "hosted_tool_approval_denied"
+            )
+        }
+    }
+
     func requestToolApproval(_ request: ToolApprovalRequest) async -> ToolApprovalStatus {
         pendingToolApproval = request
         emitHaptic(.toolApprovalNeeded)

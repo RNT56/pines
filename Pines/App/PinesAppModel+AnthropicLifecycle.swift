@@ -69,6 +69,7 @@ extension PinesAppModel {
         fileURL: URL,
         contentType: String? = nil,
         consent: PinesAnthropicProviderStorageConsent,
+        uploadProgress: ProviderUploadProgress? = nil,
         services: PinesAppServices
     ) async throws -> PinesAnthropicProviderUploadResult {
         do {
@@ -89,7 +90,8 @@ extension PinesAppModel {
                 fileName: fileURL.lastPathComponent,
                 contentType: contentType ?? Self.providerStorageContentType(for: fileURL),
                 data: data,
-                localURL: fileURL
+                localURL: fileURL,
+                uploadProgress: uploadProgress
             )
             try await auditAnthropicProviderStorageConsent(consent, providerID: coordinator.providerID, services: services)
             await refreshProviderLifecycleState(services: services)

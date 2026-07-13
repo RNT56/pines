@@ -303,6 +303,21 @@ struct PinesModelPreview: Identifiable, Hashable, Sendable {
     let compatibilityWarnings: [String]
     let runtimeProfileEvidence: RuntimeProfileEvidence?
     let runtimeCompatibilityState: RuntimeCompatibilityState
+    let compatibilityExplanation: PinesRuntimeCompatibilityExplanation
+}
+
+struct PinesRuntimeCompatibilityExplanation: Hashable, Sendable {
+    struct Fact: Identifiable, Hashable, Sendable {
+        var id: String { label }
+        let label: String
+        let value: String
+    }
+
+    let headline: String
+    let summary: String
+    let claimBasis: String
+    let facts: [Fact]
+    let nextAction: String?
 }
 
 extension PinesModelPreview {

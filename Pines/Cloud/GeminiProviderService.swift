@@ -59,7 +59,8 @@ struct GeminiProviderService {
         to uploadURL: String,
         data: Data,
         offset: Int = 0,
-        finalize: Bool = true
+        finalize: Bool = true,
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> GeminiProviderResponse {
         guard let url = URL(string: uploadURL) else {
             throw CloudProviderError.invalidResponse
@@ -70,7 +71,7 @@ struct GeminiProviderService {
         request.addValue(finalize ? "upload, finalize" : "upload", forHTTPHeaderField: "X-Goog-Upload-Command")
         request.addValue(String(offset), forHTTPHeaderField: "X-Goog-Upload-Offset")
         try await applyExtraHeaders(to: &request)
-        return try await send(request)
+        return try await send(request, uploadProgress: uploadProgress)
     }
 
     func listFiles(_ request: GeminiListRequest = GeminiListRequest()) async throws -> GeminiProviderResponse {
@@ -201,11 +202,15 @@ struct GeminiProviderService {
         return try await send(request)
     }
 
-    private func send(_ request: URLRequest) async throws -> GeminiProviderResponse {
+    private func send(
+        _ request: URLRequest,
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> GeminiProviderResponse {
         let (data, http) = try await BoundedHTTPResponse.data(
             for: request,
             session: urlSession,
-            maxBytes: BoundedHTTPResponse.fileLimit
+            maxBytes: BoundedHTTPResponse.fileLimit,
+            uploadProgress: uploadProgress
         )
         let providerResponse = GeminiProviderResponse(data: data, httpResponse: http)
         guard (200..<300).contains(http.statusCode) else {

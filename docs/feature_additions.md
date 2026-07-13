@@ -8,6 +8,7 @@ This document captures adjacent, high-value feature additions for Pines. The emp
 - Provider-hosted storage managers for OpenAI Files/vector stores, Anthropic Files, and Gemini Files/context caches, with local Vault separation.
 - Provider provenance in chat for citations, hosted tool events, file references, request/message IDs, cache metrics, thinking mode, and generated artifacts.
 - Long-running provider job records for OpenAI/Gemini Deep Research, OpenAI/Anthropic/Gemini batches, OpenAI/Gemini realtime/live sessions, and generated media workflows.
+- Production UX state for durable provider transfers, approval-gated hosted tools, user-resolved CloudKit conflicts, exact compatibility explanations, and receipt-backed OpenRouter spend summaries.
 
 ## Priority Recommendations
 

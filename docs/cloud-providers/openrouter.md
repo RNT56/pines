@@ -101,7 +101,7 @@ Implementation notes:
 
 ### 5. Detailed usage accounting and aggregate spend
 
-Pines parses and displays prompt/completion/total tokens, reported cost, upstream inference cost, BYOK state, and server web-search request count per run. Cached/reasoning/media detail, thread/provider rollups, and reconciliation through the generation accounting endpoint remain incomplete.
+Pines parses and displays prompt/completion/total tokens, reported cost, upstream inference cost, BYOK state, and server web-search request count per run. Settings also aggregates persisted receipts over 24 hours, 7 days, 30 days, or all history, with cost-coverage disclosure and upstream-provider breakdown. Cached/reasoning/media detail, per-thread rollups, and reconciliation through the generation accounting endpoint remain incomplete.
 
 Value:
 
@@ -110,7 +110,7 @@ Value:
 Implementation notes:
 
 - Add cached, reasoning, and media usage fields as product surfaces consume them.
-- Add optional thread/provider spend summaries and generation-endpoint reconciliation without turning Pines into an account-management client.
+- Add optional per-thread spend summaries and generation-endpoint reconciliation without turning Pines into an account-management client. Never estimate cost when the provider omitted it.
 
 ### 6. Prompt caching and sticky routing
 
@@ -184,7 +184,7 @@ Implementation notes:
 2. OpenRouter reasoning controls and detailed reasoning/cache usage.
 3. Response healing for eligible non-streaming structured requests.
 4. Max-price/quantization and scoped routing overrides.
-5. Aggregate/reconciled spend reporting.
+5. Generation-endpoint spend reconciliation and per-thread summaries.
 6. Prompt caching/transforms.
 7. Additional output modalities and upstream BYOK routing.
 
