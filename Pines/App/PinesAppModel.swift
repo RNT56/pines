@@ -2992,6 +2992,12 @@ final class PinesAppModel: ObservableObject {
                 anthropicOptions: anthropicRequestOptions(for: selectedProviderID, settings: settings, services: services),
                 openRouterOptions: openRouterRequestOptions(for: selectedProviderID, settings: settings, services: services)
             )
+            if let eligibilityFailure = openRouterModelEligibilityFailure(
+                providerID: selectedProviderID,
+                request: request
+            ) {
+                throw InferenceError.unsupportedCapability(eligibilityFailure)
+            }
             if request.resolvedAnthropicOptions.countTokensBeforeSend {
                 let body = Self.anthropicTokenCountPreflightBody(for: request)
                 let preflight = try await preflightAnthropicCountTokens(
@@ -3558,9 +3564,31 @@ final class PinesAppModel: ObservableObject {
         let modelRecord = providerModelCapabilities.first { record in
             record.providerID == providerID && record.modelID == modelID
         }
+        let catalogModel = cloudModelCatalog[providerID]?.first { $0.id == modelID }
         return modelRecord?.contextWindowTokens
             ?? modelRecord?.capabilities.maxContextTokens
+            ?? catalogModel?.metadata?.contextLength
+            ?? catalogModel?.capabilities?.maxContextTokens
             ?? providerCapabilities.maxContextTokens
+    }
+
+    func openRouterModelEligibilityFailure(
+        providerID: ProviderID,
+        request: ChatRequest
+    ) -> String? {
+        guard cloudProviders.first(where: { $0.id == providerID })?.kind == .openRouter,
+              let model = cloudModelCatalog[providerID]?.first(where: { $0.id == request.modelID })
+        else {
+            return nil
+        }
+        let report = model.eligibility(
+            requiredInputs: ProviderInputRequirements(messages: request.messages),
+            requiresTools: request.allowsTools && !request.availableTools.isEmpty,
+            structuredOutput: request.structuredOutput
+        )
+        guard !report.isEligible else { return nil }
+        return report.explanation.map { "\(model.displayName) is not eligible for this OpenRouter request. \($0)" }
+            ?? "The selected OpenRouter model is not eligible for this request."
     }
 
     private func preferredModelSelection(services: PinesAppServices) -> ModelPickerOption? {
@@ -5031,7 +5059,9 @@ final class PinesAppModel: ObservableObject {
                         modelID: model.id,
                         displayName: model.displayName,
                         isLocal: false,
-                        rank: model.rank
+                        rank: model.rank,
+                        capabilities: model.capabilities,
+                        modelMetadata: model.metadata
                     )
                 }
             guard !providerModels.isEmpty else { continue }

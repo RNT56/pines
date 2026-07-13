@@ -182,6 +182,8 @@ struct ModelPickerOption: Identifiable, Hashable {
     let displayName: String
     let isLocal: Bool
     let rank: Double
+    var capabilities: ProviderCapabilities? = nil
+    var modelMetadata: CloudProviderModelMetadata? = nil
 }
 
 struct ChatQuickSettingsAvailability: Hashable {

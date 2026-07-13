@@ -147,7 +147,9 @@ Implementation notes:
 
 ### 9. Model metadata filtering
 
-Pines lists text models but does not deeply use OpenRouter's metadata for modalities, supported parameters, pricing, context length, or provider availability.
+Pines now requests OpenRouter's text-output catalog in popularity order and retains a bounded, allowlisted session catalog for context/output limits, input/output modalities, supported parameters, architecture labels, moderation, lifecycle dates, and per-unit pricing. The chat picker shows concise context, input/output price, modality, tool, and schema details; context packing uses the model limit; and request preflight rejects known-incompatible image, audio, video, PDF/file, tool, JSON, and strict-schema requests before inference spend.
+
+Unknown metadata remains permissive rather than creating false incompatibility claims. Pines does not yet fetch the endpoint details feed, so it cannot show provider-by-provider availability, provider-specific feature variance, rate limits, or per-endpoint prices.
 
 Value:
 
@@ -155,8 +157,9 @@ Value:
 
 Implementation notes:
 
-- Cache OpenRouter model metadata.
-- Drive quick settings from supported parameters instead of model-name heuristics.
+- Persist catalog snapshots with an explicit freshness policy instead of keeping them only for the app session.
+- Fetch endpoint details before claiming that every routed upstream supports a catalog-level feature.
+- Drive OpenRouter reasoning and other quick settings from supported parameters instead of model-name heuristics.
 
 ### 10. BYOK upstream provider routing
 
@@ -172,14 +175,14 @@ Implementation notes:
 
 ## Suggested Priority
 
-1. Model metadata-driven eligibility and picker details.
-2. Server web search tool and citations.
+1. Server web search tool and citations.
+2. Endpoint-level provider availability and metadata freshness.
 3. OpenRouter reasoning controls and detailed reasoning/cache usage.
 4. Response healing for eligible non-streaming structured requests.
 5. Max-price/quantization and scoped routing overrides.
 6. Aggregate/reconciled spend reporting.
 7. Prompt caching/transforms.
-8. Additional modalities and upstream BYOK routing.
+8. Additional output modalities and upstream BYOK routing.
 
 ## Decisions And Open Questions
 

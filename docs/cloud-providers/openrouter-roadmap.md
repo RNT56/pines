@@ -82,11 +82,14 @@ Goal: Make OpenRouter model selection capability-driven.
 
 Todos:
 
-- Cache model metadata: context length, modalities, pricing, architecture, supported parameters, provider availability, and rate/cost hints.
-- Filter model picker by requested feature: tools, images, PDFs, schemas, reasoning, audio/video, generation outputs.
-- Show pricing/context/modality badges.
-- Warn when selected model may drop a requested feature.
-- Add model picker badges and eligibility explanations.
+- [x] Retain a bounded session catalog for context/output limits, modalities, pricing, architecture labels, supported parameters, moderation, and lifecycle dates.
+- [x] Request text-output models in OpenRouter popularity order and expand the useful picker catalog beyond the previous 24-model truncation.
+- [x] Preflight known model incompatibilities for tools, images, audio/video input, PDFs/files, JSON mode, and strict schemas before inference spend.
+- [x] Show concise pricing, context, modality, tool, and schema details in the model picker.
+- [x] Return a specific eligibility explanation when current catalog metadata rejects a request.
+- [ ] Persist catalog snapshots with freshness/expiry semantics.
+- [ ] Fetch endpoint-level provider availability, provider-specific parameter support, rate limits, and prices.
+- [ ] Add metadata-driven reasoning, generated-output, and server-tool selection once those request surfaces ship.
 
 Possible hiccups:
 
@@ -95,7 +98,7 @@ Possible hiccups:
 
 Production complete when:
 
-- Pines can explain why an OpenRouter model is eligible or ineligible for a request.
+- Pines can explain catalog-level eligibility now. Phase 2 remains open until endpoint-specific variance and metadata freshness are represented without implying that every upstream route has identical support.
 
 ## Phase 3: Structured Outputs And Response Reliability
 

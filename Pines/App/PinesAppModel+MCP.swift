@@ -204,6 +204,12 @@ extension PinesAppModel {
             availableTools: tools,
             anthropicOptions: anthropicRequestOptions(for: cloudProvider.id, settings: settings, services: services)
         )
+        if let eligibilityFailure = openRouterModelEligibilityFailure(
+            providerID: cloudProvider.id,
+            request: cloudChatRequest
+        ) {
+            throw InferenceError.unsupportedCapability(eligibilityFailure)
+        }
         let provider = BYOKCloudInferenceProvider(configuration: cloudProvider, secretStore: services.secretStore)
         let result = try await runMCPSampling(
             cloudChatRequest,

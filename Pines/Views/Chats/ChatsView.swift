@@ -361,6 +361,7 @@ private struct ChatModelPickerButton: View {
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var modelState: PinesModelState
     @EnvironmentObject private var haptics: PinesHaptics
+    @State private var showsModelPicker = false
     let currentProviderID: ProviderID?
     let currentModelID: ModelID?
     let fallbackLabel: String?
@@ -386,44 +387,23 @@ private struct ChatModelPickerButton: View {
                 .accessibilityValue("No models installed")
                 .accessibilityHint("Opens Models")
             } else {
-                Menu {
-                    ForEach(sections) { section in
-                        Section(section.title) {
-                            ForEach(section.models) { option in
-                                Button {
-                                    Task {
-                                        await select(option)
-                                    }
-                                } label: {
-                                    Label {
-                                        Text(option.compactDisplayName)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    } icon: {
-                                        Image(systemName: option.systemImage)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if !unavailableProviders.isEmpty {
-                        Section("Saved Providers") {
-                            ForEach(unavailableProviders) { provider in
-                                Button {} label: {
-                                    Label {
-                                        Text(unavailableProviderStatus(for: provider))
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    } icon: {
-                                        Image(systemName: "line.3.horizontal.decrease.circle")
-                                    }
-                                }
-                                .disabled(true)
-                            }
-                        }
-                    }
+                Button {
+                    haptics.play(.navigationSelected)
+                    showsModelPicker = true
                 } label: {
                     pickerLabel(showsDisclosure: true, currentModelLabel: currentModelLabel)
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showsModelPicker) {
+                    ChatModelPickerSheet(
+                        sections: sections,
+                        unavailableProviders: unavailableProviders,
+                        currentProviderID: currentProviderID,
+                        currentModelID: currentModelID,
+                        select: select
+                    )
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
                 }
             }
         }
@@ -548,6 +528,117 @@ private struct ChatModelPickerButton: View {
             }
     }
 
+}
+
+private struct ChatModelPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    let sections: [ModelPickerSection]
+    let unavailableProviders: [CloudProviderConfiguration]
+    let currentProviderID: ProviderID?
+    let currentModelID: ModelID?
+    let select: (ModelPickerOption) async -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(filteredSections) { section in
+                    Section(section.title) {
+                        ForEach(section.models) { option in
+                            Button {
+                                Task {
+                                    await select(option)
+                                    dismiss()
+                                }
+                            } label: {
+                                modelRow(option)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint(option.catalogAccessibilityDetail ?? "Selects this model")
+                        }
+                    }
+                }
+                if normalizedQuery.isEmpty, !unavailableProviders.isEmpty {
+                    Section("Saved Providers") {
+                        ForEach(unavailableProviders) { provider in
+                            Label(unavailableProviderStatus(for: provider), systemImage: "line.3.horizontal.decrease.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .overlay {
+                if filteredSections.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                }
+            }
+            .navigationTitle("Choose Model")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name, model ID, or capability")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var normalizedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var filteredSections: [ModelPickerSection] {
+        guard !normalizedQuery.isEmpty else { return sections }
+        return sections.compactMap { section in
+            let models = section.models.filter { option in
+                let searchable = [
+                    option.displayName,
+                    option.modelID.rawValue,
+                    option.providerName,
+                    option.catalogDetailLabel ?? "",
+                    option.modelMetadata?.summary ?? "",
+                ]
+                .joined(separator: " ")
+                .lowercased()
+                return searchable.contains(normalizedQuery)
+            }
+            return models.isEmpty ? nil : ModelPickerSection(title: section.title, models: models)
+        }
+    }
+
+    private func modelRow(_ option: ModelPickerOption) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: option.systemImage)
+                .frame(width: 24)
+                .foregroundStyle(option.providerKind == .openRouter ? Color.accentColor : .secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(option.displayName)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                if let detail = option.catalogDetailLabel {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else if option.displayName.caseInsensitiveCompare(option.modelID.rawValue) != .orderedSame {
+                    Text(option.modelID.rawValue)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 8)
+            if option.providerID == currentProviderID, option.modelID == currentModelID {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityLabel("Selected")
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
     private func unavailableProviderStatus(for provider: CloudProviderConfiguration) -> String {
         switch provider.validationStatus {
         case .valid:
@@ -621,6 +712,74 @@ private extension ModelPickerOption {
         case .openAICompatible, .custom, nil:
             return "network"
         }
+    }
+
+    var catalogDetailLabel: String? {
+        guard providerKind == .openRouter else { return nil }
+        var details = [String]()
+        if let context = modelMetadata?.contextLength ?? capabilities?.maxContextTokens {
+            details.append("\(Self.compactTokenCount(context)) context")
+        }
+        if let pricing = modelMetadata?.pricing,
+           let price = Self.compactTokenPricing(pricing) {
+            details.append(price)
+        }
+        let inputModalities = Set(modelMetadata?.inputModalities ?? [])
+        if inputModalities.contains("image") {
+            details.append("images")
+        }
+        if inputModalities.contains("file") || inputModalities.contains("pdf") {
+            details.append("files")
+        }
+        if capabilities?.toolCalling == true {
+            details.append("tools")
+        }
+        if capabilities?.structuredOutputs == true {
+            details.append("schema")
+        }
+        return details.isEmpty ? nil : details.prefix(5).joined(separator: " · ")
+    }
+
+    var catalogAccessibilityDetail: String? {
+        guard providerKind == .openRouter else { return nil }
+        var details = [String]()
+        if let catalogDetailLabel {
+            details.append(catalogDetailLabel)
+        }
+        if let summary = modelMetadata?.summary, !summary.isEmpty {
+            details.append(summary)
+        }
+        return details.isEmpty ? nil : details.joined(separator: ". ")
+    }
+
+    private static func compactTokenCount(_ value: Int) -> String {
+        if value >= 1_000_000 {
+            let millions = Double(value) / 1_000_000
+            return millions.rounded() == millions ? "\(Int(millions))M" : String(format: "%.1fM", millions)
+        }
+        if value >= 1_000 {
+            let thousands = Double(value) / 1_000
+            return thousands.rounded() == thousands ? "\(Int(thousands))K" : String(format: "%.1fK", thousands)
+        }
+        return value.formatted()
+    }
+
+    private static func compactTokenPricing(_ pricing: CloudProviderModelPricing) -> String? {
+        guard let prompt = pricing.tokenPricePerMillion(pricing.prompt),
+              let completion = pricing.tokenPricePerMillion(pricing.completion)
+        else {
+            return nil
+        }
+        return "\(currency(prompt)) in · \(currency(completion)) out / M"
+    }
+
+    private static func currency(_ value: Decimal) -> String {
+        let number = NSDecimalNumber(decimal: value)
+        let amount = number.doubleValue
+        if amount == 0 { return "$0" }
+        if amount < 0.01 { return String(format: "$%.4f", amount) }
+        if amount < 1 { return String(format: "$%.3f", amount) }
+        return String(format: "$%.2f", amount)
     }
 }
 

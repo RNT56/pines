@@ -197,7 +197,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
         var request: URLRequest
         switch configuration.kind {
-        case .openAI, .openAICompatible, .openRouter, .custom:
+        case .openRouter:
+            request = URLRequest(url: try openRouterModelCatalogURL())
+            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            addOpenAIClientRequestID(to: &request)
+        case .openAI, .openAICompatible, .custom:
             request = URLRequest(url: apiBaseURL.appending(path: "models"))
             request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             addOpenAIClientRequestID(to: &request)
@@ -447,7 +451,11 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
     private func listTextModels(apiKey: String) async throws -> [CloudProviderModel] {
         var request: URLRequest
         switch configuration.kind {
-        case .openAI, .openAICompatible, .openRouter, .custom:
+        case .openRouter:
+            request = URLRequest(url: try openRouterModelCatalogURL())
+            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            addOpenAIClientRequestID(to: &request)
+        case .openAI, .openAICompatible, .custom:
             request = URLRequest(url: apiBaseURL.appending(path: "models"))
             request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             addOpenAIClientRequestID(to: &request)
@@ -484,6 +492,21 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             throw CloudProviderError.invalidResponse
         }
         return Self.parseModels(json, providerKind: configuration.kind)
+    }
+
+    private func openRouterModelCatalogURL() throws -> URL {
+        var components = URLComponents(
+            url: apiBaseURL.appending(path: "models"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "output_modalities", value: "text"),
+            URLQueryItem(name: "sort", value: "most-popular"),
+        ]
+        guard let url = components?.url else {
+            throw CloudProviderError.invalidResponse
+        }
+        return url
     }
 
     private func anthropicRequest(apiKey: String, chatRequest: ChatRequest) async throws -> URLRequest {
@@ -1628,7 +1651,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
     }
 
-    private static func parseModels(_ json: [String: Any], providerKind: CloudProviderKind) -> [CloudProviderModel] {
+    static func parseModels(_ json: [String: Any], providerKind: CloudProviderKind) -> [CloudProviderModel] {
         let rawItems: [[String: Any]]
         switch providerKind {
         case .gemini:
@@ -1637,7 +1660,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             rawItems = json["data"] as? [[String: Any]] ?? []
         }
 
-        let parsed = rawItems.compactMap { item -> CloudProviderModel? in
+        let parsed = rawItems.enumerated().compactMap { offset, item -> CloudProviderModel? in
             let rawID: String?
             if providerKind == .gemini {
                 rawID = (item["name"] as? String)?.replacingOccurrences(of: "models/", with: "")
@@ -1646,25 +1669,30 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
             }
             let supportedGenerationMethods = item["supportedGenerationMethods"] as? [String] ?? []
             let supportedParameters = item["supported_parameters"] as? [String] ?? []
-            guard let id = rawID,
-                  CloudProviderModelEligibility.isTextOutputModel(
+            guard let id = rawID else { return nil }
+            let openRouterOutputModalities = ((item["architecture"] as? [String: Any])?["output_modalities"] as? [String] ?? [])
+                .map { $0.lowercased() }
+            let isEligibleTextModel = providerKind == .openRouter && !openRouterOutputModalities.isEmpty
+                ? openRouterOutputModalities.contains("text")
+                : CloudProviderModelEligibility.isTextOutputModel(
                       id: id,
                       providerKind: providerKind,
                       supportedGenerationMethods: supportedGenerationMethods
                   )
-            else {
-                return nil
-            }
+            guard isEligibleTextModel else { return nil }
 
             let displayName = (item["display_name"] as? String)
                 ?? (item["displayName"] as? String)
+                ?? (item["name"] as? String)
                 ?? readableModelName(id)
             let createdAt = createdDate(from: item)
             return CloudProviderModel(
                 id: ModelID(rawValue: id),
                 displayName: displayName,
                 createdAt: createdAt,
-                rank: modelRank(id: id, providerKind: providerKind, createdAt: createdAt),
+                rank: providerKind == .openRouter
+                    ? Double(rawItems.count - offset)
+                    : modelRank(id: id, providerKind: providerKind, createdAt: createdAt),
                 capabilities: modelCapabilities(
                     id: id,
                     item: item,
@@ -1673,7 +1701,8 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                     supportedGenerationMethods: supportedGenerationMethods
                 ),
                 supportedParameters: supportedParameters,
-                supportedGenerationMethods: supportedGenerationMethods
+                supportedGenerationMethods: supportedGenerationMethods,
+                metadata: providerKind == .openRouter ? openRouterModelMetadata(item) : nil
             )
         }
 
@@ -1685,8 +1714,81 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
                 return $0.rank > $1.rank
             }
             .uniqued(by: \.id)
-            .prefix(providerKind == .openAI ? 64 : 24)
+            .prefix(providerKind == .openRouter ? 96 : (providerKind == .openAI ? 64 : 24))
             .map { $0 }
+    }
+
+    private static func openRouterModelMetadata(_ item: [String: Any]) -> CloudProviderModelMetadata {
+        let architecture = item["architecture"] as? [String: Any] ?? [:]
+        let topProvider = item["top_provider"] as? [String: Any] ?? [:]
+        let rawPricing = item["pricing"] as? [String: Any] ?? [:]
+        let pricing = CloudProviderModelPricing(
+            prompt: decimalValue(rawPricing["prompt"]),
+            completion: decimalValue(rawPricing["completion"]),
+            request: decimalValue(rawPricing["request"]),
+            image: decimalValue(rawPricing["image"]),
+            webSearch: decimalValue(rawPricing["web_search"]),
+            internalReasoning: decimalValue(rawPricing["internal_reasoning"]),
+            inputCacheRead: decimalValue(rawPricing["input_cache_read"]),
+            inputCacheWrite: decimalValue(rawPricing["input_cache_write"])
+        )
+        return CloudProviderModelMetadata(
+            canonicalSlug: boundedString(item["canonical_slug"], maximumLength: 256),
+            summary: boundedString(item["description"], maximumLength: 1_024),
+            inputModalities: normalizedCatalogValues(architecture["input_modalities"]),
+            outputModalities: normalizedCatalogValues(architecture["output_modalities"]),
+            tokenizer: boundedString(architecture["tokenizer"], maximumLength: 80),
+            instructType: boundedString(architecture["instruct_type"], maximumLength: 80),
+            contextLength: positiveIntValue(item["context_length"]) ?? positiveIntValue(topProvider["context_length"]),
+            maxCompletionTokens: positiveIntValue(topProvider["max_completion_tokens"]),
+            isModerated: topProvider["is_moderated"] as? Bool,
+            expirationDate: boundedString(item["expiration_date"], maximumLength: 64),
+            knowledgeCutoff: boundedString(item["knowledge_cutoff"], maximumLength: 64),
+            pricing: pricing
+        )
+    }
+
+    private static func normalizedCatalogValues(_ value: Any?) -> [String] {
+        guard let values = value as? [String] else { return [] }
+        var seen = Set<String>()
+        return values.compactMap { value in
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty,
+                  normalized.count <= 40,
+                  seen.insert(normalized).inserted
+            else {
+                return nil
+            }
+            return normalized
+        }
+        .prefix(12)
+        .map { $0 }
+    }
+
+    private static func boundedString(_ value: Any?, maximumLength: Int) -> String? {
+        guard let raw = value as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(maximumLength))
+    }
+
+    private static func decimalValue(_ value: Any?) -> Decimal? {
+        let raw: String
+        if let string = value as? String {
+            raw = string
+        } else if let number = value as? NSNumber {
+            raw = number.stringValue
+        } else {
+            return nil
+        }
+        let parsed = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX"))
+        guard let parsed, parsed >= 0 else { return nil }
+        return parsed
+    }
+
+    private static func positiveIntValue(_ value: Any?) -> Int? {
+        guard let value = intValue(value), value > 0 else { return nil }
+        return value
     }
 
     private static func modelCapabilities(
