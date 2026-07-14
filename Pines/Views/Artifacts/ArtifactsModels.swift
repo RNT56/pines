@@ -2,38 +2,108 @@ import Foundation
 import PinesCore
 import SwiftUI
 
-enum ArtifactsWorkspaceMode: String, CaseIterable, Identifiable, Hashable {
-    case library
-    case generate
-    case research
+enum ArtifactsRoute: Hashable {
+    case artifact(String)
+    case create(kind: ArtifactsMediaKind, referenceArtifactID: String?)
+    case research(threadID: String?)
+    case providerSetup
+}
 
-    static var allCases: [ArtifactsWorkspaceMode] {
-        [.library, .generate, .research]
-    }
+enum ArtifactContentKind: String, CaseIterable, Identifiable, Hashable {
+    case report
+    case image
+    case video
+    case audio
+    case other
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .library: "Library"
-        case .generate: "Create"
-        case .research: "Research"
+        case .report: "Report"
+        case .image: "Image"
+        case .video: "Video"
+        case .audio: "Audio"
+        case .other: "Artifact"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .library: "rectangle.stack"
-        case .generate: "sparkles"
-        case .research: "doc.text.magnifyingglass"
+        case .report: "doc.text"
+        case .image: "photo"
+        case .video: "film"
+        case .audio: "waveform"
+        case .other: "doc"
+        }
+    }
+}
+
+enum ArtifactAvailability: Hashable {
+    case embedded
+    case local
+    case remote
+    case localAndRemote
+    case unavailable
+
+    var title: String {
+        switch self {
+        case .embedded: "Stored in Pines"
+        case .local: "Local copy"
+        case .remote: "Provider-hosted"
+        case .localAndRemote: "Local + provider"
+        case .unavailable: "Metadata only"
         }
     }
 
-    var subtitle: String {
+    var systemImage: String {
         switch self {
-        case .library: "Reports and generated media"
-        case .generate: "Images, video, and speech"
-        case .research: "Ask, trace, follow up"
+        case .embedded: "archivebox"
+        case .local: "internaldrive"
+        case .remote: "cloud"
+        case .localAndRemote: "externaldrive.badge.icloud"
+        case .unavailable: "questionmark.folder"
+        }
+    }
+}
+
+enum ArtifactOperationState: Hashable {
+    case ready
+    case queued
+    case processing
+    case failed(String?)
+    case cancelled
+
+    var isActive: Bool {
+        self == .queued || self == .processing
+    }
+
+    var title: String {
+        switch self {
+        case .ready: "Ready"
+        case .queued: "Queued"
+        case .processing: "Processing"
+        case .failed: "Needs attention"
+        case .cancelled: "Cancelled"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .ready: "checkmark.circle"
+        case .queued: "clock"
+        case .processing: "sparkles"
+        case .failed: "exclamationmark.triangle"
+        case .cancelled: "xmark.circle"
+        }
+    }
+
+    var tone: PinesCloudStatusTone {
+        switch self {
+        case .ready: .success
+        case .queued, .processing: .info
+        case .failed: .danger
+        case .cancelled: .neutral
         }
     }
 }
@@ -154,6 +224,35 @@ struct ArtifactsResourceFilter: Hashable {
     }
 }
 
+struct ArtifactsLibraryQuery: Hashable {
+    var text = ""
+    var category: ArtifactsAssetKindFilter = .all
+    var providerScope: ArtifactsProviderScope = .all
+    var sort: ArtifactsSort = .newest
+
+    var resourceFilter: ArtifactsResourceFilter {
+        ArtifactsResourceFilter(
+            query: text,
+            providerScope: providerScope,
+            sort: sort
+        )
+    }
+
+    var hasActiveFilters: Bool {
+        category != .all || providerScope != .all || sort != .newest
+    }
+
+    var hasSheetFilters: Bool {
+        providerScope != .all || sort != .newest
+    }
+
+    mutating func resetFilters() {
+        category = .all
+        providerScope = .all
+        sort = .newest
+    }
+}
+
 enum ArtifactsSelection: Hashable, Identifiable {
     case artifact(String)
     case file(String)
@@ -251,6 +350,56 @@ struct ArtifactsAssetViewModel: Identifiable {
     var status: PinesCloudStatus { summary.status }
     var secondaryStatus: PinesCloudStatus? { summary.secondaryStatus }
     var createdAt: Date? { summary.createdAt }
+}
+
+struct ArtifactLibraryItem: Identifiable {
+    var id: String { artifact.id }
+    let artifact: ProviderArtifactRecord
+    let title: String
+    let excerpt: String?
+    let contentKind: ArtifactContentKind
+    let availability: ArtifactAvailability
+    let operationState: ArtifactOperationState
+    let providerName: String
+    let createdAt: Date
+
+    var isActive: Bool { operationState.isActive }
+    var canImportToVault: Bool { artifact.isImportableToVault }
+    var canRemix: Bool { artifact.isRemixableImageArtifact }
+
+    init(
+        artifact: ProviderArtifactRecord,
+        providers: [CloudProviderConfiguration],
+        researchRuns: [ProviderResearchRunRecord]
+    ) {
+        self.artifact = artifact
+        contentKind = artifact.artifactContentKind
+        availability = artifact.artifactAvailability
+        operationState = artifact.artifactOperationState
+        providerName = artifact.providerID.flatMap { id in
+            providers.first(where: { $0.id == id })?.displayName
+        } ?? artifact.providerKind.pinesLifecycleTitle
+        createdAt = artifact.createdAt
+
+        let researchTitle = researchRuns.first(where: { $0.finalReportArtifactID == artifact.id })?.title
+        let resolvedTitle = researchTitle ?? artifact.artifactDisplayTitle
+        title = resolvedTitle
+        excerpt = contentKind == .report
+            ? Self.cleanedReportExcerpt(artifact.artifactExcerpt, title: resolvedTitle)
+            : artifact.artifactExcerpt
+    }
+
+    private static func cleanedReportExcerpt(_ excerpt: String?, title: String) -> String? {
+        guard var excerpt = excerpt?.trimmingCharacters(in: .whitespacesAndNewlines), !excerpt.isEmpty else {
+            return nil
+        }
+        let heading = "# \(title)"
+        if excerpt.lowercased().hasPrefix(heading.lowercased()) {
+            excerpt.removeFirst(min(heading.count, excerpt.count))
+            excerpt = excerpt.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return excerpt.isEmpty ? nil : excerpt
+    }
 }
 
 enum ArtifactsMediaKind: String, CaseIterable, Identifiable, Hashable {
@@ -940,6 +1089,98 @@ extension String {
 }
 
 extension ProviderArtifactRecord {
+    var artifactContentKind: ArtifactContentKind {
+        switch galleryPresentation {
+        case .report: .report
+        case .image: .image
+        case .video: .video
+        case .audio: .audio
+        case .metadata: .other
+        }
+    }
+
+    var artifactAvailability: ArtifactAvailability {
+        let hasLocal = localURL != nil
+        let hasRemote = remoteURL != nil
+        if hasLocal && hasRemote { return .localAndRemote }
+        if hasLocal { return .local }
+        if hasRemote { return .remote }
+        if text != nil || content != nil { return .embedded }
+        return .unavailable
+    }
+
+    var artifactOperationState: ArtifactOperationState {
+        let normalizedKind = kind.lowercased()
+        let rawStatus = artifactStatusValue?.lowercased() ?? ""
+
+        if ["failed", "error", "expired"].contains(rawStatus) {
+            return .failed(artifactErrorValue)
+        }
+        if ["cancelled", "canceled"].contains(rawStatus) {
+            return .cancelled
+        }
+        if ["queued", "pending", "submitted"].contains(rawStatus) {
+            return .queued
+        }
+        if ["running", "processing", "in_progress"].contains(rawStatus) {
+            return .processing
+        }
+        if normalizedKind == "video_job" || normalizedKind == "media_operation" {
+            if localURL != nil || remoteURL != nil || rawStatus == "completed" || rawStatus == "succeeded" {
+                return .ready
+            }
+            return .processing
+        }
+        return .ready
+    }
+
+    var artifactDisplayTitle: String {
+        if galleryPresentation != .report,
+           let prompt = (artifactPromptValue ?? text)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !prompt.isEmpty {
+            let flattened = prompt.replacingOccurrences(of: "\n", with: " ")
+            return String(flattened.prefix(72))
+        }
+        if let fileName = fileName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !fileName.isEmpty,
+           fileName.caseInsensitiveCompare(kind) != .orderedSame {
+            return fileName
+        }
+        if let prompt = artifactPromptValue?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
+            let flattened = prompt.replacingOccurrences(of: "\n", with: " ")
+            return String(flattened.prefix(72))
+        }
+        return kind.readableArtifactKind
+    }
+
+    var artifactExcerpt: String? {
+        if let prompt = artifactPromptValue?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
+            return String(prompt.replacingOccurrences(of: "\n", with: " ").prefix(180))
+        }
+        if let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            return String(text.replacingOccurrences(of: "\n", with: " ").prefix(180))
+        }
+        return nil
+    }
+
+    private var artifactStatusValue: String? {
+        content?.objectValue?["status"]?.stringValue
+            ?? content?.objectValue?["state"]?.stringValue
+    }
+
+    private var artifactErrorValue: String? {
+        content?.objectValue?["error"]?.stringValue
+            ?? content?.objectValue?["last_error"]?.stringValue
+    }
+
+    private var artifactPromptValue: String? {
+        guard let object = content?.objectValue else { return nil }
+        return object["pines_prompt"]?.stringValue
+            ?? object["prompt"]?.stringValue
+            ?? object["input"]?.stringValue
+            ?? object["description"]?.stringValue
+    }
+
     var retentionLabel: ArtifactsRetentionLabel {
         if localURL != nil { return .localCopy }
         if remoteURL != nil { return .remoteLink }

@@ -52,6 +52,27 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
+    func testSettingsInformationArchitectureAndFocusedPages() throws {
+        launchAndWaitForMainUI()
+        openTab("Settings")
+
+        let destinations = [
+            ("Appearance", "Color & appearance"),
+            ("AI & Models", "Default routing"),
+            ("Cloud & Providers", "My providers"),
+            ("Privacy & Data", "Security"),
+            ("Tools & Integrations", "Built-in tools"),
+            ("Help & Diagnostics", "Health"),
+        ]
+
+        for (destination, expectedGroup) in destinations {
+            openSettingsSection(destination)
+            assertStaticTextVisible(expectedGroup, "\(destination) did not show its focused settings content.")
+            captureScreenshot(named: "Settings - \(destination)")
+        }
+    }
+
+    @MainActor
     func testAccessibilityTextSizeKeepsPrimarySurfacesReachable() throws {
         configureLaunch(resetStore: true)
         app.launchArguments += [
@@ -60,6 +81,7 @@ final class PinesUITests: XCTestCase {
             "-AppleInterfaceStyle",
             "Dark",
         ]
+        app.launchEnvironment["PINES_UI_TEST_ARTIFACTS_FIXTURE"] = "1"
         launchAndWaitForMainUI()
 
         openTab("Models")
@@ -69,9 +91,12 @@ final class PinesUITests: XCTestCase {
         assertExists(app.buttons["Vault settings"], "Vault settings should remain reachable at accessibility text sizes.")
 
         openTab("Artifacts")
-        switchArtifactsWorkspace(to: "Create")
-        switchArtifactsWorkspace(to: "Research")
-        switchArtifactsWorkspace(to: "Library")
+        assertIdentifierVisible("pines.artifacts.library", "Artifact library should remain reachable at accessibility text sizes.")
+        assertVisibleText(containing: "Architectural study of a glass cabin", timeout: 10)
+        openArtifactsDestination(menuItem: "Image", destinationIdentifier: "pines.artifacts.create")
+        returnToArtifactsLibrary()
+        openArtifactsDestination(menuItem: "Deep Research", destinationIdentifier: "pines.artifacts.research")
+        returnToArtifactsLibrary()
 
         openTab("Chats")
         tapCreateChat()
@@ -79,6 +104,55 @@ final class PinesUITests: XCTestCase {
         assertIdentifierVisible("pines.chat.composer.input", "Chat composer should remain reachable at accessibility text sizes.")
         assertIdentifierVisible("pines.chat.composer.run-mode", "Run mode should remain reachable at accessibility text sizes.")
         assertIdentifierVisible("pines.chat.composer.send", "Send should remain reachable at accessibility text sizes.")
+    }
+
+    @MainActor
+    func testArtifactsLibraryAndFocusedDestinations() throws {
+        configureLaunch(resetStore: true)
+        app.launchEnvironment["PINES_UI_TEST_ARTIFACTS_FIXTURE"] = "1"
+        launchAndWaitForMainUI()
+
+        openTab("Artifacts")
+        assertIdentifierVisible("pines.artifacts.library", "The populated Artifact library was missing.")
+        assertVisibleText(containing: "Architectural study of a glass cabin", timeout: 10)
+        assertVisibleText(containing: "Low-impact woodland materials", timeout: 10)
+        captureScreenshot(named: "Artifacts - Library")
+
+        let images = app.buttons["Images"]
+        XCTAssertTrue(images.waitForExistence(timeout: 10), "Artifact image category was missing.")
+        images.tap()
+        assertVisibleText(containing: "Architectural study of a glass cabin", timeout: 10)
+        captureScreenshot(named: "Artifacts - Images")
+        app.buttons["All"].tap()
+
+        openArtifactsDestination(menuItem: "Image", destinationIdentifier: "pines.artifacts.create")
+        assertVisibleText(containing: "OpenAI Studio", timeout: 10)
+        captureScreenshot(named: "Artifacts - Create")
+        returnToArtifactsLibrary()
+
+        openArtifactsDestination(menuItem: "Deep Research", destinationIdentifier: "pines.artifacts.research")
+        assertVisibleText(containing: "OpenAI Studio", timeout: 10)
+        captureScreenshot(named: "Artifacts - Deep Research")
+    }
+
+    @MainActor
+    func testArtifactsProviderSetupOpensCloudProviderSettings() throws {
+        launchAndWaitForMainUI()
+
+        openTab("Artifacts")
+        openArtifactsDestination(menuItem: "Image", destinationIdentifier: "pines.artifacts.create")
+        let setup = app.buttons["Provider setup"]
+        XCTAssertTrue(setup.waitForExistence(timeout: 10), "Artifact creation did not offer provider setup.")
+        setup.tap()
+
+        let openSettings = app.buttons["Open Provider Settings"]
+        XCTAssertTrue(openSettings.waitForExistence(timeout: 10), "Provider setup did not offer a Settings handoff.")
+        openSettings.tap()
+
+        assertIdentifierVisible(
+            "pines.settings.detail.cloudProviders",
+            "Artifact provider setup did not open Cloud & Providers directly."
+        )
     }
 
     @MainActor
@@ -225,26 +299,28 @@ final class PinesUITests: XCTestCase {
         assertExists(app.buttons["Vault settings"], "Vault settings action was missing.")
 
         openTab("Artifacts")
-        switchArtifactsWorkspace(to: "Create")
-        switchArtifactsWorkspace(to: "Research")
-        switchArtifactsWorkspace(to: "Library")
+        assertIdentifierVisible("pines.artifacts.library", "The artifact library was missing.")
+        openArtifactsDestination(menuItem: "Image", destinationIdentifier: "pines.artifacts.create")
+        returnToArtifactsLibrary()
+        openArtifactsDestination(menuItem: "Deep Research", destinationIdentifier: "pines.artifacts.research")
+        returnToArtifactsLibrary()
 
         openTab("Settings")
-        openSettingsSection("Design")
-        assertStaticTextVisible("Appearance", "Design settings did not show Appearance.")
-        tapButtonOrSegment("Dark")
-        tapButtonOrSegment("System")
-        openSettingsSection("Inference")
-        assertStaticTextVisible("Execution", "Inference settings did not show Execution.")
-        openSettingsSection("Privacy")
-        assertStaticTextVisible("Storage and Sync", "Privacy settings did not show Storage and Sync.")
-        openSettingsSection("Tools")
-        assertStaticTextVisible("Agent Tool Keys", "Tools settings did not show Agent Tool Keys.")
-        assertIdentifierVisible("pines.settings.mcp.name", "MCP display name field was missing.")
-        assertIdentifierVisible("pines.settings.mcp.endpoint", "MCP endpoint field was missing.")
-        assertStaticTextVisible("MCP Servers", "Tools settings did not show MCP Servers.")
-        openSettingsSection("System")
-        assertStaticTextVisible("Architecture Health", "System settings did not show Architecture Health.")
+        openSettingsSection("Appearance")
+        assertStaticTextVisible("Color & appearance", "Appearance settings did not show color controls.")
+        selectInterfaceMode("Dark")
+        selectInterfaceMode("System")
+        openSettingsSection("AI & Models")
+        assertStaticTextVisible("Default routing", "AI & Models settings did not show routing controls.")
+        openSettingsSection("Cloud & Providers")
+        assertStaticTextVisible("My providers", "Cloud & Providers settings did not show provider controls.")
+        openSettingsSection("Privacy & Data")
+        assertStaticTextVisible("Security", "Privacy & Data settings did not show security controls.")
+        openSettingsSection("Tools & Integrations")
+        assertStaticTextVisible("Built-in tools", "Tools & Integrations did not show built-in tools.")
+        assertStaticTextVisible("MCP servers", "Tools & Integrations did not show MCP servers.")
+        openSettingsSection("Help & Diagnostics")
+        assertStaticTextVisible("Health", "Help & Diagnostics did not show service health.")
     }
 
     @MainActor
@@ -274,10 +350,13 @@ final class PinesUITests: XCTestCase {
             return
         }
 
+        let labeledButtons = app.buttons
+            .matching(NSPredicate(format: "label == %@", title))
+            .allElementsBoundByIndex
         XCTAssertTrue(tapFirstExisting([
             app.tabBars.buttons[title],
             app.buttons[title],
-        ], timeout: 10) || tapTabBarSlot(title), "Could not tap \(title) tab.")
+        ] + labeledButtons, timeout: 10) || tapTabBarSlot(title), "Could not tap \(title) tab.")
 
         var screenMarkers = [app.staticTexts[title]]
         if let identifier = screenIdentifier(for: title) {
@@ -378,59 +457,76 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
-    private func switchArtifactsWorkspace(to title: String) {
+    private func openArtifactsDestination(menuItem: String, destinationIdentifier: String) {
         dismissKeyboardIfNeeded()
-        let mode = app.buttons["pines.artifacts.workspace.mode"]
-        if !mode.waitForExistence(timeout: 2) {
-            let backToArtifacts = app.buttons["Back to artifacts"]
-            if backToArtifacts.waitForExistence(timeout: 2) {
-                backToArtifacts.tap()
-            } else {
-                app.swipeDown()
-            }
-        }
-        XCTAssertTrue(mode.waitForExistence(timeout: 10), "Artifacts workspace mode menu was not visible.")
-        mode.tap()
+        let menu = app.buttons["pines.artifacts.create-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), "Artifact create menu was not visible.")
+        menu.tap()
 
-        let item = app.buttons[title]
+        let item = app.buttons[menuItem]
         if !item.waitForExistence(timeout: 2) {
             dismissKeyboardIfNeeded()
-            mode.tap()
+            menu.tap()
         }
-        XCTAssertTrue(item.waitForExistence(timeout: 5), "Artifacts workspace mode \(title) was not visible.")
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "Artifact action \(menuItem) was not visible.")
         item.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)[destinationIdentifier].waitForExistence(timeout: 10),
+            "Artifact destination \(menuItem) did not become visible."
+        )
+    }
 
-        let visibleWorkspace: XCUIElement = switch title {
-        case "Create":
-            app.descendants(matching: .any)["pines.artifacts.media.prompt"]
-        case "Research":
-            app.descendants(matching: .any)["pines.artifacts.research.prompt"]
-        case "Library":
-            app.descendants(matching: .any)["pines.artifacts.library.search"]
-        default:
-            app.staticTexts[title]
-        }
-        XCTAssertTrue(visibleWorkspace.waitForExistence(timeout: 10), "Artifacts workspace \(title) did not become visible.")
+    @MainActor
+    private func returnToArtifactsLibrary() {
+        dismissKeyboardIfNeeded()
+        let back = firstExisting([
+            app.navigationBars.buttons["Artifacts"],
+            app.buttons["Artifacts"],
+        ])
+        XCTAssertNotNil(back, "Artifact destination had no back action.")
+        back?.tap()
+        assertIdentifierVisible("pines.artifacts.library", "Artifact library did not reappear.")
+    }
+
+    @MainActor
+    private func captureScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     @MainActor
     private func openSettingsSection(_ title: String) {
         returnToSettingsListIfNeeded()
+        let destinationID = settingsDestinationID(for: title)
         var row = firstExisting([
-            app.descendants(matching: .any)["pines.settings.section.\(title.uiTestIdentifierComponent)"],
+            app.descendants(matching: .any)["pines.settings.section.\(destinationID)"],
             app.staticTexts[title],
             app.buttons[title],
         ])
         if row == nil {
             app.swipeUp()
             row = firstExisting([
-                app.descendants(matching: .any)["pines.settings.section.\(title.uiTestIdentifierComponent)"],
+                app.descendants(matching: .any)["pines.settings.section.\(destinationID)"],
                 app.staticTexts[title],
                 app.buttons[title],
             ])
         }
         XCTAssertNotNil(row, "Could not find \(title) settings section.")
         row?.tap()
+    }
+
+    private func settingsDestinationID(for title: String) -> String {
+        switch title {
+        case "Appearance": "appearance"
+        case "AI & Models": "aiModels"
+        case "Cloud & Providers": "cloudProviders"
+        case "Privacy & Data": "privacyData"
+        case "Tools & Integrations": "toolsIntegrations"
+        case "Help & Diagnostics": "diagnostics"
+        default: title.uiTestIdentifierComponent
+        }
     }
 
     @MainActor
@@ -504,6 +600,17 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
+    private func selectInterfaceMode(_ title: String) {
+        let picker = app.descendants(matching: .any)["pines.settings.interface-mode"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10), "Interface appearance control was missing.")
+        picker.tap()
+
+        let option = app.buttons[title]
+        XCTAssertTrue(option.waitForExistence(timeout: 5), "Interface appearance option \(title) was missing.")
+        option.tap()
+    }
+
+    @MainActor
     private func dismissKeyboardIfNeeded() {
         guard app.keyboards.firstMatch.exists else { return }
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
@@ -539,7 +646,7 @@ final class PinesUITests: XCTestCase {
         case "Chats": "pines.screen.chats"
         case "Models": "pines.screen.models"
         case "Vault": "pines.screen.vault"
-        case "Artifacts": "pines.artifacts.workspace.mode"
+        case "Artifacts": "pines.screen.artifacts"
         case "Settings": "pines.screen.settings"
         default: nil
         }

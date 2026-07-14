@@ -28,7 +28,7 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - Split MLX compatibility implementations for Llama 4 and DeepSeek V4 model families.
 - Hugging Face preflight and resumable model install/delete service.
 - BYOK cloud streaming adapters for OpenAI-compatible, OpenRouter, Anthropic, and Gemini, including provider-specific stream metadata parsing. OpenRouter requests support persisted provider order/allow/deny/sort policy, fallback and supported-parameter enforcement, data-collection/ZDR constraints, routing-metadata opt-in, JSON object/schema response formats, beta server web search with engine selection and bounded policy, public-URL citation ingestion, terminal route/usage/search/cost receipts, and bounded model metadata for picker details, context packing, and fresh-only pre-spend capability rejection. Model catalogs hydrate from encrypted six-hour local snapshots while a network refresh runs.
-- Shared provider lifecycle records, repositories, previews, and the Artifacts workspace for provider-hosted files, artifacts, caches/vector stores, batches, model capabilities, live sessions, and research runs.
+- Shared provider lifecycle records, repositories, and previews, plus a focused Artifacts library for generated images, video, speech, and research reports. Create and Deep Research use dedicated routes; provider-hosted file and vector-store management remains separate in Vault.
 - OpenAI provider lifecycle workflows for Files, vector stores, vector-store file batches, batches, Deep Research, realtime session records, generated image/video artifacts, speech, transcription, and translation artifacts.
 - Anthropic provider lifecycle workflows for Files, generated file download/import, prompt cache metrics, citations, thinking preservation, Message Batches, token counting, hosted tool metadata, and model capability rows.
 - Gemini provider lifecycle workflows for Files, context caches, token counting, Deep Research, Live sessions, generated media artifacts, batches, URL context metadata, Google Search grounding, and model capability rows.
@@ -61,7 +61,7 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - CI privacy-manifest lint for the committed local-first manifest, including required-reason entries for file timestamps, disk space, and app-only UserDefaults.
 - OAuth startup guardrails avoid crashing when authentication is attempted without an active foreground window.
 - Service bootstrap logs/audits recoverable built-in tool registration and store initialization failures instead of silently discarding them.
-- App architecture cleanup that splits large files into app model types, GRDB CloudKit sync, design components, MCP payloads, model download support, Settings detail, Models components, and MLX model-family files.
+- App architecture cleanup that splits large files into app model types, GRDB CloudKit sync, design components, MCP payloads, model download support, typed and focused Settings destinations, Models components, and MLX model-family files.
 - Historical signed physical-device TurboQuant app-host smoke on `iPhone16,2` for the immediately prior immutable pair, including native compressed-path diagnostics and an explicitly unverified synthetic evidence baseline.
 
 ## Not Complete
@@ -70,7 +70,7 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - OpenRouter endpoint-level provider availability, provider-specific feature variance/rate limits/prices, cached/reasoning/media usage detail, and optional generation-endpoint cost reconciliation remain incomplete. Aggregate spend deliberately uses only persisted provider-reported receipt fields and does not estimate missing cost.
 - Signed App Store archive/export, TestFlight/App Store upload automation, and final App Store Connect privacy review for the submitted binary.
 - The platform-aware, warning-free `mlx-swift` build-tool plugin, Apple-mobile JIT compatibility fix, and SwiftPM 6.2 manifest compatibility are pinned at `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`; cold iOS device and simulator builds must remain warning-free as part of release validation.
-- Remaining monolith candidates are semantic rather than mechanical: `PinesAppModel` still owns high-level orchestration, `SettingsDetailView` owns the full settings editor, and `ModelsViewComponents` owns model list/detail presentation. Split these further only alongside focused feature changes.
+- Remaining monolith candidates are semantic rather than mechanical: `PinesAppModel` still owns high-level orchestration and `ModelsViewComponents` owns model list/detail presentation. Settings has been split into typed, focused destination pages with shared grouped-row components.
 
 ## Verification
 

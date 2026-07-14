@@ -249,6 +249,8 @@ struct ArtifactsArtifactPreviewSurface: View {
     @Environment(\.pinesTheme) private var theme
     let artifact: ProviderArtifactRecord
     var maxHeight: CGFloat = 280
+    @State private var localImageData: Data?
+    @State private var finishedLoadingLocalImage = false
 
     var body: some View {
         Group {
@@ -257,13 +259,13 @@ struct ArtifactsArtifactPreviewSurface: View {
                 imagePreview
             case .video:
                 if let url = artifact.galleryURL {
-                    VideoPlayer(player: AVPlayer(url: url))
+                    ArtifactsMediaPlayer(url: url, accessibilityLabel: "Artifact video")
                 } else {
                     placeholder(title: "Video", systemImage: "film")
                 }
             case .audio:
                 if let url = artifact.galleryURL {
-                    VideoPlayer(player: AVPlayer(url: url))
+                    ArtifactsMediaPlayer(url: url, accessibilityLabel: "Artifact audio")
                 } else {
                     placeholder(title: "Audio", systemImage: "waveform")
                 }
@@ -276,15 +278,27 @@ struct ArtifactsArtifactPreviewSurface: View {
         .frame(maxWidth: .infinity, minHeight: 140, maxHeight: maxHeight)
         .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+        .task(id: artifact.id) {
+            localImageData = nil
+            finishedLoadingLocalImage = false
+            guard artifact.galleryPresentation == .image else {
+                finishedLoadingLocalImage = true
+                return
+            }
+            localImageData = await Task.detached(priority: .userInitiated) {
+                artifact.localPreviewImageData
+            }.value
+            finishedLoadingLocalImage = true
+        }
     }
 
     @ViewBuilder
     private var imagePreview: some View {
-        if let data = artifact.localPreviewImageData {
+        if let data = localImageData {
             ArtifactsLocalImage(data: data) {
                 placeholder(title: "Image unavailable", systemImage: "photo")
             }
-        } else if let url = artifact.galleryURL {
+        } else if let url = artifact.remoteURL {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
@@ -299,8 +313,10 @@ struct ArtifactsArtifactPreviewSurface: View {
                     EmptyView()
                 }
             }
-        } else {
+        } else if finishedLoadingLocalImage {
             placeholder(title: "Image", systemImage: "photo")
+        } else {
+            ProgressView()
         }
     }
 
@@ -335,6 +351,24 @@ struct ArtifactsArtifactPreviewSurface: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ArtifactsMediaPlayer: View {
+    let accessibilityLabel: String
+    @State private var player: AVPlayer
+
+    init(url: URL, accessibilityLabel: String) {
+        self.accessibilityLabel = accessibilityLabel
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .accessibilityLabel(accessibilityLabel)
+            .onDisappear {
+                player.pause()
+            }
     }
 }
 
@@ -1259,7 +1293,7 @@ extension ArtifactsResourceDescriptor {
         self.init(
             id: "live-session-\(session.providerKind.rawValue)-\(session.id)",
             title: session.title,
-            detail: "Transcript placeholder - \(session.modalitySummary)",
+            detail: "Live session - \(session.modalitySummary)",
             systemImage: "dot.radiowaves.left.and.right",
             status: session.status.artifactsProviderCloudStatus,
             secondaryStatus: session.expiresLabel.map { .custom("Expires \($0)", .warning) },
@@ -1439,5 +1473,112 @@ extension JSONValue {
             return String(describing: self)
         }
         return string
+    }
+}
+
+/// A lightweight library preview. Unlike the full artifact preview, this never
+/// creates an AVPlayer and moves local file decoding off the main actor.
+struct ArtifactsArtifactThumbnail: View {
+    @Environment(\.pinesTheme) private var theme
+    let artifact: ProviderArtifactRecord
+    @State private var localImageData: Data?
+    @State private var finishedLoadingLocalImage = false
+
+    var body: some View {
+        Group {
+            switch artifact.galleryPresentation {
+            case .image:
+                imageThumbnail
+            case .video:
+                placeholder(title: "Video", systemImage: "play.rectangle.fill")
+            case .audio:
+                placeholder(title: "Audio", systemImage: "waveform")
+            case .report:
+                reportThumbnail
+            case .metadata:
+                placeholder(title: artifact.kind.readableArtifactKind, systemImage: artifact.kind.providerArtifactSystemImage)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.colors.controlFill)
+        .clipShape(RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .stroke(theme.colors.controlBorder, lineWidth: 0.5)
+        }
+        .task(id: localLoadKey) {
+            guard artifact.galleryPresentation == .image,
+                  artifact.localURL != nil || artifact.content != nil
+            else {
+                finishedLoadingLocalImage = true
+                return
+            }
+            let record = artifact
+            localImageData = await Task.detached(priority: .utility) {
+                record.localPreviewImageData
+            }.value
+            finishedLoadingLocalImage = true
+        }
+    }
+
+    private var localLoadKey: String {
+        [artifact.id, artifact.localURL?.absoluteString, artifact.responseID]
+            .compactMap { $0 }
+            .joined(separator: "|")
+    }
+
+    @ViewBuilder
+    private var imageThumbnail: some View {
+        if let localImageData, let image = UIImage(data: localImageData) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else if artifact.localURL != nil || artifact.content != nil, !finishedLoadingLocalImage {
+            ProgressView()
+        } else if let url = artifact.remoteURL {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .empty:
+                    ProgressView()
+                case .failure:
+                    placeholder(title: "Image", systemImage: "photo")
+                @unknown default:
+                    placeholder(title: "Image", systemImage: "photo")
+                }
+            }
+        } else {
+            placeholder(title: "Image", systemImage: "photo")
+        }
+    }
+
+    private var reportThumbnail: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(theme.colors.accent)
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(index == 2 ? theme.colors.controlBorder.opacity(0.65) : theme.colors.controlBorder)
+                    .frame(maxWidth: index == 2 ? 72 : .infinity, minHeight: 3, maxHeight: 3)
+            }
+        }
+        .padding(theme.spacing.small)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func placeholder(title: String, systemImage: String) -> some View {
+        VStack(spacing: theme.spacing.xsmall) {
+            Image(systemName: systemImage)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(theme.colors.secondaryText)
+            Text(title)
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.tertiaryText)
+                .lineLimit(1)
+        }
+        .padding(theme.spacing.small)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

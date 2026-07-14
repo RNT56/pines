@@ -22,6 +22,7 @@ struct PinesRootView: View {
     @State private var services: PinesAppServices?
     @State private var watchSessionService: PhoneWatchSessionService?
     @State private var selectedTab: PinesTab = .chats
+    @State private var requestedSettingsSectionID: UUID?
     @State private var isMainUIReady = false
     @State private var showsBootMark = true
     @State private var didStartBootstrap = false
@@ -86,6 +87,10 @@ struct PinesRootView: View {
                     .environment(\.pinesServices, services)
                     .environment(\.openPinesModelsPage, PinesOpenModelsPageAction {
                         selectedTab = .models
+                    })
+                    .environment(\.openPinesProviderSettings, PinesOpenProviderSettingsAction {
+                        requestedSettingsSectionID = UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20001")
+                        selectedTab = .settings
                     })
                     .pinesTheme(theme)
                     .transition(.opacity)
@@ -469,7 +474,7 @@ struct PinesRootView: View {
                 .tag(PinesTab.artifacts)
                 .accessibilityIdentifier("pines.tab.artifacts")
 
-            SettingsView()
+            SettingsView(requestedSectionID: $requestedSettingsSectionID)
                 .tabItem { Label(PinesTab.settings.title, systemImage: PinesTab.settings.systemImage) }
                 .tag(PinesTab.settings)
                 .accessibilityIdentifier("pines.tab.settings")
@@ -501,6 +506,15 @@ struct PinesOpenModelsPageAction: Sendable {
     }
 }
 
+struct PinesOpenProviderSettingsAction: Sendable {
+    var action: @MainActor @Sendable () -> Void
+
+    @MainActor
+    func callAsFunction() {
+        action()
+    }
+}
+
 private extension View {
     @ViewBuilder
     func pinesAdaptiveTabViewStyle() -> some View {
@@ -522,10 +536,19 @@ private struct PinesOpenModelsPageKey: EnvironmentKey {
     static let defaultValue = PinesOpenModelsPageAction {}
 }
 
+private struct PinesOpenProviderSettingsKey: EnvironmentKey {
+    static let defaultValue = PinesOpenProviderSettingsAction {}
+}
+
 extension EnvironmentValues {
     var openPinesModelsPage: PinesOpenModelsPageAction {
         get { self[PinesOpenModelsPageKey.self] }
         set { self[PinesOpenModelsPageKey.self] = newValue }
+    }
+
+    var openPinesProviderSettings: PinesOpenProviderSettingsAction {
+        get { self[PinesOpenProviderSettingsKey.self] }
+        set { self[PinesOpenProviderSettingsKey.self] = newValue }
     }
 }
 

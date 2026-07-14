@@ -76,6 +76,8 @@ Vault source files are copied only long enough for extraction, then encrypted th
 
 Provider-hosted files and artifacts are tracked separately from local Vault documents. OpenAI Files/vector stores, Anthropic Files, Gemini Files/context caches, provider batches, generated media, generated files, realtime/live sessions, and Deep Research runs all map into generic provider lifecycle records before the UI renders them. Provider raw IDs remain strings at the persistence boundary; typed wrappers are used at API edges so provider-specific IDs do not leak into shared storage. Importing a provider artifact into Vault is an explicit workflow and does not imply provider-side deletion.
 
+The user-facing Artifacts root projects those generic records into a deliberately narrower library model. It shows created outputs and active work, then navigates to typed artifact, creation, and research destinations. Provider-file and vector-store administration stays with Vault, and provider configuration stays in Settings, so infrastructure records do not compete with the content library.
+
 The GRDB implementation is split by repository concern: encrypted local-store opening, plaintext-to-SQLCipher migration, and base repository operations remain in `GRDBPinesStore.swift`, while CloudKit snapshot/apply/delete merge support lives in `GRDBPinesStore+CloudKit.swift`.
 
 ## Security Model
@@ -171,5 +173,5 @@ Large app files are intentionally split by responsibility:
 - BYOK provider request/stream handling: `BYOKCloudInferenceProvider.swift`; provider stream metadata parsing: `CloudProviderStreamParser.swift`.
 - Startup boot and lazy service creation: `PinesRootView.swift`; live service composition: `PinesAppServices.swift`.
 - Model installer orchestration: `ModelLifecycleService.swift`; background download coordination and install-mode support: `ModelDownloadSupport.swift`.
-- Settings and Models screen shells remain small; their detail/component surfaces live in `SettingsDetailView.swift` and `ModelsViewComponents.swift`.
+- Settings uses typed destinations and focused pages under `Pines/Views/Settings/`; `SettingsDetailView.swift` is only the dispatcher. The Models shell remains small, with its detail/component surfaces in `ModelsViewComponents.swift`.
 - Provider lifecycle coordinators and record mappers live under `Pines/Cloud/` and `Sources/PinesCore/Cloud/`; shared previews are assembled by `PinesAppModel` for Settings, Vault, lifecycle dashboard, artifact, batch, realtime, and research surfaces.

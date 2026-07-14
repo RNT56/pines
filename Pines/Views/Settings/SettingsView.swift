@@ -4,9 +4,9 @@ import PinesCore
 struct SettingsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
-    @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var haptics: PinesHaptics
+    @Binding var requestedSectionID: PinesSettingsSection.ID?
     @State private var selectedSectionID: PinesSettingsSection.ID?
 
     private var selectedSection: PinesSettingsSection? {
@@ -25,22 +25,32 @@ struct SettingsView: View {
         horizontalSizeClass != .compact
     }
 
+    private var primarySections: [PinesSettingsSection] {
+        settingsState.settingsSections.filter { !$0.isSupportDestination }
+    }
+
+    private var supportSections: [PinesSettingsSection] {
+        settingsState.settingsSections.filter(\.isSupportDestination)
+    }
+
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedSectionID) {
                 Section("Settings") {
-                    ForEach(settingsState.settingsSections) { section in
-                        NavigationLink(value: section.id) {
-                            SettingsSectionRow(section: section, isSelected: selectedSectionID == section.id)
-                        }
-                        .accessibilityIdentifier("pines.settings.section.\(section.title.uiTestIdentifierComponent)")
-                        .pinesSidebarListRow()
+                    settingsSectionLinks(primarySections)
+                }
+
+                if !supportSections.isEmpty {
+                    Section("Support") {
+                        settingsSectionLinks(supportSections)
                     }
                 }
             }
             .navigationTitle("Settings")
-            .pinesExpressiveScrollHaptics()
             .onAppear(perform: selectDefaultSectionIfNeeded)
+            .onChange(of: requestedSectionID) { _, _ in
+                applyRequestedSectionIfNeeded()
+            }
             .onChange(of: horizontalSizeClass) { _, _ in
                 selectDefaultSectionIfNeeded()
             }
@@ -58,8 +68,6 @@ struct SettingsView: View {
             if let selectedSection {
                 SettingsDetailView(
                     section: selectedSection,
-                    executionMode: settingsState.executionMode,
-                    storeConfiguration: settingsState.storeConfiguration,
                     selectedThemeTemplate: $settingsState.selectedThemeTemplate,
                     interfaceMode: $settingsState.interfaceMode
                 )
@@ -74,9 +82,29 @@ struct SettingsView: View {
         .accessibilityIdentifier("pines.screen.settings")
     }
 
+    @ViewBuilder
+    private func settingsSectionLinks(_ sections: [PinesSettingsSection]) -> some View {
+        ForEach(sections) { section in
+            NavigationLink(value: section.id) {
+                SettingsSectionRow(section: section, isSelected: selectedSectionID == section.id)
+            }
+            .accessibilityIdentifier("pines.settings.section.\(section.destination.rawValue)")
+            .pinesSidebarListRow()
+        }
+    }
+
     private func selectDefaultSectionIfNeeded() {
+        applyRequestedSectionIfNeeded()
         guard shouldAutoSelectSidebarItem else { return }
         selectedSectionID = selectedSectionID ?? settingsState.settingsSections.first?.id
+    }
+
+    private func applyRequestedSectionIfNeeded() {
+        guard let requestedSectionID,
+              settingsState.settingsSections.contains(where: { $0.id == requestedSectionID })
+        else { return }
+        selectedSectionID = requestedSectionID
+        self.requestedSectionID = nil
     }
 }
 

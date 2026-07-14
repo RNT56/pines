@@ -702,9 +702,10 @@ extension PinesAppModel {
         do {
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .refreshGeneratedMediaOperation(operationName: id)
+            let preserved = try await preserveProviderArtifactCreationMetadata(in: record, services: services)
             await refreshProviderLifecycleState(services: services)
             providerLifecycleError = nil
-            return record
+            return preserved
         } catch {
             providerLifecycleError = error.localizedDescription
             throw error

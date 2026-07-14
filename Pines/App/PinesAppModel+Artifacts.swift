@@ -3,6 +3,61 @@ import PinesCore
 
 @MainActor
 extension PinesAppModel {
+    @discardableResult
+    func annotateCreatedProviderArtifacts(
+        _ artifacts: [ProviderArtifactRecord],
+        prompt: String,
+        modelID: ModelID,
+        requestedKind: String,
+        referenceArtifactID: String?,
+        services: PinesAppServices
+    ) async throws -> [ProviderArtifactRecord] {
+        let annotated = artifacts.map { artifact in
+            var updated = artifact
+            var object = artifact.content?.objectValue ?? [:]
+            if object.isEmpty, let original = artifact.content {
+                object["provider_response"] = original
+            }
+            object["pines_prompt"] = .string(prompt)
+            object["pines_model"] = .string(modelID.rawValue)
+            object["pines_requested_kind"] = .string(requestedKind)
+            if let referenceArtifactID {
+                object["pines_reference_artifact_id"] = .string(referenceArtifactID)
+            }
+            updated.content = .object(object)
+            return updated
+        }
+        for artifact in annotated {
+            try await services.providerArtifactRepository?.upsertProviderArtifact(artifact)
+        }
+        await refreshProviderLifecycleState(services: services)
+        return annotated
+    }
+
+    @discardableResult
+    func preserveProviderArtifactCreationMetadata(
+        in artifact: ProviderArtifactRecord,
+        services: PinesAppServices
+    ) async throws -> ProviderArtifactRecord {
+        guard let previous = providerArtifacts.first(where: { $0.id == artifact.id }),
+              let previousObject = previous.content?.objectValue
+        else {
+            return artifact
+        }
+        let keys = ["pines_prompt", "pines_model", "pines_requested_kind", "pines_reference_artifact_id"]
+        var updated = artifact
+        var object = artifact.content?.objectValue ?? [:]
+        if object.isEmpty, let original = artifact.content {
+            object["provider_response"] = original
+        }
+        for key in keys where object[key] == nil {
+            object[key] = previousObject[key]
+        }
+        updated.content = .object(object)
+        try await services.providerArtifactRepository?.upsertProviderArtifact(updated)
+        return updated
+    }
+
     func deleteProviderArtifactRecord(id: String, services: PinesAppServices) async throws {
         guard let repository = services.providerArtifactRepository else {
             throw InferenceError.invalidRequest("Provider artifact storage is unavailable.")

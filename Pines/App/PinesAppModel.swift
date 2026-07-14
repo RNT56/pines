@@ -1065,6 +1065,14 @@ final class PinesAppModel: ObservableObject {
         guard !isBootstrapping else { return }
         isBootstrapping = true
 
+        #if DEBUG
+        do {
+            try await PinesUITestLaunchConfiguration.seedArtifactLibraryIfNeeded(services: services)
+        } catch {
+            serviceError = "Could not seed the Artifacts UI test fixture: \(error.localizedDescription)"
+        }
+        #endif
+
         if !didLoadStartupState {
             let startupStateStartedAt = Date()
             await refreshStartupState(services: services)

@@ -43,6 +43,8 @@ OpenRouter is treated as a routing platform rather than a generic text endpoint:
 
 Provider-hosted files, vector stores, caches, batches, research runs, live sessions, generated artifacts, citations, and hosted tool calls are shown as provider resources. They are not confused with your local Vault, and they carry the same local-first rule: use cloud when you choose it, show what left the device, and keep deletion/import paths explicit.
 
+The Artifacts tab is the calm output library: one searchable home for completed images, video, speech, and research reports, with a small activity area for work still running. Creation and Deep Research open as focused destinations, while provider setup, source scope, advanced generation options, and provenance stay available without occupying the library itself.
+
 ## Local Mobile AI, Treated Like It Matters
 
 Phones are becoming AI machines in their own right. Pines takes that seriously.

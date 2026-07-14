@@ -36,21 +36,21 @@ enum PinesThemeTemplate: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .evergreen:
-            "Calm local-first default with glass pine accents."
+            "Calm with pine accents."
         case .graphite:
-            "Dense pro workspace with neutral contrast."
+            "Focused neutral contrast."
         case .aurora:
-            "High-energy research surface with cool highlights."
+            "Cool, vivid highlights."
         case .paper:
-            "Warm reading-focused layout for vault-heavy work."
+            "Warm and reading focused."
         case .slate:
-            "Technical blue-gray workspace with quiet precision."
+            "Quiet blue-gray tones."
         case .porcelain:
-            "Warm ceramic minimalism with fine editorial contrast."
+            "Warm minimal contrast."
         case .sunset:
-            "Copper-orange workspace with warm glass."
+            "Copper and warm glass."
         case .obsidian:
-            "Dark-first pro console with restrained luminous accents."
+            "Dark with soft highlights."
         }
     }
 }

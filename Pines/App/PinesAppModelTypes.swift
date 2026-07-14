@@ -594,128 +594,70 @@ enum PinesVaultSensitivity: String, Hashable {
     }
 }
 
+enum PinesSettingsDestination: String, CaseIterable, Hashable {
+    case appearance
+    case aiModels
+    case cloudProviders
+    case privacyData
+    case toolsIntegrations
+    case diagnostics
+}
+
 struct PinesSettingsSection: Identifiable, Hashable {
     let id: UUID
+    let destination: PinesSettingsDestination
     let title: String
     let subtitle: String
     let systemImage: String
-    let rows: [PinesSettingsRow]
-}
 
-struct PinesSettingsRow: Identifiable, Hashable {
-    let id: UUID
-    let title: String
-    let detail: String
-    let systemImage: String
+    var isSupportDestination: Bool {
+        destination == .diagnostics
+    }
 }
 
 enum PinesStaticSettings {
     static let sections: [PinesSettingsSection] = [
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20000")!,
-            title: "Design",
-            subtitle: "Theme, motion, haptics, and visual feel.",
-            systemImage: "paintpalette",
-            rows: [
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20010")!,
-                    title: "Theme template",
-                    detail: "Color and surface system",
-                    systemImage: "swatchpalette"
-                ),
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20011")!,
-                    title: "Interaction feel",
-                    detail: "Haptics and motion",
-                    systemImage: "waveform.path"
-                )
-            ]
+            destination: .appearance,
+            title: "Appearance",
+            subtitle: "Theme, interface appearance, and feedback.",
+            systemImage: "paintpalette"
+        ),
+        PinesSettingsSection(
+            id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20005")!,
+            destination: .aiModels,
+            title: "AI & Models",
+            subtitle: "Default routing, response limits, and model access.",
+            systemImage: "cpu"
         ),
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20001")!,
-            title: "Inference",
-            subtitle: "Execution mode, local runtime, memory, and model access.",
-            systemImage: "cpu",
-            rows: [
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A21001")!,
-                    title: "Execution policy",
-                    detail: "Local, Pro, or keys",
-                    systemImage: "sparkles"
-                ),
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A21003")!,
-                    title: "Generation limits",
-                    detail: "Completion and context budgets",
-                    systemImage: "slider.horizontal.3"
-                ),
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A21002")!,
-                    title: "Runtime diagnostics",
-                    detail: "MLX and memory state",
-                    systemImage: "memorychip"
-                )
-            ]
+            destination: .cloudProviders,
+            title: "Cloud & Providers",
+            subtitle: "Pro Cloud, personal API providers, routing, and usage.",
+            systemImage: "cloud"
         ),
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20002")!,
-            title: "Privacy",
-            subtitle: "Storage, sync, Cloud Intelligence, and advanced keys.",
-            systemImage: "lock.shield",
-            rows: [
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A22001")!,
-                    title: "Vault storage",
-                    detail: "On device",
-                    systemImage: "internaldrive"
-                ),
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A22002")!,
-                    title: "Provider keys",
-                    detail: "Advanced",
-                    systemImage: "icloud"
-                )
-            ]
+            destination: .privacyData,
+            title: "Privacy & Data",
+            subtitle: "App lock, local storage, private sync, and deletion.",
+            systemImage: "lock.shield"
         ),
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20003")!,
-            title: "Tools",
-            subtitle: "Agent search keys, MCP servers, resources, and prompts.",
-            systemImage: "wrench.and.screwdriver",
-            rows: [
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A23001")!,
-                    title: "Tool approval",
-                    detail: "Ask each time",
-                    systemImage: "hand.raised"
-                ),
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A23002")!,
-                    title: "MCP servers",
-                    detail: "Tools and context",
-                    systemImage: "point.3.connected.trianglepath.dotted"
-                )
-            ]
+            destination: .toolsIntegrations,
+            title: "Tools & Integrations",
+            subtitle: "Web search, MCP servers, tools, and context sources.",
+            systemImage: "wrench.and.screwdriver"
         ),
         PinesSettingsSection(
             id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20004")!,
-            title: "System",
-            subtitle: "Service health, readiness, and recent audit activity.",
-            systemImage: "waveform.path.ecg",
-            rows: [
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A24001")!,
-                    title: "Architecture health",
-                    detail: "Service readiness",
-                    systemImage: "stethoscope"
-                ),
-                PinesSettingsRow(
-                    id: UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A24002")!,
-                    title: "Audit trail",
-                    detail: "Recent local events",
-                    systemImage: "list.bullet.clipboard"
-                )
-            ]
+            destination: .diagnostics,
+            title: "Help & Diagnostics",
+            subtitle: "Health, runtime details, and the local privacy log.",
+            systemImage: "stethoscope"
         )
     ]
 

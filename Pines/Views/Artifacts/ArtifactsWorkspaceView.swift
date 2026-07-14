@@ -1,197 +1,142 @@
 import SwiftUI
 import PinesCore
-import UniformTypeIdentifiers
-
-private extension ArtifactsWorkspaceMode {
-    static var workspaceSwitcherItems: [PinesWorkspaceSwitcherItem] {
-        allCases.map { mode in
-            PinesWorkspaceSwitcherItem(
-                id: mode.id,
-                title: mode.title,
-                subtitle: mode.subtitle,
-                systemImage: mode.systemImage
-            )
-        }
-    }
-}
 
 struct ArtifactsWorkspaceView: View {
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    @State private var mode: ArtifactsWorkspaceMode = .library
-    @State private var providerScope: ArtifactsProviderScope = .all
-    @State private var filter = ArtifactsResourceFilter()
-    @State private var assetKind: ArtifactsAssetKindFilter = .all
-    @State private var selection: ArtifactsSelection?
+    @State private var path = [ArtifactsRoute]()
+    @State private var query = ArtifactsLibraryQuery()
     @State private var pendingConfirmation: ArtifactsConfirmation?
-    @State private var createReferenceArtifactID: String?
-    @State private var requestedCreateKind: ArtifactsMediaKind?
 
     var body: some View {
-        NavigationStack {
-            activeWorkspace
-            .pinesAppBackground()
-            .navigationTitle(mode == .research ? "Deep Research" : mode.title)
+        NavigationStack(path: $path) {
+            ArtifactsLibraryView(
+                query: $query,
+                pendingConfirmation: $pendingConfirmation,
+                open: open
+            )
+            .navigationTitle("Artifacts")
+            .searchable(text: $query.text, prompt: "Search artifacts")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    createMenu
+                }
+            }
+            .navigationDestination(for: ArtifactsRoute.self, destination: destination)
             .task {
                 await appModel.refreshProviderLifecycleState(services: services)
             }
-            .confirmationDialog(
-                pendingConfirmation?.title ?? "Confirm",
-                isPresented: Binding(
-                    get: { pendingConfirmation != nil },
-                    set: { if !$0 { pendingConfirmation = nil } }
-                ),
-                titleVisibility: .visible,
-                presenting: pendingConfirmation,
-                actions: confirmationActions,
-                message: { confirmation in Text(confirmation.message) }
-            )
         }
+        .confirmationDialog(
+            pendingConfirmation?.title ?? "Confirm",
+            isPresented: Binding(
+                get: { pendingConfirmation != nil },
+                set: { if !$0 { pendingConfirmation = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingConfirmation,
+            actions: confirmationActions,
+            message: { confirmation in Text(confirmation.message) }
+        )
         .accessibilityIdentifier("pines.screen.artifacts")
     }
 
-    @ViewBuilder
-    private var activeWorkspace: some View {
-        switch mode {
-        case .library:
-            ArtifactsLibraryWorkspace(
-                mode: $mode,
-                providerScope: $providerScope,
-                filter: $filter,
-                assetKind: $assetKind,
-                selection: $selection,
-                pendingConfirmation: $pendingConfirmation,
-                openCreate: { kind in
-                    requestedCreateKind = kind
-                    mode = .generate
-                    selection = nil
-                },
-                openResearch: {
-                    mode = .research
-                    selection = nil
-                },
-                remixArtifact: { artifact in
-                    createReferenceArtifactID = artifact.id
-                    requestedCreateKind = .image
-                    if let providerID = artifact.providerID {
-                        providerScope = .provider(providerID)
-                    }
-                    mode = .generate
-                    selection = .artifact(artifact.id)
+    private var createMenu: some View {
+        Menu {
+            Section("Create") {
+                Button {
+                    open(.create(kind: .image, referenceArtifactID: nil))
+                } label: {
+                    Label("Image", systemImage: "photo")
                 }
-            )
-        case .generate:
-            ArtifactsMediaWorkspace(
-                mode: $mode,
-                providerScope: $providerScope,
-                referenceArtifactID: $createReferenceArtifactID,
-                requestedKind: $requestedCreateKind,
-                selection: $selection,
-                pendingConfirmation: $pendingConfirmation,
-                openLibrary: {
-                    mode = .library
+
+                Button {
+                    open(.create(kind: .video, referenceArtifactID: nil))
+                } label: {
+                    Label("Video", systemImage: "film")
                 }
-            )
-        case .research:
-            ArtifactsResearchWorkspace(
-                mode: $mode,
-                providerScope: providerScope,
-                selection: $selection,
-                pendingConfirmation: $pendingConfirmation
-            )
+
+                Button {
+                    open(.create(kind: .speech, referenceArtifactID: nil))
+                } label: {
+                    Label("Speech", systemImage: "waveform")
+                }
+            }
+
+            Button {
+                open(.research(threadID: nil))
+            } label: {
+                Label("Deep Research", systemImage: "doc.text.magnifyingglass")
+            }
+        } label: {
+            Image(systemName: "plus")
         }
+        .accessibilityLabel("Create artifact")
+        .accessibilityIdentifier("pines.artifacts.create-menu")
+    }
+
+    @ViewBuilder
+    private func destination(_ route: ArtifactsRoute) -> some View {
+        switch route {
+        case .artifact(let id):
+            if let artifact = providerState.providerArtifacts.first(where: { $0.id == id }) {
+                ArtifactDetailView(
+                    artifact: artifact,
+                    pendingConfirmation: $pendingConfirmation,
+                    open: open
+                )
+            } else {
+                ArtifactsMissingRecordView()
+            }
+        case .create(let kind, let referenceArtifactID):
+            ArtifactCreateView(
+                initialKind: kind,
+                referenceArtifactID: referenceArtifactID,
+                pendingConfirmation: $pendingConfirmation,
+                open: open
+            )
+        case .research(let threadID):
+            ArtifactResearchView(
+                initialThreadID: threadID,
+                pendingConfirmation: $pendingConfirmation,
+                open: open
+            )
+        case .providerSetup:
+            ArtifactsProviderSetupView()
+        }
+    }
+
+    private func open(_ route: ArtifactsRoute) {
+        path.append(route)
     }
 
     @ViewBuilder
     private func confirmationActions(_ confirmation: ArtifactsConfirmation) -> some View {
         switch confirmation {
         case .deleteArtifactRecord(let artifact):
-            Button("Delete local record", role: .destructive) {
+            Button("Remove from Pines", role: .destructive) {
                 Task { await deleteArtifactRecord(artifact) }
             }
-        case .deleteProviderFile(let file):
-            Button("Delete cloud copy", role: .destructive) {
-                Task { await deleteProviderFile(file) }
-            }
-        case .deleteProviderCache(let cache):
-            Button("Delete cloud context", role: .destructive) {
-                Task { await deleteProviderCache(cache) }
-            }
-        case .cancelBatch(let batch):
-            Button("Cancel batch", role: .destructive) {
-                Task { await cancelBatch(batch) }
-            }
         case .cancelResearch(let run):
-            Button("Cancel research run", role: .destructive) {
+            Button("Cancel research", role: .destructive) {
                 Task { await cancelResearch(run) }
             }
         case .cancelMediaOperation(let artifact):
-            Button("Cancel media operation", role: .destructive) {
+            Button("Cancel operation", role: .destructive) {
                 Task { await cancelMediaOperation(artifact) }
             }
         }
-        Button("Cancel", role: .cancel) {}
+        Button("Keep", role: .cancel) {}
     }
 
     @MainActor
     private func deleteArtifactRecord(_ artifact: ProviderArtifactRecord) async {
         do {
             try await appModel.deleteProviderArtifactRecord(id: artifact.id, services: services)
-            selection = nil
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func deleteProviderFile(_ file: ProviderFileRecord) async {
-        do {
-            switch file.providerKind {
-            case .openAI:
-                try await appModel.deleteOpenAIProviderFile(providerID: file.providerID, fileID: file.id, services: services)
-            case .anthropic:
-                try await appModel.deleteAnthropicProviderFile(providerID: file.providerID, fileID: file.id, services: services)
-            case .gemini:
-                try await appModel.deleteGeminiProviderFile(providerID: file.providerID, fileID: file.id, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(file.providerKind.pinesLifecycleTitle) file deletion is not supported here.")
-            }
-            selection = nil
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func deleteProviderCache(_ cache: ProviderCacheRecord) async {
-        do {
-            switch cache.providerKind {
-            case .openAI:
-                try await appModel.deleteOpenAIVectorStore(providerID: cache.providerID, vectorStoreID: cache.id, services: services)
-            case .gemini:
-                try await appModel.deleteGeminiContextCache(providerID: cache.providerID, cacheID: cache.id, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(cache.providerKind.pinesLifecycleTitle) context deletion is not supported here.")
-            }
-            selection = nil
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func cancelBatch(_ batch: ProviderBatchRecord) async {
-        do {
-            switch batch.providerKind {
-            case .openAI:
-                _ = try await appModel.cancelOpenAIBatch(id: batch.id, providerID: batch.providerID, services: services)
-            case .anthropic:
-                _ = try await appModel.cancelAnthropicBatch(id: batch.id, providerID: batch.providerID, services: services)
-            case .gemini:
-                _ = try await appModel.cancelGeminiBatch(id: batch.id, providerID: batch.providerID, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(batch.providerKind.pinesLifecycleTitle) batch cancellation is not supported here.")
+            pendingConfirmation = nil
+            if path.last == .artifact(artifact.id) {
+                path.removeLast()
             }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
@@ -209,6 +154,7 @@ struct ArtifactsWorkspaceView: View {
             default:
                 throw InferenceError.invalidRequest("\(run.providerKind.pinesLifecycleTitle) Deep Research is not supported here.")
             }
+            pendingConfirmation = nil
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -236,161 +182,981 @@ struct ArtifactsWorkspaceView: View {
             default:
                 throw InferenceError.invalidRequest("This artifact does not have a cancellable media operation.")
             }
+            pendingConfirmation = nil
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
     }
 }
 
-private struct ArtifactsLibraryWorkspace: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+private struct ArtifactsLibraryView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    @Binding var mode: ArtifactsWorkspaceMode
-    @Binding var providerScope: ArtifactsProviderScope
-    @Binding var filter: ArtifactsResourceFilter
-    @Binding var assetKind: ArtifactsAssetKindFilter
-    @Binding var selection: ArtifactsSelection?
+    @Binding var query: ArtifactsLibraryQuery
     @Binding var pendingConfirmation: ArtifactsConfirmation?
-    let openCreate: (ArtifactsMediaKind) -> Void
-    let openResearch: () -> Void
-    let remixArtifact: (ProviderArtifactRecord) -> Void
+    let open: (ArtifactsRoute) -> Void
+    @State private var showsFilters = false
 
-    private var lifecycleProviders: [CloudProviderConfiguration] {
-        settingsState.cloudProviders.pinesLifecycleProviders
+    private var providers: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.artifactProviders
     }
 
-    private var scopedFilter: ArtifactsResourceFilter {
-        var copy = filter
-        copy.providerScope = providerScope
-        copy.kind = nil
-        return copy
-    }
-
-    private var assets: [ArtifactsAssetViewModel] {
-        ArtifactsWorkspaceDeriver.assetViewModels(
-            artifacts: providerState.providerArtifacts,
-            filter: scopedFilter,
-            assetKind: assetKind
-        )
-    }
-
-    private var selectedArtifact: ProviderArtifactRecord? {
-        guard case .artifact(let id) = selection else { return nil }
-        return providerState.providerArtifacts.first(where: { $0.id == id })
-    }
-
-    private var selectedArtifactSheet: Binding<ProviderArtifactRecord?> {
-        Binding(
-            get: { horizontalSizeClass == .compact ? selectedArtifact : nil },
-            set: { artifact in
-                selection = artifact.map { .artifact($0.id) }
+    private var items: [ArtifactLibraryItem] {
+        let needle = query.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let filtered = providerState.providerArtifacts
+            .filter(\.isVisibleInArtifactsGallery)
+            .filter { query.category.matches($0) }
+            .filter { query.providerScope.includes($0.providerID) }
+            .map {
+                ArtifactLibraryItem(
+                    artifact: $0,
+                    providers: providers,
+                    researchRuns: providerState.providerResearchRuns
+                )
             }
-        )
+            .filter { item in
+                needle.isEmpty
+                    || item.title.lowercased().contains(needle)
+                    || item.providerName.lowercased().contains(needle)
+                    || item.excerpt?.lowercased().contains(needle) == true
+                    || item.artifact.searchText.lowercased().contains(needle)
+            }
+
+        switch query.sort {
+        case .newest:
+            return filtered.sorted { $0.createdAt > $1.createdAt }
+        case .oldest:
+            return filtered.sorted { $0.createdAt < $1.createdAt }
+        case .provider:
+            return filtered.sorted { $0.providerName.localizedCaseInsensitiveCompare($1.providerName) == .orderedAscending }
+        case .kind:
+            return filtered.sorted { $0.contentKind.title.localizedCaseInsensitiveCompare($1.contentKind.title) == .orderedAscending }
+        }
+    }
+
+    private var activeResearchThreads: [ArtifactsResearchThread] {
+        guard query.category == .all || query.category == .reports else { return [] }
+        return ArtifactsResearchThread.threads(from: providerState.providerResearchRuns)
+            .filter { $0.runs.contains(where: { !$0.status.providerIsTerminal }) }
+            .filter { query.providerScope.includes($0.latestRun.providerID) }
+    }
+
+    private var activeItems: [ArtifactLibraryItem] {
+        providerState.providerArtifacts
+            .filter(\.isVisibleInArtifactsGallery)
+            .filter { query.category.matches($0) }
+            .filter { query.providerScope.includes($0.providerID) }
+            .map {
+                ArtifactLibraryItem(
+                    artifact: $0,
+                    providers: providers,
+                    researchRuns: providerState.providerResearchRuns
+                )
+            }
+            .filter(\.isActive)
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private var completedItems: [ArtifactLibraryItem] {
+        items.filter { !$0.isActive }
+    }
+
+    private var activitySignature: String {
+        let artifacts = activeItems.map { "artifact:\($0.id):\($0.operationState.title)" }
+        let research = providerState.providerResearchRuns
+            .filter { !$0.status.providerIsTerminal }
+            .map { "research:\($0.id):\($0.status):\($0.updatedAt.timeIntervalSince1970)" }
+        return (artifacts + research).joined(separator: "|")
+    }
+
+    private var usesMediaGrid: Bool {
+        !dynamicTypeSize.isAccessibilitySize
+            && (query.category == .images || query.category == .video)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ArtifactsLibraryTopBar(
-                mode: $mode,
-                providerScope: $providerScope,
-                filter: $filter,
-                assetKind: $assetKind,
-                providers: lifecycleProviders,
-                count: assets.count,
-                isRefreshing: providerState.isRefreshingProviderLifecycle,
-                refresh: {
-                    Task { await appModel.refreshProviderLifecycleState(services: services) }
-                },
-                openCreate: { openCreate(.image) },
-                openResearch: openResearch
-            )
-
+        ScrollView {
+            VStack(alignment: .leading, spacing: theme.spacing.large) {
+                categoryBar
+                activeSection
+                resultsHeader
+                libraryContent
+            }
+            .padding(.horizontal, theme.spacing.large)
+            .padding(.vertical, theme.spacing.medium)
+            .frame(maxWidth: 1180, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .pinesExpressiveScrollHaptics()
+        .refreshable {
+            await appModel.refreshProviderLifecycleState(services: services)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
             if let error = providerState.providerLifecycleError {
                 PinesGlobalErrorBanner(
                     message: error,
                     dismiss: { providerState.providerLifecycleError = nil }
                 )
-                    .padding(.horizontal, theme.spacing.large)
-                    .padding(.top, theme.spacing.small)
+                .padding(.horizontal, theme.spacing.large)
+                .padding(.top, theme.spacing.xsmall)
+                .background(theme.colors.appBackground)
             }
+        }
+        .sheet(isPresented: $showsFilters) {
+            ArtifactsLibraryFilterSheet(
+                query: $query,
+                providers: providers
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .task(id: activitySignature) {
+            await monitorActivity()
+        }
+        .accessibilityIdentifier("pines.artifacts.library")
+    }
 
-            if horizontalSizeClass == .compact {
-                ScrollView {
-                    libraryContent
-                        .padding(theme.spacing.large)
-                }
-                .pinesExpressiveScrollHaptics()
-                .sheet(item: selectedArtifactSheet) { artifact in
-                    NavigationStack {
-                        ArtifactsAssetInspector(
-                            artifact: artifact,
-                            providers: lifecycleProviders,
-                            importArtifact: { Task { await importArtifact(artifact) } },
-                            remixArtifact: { remixArtifact(artifact) },
-                            deleteArtifact: { pendingConfirmation = .deleteArtifactRecord(artifact) }
+    private var categoryBar: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: theme.spacing.small) {
+                    ForEach(ArtifactsAssetKindFilter.allCases, id: \.self) { category in
+                        ArtifactCategoryChip(
+                            category: category,
+                            isSelected: query.category == category,
+                            select: { query.category = category }
                         )
-                        .padding(theme.spacing.large)
-                        .navigationTitle("Artifact")
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("Done") { selection = nil }
-                            }
-                        }
+                        .id(category)
                     }
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
-                }
-            } else {
-                HStack(alignment: .top, spacing: theme.spacing.large) {
-                    ScrollView {
-                        libraryContent
-                            .padding(theme.spacing.large)
-                    }
-                    .pinesExpressiveScrollHaptics()
 
-                    ArtifactsAssetInspectorSlot(
-                        artifact: selectedArtifact,
-                        providers: lifecycleProviders,
-                        importArtifact: { artifact in Task { await importArtifact(artifact) } },
-                        remixArtifact: remixArtifact,
-                        deleteArtifact: { artifact in pendingConfirmation = .deleteArtifactRecord(artifact) }
-                    )
-                    .frame(width: 390)
-                    .padding(.trailing, theme.spacing.large)
-                    .padding(.top, theme.spacing.large)
+                    Color.clear
+                        .frame(width: theme.spacing.large * 3, height: 1)
+                        .accessibilityHidden(true)
+                }
+            }
+            .onChange(of: query.category) { _, category in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(category, anchor: .leading)
                 }
             }
         }
-        .animation(reduceMotion ? nil : theme.motion.fast, value: assetKind)
-        .animation(reduceMotion ? nil : theme.motion.fast, value: assets.count)
+        .pinesExpressiveHorizontalScrollHaptics()
+    }
+
+    @ViewBuilder
+    private var activeSection: some View {
+        if !activeItems.isEmpty || !activeResearchThreads.isEmpty {
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                Text("Activity")
+                    .font(theme.typography.headline)
+                    .foregroundStyle(theme.colors.primaryText)
+
+                ForEach(activeResearchThreads) { thread in
+                    ArtifactsActivityRow(
+                        title: thread.title,
+                        detail: "Deep Research · \(thread.providerKind.pinesLifecycleTitle)",
+                        status: thread.statusText,
+                        systemImage: "doc.text.magnifyingglass"
+                    ) {
+                        open(.research(threadID: thread.id))
+                    }
+                }
+
+                ForEach(activeItems) { item in
+                    ArtifactsActivityRow(
+                        title: item.title,
+                        detail: "\(item.contentKind.title) · \(item.providerName)",
+                        status: item.operationState.title,
+                        systemImage: item.contentKind.systemImage
+                    ) {
+                        open(.artifact(item.id))
+                    }
+                }
+            }
+            .pinesSurface(.inset, padding: theme.spacing.medium)
+        }
+    }
+
+    private var resultsHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: theme.spacing.small) {
+                resultsTitle
+                Spacer(minLength: theme.spacing.small)
+                filterButton
+            }
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                resultsTitle
+                filterButton
+            }
+        }
+    }
+
+    private var resultsTitle: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+            Text(query.category == .all ? "Recent" : query.category.title)
+                .font(theme.typography.title.weight(.semibold))
+                .foregroundStyle(theme.colors.primaryText)
+            Text("\(completedItems.count) \(completedItems.count == 1 ? "artifact" : "artifacts")")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .monospacedDigit()
+        }
+    }
+
+    private var filterButton: some View {
+        Button {
+            showsFilters = true
+        } label: {
+            Label(query.hasSheetFilters ? "Filters on" : "Filter", systemImage: "line.3.horizontal.decrease")
+        }
+        .pinesButtonStyle(query.hasSheetFilters ? .primary : .secondary)
+        .accessibilityIdentifier("pines.artifacts.library.filter")
     }
 
     @ViewBuilder
     private var libraryContent: some View {
-        if assets.isEmpty {
+        if providerState.isRefreshingProviderLifecycle && items.isEmpty {
+            ArtifactsLoadingState()
+        } else if completedItems.isEmpty {
             ArtifactsLibraryEmptyState(
-                createImage: { openCreate(.image) },
-                createVideo: { openCreate(.video) },
-                startResearch: openResearch
+                hasProviders: !providers.isEmpty,
+                hasQuery: !query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || query.hasActiveFilters,
+                clearFilters: {
+                    query.text = ""
+                    query.resetFilters()
+                },
+                create: { open(.create(kind: .image, referenceArtifactID: nil)) },
+                research: { open(.research(threadID: nil)) },
+                connectProvider: { open(.providerSetup) }
             )
+        } else if usesMediaGrid {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: horizontalSizeClass == .compact ? 220 : 300), spacing: theme.spacing.medium)],
+                alignment: .leading,
+                spacing: theme.spacing.medium
+            ) {
+                ForEach(completedItems) { item in
+                    ArtifactMediaTile(
+                        item: item,
+                        open: { open(.artifact(item.id)) },
+                        importToVault: { Task { await importToVault(item.artifact) } },
+                        remix: { open(.create(kind: .image, referenceArtifactID: item.id)) },
+                        remove: { pendingConfirmation = .deleteArtifactRecord(item.artifact) }
+                    )
+                }
+            }
         } else {
-            ArtifactsAssetGrid(
-                assets: assets,
-                selection: $selection,
-                importArtifact: { artifact in Task { await importArtifact(artifact) } },
-                remixArtifact: remixArtifact,
-                deleteArtifact: { artifact in pendingConfirmation = .deleteArtifactRecord(artifact) }
-            )
+            LazyVStack(spacing: theme.spacing.small) {
+                ForEach(completedItems) { item in
+                    ArtifactLibraryRow(
+                        item: item,
+                        open: { open(.artifact(item.id)) },
+                        importToVault: { Task { await importToVault(item.artifact) } },
+                        remix: { open(.create(kind: .image, referenceArtifactID: item.id)) },
+                        remove: { pendingConfirmation = .deleteArtifactRecord(item.artifact) }
+                    )
+                }
+            }
         }
     }
 
     @MainActor
-    private func importArtifact(_ artifact: ProviderArtifactRecord) async {
+    private func importToVault(_ artifact: ProviderArtifactRecord) async {
+        do {
+            _ = try await appModel.importProviderArtifactToVault(id: artifact.id, services: services)
+        } catch {
+            providerState.providerLifecycleError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func monitorActivity() async {
+        guard !PinesUITestLaunchConfiguration.isEnabled else { return }
+        while !Task.isCancelled, !activitySignature.isEmpty {
+            let artifacts = activeItems.prefix(6)
+            let researchRuns = providerState.providerResearchRuns
+                .filter { !$0.status.providerIsTerminal }
+                .prefix(6)
+
+            for item in artifacts where !Task.isCancelled {
+                guard let providerID = item.artifact.providerID else { continue }
+                switch item.artifact.providerKind {
+                case .openAI where item.artifact.kind.lowercased() == "video_job":
+                    _ = try? await appModel.refreshOpenAIVideoArtifact(
+                        id: item.artifact.providerFileID ?? item.artifact.id,
+                        providerID: providerID,
+                        services: services
+                    )
+                case .gemini where item.artifact.kind.lowercased() == "media_operation":
+                    _ = try? await appModel.refreshGeminiGeneratedMediaOperation(
+                        id: item.artifact.responseID ?? item.artifact.id,
+                        providerID: providerID,
+                        services: services
+                    )
+                default:
+                    continue
+                }
+            }
+
+            for run in researchRuns where !Task.isCancelled {
+                switch run.providerKind {
+                case .openAI:
+                    _ = try? await appModel.refreshOpenAIDeepResearchRun(
+                        id: run.id,
+                        providerID: run.providerID,
+                        services: services
+                    )
+                case .gemini:
+                    _ = try? await appModel.refreshGeminiDeepResearchRun(
+                        id: run.id,
+                        providerID: run.providerID,
+                        services: services
+                    )
+                default:
+                    continue
+                }
+            }
+
+            do {
+                try await Task.sleep(for: .seconds(6))
+            } catch {
+                return
+            }
+        }
+    }
+}
+
+private struct ArtifactCategoryChip: View {
+    @Environment(\.pinesTheme) private var theme
+    let category: ArtifactsAssetKindFilter
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            Label(category.title, systemImage: category.systemImage)
+                .font(theme.typography.callout.weight(.semibold))
+                .padding(.horizontal, theme.spacing.medium)
+                .frame(minHeight: 40)
+                .foregroundStyle(isSelected ? theme.colors.appBackground : theme.colors.secondaryText)
+                .background {
+                    Capsule().fill(isSelected ? theme.colors.accent : theme.colors.controlFill)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct ArtifactsLibraryFilterSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var query: ArtifactsLibraryQuery
+    let providers: [CloudProviderConfiguration]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Provider") {
+                    Picker("Provider", selection: $query.providerScope) {
+                        Text("All providers").tag(ArtifactsProviderScope.all)
+                        ForEach(providers) { provider in
+                            Text(provider.displayName).tag(ArtifactsProviderScope.provider(provider.id))
+                        }
+                    }
+                }
+
+                Section("Sort") {
+                    Picker("Sort", selection: $query.sort) {
+                        ForEach(ArtifactsSort.allCases) { sort in
+                            Text(sort.title).tag(sort)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+
+                if query.hasActiveFilters {
+                    Section {
+                        Button("Reset filters", role: .destructive) {
+                            query.resetFilters()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Filter Artifacts")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct ArtifactsActivityRow: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let title: String
+    let detail: String
+    let status: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if dynamicTypeSize.isAccessibilitySize {
+                HStack(alignment: .top, spacing: theme.spacing.small) {
+                    activityIndicator
+                    VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                        activityLabels
+                        statusLabel
+                    }
+                    Spacer(minLength: 0)
+                    disclosureIndicator
+                }
+            } else {
+                HStack(spacing: theme.spacing.small) {
+                    activityIndicator
+                    activityLabels
+                    Spacer(minLength: theme.spacing.small)
+                    statusLabel
+                    disclosureIndicator
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+    }
+
+    private var activityIndicator: some View {
+        PinesStatusIndicator(color: theme.colors.accent, isActive: true, size: 9)
+            .frame(width: 24, height: 24)
+    }
+
+    private var activityLabels: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+            Text(title)
+                .font(theme.typography.callout.weight(.semibold))
+                .foregroundStyle(theme.colors.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(detail)
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var statusLabel: some View {
+        Text(status)
+            .font(theme.typography.caption.weight(.semibold))
+            .foregroundStyle(theme.colors.accent)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var disclosureIndicator: some View {
+        Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(theme.colors.tertiaryText)
+    }
+}
+
+private struct ArtifactLibraryRow: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let item: ArtifactLibraryItem
+    let open: () -> Void
+    let importToVault: () -> Void
+    let remix: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: theme.spacing.small) {
+                    Button(action: open) {
+                        VStack(alignment: .leading, spacing: theme.spacing.small) {
+                            ArtifactsArtifactThumbnail(artifact: item.artifact)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 156)
+                            labels
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(rowAccessibilityLabel)
+
+                    HStack {
+                        Spacer(minLength: 0)
+                        overflowMenu
+                    }
+                }
+            } else {
+                HStack(alignment: .center, spacing: theme.spacing.medium) {
+                    Button(action: open) {
+                        HStack(alignment: .center, spacing: theme.spacing.medium) {
+                            ArtifactsArtifactThumbnail(artifact: item.artifact)
+                                .frame(width: 92, height: 72)
+                            labels
+                            Spacer(minLength: theme.spacing.small)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(rowAccessibilityLabel)
+
+                    overflowMenu
+                }
+            }
+        }
+        .padding(theme.spacing.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .pinesSurface(.panel, padding: 0)
+    }
+
+    private var rowAccessibilityLabel: String {
+        "\(item.title), \(item.contentKind.title), \(item.providerName)"
+    }
+
+    private var labels: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            Text(item.title)
+                .font(theme.typography.headline)
+                .foregroundStyle(theme.colors.primaryText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let excerpt = item.excerpt, item.contentKind == .report {
+                Text(excerpt)
+                    .font(theme.typography.callout)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
+            }
+
+            Text("\(item.contentKind.title) · \(item.providerName) · \(RelativeDateTimeFormatter.shortLabel(for: item.createdAt))")
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.tertiaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var overflowMenu: some View {
+        ArtifactOverflowMenu(
+            item: item,
+            open: open,
+            importToVault: importToVault,
+            remix: remix,
+            remove: remove
+        )
+    }
+}
+
+private struct ArtifactMediaTile: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.pinesTheme) private var theme
+    let item: ArtifactLibraryItem
+    let open: () -> Void
+    let importToVault: () -> Void
+    let remix: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            Button(action: open) {
+                thumbnail
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(item.title)")
+
+            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                Button(action: open) {
+                    Text(item.title)
+                        .font(theme.typography.callout.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open \(item.title)")
+
+                HStack(alignment: .center, spacing: theme.spacing.xxsmall) {
+                    Button(action: open) {
+                        Text("\(item.providerName) · \(RelativeDateTimeFormatter.shortLabel(for: item.createdAt))")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(1)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open \(item.title)")
+
+                    Spacer(minLength: 0)
+                    ArtifactOverflowMenu(
+                        item: item,
+                        open: open,
+                        importToVault: importToVault,
+                        remix: remix,
+                        remove: remove
+                    )
+                }
+            }
+        }
+        .padding(theme.spacing.small)
+        .pinesSurface(.panel, padding: 0)
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        if horizontalSizeClass == .regular {
+            ArtifactsArtifactThumbnail(artifact: item.artifact)
+                .aspectRatio(1.08, contentMode: .fit)
+        } else {
+            ArtifactsArtifactThumbnail(artifact: item.artifact)
+                .frame(maxWidth: .infinity)
+                .frame(height: 220)
+                .clipped()
+        }
+    }
+}
+
+private struct ArtifactOverflowMenu: View {
+    let item: ArtifactLibraryItem
+    let open: () -> Void
+    let importToVault: () -> Void
+    let remix: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        Menu {
+            Button(action: open) {
+                Label("Open", systemImage: "arrow.up.right.square")
+            }
+            Button(action: importToVault) {
+                Label("Import to Vault", systemImage: "square.and.arrow.down")
+            }
+            .disabled(!item.canImportToVault)
+            if item.contentKind == .image {
+                Button(action: remix) {
+                    Label("Remix image", systemImage: "wand.and.stars")
+                }
+                .disabled(!item.canRemix)
+            }
+            Divider()
+            Button(role: .destructive, action: remove) {
+                Label("Remove from Pines", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("More actions for \(item.title)")
+    }
+}
+
+private struct ArtifactsLoadingState: View {
+    @Environment(\.pinesTheme) private var theme
+
+    var body: some View {
+        VStack(spacing: theme.spacing.medium) {
+            ProgressView()
+            Text("Refreshing artifacts")
+                .font(theme.typography.callout.weight(.semibold))
+                .foregroundStyle(theme.colors.secondaryText)
+        }
+        .frame(maxWidth: .infinity, minHeight: 280)
+    }
+}
+
+private struct ArtifactsLibraryEmptyState: View {
+    @Environment(\.pinesTheme) private var theme
+    let hasProviders: Bool
+    let hasQuery: Bool
+    let clearFilters: () -> Void
+    let create: () -> Void
+    let research: () -> Void
+    let connectProvider: () -> Void
+
+    var body: some View {
+        VStack(spacing: theme.spacing.medium) {
+            Image(systemName: hasQuery ? "magnifyingglass" : "rectangle.stack")
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(theme.colors.accent)
+                .frame(width: 68, height: 68)
+                .background(theme.colors.accentSoft, in: Circle())
+
+            VStack(spacing: theme.spacing.xsmall) {
+                Text(title)
+                    .font(theme.typography.title.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                    .multilineTextAlignment(.center)
+                Text(detail)
+                    .font(theme.typography.body)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if hasQuery {
+                Button("Clear filters", action: clearFilters)
+                    .pinesButtonStyle(.primary)
+            } else if !hasProviders {
+                Button(action: connectProvider) {
+                    Label("Connect a provider", systemImage: "cloud")
+                }
+                .pinesButtonStyle(.primary)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: theme.spacing.small) {
+                        createButton
+                        researchButton
+                    }
+                    VStack(spacing: theme.spacing.small) {
+                        createButton
+                        researchButton
+                    }
+                }
+            }
+        }
+        .padding(.vertical, theme.spacing.xlarge)
+        .padding(.horizontal, theme.spacing.large)
+        .frame(maxWidth: 620, minHeight: 320)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var title: String {
+        if hasQuery { return "No matching artifacts" }
+        if !hasProviders { return "Connect a provider" }
+        return "Your library is ready"
+    }
+
+    private var detail: String {
+        if hasQuery { return "Try another search or clear the active filters." }
+        if !hasProviders { return "Add an OpenAI or Gemini provider to create media and run Deep Research." }
+        return "Created images, video, speech, and research reports will appear here."
+    }
+
+    private var createButton: some View {
+        Button(action: create) {
+            Label("Create", systemImage: "sparkles")
+        }
+        .pinesButtonStyle(.primary)
+    }
+
+    private var researchButton: some View {
+        Button(action: research) {
+            Label("Research", systemImage: "doc.text.magnifyingglass")
+        }
+        .pinesButtonStyle(.secondary)
+    }
+}
+
+private struct ArtifactDetailView: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesServices) private var services
+    @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
+    @EnvironmentObject private var providerState: PinesProviderLifecycleState
+    let artifact: ProviderArtifactRecord
+    @Binding var pendingConfirmation: ArtifactsConfirmation?
+    let open: (ArtifactsRoute) -> Void
+
+    private var item: ArtifactLibraryItem {
+        ArtifactLibraryItem(
+            artifact: artifact,
+            providers: settingsState.cloudProviders,
+            researchRuns: providerState.providerResearchRuns
+        )
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: theme.spacing.large) {
+                preview
+                titleBlock
+                primaryActions
+                if item.contentKind == .report, let text = reportText {
+                    reportBody(text)
+                }
+                provenance
+            }
+            .padding(theme.spacing.large)
+            .frame(maxWidth: 900, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .navigationTitle(item.contentKind.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    if item.isActive {
+                        Button("Refresh status", systemImage: "arrow.clockwise") {
+                            Task { await appModel.refreshProviderLifecycleState(services: services) }
+                        }
+                        if canCancelOperation {
+                            Button("Cancel operation", systemImage: "xmark", role: .destructive) {
+                                pendingConfirmation = .cancelMediaOperation(artifact)
+                            }
+                        }
+                        Divider()
+                    }
+                    if artifact.galleryURL != nil {
+                        Button("Open original", systemImage: "arrow.up.forward.app") {
+                            if let url = artifact.galleryURL { openURL(url) }
+                        }
+                    }
+                    Button("Import to Vault", systemImage: "square.and.arrow.down") {
+                        Task { await importToVault() }
+                    }
+                    .disabled(!item.canImportToVault)
+                    if item.contentKind == .image {
+                        Button("Remix image", systemImage: "wand.and.stars") {
+                            open(.create(kind: .image, referenceArtifactID: artifact.id))
+                        }
+                        .disabled(!item.canRemix)
+                    }
+                    Divider()
+                    Button("Remove from Pines", systemImage: "trash", role: .destructive) {
+                        pendingConfirmation = .deleteArtifactRecord(artifact)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("Artifact actions")
+            }
+        }
+        .pinesAppBackground()
+        .accessibilityIdentifier("pines.artifacts.detail")
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        if item.contentKind == .report {
+            ArtifactsArtifactThumbnail(artifact: artifact)
+                .frame(maxWidth: .infinity, minHeight: 180, maxHeight: 240)
+        } else {
+            ArtifactsArtifactPreviewSurface(artifact: artifact, maxHeight: 560)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            Text(item.title)
+                .font(theme.typography.hero)
+                .foregroundStyle(theme.colors.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: theme.spacing.small) {
+                    metadataLabels
+                }
+                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                    metadataLabels
+                }
+            }
+            .font(theme.typography.caption)
+            .foregroundStyle(theme.colors.secondaryText)
+        }
+    }
+
+    private var primaryActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: theme.spacing.small) {
+                primaryActionButtons
+            }
+            VStack(spacing: theme.spacing.small) {
+                primaryActionButtons
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var metadataLabels: some View {
+        Label(item.providerName, systemImage: "cloud")
+        Text(RelativeDateTimeFormatter.shortLabel(for: item.createdAt))
+        Label(item.availability.title, systemImage: item.availability.systemImage)
+    }
+
+    @ViewBuilder
+    private var primaryActionButtons: some View {
+        if artifact.galleryURL != nil {
+            Button {
+                if let url = artifact.galleryURL { openURL(url) }
+            } label: {
+                Label("Open original", systemImage: "arrow.up.forward.app")
+            }
+            .pinesButtonStyle(.primary)
+        }
+
+        Button {
+            Task { await importToVault() }
+        } label: {
+            Label("Import to Vault", systemImage: "square.and.arrow.down")
+        }
+        .disabled(!item.canImportToVault)
+        .pinesButtonStyle(artifact.galleryURL == nil ? .primary : .secondary)
+
+        if item.contentKind == .image {
+            Button {
+                open(.create(kind: .image, referenceArtifactID: artifact.id))
+            } label: {
+                Label("Remix", systemImage: "wand.and.stars")
+            }
+            .disabled(!item.canRemix)
+            .pinesButtonStyle(.secondary)
+        }
+    }
+
+    private var reportText: String? {
+        if let text = artifact.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            return text
+        }
+        return ArtifactResearchReportText.text(from: artifact)
+    }
+
+    private var canCancelOperation: Bool {
+        let kind = artifact.kind.lowercased()
+        return item.isActive && (kind == "video_job" || kind == "media_operation")
+    }
+
+    private func reportBody(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: theme.spacing.medium) {
+            Text("Report")
+                .font(theme.typography.title.weight(.semibold))
+            MarkdownMessageView(messageID: UUID(), content: text, isStreaming: false)
+        }
+        .textSelection(.enabled)
+        .pinesSurface(.panel, padding: theme.spacing.large)
+    }
+
+    private var provenance: some View {
+        DisclosureGroup {
+            VStack(spacing: theme.spacing.small) {
+                ArtifactMetadataRow(title: "Provider", value: item.providerName, systemImage: "cloud")
+                ArtifactMetadataRow(title: "Kind", value: artifact.kind.readableArtifactKind, systemImage: "tag")
+                ArtifactMetadataRow(title: "Created", value: item.createdAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
+                ArtifactMetadataRow(title: "Availability", value: item.availability.title, systemImage: item.availability.systemImage)
+                ArtifactMetadataRow(title: "Size", value: artifact.byteCount.map(providerByteCountLabel) ?? "Unknown", systemImage: "internaldrive")
+                if let id = artifact.providerFileID ?? artifact.responseID {
+                    ArtifactMetadataRow(title: "Provider ID", value: id, systemImage: "number")
+                }
+            }
+            .padding(.top, theme.spacing.small)
+        } label: {
+            Label("Provenance", systemImage: "info.circle")
+                .font(theme.typography.headline)
+        }
+        .pinesSurface(.inset, padding: theme.spacing.medium)
+    }
+
+    @MainActor
+    private func importToVault() async {
         do {
             _ = try await appModel.importProviderArtifactToVault(id: artifact.id, services: services)
         } catch {
@@ -399,173 +1165,122 @@ private struct ArtifactsLibraryWorkspace: View {
     }
 }
 
-private struct ArtifactsLibraryTopBar: View {
+private struct ArtifactMetadataRow: View {
     @Environment(\.pinesTheme) private var theme
-    @Binding var mode: ArtifactsWorkspaceMode
-    @Binding var providerScope: ArtifactsProviderScope
-    @Binding var filter: ArtifactsResourceFilter
-    @Binding var assetKind: ArtifactsAssetKindFilter
-    let providers: [CloudProviderConfiguration]
-    let count: Int
-    let isRefreshing: Bool
-    let refresh: () -> Void
-    let openCreate: () -> Void
-    let openResearch: () -> Void
+    let title: String
+    let value: String
+    let systemImage: String
 
     var body: some View {
-        PinesWorkspaceTopBar {
-            PinesWorkspaceSwitcher(
-                selectionID: modeSelectionID,
-                items: ArtifactsWorkspaceMode.workspaceSwitcherItems
-            ) { _ in
-                filter.query = ""
-            }
-            .accessibilityLabel("Artifacts workspace")
-            .accessibilityValue(mode.title)
-            .accessibilityIdentifier("pines.artifacts.workspace.mode")
-        } status: {
-            HStack(spacing: theme.spacing.small) {
-                Text("\(count) visible")
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
-        } actions: {
-            HStack(spacing: theme.spacing.small) {
-                Button(action: openCreate) {
-                    Image(systemName: "sparkles")
-                        .frame(width: 18, height: 18)
-                }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("Create artifact")
-                .help("Create")
-
-                Button(action: openResearch) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .frame(width: 18, height: 18)
-                }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("Start deep research")
-                .help("Deep Research")
-
-                Button(action: refresh) {
-                    if isRefreshing {
-                        ProgressView()
-                            .frame(width: 18, height: 18)
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .frame(width: 18, height: 18)
-                    }
-                }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("Refresh library")
-                .help("Refresh")
-            }
-        } bottom: {
-            TextField("Search reports, generated media, sources, or filenames", text: $filter.query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("pines.artifacts.library.search")
-                .pinesFieldChrome()
-
-            HStack(alignment: .center, spacing: theme.spacing.small) {
-                ArtifactsAssetKindSelector(selection: $assetKind)
-
-                Spacer(minLength: theme.spacing.small)
-
-                Menu {
-                    ForEach(ArtifactsWorkspaceDeriver.providerScopes(from: providers)) { scope in
-                        Button {
-                            providerScope = scope
-                        } label: {
-                            Label(scope.title(providers: providers), systemImage: scope == providerScope ? "checkmark" : "cloud")
-                        }
-                    }
-                } label: {
-                    PinesMenuChip(title: providerScope.title(providers: providers), systemImage: "cloud", tone: .info)
-                }
-
-                Menu {
-                    ForEach(ArtifactsSort.allCases) { sort in
-                        Button {
-                            filter.sort = sort
-                        } label: {
-                            Label(sort.title, systemImage: sort == filter.sort ? "checkmark" : "arrow.up.arrow.down")
-                        }
-                    }
-                } label: {
-                    PinesMenuChip(title: filter.sort.title, systemImage: "arrow.up.arrow.down", tone: .neutral)
-                }
-            }
+        HStack(alignment: .top, spacing: theme.spacing.small) {
+            Image(systemName: systemImage)
+                .foregroundStyle(theme.colors.secondaryText)
+                .frame(width: 20)
+            Text(title)
+                .font(theme.typography.callout.weight(.semibold))
+                .foregroundStyle(theme.colors.secondaryText)
+            Spacer(minLength: theme.spacing.small)
+            Text(value)
+                .font(theme.typography.callout)
+                .foregroundStyle(theme.colors.primaryText)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
         }
     }
+}
 
-    private var modeSelectionID: Binding<String> {
-        Binding(
-            get: { mode.id },
-            set: { id in
-                if let selected = ArtifactsWorkspaceMode(rawValue: id) {
-                    mode = selected
-                }
-            }
+private struct ArtifactsMissingRecordView: View {
+    var body: some View {
+        PinesEmptyState(
+            title: "Artifact unavailable",
+            detail: "The local record changed. Return to the library and refresh.",
+            systemImage: "arrow.triangle.2.circlepath"
         )
+        .padding()
+        .navigationTitle("Artifact")
     }
 }
 
-private struct ArtifactsAssetKindSelector: View {
-    @Binding var selection: ArtifactsAssetKindFilter
+private struct ArtifactsProviderSetupView: View {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.openPinesProviderSettings) private var openProviderSettings
 
     var body: some View {
-        Picker("Artifact type", selection: $selection) {
-            ForEach(ArtifactsAssetKindFilter.allCases) { kind in
-                Label(kind.title, systemImage: kind.systemImage)
-                    .tag(kind)
+        VStack(spacing: theme.spacing.large) {
+            Image(systemName: "cloud.badge.plus")
+                .font(.system(size: 36, weight: .semibold))
+                .foregroundStyle(theme.colors.accent)
+                .frame(width: 76, height: 76)
+                .background(theme.colors.accentSoft, in: Circle())
+            VStack(spacing: theme.spacing.small) {
+                Text("Connect a provider")
+                    .font(theme.typography.title.weight(.semibold))
+                Text("Add an OpenAI or Gemini provider in Settings → Cloud & Providers, then return here to create artifacts and run Deep Research.")
+                    .font(theme.typography.body)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .multilineTextAlignment(.center)
             }
+            Button {
+                openProviderSettings()
+            } label: {
+                Label("Open Provider Settings", systemImage: "gearshape")
+            }
+            .pinesButtonStyle(.primary)
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 430)
-        .pinesSegmentedPickerChrome()
+        .padding(theme.spacing.large)
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle("Provider Setup")
+        .pinesAppBackground()
     }
 }
 
-private struct ArtifactsMediaWorkspace: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+private struct ArtifactCreateView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
-    @Environment(\.openURL) private var openURL
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    @Binding var mode: ArtifactsWorkspaceMode
-    @Binding var providerScope: ArtifactsProviderScope
-    @Binding var referenceArtifactID: String?
-    @Binding var requestedKind: ArtifactsMediaKind?
-    @Binding var selection: ArtifactsSelection?
+    let initialKind: ArtifactsMediaKind
+    let referenceArtifactID: String?
     @Binding var pendingConfirmation: ArtifactsConfirmation?
-    let openLibrary: () -> Void
-    @State private var mediaKind: ArtifactsMediaKind = .image
-    @State private var modelID = "gpt-image-2"
+    let open: (ArtifactsRoute) -> Void
+    @State private var mediaKind: ArtifactsMediaKind
+    @State private var providerID: ProviderID?
+    @State private var modelID = ""
     @State private var prompt = ""
-    @State private var isCreating = false
-    @State private var isSettingsPresented = false
-    @State private var newArtifactIDs: [String] = []
     @State private var imageQuality = "auto"
     @State private var imageSize = "auto"
     @State private var imageFormat = "png"
     @State private var speechVoice = "alloy"
     @State private var refreshAfterVideoCreate = true
+    @State private var isCreating = false
+    @State private var showsSettings = false
+    @State private var newArtifactIDs = [String]()
+    @FocusState private var promptFocused: Bool
+
+    init(
+        initialKind: ArtifactsMediaKind,
+        referenceArtifactID: String?,
+        pendingConfirmation: Binding<ArtifactsConfirmation?>,
+        open: @escaping (ArtifactsRoute) -> Void
+    ) {
+        self.initialKind = initialKind
+        self.referenceArtifactID = referenceArtifactID
+        _pendingConfirmation = pendingConfirmation
+        self.open = open
+        _mediaKind = State(initialValue: referenceArtifactID == nil ? initialKind : .image)
+    }
+
+    private var providers: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.artifactProviders
+    }
 
     private var provider: CloudProviderConfiguration? {
-        settingsState.cloudProviders.provider(in: providerScope, allowed: [.openAI, .gemini])
+        providerID.flatMap { id in providers.first(where: { $0.id == id }) }
     }
 
-    private var lifecycleProviders: [CloudProviderConfiguration] {
-        settingsState.cloudProviders.pinesLifecycleProviders.filter { [.openAI, .gemini].contains($0.kind) }
-    }
-
-    private var mediaModelOptions: [ArtifactsMediaModelOption] {
+    private var modelOptions: [ArtifactsMediaModelOption] {
         ArtifactsWorkspaceDeriver.mediaModelOptions(
             provider: provider,
             kind: mediaKind,
@@ -573,142 +1288,389 @@ private struct ArtifactsMediaWorkspace: View {
         )
     }
 
-    private var selectedModelLabel: String {
-        mediaModelOptions.first(where: { $0.id == modelID })?.title ?? modelID
+    private var selectedReference: ProviderArtifactRecord? {
+        referenceArtifactID.flatMap { id in providerState.providerArtifacts.first(where: { $0.id == id }) }
     }
 
-    private var selectedReferenceArtifact: ProviderArtifactRecord? {
-        guard let referenceArtifactID else { return nil }
-        return providerState.providerArtifacts.first { $0.id == referenceArtifactID }
+    private var outputs: [ProviderArtifactRecord] {
+        newArtifactIDs.compactMap { id in providerState.providerArtifacts.first(where: { $0.id == id }) }
     }
 
-    private var outputArtifacts: [ProviderArtifactRecord] {
-        let mediaKinds = ["image", "generated_image", "video", "audio", "speech", "transcription", "translation", "generated_media", "media_operation", "partial_image", "video_job"]
-        let recent = providerState.providerArtifacts
-            .filter { artifact in
-                artifact.isVisibleInArtifactsGallery
-                    && providerScope.includes(artifact.providerID)
-                    && mediaKinds.contains(artifact.kind.lowercased())
-            }
-        let byID = recent.reduce(into: [String: ProviderArtifactRecord]()) { result, artifact in
-            result[artifact.id] = artifact
-        }
-        var ordered = newArtifactIDs.compactMap { byID[$0] }
-        var seen = Set(ordered.map(\.id))
-        ordered.append(contentsOf: recent
-            .filter { seen.insert($0.id).inserted }
-            .sorted { $0.createdAt > $1.createdAt }
-            .prefix(18))
-        return ordered
+    private var canCreate: Bool {
+        provider != nil
+            && !modelID.isEmpty
+            && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isCreating
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ArtifactsCreateTopBar(
-                mode: $mode,
-                providerName: provider?.displayName ?? "Choose provider",
-                modelName: selectedModelLabel,
-                isCreating: isCreating,
-                newPrompt: resetComposer,
-                openSettings: { isSettingsPresented = true },
-                openLibrary: openLibrary
-            )
-
-            if let error = providerState.providerLifecycleError {
-                PinesGlobalErrorBanner(
-                    message: error,
-                    dismiss: { providerState.providerLifecycleError = nil }
-                )
-                    .padding(.horizontal, theme.spacing.large)
-                    .padding(.top, theme.spacing.small)
-            }
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: theme.spacing.large) {
-                    ArtifactsCreateComposer(
-                        mediaKind: $mediaKind,
-                        prompt: $prompt,
-                        referenceArtifact: selectedReferenceArtifact,
-                        provider: provider,
-                        modelLabel: selectedModelLabel,
-                        isCreating: isCreating,
-                        clearReference: { referenceArtifactID = nil },
-                        create: { Task { await createMedia() } }
-                    )
-
-                    ArtifactsCreateOutputRail(
-                        artifacts: outputArtifacts,
-                        selection: $selection,
-                        refreshArtifact: { artifact in Task { await refreshOutputArtifact(artifact) } },
-                        cancelArtifact: { artifact in pendingConfirmation = .cancelMediaOperation(artifact) },
-                        downloadArtifact: { artifact in Task { await downloadOutputArtifact(artifact) } },
-                        deleteArtifact: { artifact in pendingConfirmation = .deleteArtifactRecord(artifact) }
-                    )
+        ScrollView {
+            VStack(alignment: .leading, spacing: theme.spacing.large) {
+                if providers.isEmpty {
+                    noProviderState
+                } else {
+                    configurationSummary
+                    kindPicker
+                    if let selectedReference {
+                        referenceCard(selectedReference)
+                    }
+                    composer
+                    if !outputs.isEmpty {
+                        outputSection
+                    }
                 }
-                .padding(theme.spacing.large)
-                .frame(maxWidth: 1040, alignment: .leading)
-                .frame(maxWidth: .infinity)
             }
-            .pinesExpressiveScrollHaptics()
+            .padding(theme.spacing.large)
+            .frame(maxWidth: 820, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .sheet(isPresented: $isSettingsPresented) {
-            ArtifactsCreateSettingsSheet(
-                providerScope: $providerScope,
-                modelID: $modelID,
-                mediaKind: mediaKind,
-                imageQuality: $imageQuality,
-                imageSize: $imageSize,
-                imageFormat: $imageFormat,
-                speechVoice: $speechVoice,
-                refreshAfterVideoCreate: $refreshAfterVideoCreate,
-                providers: lifecycleProviders,
-                modelOptions: mediaModelOptions
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
+        .navigationTitle(selectedReference == nil ? "Create \(mediaKind.title)" : "Remix Image")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !providers.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showsSettings = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Creation settings")
+                }
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let error = providerState.providerLifecycleError {
+                PinesGlobalErrorBanner(message: error) {
+                    providerState.providerLifecycleError = nil
+                }
+                .padding(.horizontal, theme.spacing.large)
+                .background(theme.colors.appBackground)
+            }
+        }
+        .sheet(isPresented: $showsSettings) {
+            createSettings
+                .presentationDetents([.medium, .large])
         }
         .onAppear {
-            consumeRequestedKind()
+            if providerID == nil { providerID = providers.first?.id }
             normalizeSelectedModel()
         }
-        .onChange(of: provider?.id) { _, _ in normalizeSelectedModel() }
+        .onChange(of: providerID) { _, _ in normalizeSelectedModel() }
         .onChange(of: mediaKind) { _, _ in normalizeSelectedModel() }
-        .onChange(of: requestedKind) { _, _ in consumeRequestedKind() }
-        .onChange(of: referenceArtifactID) { _, newValue in
-            if newValue != nil {
-                mediaKind = .image
+        .pinesAppBackground()
+        .accessibilityIdentifier("pines.artifacts.create")
+    }
+
+    private var noProviderState: some View {
+        VStack(spacing: theme.spacing.medium) {
+            Image(systemName: "cloud.badge.plus")
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(theme.colors.accent)
+            Text("Connect a provider")
+                .font(theme.typography.title)
+            Text("OpenAI and Gemini can create artifacts. Add one in Settings, then return here.")
+                .font(theme.typography.body)
+                .foregroundStyle(theme.colors.secondaryText)
+                .multilineTextAlignment(.center)
+            Button {
+                open(.providerSetup)
+            } label: {
+                Label("Provider setup", systemImage: "cloud")
+            }
+            .pinesButtonStyle(.primary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 360)
+    }
+
+    private var configurationSummary: some View {
+        Button {
+            showsSettings = true
+        } label: {
+            HStack(spacing: theme.spacing.small) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(provider?.displayName ?? "Choose provider")
+                        .font(theme.typography.callout.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                    Text(modelOptions.first(where: { $0.id == modelID })?.title ?? "Choose a model")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: theme.spacing.small)
+                Text("Change")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.accent)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.tertiaryText)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pinesSurface(.inset, padding: theme.spacing.medium)
+    }
+
+    private var kindPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: theme.spacing.small) {
+                ForEach(ArtifactsMediaKind.allCases) { kind in
+                    Button {
+                        mediaKind = kind
+                    } label: {
+                        Label(kind.title, systemImage: kind.systemImage)
+                            .font(theme.typography.callout.weight(.semibold))
+                            .padding(.horizontal, theme.spacing.medium)
+                            .frame(minHeight: 44)
+                            .foregroundStyle(mediaKind == kind ? theme.colors.appBackground : theme.colors.secondaryText)
+                            .background {
+                                Capsule().fill(mediaKind == kind ? theme.colors.accent : theme.colors.controlFill)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(mediaKind == kind ? .isSelected : [])
+                }
             }
         }
+        .pinesExpressiveHorizontalScrollHaptics()
+        .disabled(selectedReference != nil)
+        .accessibilityLabel("Artifact type")
+    }
+
+    private func referenceCard(_ artifact: ProviderArtifactRecord) -> some View {
+        HStack(spacing: theme.spacing.medium) {
+            ArtifactsArtifactThumbnail(artifact: artifact)
+                .frame(width: 84, height: 72)
+            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                Text("Reference image")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.accent)
+                Text(artifact.artifactDisplayTitle)
+                    .font(theme.typography.callout.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .pinesSurface(.panel, padding: theme.spacing.small)
+    }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.medium) {
+            VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                Text(promptTitle)
+                    .font(theme.typography.headline)
+                    .foregroundStyle(theme.colors.primaryText)
+                TextField(promptPlaceholder, text: $prompt, axis: .vertical)
+                    .lineLimit(4...10)
+                    .focused($promptFocused)
+                    .pinesFieldChrome()
+                    .accessibilityIdentifier("pines.artifacts.create.prompt")
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: theme.spacing.small) {
+                    createButton
+                    Button("Options") { showsSettings = true }
+                        .pinesButtonStyle(.secondary)
+                }
+                VStack(spacing: theme.spacing.small) {
+                    createButton
+                    Button("Options") { showsSettings = true }
+                        .pinesButtonStyle(.secondary)
+                }
+            }
+        }
+        .pinesSurface(.panel, padding: theme.spacing.large)
+    }
+
+    private var createButton: some View {
+        Button {
+            Task { await createMedia() }
+        } label: {
+            Label(isCreating ? "Creating…" : createButtonTitle, systemImage: isCreating ? "hourglass" : "sparkles")
+        }
+        .disabled(!canCreate)
+        .pinesButtonStyle(.primary)
+        .accessibilityIdentifier("pines.artifacts.create.submit")
+    }
+
+    private var outputSection: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            Text("This session")
+                .font(theme.typography.title)
+            ForEach(outputs) { artifact in
+                let item = ArtifactLibraryItem(
+                    artifact: artifact,
+                    providers: providers,
+                    researchRuns: providerState.providerResearchRuns
+                )
+                Button {
+                    open(.artifact(artifact.id))
+                } label: {
+                    HStack(spacing: theme.spacing.medium) {
+                        ArtifactsArtifactThumbnail(artifact: artifact)
+                            .frame(width: 88, height: 68)
+                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                            Text(item.title)
+                                .font(theme.typography.callout.weight(.semibold))
+                                .foregroundStyle(theme.colors.primaryText)
+                                .lineLimit(2)
+                            Text(item.operationState.title)
+                                .font(theme.typography.caption)
+                                .foregroundStyle(item.operationState.tone.color(in: theme))
+                        }
+                        Spacer()
+                        if item.isActive {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(theme.colors.tertiaryText)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    if item.isActive {
+                        Button(role: .destructive) {
+                            pendingConfirmation = .cancelMediaOperation(artifact)
+                        } label: {
+                            Label("Cancel operation", systemImage: "xmark")
+                        }
+                    }
+                    Button(role: .destructive) {
+                        pendingConfirmation = .deleteArtifactRecord(artifact)
+                    } label: {
+                        Label("Remove from Pines", systemImage: "trash")
+                    }
+                }
+                .pinesSurface(.inset, padding: theme.spacing.small)
+            }
+        }
+    }
+
+    private var createSettings: some View {
+        NavigationStack {
+            Form {
+                Section("Provider") {
+                    Picker("Provider", selection: $providerID) {
+                        ForEach(providers) { provider in
+                            Text(provider.displayName).tag(Optional(provider.id))
+                        }
+                    }
+                    Picker("Model", selection: $modelID) {
+                        ForEach(modelOptions) { option in
+                            Text(option.title).tag(option.id)
+                        }
+                    }
+                }
+
+                if mediaKind == .image {
+                    Section("Image") {
+                        Picker("Quality", selection: $imageQuality) {
+                            Text("Automatic").tag("auto")
+                            Text("Low").tag("low")
+                            Text("Medium").tag("medium")
+                            Text("High").tag("high")
+                        }
+                        Picker("Size", selection: $imageSize) {
+                            Text("Automatic").tag("auto")
+                            Text("Square").tag("1024x1024")
+                            Text("Landscape").tag("1536x1024")
+                            Text("Portrait").tag("1024x1536")
+                        }
+                        Picker("Format", selection: $imageFormat) {
+                            Text("PNG").tag("png")
+                            Text("JPEG").tag("jpeg")
+                            Text("WebP").tag("webp")
+                        }
+                    }
+                } else if mediaKind == .speech {
+                    Section("Speech") {
+                        Picker("Voice", selection: $speechVoice) {
+                            ForEach(["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"], id: \.self) { voice in
+                                Text(voice.capitalized).tag(voice)
+                            }
+                        }
+                    }
+                } else {
+                    Section("Video") {
+                        Toggle("Check for output after creation", isOn: $refreshAfterVideoCreate)
+                    }
+                }
+            }
+            .navigationTitle("Creation Settings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showsSettings = false }
+                }
+            }
+        }
+    }
+
+    private var promptTitle: String {
+        switch mediaKind {
+        case .image: selectedReference == nil ? "Describe the image" : "Describe the changes"
+        case .video: "Describe the video"
+        case .speech: "Enter the text to speak"
+        }
+    }
+
+    private var promptPlaceholder: String {
+        switch mediaKind {
+        case .image: "Subject, composition, lighting, and style"
+        case .video: "Scene, motion, camera, and mood"
+        case .speech: "What should the voice say?"
+        }
+    }
+
+    private var createButtonTitle: String {
+        selectedReference == nil ? "Generate \(mediaKind.title.lowercased())" : "Create remix"
     }
 
     @MainActor
     private func createMedia() async {
         guard let provider else { return }
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else { return }
         isCreating = true
         defer { isCreating = false }
         do {
-            let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            let model = ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines))
+            let model = ModelID(rawValue: modelID)
             let created: [ProviderArtifactRecord]
             switch provider.kind {
             case .openAI:
                 switch mediaKind {
                 case .video:
-                    let artifact = try await appModel.createOpenAIVideoArtifact(OpenAIVideoArtifactRequest(prompt: trimmedPrompt, model: model.rawValue), providerID: provider.id, services: services)
+                    let artifact = try await appModel.createOpenAIVideoArtifact(
+                        OpenAIVideoArtifactRequest(prompt: trimmedPrompt, model: model.rawValue),
+                        providerID: provider.id,
+                        services: services
+                    )
                     created = [artifact]
                     if refreshAfterVideoCreate {
-                        _ = try? await appModel.refreshOpenAIVideoArtifact(id: artifact.providerFileID ?? artifact.id, providerID: provider.id, services: services)
+                        _ = try? await appModel.refreshOpenAIVideoArtifact(
+                            id: artifact.providerFileID ?? artifact.id,
+                            providerID: provider.id,
+                            services: services
+                        )
                     }
                 case .speech:
-                    let artifact = try await appModel.createOpenAISpeechArtifact(OpenAISpeechArtifactRequest(model: model.rawValue, input: trimmedPrompt, voice: speechVoice), providerID: provider.id, services: services)
-                    created = [artifact]
+                    created = [try await appModel.createOpenAISpeechArtifact(
+                        OpenAISpeechArtifactRequest(model: model.rawValue, input: trimmedPrompt, voice: speechVoice),
+                        providerID: provider.id,
+                        services: services
+                    )]
                 case .image:
-                    if let reference = selectedReferenceArtifact {
+                    if let selectedReference {
                         created = try await appModel.remixOpenAIImageArtifact(
                             providerID: provider.id,
                             modelID: model,
                             prompt: trimmedPrompt,
-                            reference: reference,
+                            reference: selectedReference,
                             fields: openAIImageFields(),
                             services: services
                         )
@@ -723,56 +1685,39 @@ private struct ArtifactsMediaWorkspace: View {
                     }
                 }
             case .gemini:
-                if mediaKind == .image, let reference = selectedReferenceArtifact {
+                if mediaKind == .image, let selectedReference {
                     created = try await appModel.remixGeminiImageArtifact(
                         providerID: provider.id,
                         modelID: model,
                         prompt: trimmedPrompt,
-                        reference: reference,
+                        reference: selectedReference,
                         services: services
                     )
                 } else {
-                    created = try await appModel.createGeminiGeneratedMedia(providerID: provider.id, modelID: model, prompt: trimmedPrompt, kind: mediaKind.rawValue, services: services)
+                    created = try await appModel.createGeminiGeneratedMedia(
+                        providerID: provider.id,
+                        modelID: model,
+                        prompt: trimmedPrompt,
+                        kind: mediaKind.rawValue,
+                        services: services
+                    )
                 }
             default:
-                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) media artifacts are not supported here.")
+                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) media creation is not supported here.")
             }
-            newArtifactIDs = (created.map(\.id) + newArtifactIDs).reduce(into: [String]()) { result, id in
-                if !result.contains(id) { result.append(id) }
-            }
-            if let first = created.first {
-                selection = .artifact(first.id)
+            let annotated = try await appModel.annotateCreatedProviderArtifacts(
+                created,
+                prompt: trimmedPrompt,
+                modelID: model,
+                requestedKind: mediaKind.rawValue,
+                referenceArtifactID: selectedReference?.id,
+                services: services
+            )
+            for id in annotated.map(\.id).reversed() where !newArtifactIDs.contains(id) {
+                newArtifactIDs.insert(id, at: 0)
             }
             prompt = ""
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func refreshOutputArtifact(_ artifact: ProviderArtifactRecord) async {
-        do {
-            switch artifact.providerKind {
-            case .openAI where artifact.kind.lowercased() == "video_job":
-                guard let providerID = artifact.providerID else { throw InferenceError.providerUnavailable(ProviderID(rawValue: "unknown")) }
-                _ = try await appModel.refreshOpenAIVideoArtifact(id: artifact.providerFileID ?? artifact.id, providerID: providerID, services: services)
-            case .gemini where artifact.kind.lowercased() == "media_operation":
-                guard let providerID = artifact.providerID else { throw InferenceError.providerUnavailable(ProviderID(rawValue: "unknown")) }
-                _ = try await appModel.refreshGeminiGeneratedMediaOperation(id: artifact.responseID ?? artifact.id, providerID: providerID, services: services)
-            default:
-                await appModel.refreshProviderLifecycleState(services: services)
-            }
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func downloadOutputArtifact(_ artifact: ProviderArtifactRecord) async {
-        guard artifact.providerKind == .openAI, artifact.kind.lowercased() == "video_job" else { return }
-        do {
-            guard let providerID = artifact.providerID else { throw InferenceError.providerUnavailable(ProviderID(rawValue: "unknown")) }
-            _ = try await appModel.downloadOpenAIVideoContentArtifact(id: artifact.providerFileID ?? artifact.id, providerID: providerID, services: services)
+            promptFocused = true
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -780,1327 +1725,66 @@ private struct ArtifactsMediaWorkspace: View {
 
     private func openAIImageFields() -> [String: JSONValue] {
         var fields = [String: JSONValue]()
-        if imageQuality != "auto" {
-            fields["quality"] = .string(imageQuality)
-        }
-        if imageSize != "auto" {
-            fields["size"] = .string(imageSize)
-        }
-        if imageFormat != "png" {
-            fields["output_format"] = .string(imageFormat)
-        }
+        if imageQuality != "auto" { fields["quality"] = .string(imageQuality) }
+        if imageSize != "auto" { fields["size"] = .string(imageSize) }
+        if imageFormat != "png" { fields["output_format"] = .string(imageFormat) }
         return fields
     }
 
-    private func resetComposer() {
-        prompt = ""
-        referenceArtifactID = nil
-        selection = nil
-    }
-
     private func normalizeSelectedModel() {
-        let options = mediaModelOptions
-        guard !options.isEmpty else {
+        if providerID == nil { providerID = providers.first?.id }
+        guard !modelOptions.isEmpty else {
             modelID = ""
             return
         }
-        if !options.contains(where: { $0.id == modelID }) {
-            modelID = options[0].id
-        }
-    }
-
-    private func consumeRequestedKind() {
-        guard let requestedKind else { return }
-        mediaKind = requestedKind
-        self.requestedKind = nil
-    }
-}
-
-private struct ArtifactsLibraryEmptyState: View {
-    @Environment(\.pinesTheme) private var theme
-    let createImage: () -> Void
-    let createVideo: () -> Void
-    let startResearch: () -> Void
-
-    var body: some View {
-        VStack(spacing: theme.spacing.medium) {
-            Image(systemName: "rectangle.stack.badge.minus")
-                .font(.system(size: 34, weight: .semibold))
-                .foregroundStyle(theme.colors.secondaryText)
-            VStack(spacing: theme.spacing.xxsmall) {
-                Text("No visible artifacts")
-                    .font(theme.typography.headline)
-                    .foregroundStyle(theme.colors.primaryText)
-                Text("Reports, generated images, videos, speech, and imported viewable artifacts appear here.")
-                    .font(theme.typography.callout)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            PinesAdaptiveButtonRow {
-                Button(action: createImage) {
-                    Label("Image", systemImage: "photo")
-                }
-                .pinesButtonStyle(.primary)
-
-                Button(action: createVideo) {
-                    Label("Video", systemImage: "film")
-                }
-                .pinesButtonStyle(.secondary)
-
-                Button(action: startResearch) {
-                    Label("Research", systemImage: "doc.text.magnifyingglass")
-                }
-                .pinesButtonStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 360)
-        .pinesSurface(.panel, padding: theme.spacing.large)
-    }
-}
-
-private struct ArtifactsAssetGrid: View {
-    @Environment(\.pinesTheme) private var theme
-    let assets: [ArtifactsAssetViewModel]
-    @Binding var selection: ArtifactsSelection?
-    let importArtifact: (ProviderArtifactRecord) -> Void
-    let remixArtifact: (ProviderArtifactRecord) -> Void
-    let deleteArtifact: (ProviderArtifactRecord) -> Void
-
-    private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 210), spacing: theme.spacing.medium)]
-    }
-
-    var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: theme.spacing.medium) {
-            ForEach(assets) { asset in
-                ArtifactsAssetCard(
-                    asset: asset,
-                    isSelected: selection == asset.selection,
-                    select: { selection = asset.selection },
-                    importArtifact: { importArtifact(asset.artifact) },
-                    remixArtifact: { remixArtifact(asset.artifact) },
-                    deleteArtifact: { deleteArtifact(asset.artifact) }
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            }
+        if !modelOptions.contains(where: { $0.id == modelID }) {
+            modelID = modelOptions[0].id
         }
     }
 }
 
-private struct ArtifactsAssetCard: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.openURL) private var openURL
-    let asset: ArtifactsAssetViewModel
-    let isSelected: Bool
-    let select: () -> Void
-    let importArtifact: () -> Void
-    let remixArtifact: () -> Void
-    let deleteArtifact: () -> Void
-
-    var body: some View {
-        PinesArtifactCard(
-            isSelected: isSelected,
-            minHeight: 292,
-            select: select,
-            preview: {
-            ArtifactsArtifactPreviewSurface(artifact: asset.artifact, maxHeight: 190)
-                .aspectRatio(asset.presentation == .report ? 1.18 : 1.08, contentMode: .fit)
-        }, details: {
-            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                Text(asset.title)
-                    .font(theme.typography.callout.weight(.semibold))
-                    .foregroundStyle(theme.colors.primaryText)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("\(asset.kind.readableArtifactKind) · \(asset.providerKind.pinesLifecycleTitle)")
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-        }, actions: {
-            HStack(spacing: theme.spacing.xsmall) {
-                PinesStatusChip(status: asset.status, compact: true)
-                Spacer(minLength: 0)
-                PinesCompactIconButton(title: "Open", systemImage: "arrow.up.forward.app", isDisabled: asset.artifact.galleryURL == nil) {
-                    if let url = asset.artifact.galleryURL {
-                        openURL(url)
-                    }
-                }
-                PinesCompactIconButton(title: "Import to Vault", systemImage: "square.and.arrow.down", isDisabled: !asset.artifact.isImportableToVault, action: importArtifact)
-                PinesCompactIconButton(title: "Remix", systemImage: "wand.and.stars", isDisabled: !asset.artifact.isRemixableImageArtifact, action: remixArtifact)
-                    .help(asset.artifact.remixDisabledReason ?? "Remix")
-                PinesCompactIconButton(title: "Delete local record", systemImage: "trash", role: .destructive, action: deleteArtifact)
-            }
-        })
-    }
-}
-
-private struct ArtifactsAssetInspectorSlot: View {
-    @Environment(\.pinesTheme) private var theme
-    let artifact: ProviderArtifactRecord?
-    let providers: [CloudProviderConfiguration]
-    let importArtifact: (ProviderArtifactRecord) -> Void
-    let remixArtifact: (ProviderArtifactRecord) -> Void
-    let deleteArtifact: (ProviderArtifactRecord) -> Void
-
-    var body: some View {
-        Group {
-            if let artifact {
-                ArtifactsAssetInspector(
-                    artifact: artifact,
-                    providers: providers,
-                    importArtifact: { importArtifact(artifact) },
-                    remixArtifact: { remixArtifact(artifact) },
-                    deleteArtifact: { deleteArtifact(artifact) }
-                )
-            } else {
-                VStack(spacing: theme.spacing.small) {
-                    Image(systemName: "sidebar.right")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(theme.colors.secondaryText)
-                    Text("Select an artifact")
-                        .font(theme.typography.callout.weight(.semibold))
-                        .foregroundStyle(theme.colors.primaryText)
-                    Text("Preview, provenance, and actions stay here while the grid remains stable.")
-                        .font(theme.typography.caption)
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, minHeight: 300)
-                .pinesSurface(.panel, padding: theme.spacing.large)
-            }
-        }
-    }
-}
-
-private struct ArtifactsAssetInspector: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.openURL) private var openURL
-    let artifact: ProviderArtifactRecord
-    let providers: [CloudProviderConfiguration]
-    let importArtifact: () -> Void
-    let remixArtifact: () -> Void
-    let deleteArtifact: () -> Void
-
-    private var providerName: String {
-        if let providerID = artifact.providerID,
-           let provider = providers.first(where: { $0.id == providerID }) {
-            return provider.displayName
-        }
-        return artifact.providerKind.pinesLifecycleTitle
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: theme.spacing.medium) {
-                ArtifactsArtifactPreviewSurface(artifact: artifact, maxHeight: 320)
-
-                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                    Text(artifact.fileName ?? artifact.kind.readableArtifactKind)
-                        .font(theme.typography.headline)
-                        .foregroundStyle(theme.colors.primaryText)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(providerName)
-                        .font(theme.typography.caption.weight(.semibold))
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .lineLimit(1)
-                }
-
-                HStack(spacing: theme.spacing.xsmall) {
-                    inspectorButton("Open", systemImage: "arrow.up.forward.app", disabled: artifact.galleryURL == nil) {
-                        if let url = artifact.galleryURL {
-                            openURL(url)
-                        }
-                    }
-                    inspectorButton("Import", systemImage: "square.and.arrow.down", disabled: !artifact.isImportableToVault, action: importArtifact)
-                    inspectorButton("Remix", systemImage: "wand.and.stars", disabled: !artifact.isRemixableImageArtifact, action: remixArtifact)
-                        .help(artifact.remixDisabledReason ?? "Remix")
-                    inspectorButton("Delete", systemImage: "trash", disabled: false, role: .destructive, action: deleteArtifact)
-                }
-
-                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                    inspectorRow("Kind", artifact.kind.readableArtifactKind, systemImage: "tag")
-                    inspectorRow("Created", RelativeDateTimeFormatter.shortLabel(for: artifact.createdAt), systemImage: "clock")
-                    inspectorRow("Provider", artifact.providerID?.rawValue ?? artifact.providerKind.pinesLifecycleTitle, systemImage: "cloud")
-                    inspectorRow("Size", artifact.byteCount.map(providerByteCountLabel) ?? "Unknown", systemImage: "internaldrive")
-                }
-                .pinesSurface(.inset, padding: theme.spacing.small)
-
-                if let text = artifact.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(text)
-                        .font(.system(.caption, design: artifact.galleryPresentation == .report ? .default : .monospaced))
-                        .foregroundStyle(theme.colors.primaryText)
-                        .textSelection(.enabled)
-                        .lineLimit(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .pinesSurface(.inset, padding: theme.spacing.small)
-                }
-            }
-        }
-        .pinesSurface(.panel, padding: theme.spacing.medium)
-    }
-
-    private func inspectorButton(_ title: String, systemImage: String, disabled: Bool, role: ButtonRole? = nil, action: @escaping () -> Void) -> some View {
-        Button(role: role, action: action) {
-            Image(systemName: systemImage)
-                .frame(width: 18, height: 18)
-        }
-        .disabled(disabled)
-        .pinesButtonStyle(.icon)
-        .accessibilityLabel(title)
-        .help(title)
-    }
-
-    private func inspectorRow(_ title: String, _ value: String, systemImage: String) -> some View {
-        HStack(spacing: theme.spacing.xsmall) {
-            Image(systemName: systemImage)
-                .frame(width: 16)
-                .foregroundStyle(theme.colors.secondaryText)
-            Text(title)
-                .font(theme.typography.caption.weight(.semibold))
-                .foregroundStyle(theme.colors.secondaryText)
-            Spacer(minLength: theme.spacing.small)
-            Text(value)
-                .font(theme.typography.caption)
-                .foregroundStyle(theme.colors.primaryText)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-    }
-}
-
-private struct ArtifactsCreateTopBar: View {
-    @Environment(\.pinesTheme) private var theme
-    @Binding var mode: ArtifactsWorkspaceMode
-    let providerName: String
-    let modelName: String
-    let isCreating: Bool
-    let newPrompt: () -> Void
-    let openSettings: () -> Void
-    let openLibrary: () -> Void
-
-    var body: some View {
-        PinesWorkspaceTopBar {
-            PinesWorkspaceSwitcher(
-                selectionID: modeSelectionID,
-                items: ArtifactsWorkspaceMode.workspaceSwitcherItems
-            )
-            .accessibilityLabel("Artifacts workspace")
-            .accessibilityValue(mode.title)
-            .accessibilityIdentifier("pines.artifacts.workspace.mode")
-        } status: {
-            Text("\(providerName) - \(modelName)")
-                .font(theme.typography.caption.weight(.semibold))
-                .foregroundStyle(theme.colors.secondaryText)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        } actions: {
-            HStack(spacing: theme.spacing.small) {
-                if isCreating {
-                    ProgressView()
-                        .frame(width: 34, height: 34)
-                }
-
-                Button(action: newPrompt) {
-                    Image(systemName: "plus")
-                        .frame(width: 18, height: 18)
-                }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("New create prompt")
-                .help("New")
-
-                Button(action: openLibrary) {
-                    Image(systemName: "rectangle.stack")
-                        .frame(width: 18, height: 18)
-                }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("Open library")
-                .help("Library")
-
-                Button(action: openSettings) {
-                    Image(systemName: "slider.horizontal.3")
-                        .frame(width: 18, height: 18)
-                }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("Create settings")
-                .help("Settings")
-            }
-        }
-    }
-
-    private var modeSelectionID: Binding<String> {
-        Binding(
-            get: { mode.id },
-            set: { id in
-                if let selected = ArtifactsWorkspaceMode(rawValue: id) {
-                    mode = selected
-                }
-            }
-        )
-    }
-}
-
-private struct ArtifactsCreateComposer: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.pinesTheme) private var theme
-    @Binding var mediaKind: ArtifactsMediaKind
-    @Binding var prompt: String
-    let referenceArtifact: ProviderArtifactRecord?
-    let provider: CloudProviderConfiguration?
-    let modelLabel: String
-    let isCreating: Bool
-    let clearReference: () -> Void
-    let create: () -> Void
-
-    private var isDisabled: Bool {
-        provider == nil || isCreating || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    var body: some View {
-        PinesComposerBar(
-            kind: .panel,
-            padding: theme.spacing.medium,
-            supplementary: {
-            HStack(alignment: .center, spacing: theme.spacing.small) {
-                ArtifactsMediaKindSelector(selection: $mediaKind)
-                Spacer(minLength: theme.spacing.small)
-                PinesStatusChip(status: provider == nil ? .warning("No provider") : .custom(modelLabel, .info), compact: true)
-            }
-
-            if let referenceArtifact {
-                HStack(spacing: theme.spacing.small) {
-                    Image(systemName: "photo.on.rectangle")
-                        .foregroundStyle(theme.colors.accent)
-                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                        Text("Reference")
-                            .font(theme.typography.caption.weight(.semibold))
-                            .foregroundStyle(theme.colors.secondaryText)
-                        Text(referenceArtifact.fileName ?? referenceArtifact.id)
-                            .font(theme.typography.callout.weight(.semibold))
-                            .foregroundStyle(theme.colors.primaryText)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Spacer(minLength: theme.spacing.small)
-                    Button(action: clearReference) {
-                        Image(systemName: "xmark")
-                            .frame(width: 16, height: 16)
-                    }
-                    .pinesButtonStyle(.icon)
-                    .accessibilityLabel("Remove reference")
-                }
-                .pinesSurface(.inset, padding: theme.spacing.small)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }, leading: {
-            EmptyView()
-        }, field: {
-                TextField(promptPlaceholder, text: $prompt, axis: .vertical)
-                    .lineLimit(4...9)
-                    .accessibilityIdentifier("pines.artifacts.media.prompt")
-                    .pinesFieldChrome()
-        }, trailing: {
-                Button(action: create) {
-                    Image(systemName: isCreating ? "hourglass" : "paperplane.fill")
-                        .frame(width: 20, height: 20)
-                }
-                .disabled(isDisabled)
-                .accessibilityIdentifier("pines.artifacts.media.create")
-                .accessibilityLabel(referenceArtifact == nil ? "Create artifact" : "Remix artifact")
-                .pinesButtonStyle(.primary)
-        })
-        .animation(reduceMotion ? nil : theme.motion.fast, value: referenceArtifact?.id)
-    }
-
-    private var promptPlaceholder: String {
-        switch mediaKind {
-        case .image:
-            referenceArtifact == nil ? "Describe the image to create" : "Describe how to transform the reference image"
-        case .video:
-            "Describe the scene, movement, and audio cues"
-        case .speech:
-            "Enter the text to turn into speech"
-        }
-    }
-}
-
-private struct ArtifactsCreateSettingsSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.pinesTheme) private var theme
-    @Binding var providerScope: ArtifactsProviderScope
-    @Binding var modelID: String
-    let mediaKind: ArtifactsMediaKind
-    @Binding var imageQuality: String
-    @Binding var imageSize: String
-    @Binding var imageFormat: String
-    @Binding var speechVoice: String
-    @Binding var refreshAfterVideoCreate: Bool
-    let providers: [CloudProviderConfiguration]
-    let modelOptions: [ArtifactsMediaModelOption]
-
-    private let imageQualities = ["auto", "low", "medium", "high"]
-    private let imageSizes = ["auto", "1024x1024", "1536x1024", "1024x1536"]
-    private let imageFormats = ["png", "jpeg", "webp"]
-    private let voices = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Provider") {
-                    Picker("Provider", selection: $providerScope) {
-                        Text("Auto").tag(ArtifactsProviderScope.all)
-                        ForEach(providers) { provider in
-                            Text(provider.displayName).tag(ArtifactsProviderScope.provider(provider.id))
-                        }
-                    }
-                    Picker("Model", selection: $modelID) {
-                        ForEach(modelOptions) { option in
-                            Text(option.title).tag(option.id)
-                        }
-                    }
-                    .disabled(modelOptions.isEmpty)
-                }
-
-                if mediaKind == .image {
-                    Section("Image") {
-                        Picker("Quality", selection: $imageQuality) {
-                            ForEach(imageQualities, id: \.self) { Text($0.readableArtifactKind).tag($0) }
-                        }
-                        Picker("Size", selection: $imageSize) {
-                            ForEach(imageSizes, id: \.self) { Text($0).tag($0) }
-                        }
-                        Picker("Format", selection: $imageFormat) {
-                            ForEach(imageFormats, id: \.self) { Text($0.uppercased()).tag($0) }
-                        }
-                    }
-                }
-
-                if mediaKind == .video {
-                    Section("Video") {
-                        Toggle("Refresh after create", isOn: $refreshAfterVideoCreate)
-                    }
-                }
-
-                if mediaKind == .speech {
-                    Section("Speech") {
-                        Picker("Voice", selection: $speechVoice) {
-                            ForEach(voices, id: \.self) { Text($0.readableArtifactKind).tag($0) }
-                        }
-                    }
-                }
-            }
-            .pinesThemedForm()
-            .navigationTitle("Create Settings")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-    }
-}
-
-private struct ArtifactsCreateOutputRail: View {
-    @Environment(\.pinesTheme) private var theme
-    let artifacts: [ProviderArtifactRecord]
-    @Binding var selection: ArtifactsSelection?
-    let refreshArtifact: (ProviderArtifactRecord) -> Void
-    let cancelArtifact: (ProviderArtifactRecord) -> Void
-    let downloadArtifact: (ProviderArtifactRecord) -> Void
-    let deleteArtifact: (ProviderArtifactRecord) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            HStack {
-                Text("Output")
-                    .font(theme.typography.headline)
-                    .foregroundStyle(theme.colors.primaryText)
-                Spacer()
-                Text("\(artifacts.count)")
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .monospacedDigit()
-            }
-
-            if artifacts.isEmpty {
-                PinesEmptyState(title: "No generated output yet", detail: "Created images, video jobs, speech, and remix results appear here first.", systemImage: "sparkles")
-                    .frame(maxWidth: .infinity, minHeight: 220)
-                    .pinesSurface(.panel, padding: theme.spacing.large)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: theme.spacing.medium) {
-                        ForEach(artifacts) { artifact in
-                            ArtifactsCreateOutputCard(
-                                artifact: artifact,
-                                isSelected: selection == .artifact(artifact.id),
-                                select: { selection = .artifact(artifact.id) },
-                                refreshArtifact: { refreshArtifact(artifact) },
-                                cancelArtifact: { cancelArtifact(artifact) },
-                                downloadArtifact: { downloadArtifact(artifact) },
-                                deleteArtifact: { deleteArtifact(artifact) }
-                            )
-                            .frame(width: 258)
-                        }
-                    }
-                    .padding(.vertical, theme.spacing.xxsmall)
-                }
-            }
-        }
-    }
-}
-
-private struct ArtifactsCreateOutputCard: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.openURL) private var openURL
-    let artifact: ProviderArtifactRecord
-    let isSelected: Bool
-    let select: () -> Void
-    let refreshArtifact: () -> Void
-    let cancelArtifact: () -> Void
-    let downloadArtifact: () -> Void
-    let deleteArtifact: () -> Void
-
-    private var isOperation: Bool {
-        let kind = artifact.kind.lowercased()
-        return kind == "video_job" || kind == "media_operation"
-    }
-
-    private var canDownload: Bool {
-        artifact.providerKind == .openAI && artifact.kind.lowercased() == "video_job"
-    }
-
-    var body: some View {
-        PinesArtifactCard(
-            isSelected: isSelected,
-            minHeight: 268,
-            select: select,
-            preview: {
-            ArtifactsArtifactPreviewSurface(artifact: artifact, maxHeight: 160)
-                .aspectRatio(1.12, contentMode: .fit)
-        }, details: {
-            Text(artifact.fileName ?? artifact.kind.readableArtifactKind)
-                .font(theme.typography.callout.weight(.semibold))
-                .foregroundStyle(theme.colors.primaryText)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text("\(artifact.kind.readableArtifactKind) · \(artifact.providerKind.pinesLifecycleTitle)")
-                .font(theme.typography.caption.weight(.semibold))
-                .foregroundStyle(theme.colors.secondaryText)
-                .lineLimit(1)
-        }, actions: {
-            HStack(spacing: theme.spacing.xsmall) {
-                PinesCompactIconButton(title: "Open", systemImage: "arrow.up.forward.app", isDisabled: artifact.galleryURL == nil) {
-                    if let url = artifact.galleryURL {
-                        openURL(url)
-                    }
-                }
-
-                Menu {
-                    Button(action: refreshArtifact) {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(!isOperation)
-
-                    Button(action: downloadArtifact) {
-                        Label("Download", systemImage: "arrow.down.circle")
-                    }
-                    .disabled(!canDownload)
-
-                    Button(role: .destructive, action: cancelArtifact) {
-                        Label("Cancel operation", systemImage: "xmark")
-                    }
-                    .disabled(!isOperation)
-
-                    Button(role: .destructive, action: deleteArtifact) {
-                        Label("Delete local record", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 18, height: 18)
-                }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("More artifact actions")
-            }
-        })
-    }
-}
-
-private struct ArtifactsStorageWorkspace: View {
-    @Environment(\.pinesTheme) private var theme
-    let providerScope: ArtifactsProviderScope
-    @Binding var selection: ArtifactsSelection?
-    @Binding var pendingConfirmation: ArtifactsConfirmation?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.large) {
-            ArtifactsFilesWorkspace(providerScope: providerScope, selection: $selection, pendingConfirmation: $pendingConfirmation)
-            ArtifactsContextWorkspace(providerScope: providerScope, selection: $selection, pendingConfirmation: $pendingConfirmation)
-        }
-    }
-}
-
-private struct ArtifactsJobsWorkspace: View {
-    @Environment(\.pinesTheme) private var theme
-    let providerScope: ArtifactsProviderScope
-    @Binding var selection: ArtifactsSelection?
-    @Binding var pendingConfirmation: ArtifactsConfirmation?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.large) {
-            ArtifactsBatchesWorkspace(providerScope: providerScope, selection: $selection, pendingConfirmation: $pendingConfirmation)
-            ArtifactsRealtimeWorkspace(providerScope: providerScope, selection: $selection)
-        }
-    }
-}
-
-private struct ArtifactsFilesWorkspace: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.pinesServices) private var services
-    @EnvironmentObject private var appModel: PinesAppModel
-    @EnvironmentObject private var settingsState: PinesSettingsState
-    @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    @EnvironmentObject private var vaultState: PinesVaultState
-    let providerScope: ArtifactsProviderScope
-    @Binding var selection: ArtifactsSelection?
-    @Binding var pendingConfirmation: ArtifactsConfirmation?
-    @State private var isImporterPresented = false
-    @State private var selectedVaultDocumentID: UUID?
-    @State private var purpose = "assistants"
-
-    private var provider: CloudProviderConfiguration? {
-        settingsState.cloudProviders.provider(in: providerScope, allowed: [.openAI, .anthropic, .gemini])
-    }
-
-    private var summaries: [ArtifactsResourceSummary] {
-        ArtifactsWorkspaceDeriver.fileSummaries(files: providerState.providerFiles, filter: .init(providerScope: providerScope))
-    }
-
-    private var transfers: [ProviderTransferRecord] {
-        providerState.providerTransfers.filter { transfer in
-            switch providerScope {
-            case .all: true
-            case .provider(let providerID): transfer.providerID == providerID
-            }
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Cloud Copies", subtitle: "Reusable remote copies for large files and background work. Local Vault files stay separate.", systemImage: "doc.badge.arrow.up") {
-                VStack(alignment: .leading, spacing: theme.spacing.small) {
-                    providerRequirement(allowed: "OpenAI, Anthropic, or Gemini")
-                    if provider?.kind == .openAI {
-                        TextField("OpenAI purpose", text: $purpose)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .pinesFieldChrome()
-                    }
-                    HStack(spacing: theme.spacing.small) {
-                        Button {
-                            isImporterPresented = true
-                        } label: {
-                            Label("Create Cloud Copy", systemImage: "square.and.arrow.up")
-                        }
-                        .disabled(provider == nil)
-                        .pinesButtonStyle(.primary)
-
-                        Button {
-                            Task { await refreshStorage() }
-                        } label: {
-                            Label("Refresh provider", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        .disabled(provider == nil)
-                    }
-
-                    HStack(spacing: theme.spacing.small) {
-                        Picker("Vault document", selection: $selectedVaultDocumentID) {
-                            Text("Choose Vault document").tag(Optional<UUID>.none)
-                            ForEach(vaultState.vaultItems) { item in
-                                Text(item.title).tag(Optional(item.id))
-                            }
-                        }
-                        .pickerStyle(.menu)
-
-                        Button {
-                            Task { await uploadVaultDocument() }
-                        } label: {
-                            Label("Upload Vault copy", systemImage: "shippingbox")
-                        }
-                        .disabled(selectedVaultDocumentID == nil || provider == nil || provider?.kind == .gemini)
-                    }
-                }
-            }
-            .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
-                Task { await handleImport(result) }
-            }
-
-            if !transfers.isEmpty {
-                PinesCardSection(
-                    "Transfer Queue",
-                    subtitle: "Transfers survive relaunch. Cancelled, interrupted, and failed uploads keep their staged source for retry.",
-                    systemImage: "arrow.up.arrow.down.circle"
-                ) {
-                    VStack(spacing: theme.spacing.small) {
-                        ForEach(transfers) { transfer in
-                            transferRow(transfer)
-                        }
-                    }
-                }
-            }
-
-            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No provider files", emptyDetail: "Provider-hosted files appear here after upload or provider refresh.")
-
-            fileActions
-        }
-    }
-
-    @ViewBuilder
-    private var fileActions: some View {
-        if case .file(let id) = selection, let file = providerState.providerFiles.first(where: { $0.id == id }) {
-            PinesCardSection("Cloud Copy Actions", subtitle: "These operate on the cloud copy, not local Vault source files.", systemImage: "ellipsis.circle") {
-                PinesAdaptiveButtonRow {
-                    Button {
-                        Task { await refreshFile(file) }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    .pinesButtonStyle(.secondary, fillWidth: true)
-
-                    if file.providerKind == .anthropic {
-                        Button {
-                            Task { await downloadFile(file) }
-                        } label: {
-                            Label("Download as artifact", systemImage: "square.and.arrow.down")
-                        }
-                        .pinesButtonStyle(.secondary, fillWidth: true)
-                    }
-
-                    Button(role: .destructive) {
-                        pendingConfirmation = .deleteProviderFile(file)
-                    } label: {
-                        Label("Delete provider file", systemImage: "trash")
-                    }
-                    .pinesButtonStyle(.destructive, fillWidth: true)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func providerRequirement(allowed: String) -> some View {
-        if let provider {
-            PinesStatusChip(status: .custom("\(provider.displayName) - \(provider.kind.pinesLifecycleTitle)", .info))
-        } else {
-            PinesEmptyState(title: "Choose a provider", detail: "Set the page provider scope to \(allowed).", systemImage: "cloud")
-                .pinesSurface(.inset, padding: theme.spacing.small)
-        }
-    }
-
-    @ViewBuilder
-    private func transferRow(_ transfer: ProviderTransferRecord) -> some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-            HStack(alignment: .firstTextBaseline, spacing: theme.spacing.small) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(transfer.fileName)
-                        .font(theme.typography.callout.weight(.semibold))
-                        .foregroundStyle(theme.colors.primaryText)
-                        .lineLimit(1)
-                    Text("\(transfer.providerKind.pinesLifecycleTitle) - \(transfer.status.pinesTransferLabel)")
-                        .font(theme.typography.caption)
-                        .foregroundStyle(theme.colors.secondaryText)
-                }
-                Spacer(minLength: theme.spacing.small)
-                if transfer.status.isActive {
-                    Button("Cancel", role: .destructive) {
-                        Task { await appModel.cancelProviderTransfer(id: transfer.id, services: services) }
-                    }
-                    .font(theme.typography.caption.weight(.semibold))
-                } else if transfer.status.canRetry {
-                    Button("Retry") {
-                        Task { await appModel.retryProviderTransfer(id: transfer.id, services: services) }
-                    }
-                    .font(theme.typography.caption.weight(.semibold))
-                    Button("Remove", role: .destructive) {
-                        Task { await appModel.removeProviderTransfer(id: transfer.id, services: services) }
-                    }
-                    .font(theme.typography.caption.weight(.semibold))
-                } else {
-                    Button("Clear") {
-                        Task { await appModel.removeProviderTransfer(id: transfer.id, services: services) }
-                    }
-                    .font(theme.typography.caption.weight(.semibold))
-                }
-            }
-
-            if transfer.status.isActive {
-                if let progress = transfer.progressFraction,
-                   transfer.status == .transferring,
-                   transfer.completedBytes > 0 {
-                    ProgressView(value: progress)
-                        .accessibilityLabel("Upload progress")
-                        .accessibilityValue("\(Int(progress * 100)) percent")
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel(transfer.status.pinesTransferLabel)
-                }
-            }
-            if let total = transfer.totalBytes {
-                Text(transfer.completedBytes > 0
-                    ? "\(providerByteCountLabel(transfer.completedBytes)) of \(providerByteCountLabel(total)) - attempt \(transfer.retryCount + 1)"
-                    : "\(providerByteCountLabel(total)) staged - attempt \(transfer.retryCount + 1)")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.secondaryText)
-            }
-            if let error = transfer.lastError, !error.isEmpty {
-                Text(error)
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .pinesSurface(.inset, padding: theme.spacing.small)
-    }
-
-    @MainActor
-    private func handleImport(_ result: Result<[URL], Error>) async {
-        guard let provider else { return }
-        do {
-            guard let url = try result.get().first else { return }
-            try await appModel.enqueueProviderFileTransfer(
-                provider: provider,
-                fileURL: url,
-                purpose: provider.kind == .openAI ? purpose : nil,
-                services: services
-            )
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func uploadVaultDocument() async {
-        guard let provider, let selectedVaultDocumentID else { return }
-        do {
-            let title = vaultState.vaultItems.first(where: { $0.id == selectedVaultDocumentID })?.title ?? "Vault document"
-            try await appModel.enqueueVaultProviderTransfer(
-                provider: provider,
-                documentID: selectedVaultDocumentID,
-                documentTitle: title,
-                purpose: provider.kind == .openAI ? purpose : nil,
-                services: services
-            )
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func refreshStorage() async {
-        guard let provider else { return }
-        do {
-            switch provider.kind {
-            case .openAI:
-                _ = try await appModel.refreshOpenAIProviderStorage(providerID: provider.id, services: services)
-            case .anthropic:
-                _ = try await appModel.refreshAnthropicProviderStorage(providerID: provider.id, services: services)
-            case .gemini:
-                _ = try await appModel.refreshGeminiProviderStorage(providerID: provider.id, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) refresh is not supported here.")
-            }
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func refreshFile(_ file: ProviderFileRecord) async {
-        do {
-            switch file.providerKind {
-            case .anthropic:
-                _ = try await appModel.refreshAnthropicProviderFile(providerID: file.providerID, fileID: file.id, services: services)
-            case .gemini:
-                _ = try await appModel.refreshGeminiProviderFile(providerID: file.providerID, fileID: file.id, services: services)
-            case .openAI:
-                _ = try await appModel.refreshOpenAIProviderStorage(providerID: file.providerID, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(file.providerKind.pinesLifecycleTitle) file refresh is not supported here.")
-            }
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func downloadFile(_ file: ProviderFileRecord) async {
-        do {
-            _ = try await appModel.downloadAnthropicProviderFileContent(providerID: file.providerID, fileID: file.id, fileName: file.fileName, services: services)
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-}
-
-private extension ProviderTransferStatus {
-    var pinesTransferLabel: String {
-        switch self {
-        case .queued: "Queued"
-        case .preparing: "Preparing durable source"
-        case .transferring: "Uploading"
-        case .verifying: "Verifying cloud copy"
-        case .completed: "Completed"
-        case .failed: "Failed"
-        case .cancelled: "Cancelled"
-        case .interrupted: "Interrupted"
-        }
-    }
-}
-
-private struct ArtifactsContextWorkspace: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.pinesServices) private var services
-    @EnvironmentObject private var appModel: PinesAppModel
-    @EnvironmentObject private var settingsState: PinesSettingsState
-    @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    let providerScope: ArtifactsProviderScope
-    @Binding var selection: ArtifactsSelection?
-    @Binding var pendingConfirmation: ArtifactsConfirmation?
-    @State private var name = ""
-    @State private var modelID = "gemini-2.5-pro"
-    @State private var ttlSeconds = "3600"
-    @State private var contextText = ""
-    @State private var isCreating = false
-
-    private var provider: CloudProviderConfiguration? {
-        settingsState.cloudProviders.provider(in: providerScope, allowed: [.openAI, .gemini])
-    }
-
-    private var summaries: [ArtifactsResourceSummary] {
-        ArtifactsWorkspaceDeriver.cacheSummaries(caches: providerState.providerCaches, filter: .init(providerScope: providerScope))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Reusable Context", subtitle: "Optimized repeated context for search, file analysis, and long conversations.", systemImage: "externaldrive.badge.icloud") {
-                VStack(alignment: .leading, spacing: theme.spacing.small) {
-                    if let provider {
-                        PinesStatusChip(status: .custom("\(provider.displayName) - \(provider.kind.pinesLifecycleTitle)", .info))
-                    } else {
-                        PinesEmptyState(title: "Choose OpenAI or Gemini", detail: "Set the page provider scope before creating reusable context.", systemImage: "cloud")
-                            .pinesSurface(.inset, padding: theme.spacing.small)
-                    }
-                    HStack(spacing: theme.spacing.small) {
-                        TextField(provider?.kind == .openAI ? "Vector store name" : "Cache name", text: $name)
-                            .pinesFieldChrome()
-                        TextField("Model", text: $modelID)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .pinesFieldChrome()
-                    }
-                    if provider?.kind == .gemini {
-                        TextField("TTL seconds", text: $ttlSeconds)
-                            .pinesFieldChrome()
-                        TextField("Context to cache", text: $contextText, axis: .vertical)
-                            .lineLimit(3...7)
-                            .pinesFieldChrome()
-                    }
-                    Button {
-                        Task { await createContext() }
-                    } label: {
-                        Label(isCreating ? "Creating" : "Create reusable context", systemImage: isCreating ? "hourglass" : "plus.circle")
-                    }
-                    .disabled(provider == nil || isCreating || (provider?.kind == .gemini && contextText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
-                    .pinesButtonStyle(.primary)
-                }
-            }
-
-            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No reusable context", emptyDetail: "Reusable cloud context appears here.")
-
-            if case .cache(let id) = selection, let cache = providerState.providerCaches.first(where: { $0.id == id }) {
-                PinesCardSection("Reusable Context Actions", subtitle: "Refresh or remove the cloud context separately from local data.", systemImage: "ellipsis.circle") {
-                    PinesAdaptiveButtonRow {
-                        Button {
-                            Task { await refreshCache(cache) }
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                        .pinesButtonStyle(.secondary, fillWidth: true)
-
-                        Button(role: .destructive) {
-                            pendingConfirmation = .deleteProviderCache(cache)
-                        } label: {
-                            Label("Delete cloud context", systemImage: "trash")
-                        }
-                        .pinesButtonStyle(.destructive, fillWidth: true)
-                    }
-                }
-            }
-        }
-    }
-
-    @MainActor
-    private func createContext() async {
-        guard let provider else { return }
-        isCreating = true
-        defer { isCreating = false }
-        do {
-            switch provider.kind {
-            case .openAI:
-                _ = try await appModel.createOpenAIVectorStore(providerID: provider.id, name: name.trimmingCharacters(in: .whitespacesAndNewlines), services: services)
-            case .gemini:
-                _ = try await appModel.createGeminiContextCache(
-                    providerID: provider.id,
-                    modelID: ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines)),
-                    displayName: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                    text: contextText,
-                    ttlSeconds: Int(ttlSeconds),
-                    services: services
-                )
-                contextText = ""
-            default:
-                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) context storage is not supported here.")
-            }
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func refreshCache(_ cache: ProviderCacheRecord) async {
-        do {
-            switch cache.providerKind {
-            case .openAI:
-                _ = try await appModel.refreshOpenAIVectorStoreFiles(providerID: cache.providerID, vectorStoreID: cache.id, services: services)
-            case .gemini:
-                _ = try await appModel.refreshGeminiContextCache(providerID: cache.providerID, cacheID: cache.id, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(cache.providerKind.pinesLifecycleTitle) context refresh is not supported here.")
-            }
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-}
-
-private struct ArtifactsBatchesWorkspace: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.pinesServices) private var services
-    @EnvironmentObject private var appModel: PinesAppModel
-    @EnvironmentObject private var settingsState: PinesSettingsState
-    @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    let providerScope: ArtifactsProviderScope
-    @Binding var selection: ArtifactsSelection?
-    @Binding var pendingConfirmation: ArtifactsConfirmation?
-    @State private var modelID = "claude-sonnet-4-5"
-    @State private var customID = ""
-    @State private var prompt = ""
-    @State private var maxTokens = "1024"
-    @State private var isCreating = false
-    @State private var isCounting = false
-    @State private var tokenCount: Int?
-
-    private var provider: CloudProviderConfiguration? {
-        settingsState.cloudProviders.provider(in: providerScope, allowed: [.openAI, .anthropic, .gemini])
-    }
-
-    private var summaries: [ArtifactsResourceSummary] {
-        ArtifactsWorkspaceDeriver.batchSummaries(batches: providerState.providerBatches, filter: .init(providerScope: providerScope))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Background Processing", subtitle: "Run long reports, multiple files, transcription queues, and Vault enrichment outside the chat stream.", systemImage: "tray.full") {
-                VStack(alignment: .leading, spacing: theme.spacing.small) {
-                    if let provider {
-                        PinesStatusChip(status: .custom("\(provider.displayName) - \(provider.kind.pinesLifecycleTitle)", .info))
-                    } else {
-                        PinesEmptyState(title: "Choose a provider", detail: "Set the page provider scope to create or manage batches.", systemImage: "cloud")
-                            .pinesSurface(.inset, padding: theme.spacing.small)
-                    }
-                    HStack(spacing: theme.spacing.small) {
-                        TextField("Model", text: $modelID)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .pinesFieldChrome()
-                        TextField("Max tokens", text: $maxTokens)
-                            .pinesFieldChrome()
-                            .frame(maxWidth: 130)
-                    }
-                    TextField("Custom ID", text: $customID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .pinesFieldChrome()
-                    TextField("Batch prompt", text: $prompt, axis: .vertical)
-                        .lineLimit(3...7)
-                        .pinesFieldChrome()
-                        .onChange(of: prompt) { _, _ in tokenCount = nil }
-                    HStack(spacing: theme.spacing.small) {
-                        Button {
-                            Task { await countTokens() }
-                        } label: {
-                            Label(isCounting ? "Counting" : "Count tokens", systemImage: isCounting ? "hourglass" : "number")
-                        }
-                        .disabled(provider?.kind != .anthropic || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCounting)
-
-                        Button {
-                            Task { await createBatch() }
-                        } label: {
-                            Label(isCreating ? "Creating" : "Create batch", systemImage: isCreating ? "hourglass" : "plus.circle")
-                        }
-                        .disabled(provider?.kind != .anthropic || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreating)
-                        .pinesButtonStyle(.primary)
-
-                        Spacer()
-
-                        if let tokenCount {
-                            Text("\(tokenCount) input tokens")
-                                .font(theme.typography.caption.weight(.semibold))
-                                .foregroundStyle(theme.colors.secondaryText)
-                                .monospacedDigit()
-                        }
-                    }
-                }
-            }
-
-            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No batches", emptyDetail: "Provider background jobs appear here after refresh or creation.")
-
-            if case .batch(let id) = selection, let batch = providerState.providerBatches.first(where: { $0.id == id }) {
-                PinesCardSection("Batch Actions", subtitle: "Cancel running jobs or import terminal result artifacts where supported.", systemImage: "ellipsis.circle") {
-                    PinesAdaptiveButtonRow {
-                        Button {
-                            Task { await refreshBatch(batch) }
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                        .pinesButtonStyle(.secondary, fillWidth: true)
-
-                        Button(role: .destructive) {
-                            pendingConfirmation = .cancelBatch(batch)
-                        } label: {
-                            Label("Cancel", systemImage: "xmark")
-                        }
-                        .pinesButtonStyle(.destructive, fillWidth: true)
-                        .disabled(batch.status.providerIsTerminal)
-
-                        Button {
-                            Task { await importResults(batch) }
-                        } label: {
-                            Label("Import results", systemImage: "square.and.arrow.down")
-                        }
-                        .pinesButtonStyle(.secondary, fillWidth: true)
-                        .disabled(!batch.status.providerIsTerminal)
-                    }
-                }
-            }
-        }
-    }
-
-    @MainActor
-    private func countTokens() async {
-        guard let provider else { return }
-        isCounting = true
-        defer { isCounting = false }
-        do {
-            tokenCount = try await appModel.countAnthropicTokens(
-                providerID: provider.id,
-                modelID: ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines)),
-                text: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
-                services: services
-            )
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func createBatch() async {
-        guard let provider else { return }
-        isCreating = true
-        defer { isCreating = false }
-        do {
-            _ = try await appModel.createAnthropicMessageBatch(
-                providerID: provider.id,
-                modelID: ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines)),
-                prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
-                customID: customID,
-                maxTokens: Int(maxTokens) ?? 1024,
-                services: services
-            )
-            prompt = ""
-            customID = ""
-            tokenCount = nil
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func refreshBatch(_ batch: ProviderBatchRecord) async {
-        do {
-            switch batch.providerKind {
-            case .openAI:
-                _ = try await appModel.refreshOpenAIBatch(id: batch.id, providerID: batch.providerID, services: services)
-            case .anthropic:
-                _ = try await appModel.refreshAnthropicBatch(id: batch.id, providerID: batch.providerID, services: services)
-            case .gemini:
-                _ = try await appModel.refreshGeminiBatch(id: batch.id, providerID: batch.providerID, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(batch.providerKind.pinesLifecycleTitle) batch refresh is not supported here.")
-            }
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func importResults(_ batch: ProviderBatchRecord) async {
-        do {
-            switch batch.providerKind {
-            case .openAI:
-                _ = try await appModel.importOpenAIBatchResultArtifacts(id: batch.id, providerID: batch.providerID, services: services)
-            case .anthropic:
-                _ = try await appModel.importAnthropicBatchResults(id: batch.id, providerID: batch.providerID, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(batch.providerKind.pinesLifecycleTitle) result import is not supported here.")
-            }
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-}
-
-private struct ArtifactsResearchWorkspace: View {
+private struct ArtifactResearchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    @Binding var mode: ArtifactsWorkspaceMode
-    let providerScope: ArtifactsProviderScope
-    @Binding var selection: ArtifactsSelection?
+    let initialThreadID: String?
     @Binding var pendingConfirmation: ArtifactsConfirmation?
+    let open: (ArtifactsRoute) -> Void
+    @State private var selectedThreadID: String?
+    @State private var providerID: ProviderID?
+    @State private var modelID = ""
     @State private var prompt = ""
     @State private var followUpPrompt = ""
-    @State private var modelID = "gpt-5.5"
     @State private var depth: OpenAIDeepResearchDepth = .standard
     @State private var reportFormat: OpenAIDeepResearchReportFormat = .memo
+    @State private var usesProviderFiles = false
     @State private var isStarting = false
-    @State private var isSendingFollowUp = false
-    @State private var selectedThreadID: String?
-    @State private var isHistoryPresented = false
+    @State private var showsSettings = false
+    @State private var showsHistory = false
     @State private var clarificationDraft: ArtifactsResearchClarificationDraft?
-    @State private var clarificationAnswers: [String: String] = [:]
-    @FocusState private var isComposerFocused: Bool
+    @State private var clarificationAnswers = [String: String]()
+    @FocusState private var composerFocused: Bool
+
+    init(
+        initialThreadID: String?,
+        pendingConfirmation: Binding<ArtifactsConfirmation?>,
+        open: @escaping (ArtifactsRoute) -> Void
+    ) {
+        self.initialThreadID = initialThreadID
+        _selectedThreadID = State(initialValue: initialThreadID)
+        _pendingConfirmation = pendingConfirmation
+        self.open = open
+    }
+
+    private var providers: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.artifactProviders
+    }
 
     private var provider: CloudProviderConfiguration? {
-        settingsState.cloudProviders.provider(in: providerScope, allowed: [.openAI, .gemini])
+        providerID.flatMap { id in providers.first(where: { $0.id == id }) }
     }
 
     private var modelOptions: [ArtifactsResearchModelOption] {
@@ -2110,183 +1794,158 @@ private struct ArtifactsResearchWorkspace: View {
         )
     }
 
-    private var selectedModelLabel: String {
-        modelOptions.first(where: { $0.id == modelID })?.title ?? modelID
-    }
-
     private var threads: [ArtifactsResearchThread] {
-        ArtifactsResearchThread.threads(
-            from: providerState.providerResearchRuns.filter { providerScope.includes($0.providerID) }
-        )
+        ArtifactsResearchThread.threads(from: providerState.providerResearchRuns)
     }
 
     private var selectedThread: ArtifactsResearchThread? {
-        if let selectedThreadID,
-           let thread = threads.first(where: { $0.id == selectedThreadID }) {
-            return thread
-        }
-        if case .research(let id) = selection,
-           let thread = threads.first(where: { $0.runs.contains { $0.id == id } }) {
-            return thread
-        }
-        return nil
+        selectedThreadID.flatMap { id in threads.first(where: { $0.id == id }) }
     }
 
-    private var composerText: Binding<String> {
+    private var activeRuns: [ProviderResearchRunRecord] {
+        selectedThread?.runs.filter { !$0.status.providerIsTerminal } ?? []
+    }
+
+    private var activeRunSignature: String {
+        activeRuns.map { "\($0.id):\($0.status):\($0.updatedAt.timeIntervalSince1970)" }.joined(separator: "|")
+    }
+
+    private var composerBinding: Binding<String> {
         Binding(
             get: { selectedThread == nil ? prompt : followUpPrompt },
             set: { value in
-                if selectedThread == nil {
-                    prompt = value
-                } else {
-                    followUpPrompt = value
-                }
+                if selectedThread == nil { prompt = value } else { followUpPrompt = value }
             }
         )
     }
 
     private var sendDisabled: Bool {
-        if provider == nil || modelID.isEmpty || isStarting || isSendingFollowUp {
-            return true
-        }
-        if selectedThread == nil {
-            return prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        return followUpPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let text = selectedThread == nil ? prompt : followUpPrompt
+        return provider == nil
+            || modelID.isEmpty
+            || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || isStarting
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            researchTopBar
             if let error = providerState.providerLifecycleError {
-                PinesGlobalErrorBanner(
-                    message: error,
-                    dismiss: { providerState.providerLifecycleError = nil }
-                )
-                    .padding(.horizontal, theme.spacing.large)
-                    .padding(.top, theme.spacing.small)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                PinesGlobalErrorBanner(message: error) {
+                    providerState.providerLifecycleError = nil
+                }
+                .padding(.horizontal, theme.spacing.large)
+                .padding(.top, theme.spacing.xsmall)
             }
-            researchConversation
-            researchComposer
+
+            conversation
+            composer
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.colors.appBackground)
-        .onAppear { normalizeSelectedModel() }
-        .onChange(of: provider?.id) { _, _ in
-            selectedThreadID = nil
-            selection = nil
-            normalizeSelectedModel()
+        .navigationTitle(selectedThread?.title ?? "Deep Research")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    startNewThread()
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .accessibilityLabel("New research")
+                .accessibilityIdentifier("pines.artifacts.research.new")
+
+                Menu {
+                    Button {
+                        showsHistory = true
+                    } label: {
+                        Label("Research history", systemImage: "clock.arrow.circlepath")
+                    }
+                    .disabled(threads.isEmpty)
+                    Button {
+                        showsSettings = true
+                    } label: {
+                        Label("Research settings", systemImage: "slider.horizontal.3")
+                    }
+                    if !activeRuns.isEmpty {
+                        Button {
+                            Task { await refreshActiveRuns() }
+                        } label: {
+                            Label("Refresh progress", systemImage: "arrow.clockwise")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("Research actions")
+            }
         }
-        .sheet(isPresented: $isHistoryPresented) {
-            ArtifactsResearchHistorySheet(
+        .sheet(isPresented: $showsSettings) {
+            researchSettings
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showsHistory) {
+            ArtifactsResearchHistoryView(
                 threads: threads,
-                selectedThreadID: selectedThread?.id,
+                selectedThreadID: selectedThreadID,
                 select: { thread in
-                    selectedThreadID = thread.id
-                    selection = .research(thread.latestRun.id)
-                    isHistoryPresented = false
+                    selectThread(thread)
+                    showsHistory = false
                 }
             )
             .presentationDetents([.medium, .large])
-            .pinesTheme(theme)
         }
+        .sheet(item: $clarificationDraft) { draft in
+            ArtifactsResearchClarificationView(
+                draft: draft,
+                answers: $clarificationAnswers,
+                start: { providerPrompt in
+                    clarificationDraft = nil
+                    Task { await startRun(originalPrompt: draft.originalPrompt, providerPrompt: providerPrompt) }
+                },
+                cancel: { clarificationDraft = nil }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .onAppear(perform: configureInitialSelection)
+        .onChange(of: providerID) { _, _ in normalizeSelectedModel() }
+        .task(id: activeRunSignature) {
+            await monitorActiveRuns()
+        }
+        .pinesAppBackground()
+        .accessibilityIdentifier("pines.artifacts.research")
     }
 
-    private var researchTopBar: some View {
-        PinesWorkspaceTopBar {
-            PinesWorkspaceSwitcher(
-                selectionID: modeSelectionID,
-                items: ArtifactsWorkspaceMode.workspaceSwitcherItems
-            ) { _ in
-                selection = nil
-            }
-            .accessibilityLabel("Artifacts workspace")
-            .accessibilityValue(mode.title)
-            .accessibilityIdentifier("pines.artifacts.workspace.mode")
-        } status: {
-            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                Text(selectedThread?.title ?? "Deep Research")
-                    .font(theme.typography.headline)
-                    .foregroundStyle(theme.colors.primaryText)
-                    .pinesFittingText()
-
-                Text(researchSubtitle)
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        } actions: {
-            HStack(spacing: theme.spacing.small) {
-            Button {
-                startNewThread()
-            } label: {
-                Image(systemName: "square.and.pencil")
-                    .frame(width: 18, height: 18)
-            }
-            .pinesButtonStyle(.icon)
-            .accessibilityLabel("New research chat")
-            .accessibilityIdentifier("pines.artifacts.research.new")
-
-            Button {
-                isHistoryPresented = true
-            } label: {
-                Image(systemName: "clock.arrow.circlepath")
-                    .frame(width: 18, height: 18)
-            }
-            .disabled(threads.isEmpty)
-            .pinesButtonStyle(.icon)
-            .accessibilityLabel("Research history")
-            .accessibilityIdentifier("pines.artifacts.research.history")
-        }
-        }
-    }
-
-    private var modeSelectionID: Binding<String> {
-        Binding(
-            get: { mode.id },
-            set: { id in
-                if let selected = ArtifactsWorkspaceMode(rawValue: id) {
-                    mode = selected
-                }
-            }
-        )
-    }
-
-    private var researchSubtitle: String {
-        if let thread = selectedThread {
-            return "\(thread.providerKind.pinesLifecycleTitle) - \(thread.modelID.rawValue) - \(thread.statusText)"
-        }
-        if let provider {
-            return "\(provider.displayName) - \(selectedModelLabel)"
-        }
-        return "Choose an OpenAI or Gemini provider in Artifacts scope"
-    }
-
-    private var researchConversation: some View {
+    private var conversation: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: theme.spacing.large) {
-                    if let selectedThread {
+                    if providers.isEmpty {
+                        researchEmptyState(
+                            title: "Connect a research provider",
+                            detail: "Add OpenAI or Gemini in Settings before starting Deep Research.",
+                            actionTitle: "Provider setup",
+                            action: { open(.providerSetup) }
+                        )
+                    } else if let selectedThread {
                         ForEach(selectedThread.runs) { run in
-                            ArtifactsResearchRunExchange(
+                            ArtifactsResearchRunView(
                                 run: run,
-                                finalReport: finalReport(for: run),
+                                report: finalReport(for: run),
                                 refresh: { Task { await refreshRun(run) } },
                                 cancel: { pendingConfirmation = .cancelResearch(run) },
-                                openArtifact: { artifact in selection = .artifact(artifact.id) }
+                                openReport: { artifact in open(.artifact(artifact.id)) }
                             )
                             .id(run.id)
                         }
                     } else {
-                        researchEmptyState
+                        researchEmptyState(
+                            title: "What should we research?",
+                            detail: "Ask a question below. Pines can clarify scope before starting, then keeps sources, progress, and the final report together.",
+                            actionTitle: threads.isEmpty ? nil : "Open history",
+                            action: { showsHistory = true }
+                        )
                     }
                 }
-                .padding(.horizontal, theme.spacing.large)
-                .padding(.vertical, theme.spacing.large)
-                .frame(maxWidth: 860, alignment: .leading)
+                .padding(theme.spacing.large)
+                .frame(maxWidth: 880, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
             .onChange(of: selectedThread?.latestRun.id) { _, id in
@@ -2298,143 +1957,126 @@ private struct ArtifactsResearchWorkspace: View {
         }
     }
 
-    private var researchEmptyState: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            HStack(alignment: .top, spacing: theme.spacing.small) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(theme.colors.accent)
-                    .frame(width: 34, height: 34)
-                    .background(theme.colors.accentSoft, in: Circle())
-
-                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                    Text(provider == nil ? "Connect a research provider" : "What should we research?")
-                        .font(theme.typography.title.weight(.semibold))
-                        .foregroundStyle(theme.colors.primaryText)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                    Text(provider == nil ? "Select an OpenAI or Gemini provider scope before starting." : "Ask a broad or specific question. I can pause for up to five clarifications before launching the provider research run.")
-                        .font(theme.typography.body)
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            if !threads.isEmpty {
-                Button {
-                    isHistoryPresented = true
-                } label: {
-                    Label("Open research history", systemImage: "clock.arrow.circlepath")
-                }
-                .pinesButtonStyle(.secondary)
+    private func researchEmptyState(
+        title: String,
+        detail: String,
+        actionTitle: String?,
+        action: @escaping () -> Void
+    ) -> some View {
+        VStack(spacing: theme.spacing.medium) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(theme.colors.accent)
+                .frame(width: 68, height: 68)
+                .background(theme.colors.accentSoft, in: Circle())
+            Text(title)
+                .font(theme.typography.title)
+                .multilineTextAlignment(.center)
+            Text(detail)
+                .font(theme.typography.body)
+                .foregroundStyle(theme.colors.secondaryText)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if let actionTitle {
+                Button(actionTitle, action: action)
+                    .pinesButtonStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 360, alignment: .center)
-    }
-
-    private var researchComposer: some View {
-        PinesComposerBar(
-            kind: .chrome,
-            maxWidth: 860,
-            padding: 0,
-            showsSurface: false,
-            supplementary: {
-                if let clarificationDraft {
-                ArtifactsResearchClarificationPanel(
-                    draft: clarificationDraft,
-                    answers: $clarificationAnswers,
-                    start: {
-                        Task {
-                            await startRun(
-                                originalPrompt: clarificationDraft.originalPrompt,
-                                providerPrompt: clarificationDraft.providerPrompt(answers: clarificationAnswers)
-                            )
-                        }
-                    },
-                    skip: {
-                        Task {
-                            await startRun(
-                                originalPrompt: clarificationDraft.originalPrompt,
-                                providerPrompt: clarificationDraft.providerPrompt(answers: [:])
-                            )
-                        }
-                    },
-                    cancel: {
-                        self.clarificationDraft = nil
-                        clarificationAnswers = [:]
-                    }
-                )
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-        }, leading: {
-            researchSettingsButton
-        }, field: {
-                TextField(selectedThread == nil ? "Ask a research question" : "Ask a follow-up", text: composerText, axis: .vertical)
-                    .lineLimit(1...6)
-                    .focused($isComposerFocused)
-                    .textInputAutocapitalization(.sentences)
-                    .accessibilityIdentifier(selectedThread == nil ? "pines.artifacts.research.prompt" : "pines.artifacts.research.follow-up")
-                    .pinesFieldChrome()
-        }, trailing: {
-                Button {
-                    Task { await commitComposer() }
-                } label: {
-                    Image(systemName: isStarting || isSendingFollowUp ? "hourglass" : "paperplane.fill")
-                        .frame(width: 18, height: 18)
-                }
-                .disabled(sendDisabled)
-                .accessibilityIdentifier(selectedThread == nil ? "pines.artifacts.research.start" : "pines.artifacts.research.follow-up.send")
-                .pinesButtonStyle(.primary)
-                .accessibilityLabel(selectedThread == nil ? "Start research" : "Send follow-up")
-        })
-        .padding(.horizontal, theme.spacing.large)
-        .padding(.vertical, theme.spacing.small)
+        .padding(.vertical, theme.spacing.xlarge)
+        .frame(maxWidth: 620, minHeight: 360)
         .frame(maxWidth: .infinity)
     }
 
-    private var researchSettingsButton: some View {
-        Menu {
-            Section("Model") {
-                ForEach(modelOptions) { option in
-                    Button {
-                        modelID = option.id
-                    } label: {
-                        Label(option.title, systemImage: option.id == modelID ? "checkmark" : "cpu")
-                    }
-                }
-            }
-            Section("Depth") {
-                ForEach(OpenAIDeepResearchDepth.allCases, id: \.self) { option in
-                    Button {
-                        depth = option
-                    } label: {
-                        Label(option.rawValue.readableArtifactKind, systemImage: option == depth ? "checkmark" : "slider.horizontal.3")
-                    }
-                }
-            }
-            Section("Report") {
-                ForEach(OpenAIDeepResearchReportFormat.allCases, id: \.self) { option in
-                    Button {
-                        reportFormat = option
-                    } label: {
-                        Label(option.rawValue.readableArtifactKind, systemImage: option == reportFormat ? "checkmark" : "doc.text")
-                    }
-                }
-            }
-            if let provider {
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            if selectedThread == nil {
                 Button {
-                    Task { await resumeRuns(provider) }
+                    showsSettings = true
                 } label: {
-                    Label("Refresh running research", systemImage: "arrow.triangle.2.circlepath")
+                    Label(researchConfigurationLabel, systemImage: usesProviderFiles ? "globe.badge.chevron.backward" : "globe")
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(alignment: .bottom, spacing: theme.spacing.small) {
+                TextField(selectedThread == nil ? "Ask a research question" : "Ask a follow-up", text: composerBinding, axis: .vertical)
+                    .lineLimit(1...6)
+                    .focused($composerFocused)
+                    .pinesFieldChrome()
+                    .accessibilityIdentifier(selectedThread == nil ? "pines.artifacts.research.prompt" : "pines.artifacts.research.follow-up")
+
+                Button {
+                    Task { await commitComposer() }
+                } label: {
+                    Image(systemName: isStarting ? "hourglass" : "arrow.up")
+                        .frame(width: 20, height: 20)
+                }
+                .disabled(sendDisabled)
+                .pinesButtonStyle(.primary)
+                .accessibilityLabel(selectedThread == nil ? "Start research" : "Send follow-up")
+                .accessibilityIdentifier("pines.artifacts.research.send")
+            }
+        }
+        .padding(.horizontal, theme.spacing.large)
+        .padding(.vertical, theme.spacing.small)
+        .frame(maxWidth: 880)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
+    }
+
+    private var researchConfigurationLabel: String {
+        let providerName = provider?.displayName ?? "Choose provider"
+        let source = usesProviderFiles ? "web + provider files" : "web only"
+        return "\(providerName) · \(source)"
+    }
+
+    private var researchSettings: some View {
+        NavigationStack {
+            Form {
+                Section("Provider") {
+                    Picker("Provider", selection: $providerID) {
+                        ForEach(providers) { provider in
+                            Text(provider.displayName).tag(Optional(provider.id))
+                        }
+                    }
+                    Picker("Model", selection: $modelID) {
+                        ForEach(modelOptions) { option in
+                            Text(option.title).tag(option.id)
+                        }
+                    }
+                }
+
+                Section("Sources") {
+                    Toggle("Include provider files", isOn: $usesProviderFiles)
+                    Text(usesProviderFiles
+                         ? "Research may use files and vector stores already hosted with this provider, in addition to the web."
+                         : "Research uses the web only. Provider-hosted files are excluded.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Report") {
+                    Picker("Depth", selection: $depth) {
+                        ForEach(OpenAIDeepResearchDepth.allCases, id: \.self) { value in
+                            Text(value.rawValue.readableArtifactKind).tag(value)
+                        }
+                    }
+                    Picker("Format", selection: $reportFormat) {
+                        ForEach(OpenAIDeepResearchReportFormat.allCases, id: \.self) { value in
+                            Text(value.rawValue.readableArtifactKind).tag(value)
+                        }
+                    }
                 }
             }
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .frame(width: 18, height: 18)
+            .navigationTitle("Research Settings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showsSettings = false }
+                }
+            }
         }
-        .disabled(provider == nil || modelOptions.isEmpty)
-        .pinesButtonStyle(.icon)
-        .accessibilityLabel("Research settings")
     }
 
     @MainActor
@@ -2443,15 +2085,15 @@ private struct ArtifactsResearchWorkspace: View {
             await sendFollowUp(in: selectedThread)
             return
         }
-        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else { return }
-        let questions = ArtifactsResearchClarifier.questions(for: trimmedPrompt)
-        guard !questions.isEmpty else {
-            await startRun(originalPrompt: trimmedPrompt, providerPrompt: trimmedPrompt)
-            return
+        let question = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty else { return }
+        let questions = ArtifactsResearchClarifier.questions(for: question)
+        if questions.isEmpty {
+            await startRun(originalPrompt: question, providerPrompt: question)
+        } else {
+            clarificationAnswers = Dictionary(uniqueKeysWithValues: questions.map { ($0.id, "") })
+            clarificationDraft = ArtifactsResearchClarificationDraft(originalPrompt: question, questions: questions)
         }
-        clarificationDraft = ArtifactsResearchClarificationDraft(originalPrompt: trimmedPrompt, questions: questions)
-        clarificationAnswers = Dictionary(uniqueKeysWithValues: questions.map { ($0.id, "") })
     }
 
     @MainActor
@@ -2461,49 +2103,58 @@ private struct ArtifactsResearchWorkspace: View {
         defer { isStarting = false }
         do {
             let threadID = UUID().uuidString
-            let resolvedTitle = Self.derivedResearchTitle(from: originalPrompt)
-            let model = ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines))
-            let vectorStoreIDs = providerState.providerVectorStores.filter { $0.providerID == provider.id }.map(\.id)
-            let providerFileIDs = providerState.providerFiles.filter { $0.providerID == provider.id }.map(\.id)
+            let model = ModelID(rawValue: modelID)
+            let vectorStoreIDs = usesProviderFiles
+                ? providerState.providerVectorStores.filter { $0.providerID == provider.id }.map(\.id)
+                : []
+            let providerFileIDs = usesProviderFiles
+                ? providerState.providerFiles.filter { $0.providerID == provider.id }.map(\.id)
+                : []
             let metadata = researchMetadata(threadID: threadID, userPrompt: originalPrompt)
             let run: ProviderResearchRunRecord
             switch provider.kind {
             case .openAI:
-                let request = OpenAIDeepResearchRequest(
-                    providerID: provider.id,
-                    modelID: model,
-                    title: resolvedTitle,
-                    prompt: providerPrompt,
-                    depth: depth,
-                    sourcePolicy: .webAndFiles(
+                let sourcePolicy: OpenAIDeepResearchSourcePolicy = usesProviderFiles
+                    ? .webAndFiles(
                         vectorStoreIDs: vectorStoreIDs.map { OpenAIVectorStoreID(rawValue: $0) },
                         providerFileIDs: providerFileIDs.map { OpenAIProviderFileID(rawValue: $0) }
+                    )
+                    : .webOnly()
+                run = try await appModel.startOpenAIDeepResearch(
+                    OpenAIDeepResearchRequest(
+                        providerID: provider.id,
+                        modelID: model,
+                        title: Self.derivedResearchTitle(from: originalPrompt),
+                        prompt: providerPrompt,
+                        depth: depth,
+                        sourcePolicy: sourcePolicy,
+                        reportFormat: reportFormat,
+                        metadata: metadata
                     ),
-                    reportFormat: reportFormat,
-                    metadata: metadata
+                    services: services
                 )
-                run = try await appModel.startOpenAIDeepResearch(request, services: services)
             case .gemini:
-                let request = PinesProviderDeepResearchRequest(
-                    providerID: provider.id,
-                    providerKind: provider.kind,
-                    modelID: model,
-                    title: resolvedTitle,
-                    prompt: providerPrompt,
-                    depth: depth.rawValue,
-                    reportFormat: reportFormat.rawValue,
-                    vectorStoreIDs: vectorStoreIDs,
-                    providerFileIDs: providerFileIDs,
-                    metadata: metadata
+                run = try await appModel.startGeminiDeepResearch(
+                    PinesProviderDeepResearchRequest(
+                        providerID: provider.id,
+                        providerKind: provider.kind,
+                        modelID: model,
+                        title: Self.derivedResearchTitle(from: originalPrompt),
+                        prompt: providerPrompt,
+                        depth: depth.rawValue,
+                        reportFormat: reportFormat.rawValue,
+                        vectorStoreIDs: vectorStoreIDs,
+                        providerFileIDs: providerFileIDs,
+                        metadata: metadata
+                    ),
+                    services: services
                 )
-                run = try await appModel.startGeminiDeepResearch(request, services: services)
             default:
                 throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) Deep Research is not supported here.")
             }
             selectedThreadID = threadID
-            selection = .research(run.id)
+            providerID = run.providerID
             prompt = ""
-            clarificationDraft = nil
             clarificationAnswers = [:]
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
@@ -2514,15 +2165,14 @@ private struct ArtifactsResearchWorkspace: View {
     private func sendFollowUp(in thread: ArtifactsResearchThread) async {
         let question = followUpPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
-        isSendingFollowUp = true
-        defer { isSendingFollowUp = false }
+        isStarting = true
+        defer { isStarting = false }
         do {
             let latest = thread.latestRun
             let metadata = researchMetadata(threadID: thread.id, userPrompt: question, followUpOf: latest.id)
-            let run: ProviderResearchRunRecord
             switch latest.providerKind {
             case .gemini:
-                run = try await appModel.startGeminiDeepResearchFollowUp(
+                _ = try await appModel.startGeminiDeepResearchFollowUp(
                     prompt: question,
                     previousRunID: latest.id,
                     providerID: latest.providerID,
@@ -2531,73 +2181,85 @@ private struct ArtifactsResearchWorkspace: View {
                     metadata: metadata
                 )
             case .openAI:
-                let request = OpenAIDeepResearchRequest(
-                    providerID: latest.providerID,
-                    modelID: latest.modelID,
-                    title: "Follow-up: \(thread.title)",
-                    prompt: Self.followUpProviderPrompt(question: question, thread: thread, artifacts: providerState.providerArtifacts),
-                    depth: depth,
-                    sourcePolicy: .webAndFiles(
+                let sourcePolicy: OpenAIDeepResearchSourcePolicy = usesProviderFiles
+                    ? .webAndFiles(
                         vectorStoreIDs: providerState.providerVectorStores.filter { $0.providerID == latest.providerID }.map { OpenAIVectorStoreID(rawValue: $0.id) },
                         providerFileIDs: providerState.providerFiles.filter { $0.providerID == latest.providerID }.map { OpenAIProviderFileID(rawValue: $0.id) }
+                    )
+                    : .webOnly()
+                _ = try await appModel.startOpenAIDeepResearch(
+                    OpenAIDeepResearchRequest(
+                        providerID: latest.providerID,
+                        modelID: latest.modelID,
+                        title: "Follow-up: \(thread.title)",
+                        prompt: Self.followUpProviderPrompt(question: question, thread: thread, artifacts: providerState.providerArtifacts),
+                        depth: depth,
+                        sourcePolicy: sourcePolicy,
+                        reportFormat: reportFormat,
+                        metadata: metadata
                     ),
-                    reportFormat: reportFormat,
-                    metadata: metadata
+                    services: services
                 )
-                run = try await appModel.startOpenAIDeepResearch(request, services: services)
             default:
                 throw InferenceError.invalidRequest("\(latest.providerKind.pinesLifecycleTitle) Deep Research follow-up is not supported here.")
             }
-            selectedThreadID = thread.id
-            selection = .research(run.id)
             followUpPrompt = ""
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
     }
 
-    private func researchMetadata(threadID: String, userPrompt: String, followUpOf: String? = nil) -> [String: String] {
-        var metadata = [
-            "pines.research_thread_id": threadID,
-            "pines.user_prompt": String(userPrompt.prefix(512)),
-            "pines.research_ui": "chat_pane_v2",
-        ]
-        if let followUpOf {
-            metadata["pines.follow_up_of"] = followUpOf
+    private func configureInitialSelection() {
+        if let selectedThread {
+            providerID = selectedThread.latestRun.providerID
+            modelID = selectedThread.modelID.rawValue
+            usesProviderFiles = selectedThread.latestRun.usesProviderFilesForResearch
+        } else if providerID == nil {
+            providerID = providers.first?.id
         }
-        return metadata
+        normalizeSelectedModel()
     }
 
-    private func finalReport(for run: ProviderResearchRunRecord) -> ProviderArtifactRecord? {
-        run.finalReportArtifactID.flatMap { id in
-            providerState.providerArtifacts.first { $0.id == id }
-        }
+    private func selectThread(_ thread: ArtifactsResearchThread) {
+        selectedThreadID = thread.id
+        providerID = thread.latestRun.providerID
+        modelID = thread.modelID.rawValue
+        depth = OpenAIDeepResearchDepth(rawValue: thread.latestRun.depth) ?? .standard
+        reportFormat = OpenAIDeepResearchReportFormat(rawValue: thread.latestRun.reportFormat) ?? .memo
+        usesProviderFiles = thread.latestRun.usesProviderFilesForResearch
     }
 
     private func startNewThread() {
         selectedThreadID = nil
-        selection = nil
         prompt = ""
         followUpPrompt = ""
-        clarificationDraft = nil
-        clarificationAnswers = [:]
-        isComposerFocused = true
+        composerFocused = true
     }
 
-    @MainActor
-    private func resumeRuns(_ provider: CloudProviderConfiguration) async {
-        do {
-            switch provider.kind {
-            case .openAI:
-                _ = try await appModel.resumeOpenAIDeepResearchRuns(providerID: provider.id, services: services)
-            case .gemini:
-                _ = try await appModel.resumeGeminiDeepResearchRuns(providerID: provider.id, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) Deep Research is not supported here.")
-            }
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
+    private func normalizeSelectedModel() {
+        if providerID == nil { providerID = providers.first?.id }
+        guard !modelOptions.isEmpty else {
+            modelID = ""
+            return
         }
+        if !modelOptions.contains(where: { $0.id == modelID }) {
+            modelID = modelOptions[0].id
+        }
+    }
+
+    private func finalReport(for run: ProviderResearchRunRecord) -> ProviderArtifactRecord? {
+        run.finalReportArtifactID.flatMap { id in providerState.providerArtifacts.first(where: { $0.id == id }) }
+    }
+
+    private func researchMetadata(threadID: String, userPrompt: String, followUpOf: String? = nil) -> [String: String] {
+        var metadata = [
+            "pines.research_thread_id": threadID,
+            "pines.user_prompt": String(userPrompt.prefix(512)),
+            "pines.research_ui": "artifact_library_v3",
+            "pines.source_scope": usesProviderFiles ? "web_and_provider_files" : "web_only",
+        ]
+        if let followUpOf { metadata["pines.follow_up_of"] = followUpOf }
+        return metadata
     }
 
     @MainActor
@@ -2609,67 +2271,62 @@ private struct ArtifactsResearchWorkspace: View {
             case .gemini:
                 _ = try await appModel.refreshGeminiDeepResearchRun(id: run.id, providerID: run.providerID, services: services)
             default:
-                throw InferenceError.invalidRequest("\(run.providerKind.pinesLifecycleTitle) Deep Research is not supported here.")
+                break
             }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
     }
 
-    private func normalizeSelectedModel() {
-        let options = modelOptions
-        guard !options.isEmpty else {
-            modelID = ""
-            return
-        }
-        if !options.contains(where: { $0.id == modelID }) {
-            modelID = options[0].id
+    @MainActor
+    private func refreshActiveRuns() async {
+        for run in activeRuns { await refreshRun(run) }
+    }
+
+    @MainActor
+    private func monitorActiveRuns() async {
+        guard !activeRuns.isEmpty else { return }
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .seconds(4))
+            } catch {
+                return
+            }
+            guard !activeRuns.isEmpty else { return }
+            await refreshActiveRuns()
         }
     }
 
     private static func derivedResearchTitle(from prompt: String) -> String {
-        let trimmed = prompt
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\n", with: " ")
-        guard !trimmed.isEmpty else { return "Deep research" }
-        let clipped = String(trimmed.prefix(72)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return clipped.last == "?" ? String(clipped.dropLast()) : clipped
+        let line = prompt.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
+        let clipped = String(line.prefix(72)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return clipped.last == "?" ? String(clipped.dropLast()) : (clipped.isEmpty ? "Deep Research" : clipped)
     }
 
-    private static func followUpProviderPrompt(question: String, thread: ArtifactsResearchThread, artifacts: [ProviderArtifactRecord]) -> String {
-        let priorContext = thread.runs.map { run in
+    private static func followUpProviderPrompt(
+        question: String,
+        thread: ArtifactsResearchThread,
+        artifacts: [ProviderArtifactRecord]
+    ) -> String {
+        let context = thread.runs.map { run in
             let report = run.finalReportArtifactID
-                .flatMap { id in artifacts.first { $0.id == id } }
-                .flatMap(ArtifactsResearchReportText.text(from:))
+                .flatMap { id in artifacts.first(where: { $0.id == id }) }
+                .flatMap(ArtifactResearchReportText.text(from:))
                 .map { String($0.prefix(2400)) }
                 ?? run.lastError
                 ?? run.status
-            return """
-            Prior prompt:
-            \(run.researchDisplayPrompt)
-
-            Prior output excerpt:
-            \(report)
-            """
+            return "Prior prompt:\n\(run.researchDisplayPrompt)\n\nPrior output excerpt:\n\(report)"
         }.joined(separator: "\n\n---\n\n")
-
-        return """
-        Follow-up question:
-        \(question)
-
-        Use the prior Deep Research context below. Verify new claims with fresh sources where needed, keep citations visible, and answer as a continuation of the same research thread.
-
-        \(priorContext)
-        """
+        return "Follow-up question:\n\(question)\n\nContinue the same research thread. Verify new claims and retain visible citations.\n\n\(context)"
     }
 }
 
-private struct ArtifactsResearchThread: Identifiable, Hashable {
+struct ArtifactsResearchThread: Identifiable, Hashable {
     var id: String
     var runs: [ProviderResearchRunRecord]
 
     var latestRun: ProviderResearchRunRecord {
-        runs.max { $0.updatedAt < $1.updatedAt } ?? runs[0]
+        runs.max(by: { $0.updatedAt < $1.updatedAt }) ?? runs[0]
     }
 
     var title: String { runs.first?.title ?? latestRun.title }
@@ -2679,67 +2336,53 @@ private struct ArtifactsResearchThread: Identifiable, Hashable {
     var sourceCount: Int {
         Set(runs.flatMap { ArtifactsWorkspaceDeriver.researchSources(for: $0).map { $0.url ?? $0.title } }).count
     }
-
     var statusText: String {
-        if runs.contains(where: { !$0.status.providerIsTerminal }) {
-            return "researching"
-        }
-        if latestRun.lastError != nil {
-            return "needs attention"
-        }
-        return "ready"
+        if runs.contains(where: { !$0.status.providerIsTerminal }) { return "Researching" }
+        if runs.contains(where: { $0.lastError != nil }) { return "Needs attention" }
+        return "Ready"
     }
 
     static func threads(from runs: [ProviderResearchRunRecord]) -> [ArtifactsResearchThread] {
-        let grouped = Dictionary(grouping: runs) { run in
+        Dictionary(grouping: runs) { run in
             run.providerMetadata["pines.research_thread_id"]
                 ?? run.providerMetadata["pines.follow_up_of"]
                 ?? run.id
         }
-        return grouped.map { key, groupedRuns in
+        .map { id, groupedRuns in
             ArtifactsResearchThread(
-                id: key,
-                runs: groupedRuns.sorted { lhs, rhs in
-                    if lhs.createdAt == rhs.createdAt {
-                        return lhs.updatedAt < rhs.updatedAt
-                    }
-                    return lhs.createdAt < rhs.createdAt
-                }
+                id: id,
+                runs: groupedRuns.sorted { $0.createdAt == $1.createdAt ? $0.updatedAt < $1.updatedAt : $0.createdAt < $1.createdAt }
             )
         }
         .sorted { lhs, rhs in
-            if lhs.runs.contains(where: { !$0.status.providerIsTerminal }) != rhs.runs.contains(where: { !$0.status.providerIsTerminal }) {
-                return lhs.runs.contains(where: { !$0.status.providerIsTerminal })
-            }
-            return lhs.updatedAt > rhs.updatedAt
+            let lhsActive = lhs.runs.contains(where: { !$0.status.providerIsTerminal })
+            let rhsActive = rhs.runs.contains(where: { !$0.status.providerIsTerminal })
+            return lhsActive == rhsActive ? lhs.updatedAt > rhs.updatedAt : lhsActive
         }
     }
 }
 
 private extension ProviderResearchRunRecord {
     var researchDisplayPrompt: String {
-        if let prompt = providerMetadata["pines.user_prompt"], !prompt.isEmpty {
-            return prompt
-        }
-        if let range = prompt.range(of: "Follow-up question for previous Deep Research run", options: .caseInsensitive) {
-            let followUp = prompt[range.upperBound...]
-            if let separator = followUp.range(of: "Original research request:", options: .caseInsensitive) {
-                return String(followUp[..<separator.lowerBound])
-                    .replacingOccurrences(of: ":", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+        if let userPrompt = providerMetadata["pines.user_prompt"], !userPrompt.isEmpty {
+            return userPrompt
         }
         return prompt
     }
+
+    var usesProviderFilesForResearch: Bool {
+        providerMetadata["pines.source_scope"] == "web_and_provider_files"
+            || providerMetadata["pines_research_source_scope"] == OpenAIDeepResearchSourceScope.webAndProviderFiles.rawValue
+    }
 }
 
-private struct ArtifactsResearchRunExchange: View {
+private struct ArtifactsResearchRunView: View {
     @Environment(\.pinesTheme) private var theme
     let run: ProviderResearchRunRecord
-    let finalReport: ProviderArtifactRecord?
+    let report: ProviderArtifactRecord?
     let refresh: () -> Void
     let cancel: () -> Void
-    let openArtifact: (ProviderArtifactRecord) -> Void
+    let openReport: (ProviderArtifactRecord) -> Void
 
     private var events: [ArtifactsResearchTimelineEvent] {
         ArtifactsWorkspaceDeriver.researchTimeline(for: run)
@@ -2759,95 +2402,91 @@ private struct ArtifactsResearchRunExchange: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
 
-            PinesMessageBubble(role: .assistant, isActive: !run.status.providerIsTerminal) {
-                VStack(alignment: .leading, spacing: theme.spacing.medium) {
-                    assistantHeader
-                    ArtifactsResearchProgressList(events: events, sources: sources)
-
-                    if let finalReport {
-                        ArtifactsResearchFinalReportMessage(artifact: finalReport) {
-                            openArtifact(finalReport)
-                        }
-                    } else if run.status.providerIsTerminal {
-                        terminalEmptyMessage
+            VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                HStack(spacing: theme.spacing.small) {
+                    PinesStatusIndicator(
+                        color: run.status.providerCloudStatus.tone.color(in: theme),
+                        isActive: !run.status.providerIsTerminal,
+                        size: 9
+                    )
+                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                        Text(run.status.providerCloudStatus.title)
+                            .font(theme.typography.callout.weight(.semibold))
+                        Text("\(run.providerKind.pinesLifecycleTitle) · \(run.modelID.rawValue)")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(1)
                     }
+                    Spacer()
+                    Menu {
+                        Button(action: refresh) {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        if !run.status.providerIsTerminal {
+                            Button(role: .destructive, action: cancel) {
+                                Label("Cancel research", systemImage: "xmark")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Research run actions")
+                }
+
+                ArtifactsResearchActivityDisclosure(events: events, sources: sources)
+
+                if let report {
+                    Button {
+                        openReport(report)
+                    } label: {
+                        VStack(alignment: .leading, spacing: theme.spacing.small) {
+                            HStack {
+                                Label("Final report", systemImage: "doc.richtext")
+                                    .font(theme.typography.callout.weight(.semibold))
+                                    .foregroundStyle(theme.colors.success)
+                                Spacer()
+                                Image(systemName: "arrow.up.right.square")
+                                    .foregroundStyle(theme.colors.secondaryText)
+                            }
+                            Text(ArtifactResearchReportText.text(from: report) ?? "Open the saved report")
+                                .font(theme.typography.callout)
+                                .foregroundStyle(theme.colors.primaryText)
+                                .lineLimit(5)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .pinesSurface(.inset, padding: theme.spacing.medium)
+                } else if run.status.providerIsTerminal {
+                    Text(run.lastError ?? "The provider completed without a saved report artifact.")
+                        .font(theme.typography.callout)
+                        .foregroundStyle(run.lastError == nil ? theme.colors.secondaryText : theme.colors.danger)
                 }
             }
+            .pinesSurface(.panel, padding: theme.spacing.medium)
         }
-    }
-
-    private var assistantHeader: some View {
-        HStack(alignment: .center, spacing: theme.spacing.small) {
-            PinesStatusIndicator(
-                color: run.status.providerCloudStatus.tone.color(in: theme),
-                isActive: !run.status.providerIsTerminal,
-                size: 8
-            )
-            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                Text(run.status.providerCloudStatus.title)
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .lineLimit(1)
-                Text("\(run.providerKind.pinesLifecycleTitle) - \(run.modelID.rawValue)")
-                    .font(theme.typography.caption)
-                    .foregroundStyle(theme.colors.tertiaryText)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: theme.spacing.small)
-
-            Button(action: refresh) {
-                Image(systemName: "arrow.clockwise")
-                    .frame(width: 18, height: 18)
-            }
-            .pinesButtonStyle(.icon)
-            .accessibilityLabel("Refresh research")
-
-            if !run.status.providerIsTerminal {
-                Button(role: .destructive, action: cancel) {
-                    Image(systemName: "xmark")
-                        .frame(width: 18, height: 18)
-                }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("Cancel research")
-            }
-        }
-    }
-
-    private var terminalEmptyMessage: some View {
-        Label {
-            Text(run.lastError ?? "The run completed without a saved report artifact.")
-                .font(theme.typography.caption)
-                .foregroundStyle(run.lastError == nil ? theme.colors.secondaryText : theme.colors.danger)
-                .fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Image(systemName: run.lastError == nil ? "checkmark.circle" : "exclamationmark.triangle")
-                .foregroundStyle(run.lastError == nil ? theme.colors.success : theme.colors.danger)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-private struct ArtifactsResearchProgressList: View {
+private struct ArtifactsResearchActivityDisclosure: View {
     @Environment(\.pinesTheme) private var theme
     let events: [ArtifactsResearchTimelineEvent]
     let sources: [ArtifactsResearchSource]
-    @State private var isExpanded = true
+    @State private var expanded = false
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
+        DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: theme.spacing.small) {
-                ForEach(events.prefix(12)) { event in
+                ForEach(events.prefix(8)) { event in
                     HStack(alignment: .top, spacing: theme.spacing.small) {
                         Image(systemName: event.systemImage)
-                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(event.tone.color(in: theme))
-                            .frame(width: 20, height: 20)
+                            .frame(width: 20)
                         VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
                             Text(event.title)
                                 .font(theme.typography.caption.weight(.semibold))
-                                .foregroundStyle(theme.colors.primaryText)
-                                .lineLimit(1)
                             Text(event.detail)
                                 .font(theme.typography.caption)
                                 .foregroundStyle(theme.colors.secondaryText)
@@ -2855,59 +2494,34 @@ private struct ArtifactsResearchProgressList: View {
                         }
                     }
                 }
-
-                if sources.isEmpty {
-                    Text("Source pages will appear here when the provider returns citations or searched-page metadata.")
-                        .font(theme.typography.caption)
-                        .foregroundStyle(theme.colors.tertiaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: theme.spacing.xsmall)], alignment: .leading, spacing: theme.spacing.xsmall) {
-                        ForEach(sources.prefix(16)) { source in
-                            ArtifactsResearchSourceChip(source: source)
-                        }
+                ForEach(sources.prefix(12)) { source in
+                    if let url = source.url.flatMap(URL.init(string:)) {
+                        Link(destination: url) { researchSourceRow(source) }
+                    } else {
+                        researchSourceRow(source)
                     }
                 }
             }
             .padding(.top, theme.spacing.small)
         } label: {
-            HStack(spacing: theme.spacing.xsmall) {
-                Label("Research activity", systemImage: "point.3.connected.trianglepath.dotted")
+            HStack {
+                Label("Activity & sources", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.secondaryText)
-                Spacer(minLength: theme.spacing.small)
+                Spacer()
                 Text("\(sources.count)")
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.tertiaryText)
-                    .monospacedDigit()
+                    .font(theme.typography.caption.monospacedDigit())
+                    .foregroundStyle(theme.colors.secondaryText)
             }
         }
         .pinesSurface(.inset, padding: theme.spacing.small)
     }
-}
 
-private struct ArtifactsResearchSourceChip: View {
-    @Environment(\.pinesTheme) private var theme
-    let source: ArtifactsResearchSource
-
-    var body: some View {
-        Group {
-            if let urlString = source.url, let url = URL(string: urlString) {
-                Link(destination: url) { chipContent }
-            } else {
-                chipContent
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var chipContent: some View {
-        HStack(alignment: .top, spacing: theme.spacing.xsmall) {
+    private func researchSourceRow(_ source: ArtifactsResearchSource) -> some View {
+        HStack(alignment: .top, spacing: theme.spacing.small) {
             Image(systemName: source.systemImage)
-                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(source.tone.color(in: theme))
-                .frame(width: 18, height: 18)
-            VStack(alignment: .leading, spacing: 1) {
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
                 Text(source.title)
                     .font(theme.typography.caption.weight(.semibold))
                     .foregroundStyle(theme.colors.primaryText)
@@ -2918,51 +2532,11 @@ private struct ArtifactsResearchSourceChip: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Spacer(minLength: 0)
         }
-        .padding(theme.spacing.xsmall)
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .topLeading)
-        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
     }
 }
 
-private struct ArtifactsResearchFinalReportMessage: View {
-    @Environment(\.pinesTheme) private var theme
-    let artifact: ProviderArtifactRecord
-    let open: () -> Void
-
-    private var reportText: String {
-        ArtifactsResearchReportText.text(from: artifact) ?? "Report saved. Open the full report to view the complete output."
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
-            HStack(spacing: theme.spacing.small) {
-                Label("Final report", systemImage: "doc.richtext")
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.success)
-                Spacer()
-                Button {
-                    open()
-                } label: {
-                    Label("Open", systemImage: "arrow.up.right.square")
-                        .labelStyle(.iconOnly)
-                }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("Open final report artifact")
-            }
-
-            MarkdownMessageView(
-                messageID: UUID(),
-                content: reportText,
-                isStreaming: false
-            )
-        }
-        .pinesSurface(.inset, padding: theme.spacing.small)
-    }
-}
-
-private enum ArtifactsResearchReportText {
+enum ArtifactResearchReportText {
     static func text(from artifact: ProviderArtifactRecord) -> String? {
         if let text = artifact.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
             return text
@@ -2977,21 +2551,15 @@ private enum ArtifactsResearchReportText {
                ["reasoning", "web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "function_call", "computer_call"].contains(type) {
                 return nil
             }
-            if let outputText = object["output_text"]?.stringValue, !outputText.isEmpty {
-                return outputText
-            }
+            if let outputText = object["output_text"]?.stringValue, !outputText.isEmpty { return outputText }
             if let type = object["type"]?.stringValue,
                ["output_text", "text", "message"].contains(type),
                let text = object["text"]?.stringValue,
                !text.isEmpty {
                 return text
             }
-            if object["type"]?.stringValue == "message", let content = object["content"] {
-                return userFacingText(from: content)
-            }
-            if let output = object["output"] {
-                return userFacingText(from: output)
-            }
+            if let content = object["content"] { return userFacingText(from: content) }
+            if let output = object["output"] { return userFacingText(from: output) }
             return nil
         case let .array(values):
             let text = values.compactMap(userFacingText(from:)).joined(separator: "\n\n")
@@ -3004,19 +2572,19 @@ private enum ArtifactsResearchReportText {
     }
 }
 
-private struct ArtifactsResearchHistorySheet: View {
+private struct ArtifactsResearchHistoryView: View {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.dismiss) private var dismiss
     let threads: [ArtifactsResearchThread]
     let selectedThreadID: String?
     let select: (ArtifactsResearchThread) -> Void
     @State private var query = ""
 
     private var filteredThreads: [ArtifactsResearchThread] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return threads }
-        return threads.filter { thread in
-            thread.title.lowercased().contains(trimmed)
-                || thread.runs.contains { $0.researchDisplayPrompt.lowercased().contains(trimmed) }
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return needle.isEmpty ? threads : threads.filter {
+            $0.title.lowercased().contains(needle)
+                || $0.runs.contains(where: { $0.researchDisplayPrompt.lowercased().contains(needle) })
         }
     }
 
@@ -3035,21 +2603,23 @@ private struct ArtifactsResearchHistorySheet: View {
                                 .font(theme.typography.callout.weight(.semibold))
                                 .foregroundStyle(theme.colors.primaryText)
                                 .lineLimit(2)
-                            Text(thread.latestRun.researchDisplayPrompt)
+                            Text("\(thread.providerKind.pinesLifecycleTitle) · \(thread.statusText) · \(thread.sourceCount) sources")
                                 .font(theme.typography.caption)
                                 .foregroundStyle(theme.colors.secondaryText)
-                                .lineLimit(2)
-                            Text("\(thread.providerKind.pinesLifecycleTitle) - \(thread.statusText) - \(thread.sourceCount) sources - \(RelativeDateTimeFormatter.shortLabel(for: thread.updatedAt))")
+                            Text(RelativeDateTimeFormatter.shortLabel(for: thread.updatedAt))
                                 .font(theme.typography.caption)
                                 .foregroundStyle(theme.colors.tertiaryText)
-                                .lineLimit(1)
                         }
                     }
-                    .padding(.vertical, theme.spacing.xxsmall)
                 }
             }
             .searchable(text: $query, prompt: "Search research")
             .navigationTitle("Research History")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
         }
     }
 }
@@ -3057,7 +2627,6 @@ private struct ArtifactsResearchHistorySheet: View {
 private struct ArtifactsResearchClarificationQuestion: Identifiable, Hashable {
     let id: String
     let title: String
-    let detail: String
     let placeholder: String
 }
 
@@ -3067,237 +2636,92 @@ private struct ArtifactsResearchClarificationDraft: Identifiable, Hashable {
     let questions: [ArtifactsResearchClarificationQuestion]
 
     func providerPrompt(answers: [String: String]) -> String {
-        let resolvedAnswers = questions.compactMap { question -> String? in
+        let resolved = questions.compactMap { question -> String? in
             let answer = answers[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !answer.isEmpty else { return nil }
-            return "- \(question.title): \(answer)"
+            return answer.isEmpty ? nil : "- \(question.title): \(answer)"
         }
-        guard !resolvedAnswers.isEmpty else {
-            return """
-            \(originalPrompt)
-
-            Proceed with reasonable assumptions. State any important assumptions before the report.
-            """
+        guard !resolved.isEmpty else {
+            return "\(originalPrompt)\n\nProceed with reasonable assumptions and state important assumptions in the report."
         }
-        return """
-        \(originalPrompt)
-
-        Clarifications from the user:
-        \(resolvedAnswers.joined(separator: "\n"))
-        """
+        return "\(originalPrompt)\n\nClarifications from the user:\n\(resolved.joined(separator: "\n"))"
     }
 }
 
 private enum ArtifactsResearchClarifier {
     static func questions(for prompt: String) -> [ArtifactsResearchClarificationQuestion] {
-        let lowercased = prompt.lowercased()
+        let value = prompt.lowercased()
         var questions = [ArtifactsResearchClarificationQuestion]()
-        if !containsAny(lowercased, ["202", "today", "yesterday", "last ", "next ", "current", "latest", "q1", "q2", "q3", "q4", "month", "year"]) {
-            questions.append(.init(id: "timeframe", title: "Timeframe", detail: "What dates or recency should the research prioritize?", placeholder: "Example: last 12 months, 2024-2026, current as of today"))
+        if !containsAny(value, ["today", "current", "latest", "last ", "next ", "202", "month", "year", "q1", "q2", "q3", "q4"]) {
+            questions.append(.init(id: "timeframe", title: "Timeframe", placeholder: "For example: current as of today, or last 12 months"))
         }
-        if !containsAny(lowercased, ["us", "u.s.", "usa", "europe", "eu", "global", "uk", "germany", "china", "japan", "india", "market"]) {
-            questions.append(.init(id: "scope", title: "Geographic or market scope", detail: "Should the answer focus on a region, market, or audience?", placeholder: "Example: United States consumers, EU regulation, global enterprise buyers"))
+        if !containsAny(value, ["global", "market", "united states", "u.s.", "europe", "eu", "uk", "germany", "asia"]) {
+            questions.append(.init(id: "scope", title: "Market or audience", placeholder: "For example: global enterprise buyers"))
         }
-        if !containsAny(lowercased, ["compare", "versus", "vs", "rank", "best", "benchmark", "criteria"]) {
-            questions.append(.init(id: "decision", title: "Decision criteria", detail: "What should the report optimize for or compare against?", placeholder: "Example: adoption, price, regulation, risk, technical quality"))
+        if !containsAny(value, ["compare", "decision", "recommend", "rank", "risk", "price", "adoption", "quality"]) {
+            questions.append(.init(id: "goal", title: "Decision goal", placeholder: "What should the report help you decide?"))
         }
-        if !containsAny(lowercased, ["primary", "academic", "news", "filing", "official", "source", "citation", "paper"]) {
-            questions.append(.init(id: "sources", title: "Source preference", detail: "Are there source types to prefer or avoid?", placeholder: "Example: primary sources and filings; avoid blogs"))
-        }
-        if !containsAny(lowercased, ["memo", "table", "bullets", "brief", "report", "slides", "executive", "technical"]) {
-            questions.append(.init(id: "format", title: "Output format", detail: "How should the final result be shaped?", placeholder: "Example: executive memo with a comparison table"))
-        }
-        return Array(questions.prefix(5))
+        return Array(questions.prefix(3))
     }
 
-    private static func containsAny(_ text: String, _ needles: [String]) -> Bool {
-        needles.contains { text.contains($0) }
+    private static func containsAny(_ text: String, _ values: [String]) -> Bool {
+        values.contains { text.contains($0) }
     }
 }
 
-private struct ArtifactsResearchClarificationPanel: View {
+private struct ArtifactsResearchClarificationView: View {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.dismiss) private var dismiss
     let draft: ArtifactsResearchClarificationDraft
     @Binding var answers: [String: String]
-    let start: () -> Void
-    let skip: () -> Void
+    let start: (String) -> Void
     let cancel: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
-            HStack(spacing: theme.spacing.small) {
-                Label("Clarify before research", systemImage: "questionmark.bubble")
-                    .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.accent)
-                Spacer()
-                Button(action: cancel) {
-                    Image(systemName: "xmark")
-                        .frame(width: 18, height: 18)
+        NavigationStack {
+            Form {
+                Section {
+                    Text("A little more context can make the report substantially more useful. Every answer is optional.")
+                        .foregroundStyle(.secondary)
                 }
-                .pinesButtonStyle(.icon)
-                .accessibilityLabel("Dismiss clarification")
-            }
-
-            ForEach(draft.questions) { question in
-                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                    Text(question.title)
-                        .font(theme.typography.caption.weight(.semibold))
-                        .foregroundStyle(theme.colors.primaryText)
-                    TextField(question.placeholder, text: Binding(
-                        get: { answers[question.id] ?? "" },
-                        set: { answers[question.id] = $0 }
-                    ), axis: .vertical)
-                    .lineLimit(1...3)
-                    .pinesFieldChrome()
-                    Text(question.detail)
-                        .font(theme.typography.caption)
-                        .foregroundStyle(theme.colors.tertiaryText)
-                }
-            }
-
-            HStack(spacing: theme.spacing.small) {
-                Button("Start with answers", action: start)
-                    .pinesButtonStyle(.primary)
-                Button("Use assumptions", action: skip)
-                    .pinesButtonStyle(.secondary)
-            }
-        }
-        .pinesSurface(.panel, padding: theme.spacing.medium)
-    }
-}
-
-private struct ArtifactsRealtimeWorkspace: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.pinesServices) private var services
-    @EnvironmentObject private var appModel: PinesAppModel
-    @EnvironmentObject private var settingsState: PinesSettingsState
-    @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    let providerScope: ArtifactsProviderScope
-    @Binding var selection: ArtifactsSelection?
-    @State private var modelID = "gpt-4o-realtime-preview"
-    @State private var includesAudio = true
-    @State private var isCreating = false
-
-    private var provider: CloudProviderConfiguration? {
-        settingsState.cloudProviders.provider(in: providerScope, allowed: [.openAI, .gemini])
-    }
-
-    private var summaries: [ArtifactsResourceSummary] {
-        ArtifactsWorkspaceDeriver.liveSessionSummaries(sessions: providerState.providerLiveSessions, filter: .init(providerScope: providerScope))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Realtime Sessions", subtitle: "Create and inspect realtime/live session records. Full audio transport remains a separate workflow.", systemImage: "dot.radiowaves.left.and.right") {
-                VStack(alignment: .leading, spacing: theme.spacing.small) {
-                    if let provider {
-                        PinesStatusChip(status: .custom("\(provider.displayName) - \(provider.kind.pinesLifecycleTitle)", .info))
-                    } else {
-                        PinesEmptyState(title: "Choose OpenAI or Gemini", detail: "Set the page provider scope before creating a realtime session record.", systemImage: "cloud")
-                            .pinesSurface(.inset, padding: theme.spacing.small)
+                ForEach(draft.questions) { question in
+                    Section(question.title) {
+                        TextField(question.placeholder, text: Binding(
+                            get: { answers[question.id] ?? "" },
+                            set: { answers[question.id] = $0 }
+                        ), axis: .vertical)
+                        .lineLimit(1...4)
                     }
-                    TextField("Model", text: $modelID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .pinesFieldChrome()
-                    Toggle("Audio modality", isOn: $includesAudio)
-                        .toggleStyle(.switch)
-                    Button {
-                        Task { await createSession() }
-                    } label: {
-                        Label(isCreating ? "Creating" : "Create session", systemImage: isCreating ? "hourglass" : "plus.circle")
+                }
+                Section {
+                    Button("Start with these answers") {
+                        start(draft.providerPrompt(answers: answers))
                     }
-                    .disabled(provider == nil || isCreating)
-                    .pinesButtonStyle(.primary)
+                    Button("Use reasonable assumptions") {
+                        start(draft.providerPrompt(answers: [:]))
+                    }
                 }
             }
-
-            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No realtime sessions", emptyDetail: "Session records and transcript placeholders appear here.")
-        }
-    }
-
-    @MainActor
-    private func createSession() async {
-        guard let provider else { return }
-        isCreating = true
-        defer { isCreating = false }
-        do {
-            let modalities = includesAudio ? ["text", "audio"] : ["text"]
-            let model = ModelID(rawValue: modelID.trimmingCharacters(in: .whitespacesAndNewlines))
-            let session: JSONValue = .object([
-                "type": .string("realtime"),
-                "model": .string(model.rawValue),
-                "modalities": .array(modalities.map { .string($0) }),
-            ])
-            switch provider.kind {
-            case .openAI:
-                let request = OpenAIRealtimeSessionWorkflowRequest(kind: .clientSecret(OpenAIRealtimeClientSecretRequest(session: session), modalities: modalities), fallbackModelID: model)
-                _ = try await appModel.createOpenAIRealtimeSessionRecord(request, providerID: provider.id, services: services)
-            case .gemini:
-                let request = PinesProviderRealtimeSessionRequest(providerID: provider.id, providerKind: provider.kind, modelID: model, modalities: modalities, session: session)
-                _ = try await appModel.createGeminiRealtimeSessionRecord(request, providerID: provider.id, services: services)
-            default:
-                throw InferenceError.invalidRequest("\(provider.kind.pinesLifecycleTitle) Realtime is not supported here.")
-            }
-        } catch {
-            providerState.providerLifecycleError = error.localizedDescription
-        }
-    }
-}
-
-private struct ArtifactsCapabilitiesWorkspace: View {
-    @Environment(\.pinesTheme) private var theme
-    @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    let providerScope: ArtifactsProviderScope
-    @Binding var selection: ArtifactsSelection?
-
-    private var summaries: [ArtifactsResourceSummary] {
-        ArtifactsWorkspaceDeriver.capabilitySummaries(capabilities: providerState.providerModelCapabilities, filter: .init(providerScope: providerScope, sort: .provider))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.medium) {
-            PinesCardSection("Capability Diagnostics", subtitle: "Advanced metadata that powers model picker gating and attachment compatibility.", systemImage: "cpu") {
-                PinesMetricPillGroup(items: [
-                    .init("Models", value: "\(summaries.count)", systemImage: "cpu", tone: .info),
-                    .init("Providers", value: "\(Set(summaries.map(\.providerKind)).count)", systemImage: "cloud", tone: .warning),
-                ])
-            }
-            ArtifactsResourceList(summaries: summaries, selection: $selection, emptyTitle: "No capability metadata", emptyDetail: "Refresh cloud resources to populate diagnostic rows.")
-        }
-    }
-}
-
-private struct ArtifactsMediaKindSelector: View {
-    @Binding var selection: ArtifactsMediaKind
-
-    var body: some View {
-        Picker("Media type", selection: $selection) {
-            ForEach(ArtifactsMediaKind.allCases) { kind in
-                Label(kind.title, systemImage: kind.systemImage)
-                    .tag(kind)
+            .navigationTitle("Clarify Research")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        cancel()
+                        dismiss()
+                    }
+                }
             }
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 360)
-        .pinesSegmentedPickerChrome()
     }
 }
 
 enum ArtifactsConfirmation: Identifiable {
     case deleteArtifactRecord(ProviderArtifactRecord)
-    case deleteProviderFile(ProviderFileRecord)
-    case deleteProviderCache(ProviderCacheRecord)
-    case cancelBatch(ProviderBatchRecord)
     case cancelResearch(ProviderResearchRunRecord)
     case cancelMediaOperation(ProviderArtifactRecord)
 
     var id: String {
         switch self {
         case .deleteArtifactRecord(let artifact): "delete-artifact-\(artifact.id)"
-        case .deleteProviderFile(let file): "delete-file-\(file.id)"
-        case .deleteProviderCache(let cache): "delete-cache-\(cache.id)"
-        case .cancelBatch(let batch): "cancel-batch-\(batch.id)"
         case .cancelResearch(let run): "cancel-research-\(run.id)"
         case .cancelMediaOperation(let artifact): "cancel-media-\(artifact.id)"
         }
@@ -3305,10 +2729,7 @@ enum ArtifactsConfirmation: Identifiable {
 
     var title: String {
         switch self {
-        case .deleteArtifactRecord: "Delete local artifact record?"
-        case .deleteProviderFile: "Delete cloud copy?"
-        case .deleteProviderCache: "Delete cloud context?"
-        case .cancelBatch: "Cancel background process?"
+        case .deleteArtifactRecord: "Remove local record?"
         case .cancelResearch: "Cancel research run?"
         case .cancelMediaOperation: "Cancel media operation?"
         }
@@ -3317,32 +2738,17 @@ enum ArtifactsConfirmation: Identifiable {
     var message: String {
         switch self {
         case .deleteArtifactRecord(let artifact):
-            "This removes only Pines' local lifecycle record for \(artifact.fileName ?? artifact.id). It does not delete cloud copies or remote resources."
-        case .deleteProviderFile(let file):
-            "This asks \(file.providerKind.pinesLifecycleTitle) to delete \(file.fileName). The local Vault source, if any, is not deleted."
-        case .deleteProviderCache(let cache):
-            "This asks \(cache.providerKind.pinesLifecycleTitle) to delete \(cache.name ?? cache.id). Local Vault documents are not deleted."
-        case .cancelBatch(let batch):
-            "This asks \(batch.providerKind.pinesLifecycleTitle) to cancel batch \(batch.id). Completed output files are not imported automatically."
+            "This removes only Pines' local record for \(artifact.fileName ?? artifact.artifactDisplayTitle). It does not delete provider-hosted copies."
         case .cancelResearch(let run):
-            "This asks \(run.providerKind.pinesLifecycleTitle) to cancel research run \(run.title). Existing saved artifacts remain local records."
+            "This asks \(run.providerKind.pinesLifecycleTitle) to cancel \(run.title). Saved artifacts remain available."
         case .cancelMediaOperation(let artifact):
-            "This asks \(artifact.providerKind.pinesLifecycleTitle) to stop \(artifact.fileName ?? artifact.kind.readableArtifactKind). Any output already completed may remain available from the provider."
+            "This asks \(artifact.providerKind.pinesLifecycleTitle) to stop \(artifact.fileName ?? artifact.artifactDisplayTitle). Completed output may remain with the provider."
         }
     }
 }
 
 private extension Array where Element == CloudProviderConfiguration {
-    var pinesLifecycleProviders: [CloudProviderConfiguration] {
-        filter { $0.kind == .openAI || $0.kind == .anthropic || $0.kind == .gemini }
-    }
-
-    func provider(in scope: ArtifactsProviderScope, allowed kinds: Set<CloudProviderKind>) -> CloudProviderConfiguration? {
-        switch scope {
-        case .all:
-            first { kinds.contains($0.kind) }
-        case .provider(let id):
-            first { $0.id == id && kinds.contains($0.kind) }
-        }
+    var artifactProviders: [CloudProviderConfiguration] {
+        filter { $0.kind == .openAI || $0.kind == .gemini }
     }
 }

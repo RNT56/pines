@@ -70,8 +70,9 @@ extension PinesAppModel {
     ) async throws -> ProviderArtifactRecord {
         let artifact = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .refreshVideoJob(id: id)
+        let preserved = try await preserveProviderArtifactCreationMetadata(in: artifact, services: services)
         await refreshProviderLifecycleState(services: services)
-        return artifact
+        return preserved
     }
 
     @discardableResult

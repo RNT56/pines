@@ -5,6 +5,7 @@ This document captures adjacent, high-value feature additions for Pines. The emp
 ## Recently Landed Foundation
 
 - Shared provider lifecycle records and dashboards for OpenAI, Anthropic, and Gemini files, artifacts, caches/vector stores, batches, model capabilities, live sessions, and research runs.
+- A focused Artifacts library with searchable output categories, adaptive list/media layouts, compact active-work status, full artifact readers, dedicated media creation, and conversation-first Deep Research routes.
 - Provider-hosted storage managers for OpenAI Files/vector stores, Anthropic Files, and Gemini Files/context caches, with local Vault separation.
 - Provider provenance in chat for citations, hosted tool events, file references, request/message IDs, cache metrics, thinking mode, and generated artifacts.
 - Long-running provider job records for OpenAI/Gemini Deep Research, OpenAI/Anthropic/Gemini batches, OpenAI/Gemini realtime/live sessions, and generated media workflows.

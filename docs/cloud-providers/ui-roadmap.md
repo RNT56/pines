@@ -1,6 +1,6 @@
 # Cloud Provider UI Roadmap
 
-Last verified: 2026-07-13.
+Last verified: 2026-07-15.
 
 This document defines the shared UI work required by the provider parity roadmaps. Every new provider feature must follow the Pines design system in [DESIGN_SYSTEM.md](../DESIGN_SYSTEM.md): no feature-local palettes, no hard-coded light/dark colors, dense operational layouts, shared list/panel/card primitives, semantic colors, and theme support through `\.pinesTheme`.
 
@@ -10,16 +10,17 @@ Add advanced cloud-provider capabilities without turning Pines into a dashboard 
 
 ## Implementation Status
 
-Updated 2026-07-13:
+Updated 2026-07-15:
 
-- Pines has a shared provider lifecycle dashboard with previews for files, artifacts, caches/vector stores, batches, research runs, live sessions, and model capabilities.
+- Pines has shared provider lifecycle records and previews for files, artifacts, caches/vector stores, batches, research runs, live sessions, and model capabilities.
+- The Artifacts tab now presents a quiet, searchable output library. Images/video can use an adaptive media grid; other outputs use readable rows; active media/research work stays in a compact Activity section; creation, research, and artifact detail use typed navigation destinations.
 - Vault/provider storage views show OpenAI, Anthropic, and Gemini provider-hosted files separately from local Vault items, with refresh/delete/export/import paths where supported.
 - Anthropic now has Settings capability rows, prompt/thinking quick settings, file management, batch create/count/refresh/cancel/import flows, citations/source panels, hosted-tool timeline rows, and run provenance pills.
-- Gemini now has file/media management, context cache management, generated media workspace, Deep Research workspace, realtime session records, batch rows, and capability previews.
-- OpenAI now has file/vector-store management, artifact previews, batch rows, Deep Research workspace, realtime session records, and media/audio artifact workflows.
+- Gemini now has file/media management, context cache management, generated media creation, Deep Research, realtime session records, batch rows, and capability previews.
+- OpenAI now has file/vector-store management, artifact previews, batch rows, Deep Research, realtime session records, and media/audio artifact workflows.
 - OpenAI, Anthropic, and Gemini file uploads now use a persisted transfer queue with real byte progress, retry/cancellation, relaunch recovery, retained staged sources, and provider-copy verification.
 - Approval-gated hosted tools now pause before the provider request and disclose environment, data egress, side effects, network destinations, and retention before one-time approval or denial; decisions are audited.
-- Remaining UI work includes media viewers, realtime controls, source highlighting, compact-width preview coverage, richer per-resource retention/billing detail, and dedicated computer-use action review.
+- Remaining UI work includes richer realtime controls, source highlighting, broader compact-width fixture coverage, richer per-resource retention/billing detail, and dedicated computer-use action review.
 
 ## Design Principles
 
@@ -140,6 +141,8 @@ Production requirements:
 
 Purpose: Handle generated or provider-returned files/media.
 
+Current implementation: a searchable, filterable library for image, video, audio, and research-report outputs; a compact Activity section; adaptive list/media layouts; full artifact detail; Vault import; original-provider links; image remix; and local-record removal. Creation metadata is retained across provider job refreshes so prompts produce readable library titles instead of opaque filenames.
+
 Components:
 
 - Artifact list grouped by conversation/provider/type.
@@ -170,6 +173,8 @@ Production requirements:
 ### 9. Deep Research Workspace
 
 Purpose: Support long-running provider research agents without hiding minutes-long work inside normal chat.
+
+Current implementation: a dedicated, conversation-first research destination with an explicit web-only default, opt-in provider files, optional prompt clarification, persisted run history, follow-up continuity, compact activity/source disclosure, cancellation/refresh, and direct navigation into the completed report.
 
 Components:
 

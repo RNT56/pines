@@ -225,7 +225,7 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertFalse(rootView.contains("ProviderLifecycleDashboard"))
     }
 
-    func testArtifactsCreateAndLibraryUseDedicatedAssetStudioSurfaces() throws {
+    func testArtifactsLibraryCreateAndDetailUseDedicatedSurfaces() throws {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -239,14 +239,67 @@ final class CoreSurfaceTests: XCTestCase {
         )
 
         XCTAssertTrue(models.contains("enum ArtifactsAssetKindFilter"))
-        XCTAssertTrue(models.contains("static func assetViewModels"))
+        XCTAssertTrue(models.contains("struct ArtifactsLibraryQuery"))
+        XCTAssertTrue(models.contains("struct ArtifactLibraryItem"))
         XCTAssertTrue(models.contains("isVisibleInArtifactsGallery"))
-        XCTAssertTrue(workspace.contains("ArtifactsAssetGrid"))
-        XCTAssertTrue(workspace.contains("ArtifactsAssetInspector"))
-        XCTAssertTrue(workspace.contains("ArtifactsCreateComposer"))
-        XCTAssertTrue(workspace.contains("ArtifactsCreateOutputRail"))
+        XCTAssertTrue(workspace.contains("ArtifactsLibraryView"))
+        XCTAssertTrue(workspace.contains("ArtifactLibraryRow"))
+        XCTAssertTrue(workspace.contains("ArtifactMediaTile"))
+        XCTAssertTrue(workspace.contains("ArtifactDetailView"))
+        XCTAssertTrue(workspace.contains("ArtifactCreateView"))
+        XCTAssertTrue(workspace.contains("This session"))
+        XCTAssertTrue(workspace.contains("Create \\(mediaKind.title)"))
+        XCTAssertTrue(workspace.contains("Generate \\(mediaKind.title.lowercased())"))
+        XCTAssertFalse(workspace.contains("Create (mediaKind.title)"))
+        XCTAssertFalse(workspace.contains("Generate (mediaKind.title.lowercased())"))
         XCTAssertFalse(workspace.contains("PinesCardSection(\"Generate Media\""))
         XCTAssertFalse(workspace.contains("PinesCardSection(\"Gallery\""))
+    }
+
+    func testArtifactLibraryProjectionUsesPromptAndLifecycleState() {
+        let artifact = ProviderArtifactRecord(
+            id: "artifact-1",
+            providerKind: .openAI,
+            kind: "video_job",
+            fileName: "video_01.mp4",
+            contentType: "video/mp4",
+            content: .object([
+                "pines_prompt": .string("A quiet cabin beneath tall pines"),
+                "status": .string("processing"),
+            ])
+        )
+
+        let item = ArtifactLibraryItem(
+            artifact: artifact,
+            providers: [],
+            researchRuns: []
+        )
+
+        XCTAssertEqual(item.title, "A quiet cabin beneath tall pines")
+        XCTAssertEqual(item.contentKind, .video)
+        XCTAssertEqual(item.operationState, .processing)
+        XCTAssertEqual(item.availability, .embedded)
+        XCTAssertTrue(item.isActive)
+    }
+
+    func testArtifactLibraryHidesInternalLifecycleRecords() {
+        let internalRecord = ProviderArtifactRecord(
+            id: "tool-output",
+            providerKind: .openAI,
+            kind: "tool_output",
+            content: .object(["status": .string("completed")])
+        )
+        let report = ProviderArtifactRecord(
+            id: "report",
+            providerKind: .gemini,
+            kind: "deep_research_report",
+            text: "# Findings"
+        )
+
+        XCTAssertFalse(internalRecord.isVisibleInArtifactsGallery)
+        XCTAssertTrue(report.isVisibleInArtifactsGallery)
+        XCTAssertEqual(report.artifactContentKind, .report)
+        XCTAssertEqual(report.artifactOperationState, .ready)
     }
 
     func testArtifactsRemixWiringUsesProviderEditAndReferenceImagePayloads() throws {
@@ -601,7 +654,7 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(stress.contains("if status != .complete"))
     }
 
-    func testArtifactsWorkspaceDefinesFocusedModesAndConfirmations() throws {
+    func testArtifactsWorkspaceUsesLibraryRootAndFocusedDestinations() throws {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -614,33 +667,33 @@ final class CoreSurfaceTests: XCTestCase {
             encoding: .utf8
         )
 
-        for mode in ["Library", "Create", "Research"] {
-            XCTAssertTrue(workspace.contains(mode), "Missing artifacts workspace mode \(mode)")
-        }
-        XCTAssertFalse(workspace.contains("case .storage"))
-        XCTAssertFalse(workspace.contains("case .jobs"))
-        XCTAssertTrue(workspace.contains("ArtifactsMediaModelOption"))
-        XCTAssertTrue(workspace.contains("ArtifactsResearchModelOption"))
-        XCTAssertTrue(workspace.contains("PinesWorkspaceSwitcher"))
+        XCTAssertTrue(models.contains("enum ArtifactsRoute"))
+        XCTAssertTrue(models.contains("case artifact(String)"))
+        XCTAssertTrue(models.contains("case create(kind: ArtifactsMediaKind"))
+        XCTAssertTrue(models.contains("case research(threadID: String?)"))
+        XCTAssertTrue(workspace.contains("NavigationStack(path: $path)"))
+        XCTAssertTrue(workspace.contains("ArtifactCreateView"))
+        XCTAssertTrue(workspace.contains("ArtifactResearchView"))
+        XCTAssertTrue(workspace.contains("ArtifactDetailView"))
+        XCTAssertFalse(workspace.contains("PinesWorkspaceSwitcher"))
+        XCTAssertFalse(workspace.contains("ArtifactsStorageWorkspace"))
+        XCTAssertFalse(workspace.contains("ArtifactsFilesWorkspace"))
+        XCTAssertFalse(workspace.contains("ArtifactsBatchesWorkspace"))
+        XCTAssertFalse(workspace.contains("ArtifactsRealtimeWorkspace"))
+        XCTAssertFalse(workspace.contains("ArtifactsCapabilitiesWorkspace"))
         XCTAssertTrue(workspace.contains("Deep Research"))
-        XCTAssertFalse(workspace.contains("Research Console"))
-        XCTAssertFalse(workspace.contains("Research Chat"))
-        XCTAssertTrue(workspace.contains("researchConversation"))
-        XCTAssertTrue(workspace.contains("researchComposer"))
-        XCTAssertFalse(workspace.contains("ArtifactsResearchChatWorkspace"))
+        XCTAssertTrue(workspace.contains("conversation"))
+        XCTAssertTrue(workspace.contains("composer"))
         XCTAssertTrue(workspace.contains("PinesMessageBubble"))
         XCTAssertTrue(workspace.contains("Ask a research question"))
         XCTAssertTrue(workspace.contains("Ask a follow-up"))
-        XCTAssertTrue(workspace.contains("Report saved. Open the full report"))
         XCTAssertTrue(workspace.contains("derivedResearchTitle"))
         XCTAssertTrue(workspace.contains("cancelMediaOperation"))
-        XCTAssertFalse(workspace.contains("LazyVGrid(columns: [GridItem(.adaptive(minimum: 148)"))
-        XCTAssertTrue(workspace.contains("ArtifactsAssetGrid"))
-        XCTAssertTrue(workspace.contains("PinesMenuChip"))
-        XCTAssertTrue(workspace.contains("This removes only Pines' local lifecycle record"))
-        XCTAssertTrue(models.contains("enum ArtifactsWorkspaceMode"))
+        XCTAssertTrue(workspace.contains("usesProviderFiles"))
+        XCTAssertTrue(workspace.contains(".webOnly()"))
+        XCTAssertTrue(workspace.contains("This removes only Pines' local record"))
+        XCTAssertFalse(models.contains("enum ArtifactsWorkspaceMode"))
         XCTAssertTrue(models.contains("isVisibleInArtifactsGallery"))
-        XCTAssertTrue(models.contains("static func counts"))
         XCTAssertTrue(models.contains("researchTimeline"))
         XCTAssertTrue(models.contains("researchSources"))
         XCTAssertTrue(models.contains("gpt-image-2"))
@@ -658,7 +711,7 @@ final class CoreSurfaceTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let settings = try String(
-            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Settings/SettingsDetailView.swift"),
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Settings/CloudProvidersSettingsPage.swift"),
             encoding: .utf8
         )
         let appModel = try String(
@@ -670,23 +723,21 @@ final class CoreSurfaceTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(settings.contains("@State private var providerEnabled = true"))
-        XCTAssertTrue(settings.contains("@State private var editingProviderID: ProviderID?"))
-        XCTAssertTrue(settings.contains("providerSaveConfirmation"))
-        XCTAssertTrue(settings.contains("Saved \\(savedName). Validating the key and refreshing models."))
+        XCTAssertTrue(settings.contains("@State private var enabledForAgents: Bool"))
+        XCTAssertTrue(settings.contains("let provider: CloudProviderConfiguration?"))
+        XCTAssertTrue(settings.contains("@State private var saveError: String?"))
+        XCTAssertTrue(settings.contains("saveCloudProvider("))
         XCTAssertTrue(settings.contains("New API key (optional)"))
-        XCTAssertTrue(settings.contains("Update provider"))
-        XCTAssertTrue(settings.contains("beginProviderEditing(provider)"))
-        XCTAssertTrue(settings.contains("cancelProviderEditing()"))
-        XCTAssertTrue(settings.contains("OpenRouter routing and privacy"))
+        XCTAssertTrue(settings.contains("Edit Provider"))
+        XCTAssertTrue(settings.contains("CloudProviderEditorSheet(provider:"))
+        XCTAssertTrue(settings.contains("OpenRouter routing & usage"))
         XCTAssertTrue(settings.contains("Web search engine"))
-        XCTAssertTrue(settings.contains("Auto (native or fallback)"))
         XCTAssertTrue(settings.contains("Require zero data retention"))
-        XCTAssertTrue(settings.contains("Save routing policy"))
+        XCTAssertTrue(settings.contains("savePolicy()"))
         XCTAssertTrue(settings.contains("pines.settings.openrouter.routing"))
         XCTAssertTrue(settings.contains("Use for agents"))
-        XCTAssertTrue(settings.contains("Default model"))
         XCTAssertTrue(settings.contains("provider.defaultModelID"))
+        XCTAssertTrue(settings.contains("compactModelName(model.rawValue)"))
         XCTAssertTrue(appModel.contains("finishSavedCloudProviderActivation"))
         XCTAssertTrue(appModel.contains("providerID: ProviderID? = nil"))
         XCTAssertTrue(appModel.contains("let resolvedProviderID = providerID ?? Self.makeCloudProviderID(kind: kind)"))
@@ -709,6 +760,43 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(chats.contains("No agent models"))
         XCTAssertTrue(chats.contains("no curated agent models"))
         XCTAssertTrue(chats.contains("Saved Providers"))
+    }
+
+    func testSettingsUsesTypedDestinationsAndFocusedPages() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let types = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/App/PinesAppModelTypes.swift"),
+            encoding: .utf8
+        )
+        let detail = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Settings/SettingsDetailView.swift"),
+            encoding: .utf8
+        )
+        let settingsView = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Settings/SettingsView.swift"),
+            encoding: .utf8
+        )
+
+        for destination in [
+            "appearance", "aiModels", "cloudProviders", "privacyData",
+            "toolsIntegrations", "diagnostics",
+        ] {
+            XCTAssertTrue(types.contains("case \(destination)"), "Missing typed settings destination \(destination)")
+        }
+
+        for page in [
+            "AppearanceSettingsPage", "AIModelsSettingsPage", "CloudProvidersSettingsPage",
+            "PrivacyDataSettingsPage", "ToolsIntegrationsSettingsPage", "DiagnosticsSettingsPage",
+        ] {
+            XCTAssertTrue(detail.contains(page), "Settings dispatcher does not route to \(page)")
+        }
+
+        XCTAssertTrue(settingsView.contains("Section(\"Support\")"))
+        XCTAssertTrue(settingsView.contains("section.destination.rawValue"))
+        XCTAssertFalse(detail.contains("case \"Design\""))
+        XCTAssertFalse(detail.contains("PinesCardSection"))
     }
 
     func testCloudProviderEditIdentityAndValidationSemantics() throws {
@@ -769,7 +857,7 @@ final class CoreSurfaceTests: XCTestCase {
             encoding: .utf8
         )
         let settings = try String(
-            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Settings/SettingsDetailView.swift"),
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Settings/PrivacyDataSettingsPage.swift"),
             encoding: .utf8
         )
 
@@ -779,7 +867,6 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(appModel.contains("phase: .succeeded"))
         XCTAssertTrue(appModel.contains("phase: .failed"))
         XCTAssertTrue(appModel.contains("services.redactor.redact(error.localizedDescription)"))
-        XCTAssertTrue(settings.contains("cloudKitSyncChipStatus"))
         XCTAssertTrue(settings.contains("cloudKitSyncSummary"))
         XCTAssertTrue(settings.contains("reason: \"manual_settings\""))
         XCTAssertTrue(settings.contains("pines.settings.icloud.sync-now"))
