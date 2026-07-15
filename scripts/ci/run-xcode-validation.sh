@@ -27,6 +27,9 @@ usage: run-xcode-validation.sh [all|prepare|generate|resolve|build-app|build-tes
 
 Subcommands let GitHub Actions show granular Xcode validation phases while preserving
 the generated-project and package-lock drift checks used by the full local run.
+
+Set PINES_XCODE_UI_TEST_MODE=smoke to run the bounded critical-journey UI shards used
+by required CI. The default full mode runs the complete PinesUITests target.
 USAGE
 }
 
@@ -233,9 +236,38 @@ run_tests() {
   : > "$log_dir/xcodebuild-test-run.log"
   prepare_test_simulator "$simulator_id"
   run_xcode_test_phase "$simulator_id" "unit tests" -only-testing:PinesTests
-  run_xcode_test_phase "$simulator_id" "UI smoke tests" -only-testing:PinesUITests
+  run_ui_tests "$simulator_id"
   cleanup_test_simulator
   trap - EXIT INT TERM
+}
+
+run_ui_tests() {
+  local simulator_id="$1"
+  local mode="${PINES_XCODE_UI_TEST_MODE:-full}"
+
+  case "$mode" in
+    smoke)
+      local smoke_tests=(
+        "PinesUITests/PinesUITests/testLaunchNavigateTabsCreateChatAndTypeDraft"
+        "PinesUITests/PinesUITests/testAccessibilityTextSizeKeepsPrimarySurfacesReachable"
+        "PinesUITests/PinesUITests/testArtifactsLibraryAndFocusedDestinations"
+      )
+      local test
+      for test in "${smoke_tests[@]}"; do
+        run_xcode_test_phase \
+          "$simulator_id" \
+          "UI smoke: ${test##*/}" \
+          "-only-testing:$test"
+      done
+      ;;
+    full)
+      run_xcode_test_phase "$simulator_id" "full UI test suite" -only-testing:PinesUITests
+      ;;
+    *)
+      echo "::error::Unsupported PINES_XCODE_UI_TEST_MODE '$mode'; expected 'smoke' or 'full'." >&2
+      return 2
+      ;;
+  esac
 }
 
 run_xcode_test_phase() {
