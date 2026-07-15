@@ -1427,6 +1427,24 @@ actor GRDBPinesStore:
         try await database.read(Self.fetchDocuments)
     }
 
+    func document(id: UUID) async throws -> VaultDocumentRecord? {
+        try await database.read { db in
+            try Row.fetchOne(
+                db,
+                sql: """
+                SELECT d.id, d.title, d.source_type, d.local_path, d.sha256, d.project_id,
+                       d.updated_at, COUNT(c.id) AS chunk_count
+                FROM vault_documents d
+                LEFT JOIN vault_chunks c ON c.document_id = d.id
+                WHERE d.id = ? AND d.sync_state != ?
+                GROUP BY d.id
+                LIMIT 1
+                """,
+                arguments: [id.uuidString, SyncState.deleted.rawValue]
+            ).map(Self.vaultDocument(from:))
+        }
+    }
+
     nonisolated func observeDocuments() -> AsyncStream<[VaultDocumentRecord]> {
         observationStream(Self.fetchDocuments)
     }
@@ -1514,6 +1532,33 @@ actor GRDBPinesStore:
         }
     }
 
+    func chunks(documentID: UUID, limit: Int, offset: Int) async throws -> [VaultChunk] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                SELECT id, document_id, ordinal, text, token_estimate, created_at
+                FROM vault_chunks
+                WHERE document_id = ?
+                ORDER BY ordinal ASC
+                LIMIT ? OFFSET ?
+                """,
+                arguments: [documentID.uuidString, limit, max(0, offset)]
+            ).map(Self.vaultChunk(from:))
+        }
+    }
+
+    func chunkUTF8ByteCount(documentID: UUID) async throws -> Int64 {
+        try await database.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT COALESCE(SUM(length(CAST(text AS BLOB))), 0) FROM vault_chunks WHERE document_id = ?",
+                arguments: [documentID.uuidString]
+            ) ?? 0
+        }
+    }
+
     func embeddings(documentID: UUID) async throws -> [VaultStoredEmbedding] {
         try await database.read { db in
             try Row.fetchAll(
@@ -1528,6 +1573,23 @@ actor GRDBPinesStore:
                 """,
                 arguments: [documentID.uuidString]
             ).map(Self.vaultStoredEmbedding(from:))
+        }
+    }
+
+    func embeddingCount(documentID: UUID, profileID: String?) async throws -> Int {
+        try await database.read { db in
+            if let profileID {
+                return try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM vault_embeddings WHERE document_id = ? AND profile_id = ?",
+                    arguments: [documentID.uuidString, profileID]
+                ) ?? 0
+            }
+            return try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM vault_embeddings WHERE document_id = ?",
+                arguments: [documentID.uuidString]
+            ) ?? 0
         }
     }
 
@@ -2335,15 +2397,24 @@ actor GRDBPinesStore:
     // MARK: - Provider Lifecycle Records
 
     func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord] {
-        try await database.read { db in
+        try await listProviderFiles(providerID: providerID, limit: Int.max)
+    }
+
+    func listProviderFiles(providerID: ProviderID?, limit: Int) async throws -> [ProviderFileRecord] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
             if let providerID {
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_files WHERE provider_id = ? ORDER BY created_at DESC",
-                    arguments: [providerID.rawValue]
+                    sql: "SELECT * FROM provider_files WHERE provider_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                    arguments: [providerID.rawValue, limit]
                 ).map(Self.providerFile(from:))
             }
-            return try Row.fetchAll(db, sql: "SELECT * FROM provider_files ORDER BY created_at DESC").map(Self.providerFile(from:))
+            return try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM provider_files ORDER BY created_at DESC, id DESC LIMIT ?",
+                arguments: [limit]
+            ).map(Self.providerFile(from:))
         }
     }
 
@@ -2410,6 +2481,47 @@ actor GRDBPinesStore:
         }
     }
 
+    func listRecentProviderArtifacts(
+        limit: Int,
+        before cursor: ProviderArtifactCursor?
+    ) async throws -> [ProviderArtifactRecord] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
+            if let cursor {
+                return try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT * FROM provider_artifacts
+                    WHERE created_at < ? OR (created_at = ? AND id < ?)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    arguments: [
+                        cursor.createdAt.timeIntervalSinceReferenceDate,
+                        cursor.createdAt.timeIntervalSinceReferenceDate,
+                        cursor.id,
+                        limit,
+                    ]
+                ).map(Self.providerArtifact(from:))
+            }
+            return try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM provider_artifacts ORDER BY created_at DESC, id DESC LIMIT ?",
+                arguments: [limit]
+            ).map(Self.providerArtifact(from:))
+        }
+    }
+
+    func providerArtifact(id: String) async throws -> ProviderArtifactRecord? {
+        try await database.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM provider_artifacts WHERE id = ? LIMIT 1",
+                arguments: [id]
+            ).map(Self.providerArtifact(from:))
+        }
+    }
+
     func upsertProviderArtifact(_ artifact: ProviderArtifactRecord) async throws {
         try await database.write { db in
             try db.execute(
@@ -2461,28 +2573,37 @@ actor GRDBPinesStore:
     }
 
     func listProviderCaches(providerID: ProviderID?, kind: String?) async throws -> [ProviderCacheRecord] {
-        try await database.read { db in
+        try await listProviderCaches(providerID: providerID, kind: kind, limit: Int.max)
+    }
+
+    func listProviderCaches(providerID: ProviderID?, kind: String?, limit: Int) async throws -> [ProviderCacheRecord] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
             switch (providerID, kind) {
             case let (providerID?, kind?):
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_caches WHERE provider_id = ? AND kind = ? ORDER BY created_at DESC",
-                    arguments: [providerID.rawValue, kind]
+                    sql: "SELECT * FROM provider_caches WHERE provider_id = ? AND kind = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                    arguments: [providerID.rawValue, kind, limit]
                 ).map(Self.providerCache(from:))
             case let (providerID?, nil):
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_caches WHERE provider_id = ? ORDER BY created_at DESC",
-                    arguments: [providerID.rawValue]
+                    sql: "SELECT * FROM provider_caches WHERE provider_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                    arguments: [providerID.rawValue, limit]
                 ).map(Self.providerCache(from:))
             case let (nil, kind?):
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_caches WHERE kind = ? ORDER BY created_at DESC",
-                    arguments: [kind]
+                    sql: "SELECT * FROM provider_caches WHERE kind = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                    arguments: [kind, limit]
                 ).map(Self.providerCache(from:))
             case (nil, nil):
-                return try Row.fetchAll(db, sql: "SELECT * FROM provider_caches ORDER BY created_at DESC").map(Self.providerCache(from:))
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_caches ORDER BY created_at DESC, id DESC LIMIT ?",
+                    arguments: [limit]
+                ).map(Self.providerCache(from:))
             }
         }
     }
@@ -2538,15 +2659,24 @@ actor GRDBPinesStore:
     }
 
     func listProviderBatches(providerID: ProviderID?) async throws -> [ProviderBatchRecord] {
-        try await database.read { db in
+        try await listProviderBatches(providerID: providerID, limit: Int.max)
+    }
+
+    func listProviderBatches(providerID: ProviderID?, limit: Int) async throws -> [ProviderBatchRecord] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
             if let providerID {
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_batches WHERE provider_id = ? ORDER BY created_at DESC",
-                    arguments: [providerID.rawValue]
+                    sql: "SELECT * FROM provider_batches WHERE provider_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                    arguments: [providerID.rawValue, limit]
                 ).map(Self.providerBatch(from:))
             }
-            return try Row.fetchAll(db, sql: "SELECT * FROM provider_batches ORDER BY created_at DESC").map(Self.providerBatch(from:))
+            return try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM provider_batches ORDER BY created_at DESC, id DESC LIMIT ?",
+                arguments: [limit]
+            ).map(Self.providerBatch(from:))
         }
     }
 
@@ -2601,15 +2731,24 @@ actor GRDBPinesStore:
     }
 
     func listProviderLiveSessions(providerID: ProviderID?) async throws -> [ProviderLiveSessionRecord] {
-        try await database.read { db in
+        try await listProviderLiveSessions(providerID: providerID, limit: Int.max)
+    }
+
+    func listProviderLiveSessions(providerID: ProviderID?, limit: Int) async throws -> [ProviderLiveSessionRecord] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
             if let providerID {
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_live_sessions WHERE provider_id = ? ORDER BY created_at DESC",
-                    arguments: [providerID.rawValue]
+                    sql: "SELECT * FROM provider_live_sessions WHERE provider_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                    arguments: [providerID.rawValue, limit]
                 ).map(Self.providerLiveSession(from:))
             }
-            return try Row.fetchAll(db, sql: "SELECT * FROM provider_live_sessions ORDER BY created_at DESC").map(Self.providerLiveSession(from:))
+            return try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM provider_live_sessions ORDER BY created_at DESC, id DESC LIMIT ?",
+                arguments: [limit]
+            ).map(Self.providerLiveSession(from:))
         }
     }
 
@@ -2658,15 +2797,24 @@ actor GRDBPinesStore:
     }
 
     func listProviderStructuredOutputs(responseID: String?) async throws -> [ProviderStructuredOutputRecord] {
-        try await database.read { db in
+        try await listProviderStructuredOutputs(responseID: responseID, limit: Int.max)
+    }
+
+    func listProviderStructuredOutputs(responseID: String?, limit: Int) async throws -> [ProviderStructuredOutputRecord] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
             if let responseID {
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_structured_outputs WHERE response_id = ? ORDER BY created_at ASC",
-                    arguments: [responseID]
+                    sql: "SELECT * FROM provider_structured_outputs WHERE response_id = ? ORDER BY created_at ASC, id ASC LIMIT ?",
+                    arguments: [responseID, limit]
                 ).map(Self.providerStructuredOutput(from:))
             }
-            return try Row.fetchAll(db, sql: "SELECT * FROM provider_structured_outputs ORDER BY created_at DESC").map(Self.providerStructuredOutput(from:))
+            return try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM provider_structured_outputs ORDER BY created_at DESC, id DESC LIMIT ?",
+                arguments: [limit]
+            ).map(Self.providerStructuredOutput(from:))
         }
     }
 
@@ -2717,15 +2865,24 @@ actor GRDBPinesStore:
     }
 
     func listProviderModelCapabilities(providerID: ProviderID?) async throws -> [ProviderModelCapabilityRecord] {
-        try await database.read { db in
+        try await listProviderModelCapabilities(providerID: providerID, limit: Int.max)
+    }
+
+    func listProviderModelCapabilities(providerID: ProviderID?, limit: Int) async throws -> [ProviderModelCapabilityRecord] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
             if let providerID {
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_model_capabilities WHERE provider_id = ? ORDER BY fetched_at DESC",
-                    arguments: [providerID.rawValue]
+                    sql: "SELECT * FROM provider_model_capabilities WHERE provider_id = ? ORDER BY fetched_at DESC, model_id DESC LIMIT ?",
+                    arguments: [providerID.rawValue, limit]
                 ).map(Self.providerModelCapability(from:))
             }
-            return try Row.fetchAll(db, sql: "SELECT * FROM provider_model_capabilities ORDER BY fetched_at DESC").map(Self.providerModelCapability(from:))
+            return try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM provider_model_capabilities ORDER BY fetched_at DESC, provider_id DESC, model_id DESC LIMIT ?",
+                arguments: [limit]
+            ).map(Self.providerModelCapability(from:))
         }
     }
 
@@ -2773,28 +2930,41 @@ actor GRDBPinesStore:
     }
 
     func listProviderResearchRuns(providerID: ProviderID?, status: String?) async throws -> [ProviderResearchRunRecord] {
-        try await database.read { db in
+        try await listProviderResearchRuns(providerID: providerID, status: status, limit: Int.max)
+    }
+
+    func listProviderResearchRuns(
+        providerID: ProviderID?,
+        status: String?,
+        limit: Int
+    ) async throws -> [ProviderResearchRunRecord] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
             switch (providerID, status) {
             case let (providerID?, status?):
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_research_runs WHERE provider_id = ? AND status = ? ORDER BY updated_at DESC",
-                    arguments: [providerID.rawValue, status]
+                    sql: "SELECT * FROM provider_research_runs WHERE provider_id = ? AND status = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+                    arguments: [providerID.rawValue, status, limit]
                 ).map(Self.providerResearchRun(from:))
             case let (providerID?, nil):
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_research_runs WHERE provider_id = ? ORDER BY updated_at DESC",
-                    arguments: [providerID.rawValue]
+                    sql: "SELECT * FROM provider_research_runs WHERE provider_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+                    arguments: [providerID.rawValue, limit]
                 ).map(Self.providerResearchRun(from:))
             case let (nil, status?):
                 return try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_research_runs WHERE status = ? ORDER BY updated_at DESC",
-                    arguments: [status]
+                    sql: "SELECT * FROM provider_research_runs WHERE status = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+                    arguments: [status, limit]
                 ).map(Self.providerResearchRun(from:))
             case (nil, nil):
-                return try Row.fetchAll(db, sql: "SELECT * FROM provider_research_runs ORDER BY updated_at DESC").map(Self.providerResearchRun(from:))
+                return try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_research_runs ORDER BY updated_at DESC, id DESC LIMIT ?",
+                    arguments: [limit]
+                ).map(Self.providerResearchRun(from:))
             }
         }
     }

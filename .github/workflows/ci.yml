@@ -108,6 +108,9 @@ jobs:
       - name: Validate CI shell scripts
         run: bash -n scripts/ci/*.sh
 
+      - name: Test release build hygiene guard
+        run: bash scripts/ci/test-release-build-hygiene.sh
+
       - name: Public repo hygiene
         run: bash scripts/ci/check-public-hygiene.sh
 
@@ -227,8 +230,14 @@ jobs:
       - name: Generate project and verify drift
         run: bash scripts/ci/run-xcode-validation.sh generate
 
+      - name: Validate release project hygiene
+        run: bash scripts/ci/check-release-build-hygiene.sh project
+
       - name: Resolve Xcode package dependencies
         run: bash scripts/ci/run-xcode-validation.sh resolve
+
+      - name: Validate release build settings
+        run: bash scripts/ci/check-release-build-hygiene.sh settings
 
       - name: Build unsigned iOS app
         run: bash scripts/ci/run-xcode-validation.sh build-app

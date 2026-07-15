@@ -48,6 +48,7 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - Platform-unlock contracts for adaptive precision, semantic/multimodal/agent memory, open KV descriptors, device mesh, personalization/adapters, and release kill switches. These are disabled by default and require compatibility-pair plus evidence gates before product activation.
 - iOS runtime guardrails: memory/thermal adaptive profiles, compact 6 GB device defaults, memory-warning unload, bounded vector scans, batched vault embedding ingestion, foreground-only MLX execution, conservative background model-download network defaults, and recovered-download reconciliation.
 - Read-only runtime diagnostics and OSLog/MetricKit hooks for startup phases, generation speed, vault retrieval, and memory pressure.
+- App-wide performance foundations: Release/Profile `PinesPerformance` scheme and shipping-binary hygiene gate; privacy-safe launch/chat/gallery/Vault/provider signposts; stable deduplicated artifact polling; off-main target-size image downsampling with cost-bounded caching; indexed and SQL-capped provider lifecycle queries; atomic concurrent lifecycle snapshots; summary/detail Vault loading with SQL aggregates; cost-bounded Markdown, syntax, and citation caches; file-backed streaming provider uploads with throttled progress publication; scoped refresh APIs; and reactive pressure-aware cache, motion, and haptic policy with a prefetch gate for future speculative loaders.
 - Bidirectional CloudKit private-database sync for opt-in settings, Project Spaces, conversations/messages, Vault document metadata/chunks, tombstones, and explicitly enabled embedding/code blobs. Sync is triggered at launch, foreground activation, settings changes, and local content mutations; Settings exposes current sync phase, redacted failure details, last success, and explicit retry.
 - Personal-team-safe default signing: generated Xcode builds omit iCloud entitlements and keep CloudKit runtime activation disabled unless a paid-team build overrides both iCloud settings.
 - MCP Streamable HTTP support for tools, resources, prompts, user-approved sampling, bearer tokens, OAuth PKCE, subscriptions, safe resource previews, and persisted MCP tool safety annotations. Unannotated tools conservatively default to remote-state-changing.
@@ -71,6 +72,7 @@ This repository is a working foundation for `pines`, not a signed App Store dist
 - Signed App Store archive/export, TestFlight/App Store upload automation, and final App Store Connect privacy review for the submitted binary.
 - The platform-aware, warning-free `mlx-swift` build-tool plugin, Apple-mobile JIT compatibility fix, and SwiftPM 6.2 manifest compatibility are pinned at `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`; cold iOS device and simulator builds must remain warning-free as part of release validation.
 - Remaining monolith candidates are semantic rather than mechanical: `PinesAppModel` still owns high-level orchestration and `ModelsViewComponents` owns model list/detail presentation. Settings has been split into typed, focused destination pages with shared grouped-row components.
+- Current-commit physical-device launch, scroll-hitch, peak-memory, file-activity, and provider-transfer traces have not yet been recorded across the supported device classes. The targets and harness are implemented, but performance acceptance remains provisional until the baseline ledger in `docs/performance/baselines/` contains reproducible device evidence.
 
 ## Verification
 
@@ -82,6 +84,8 @@ swift test --disable-automatic-resolution
 swift run --disable-automatic-resolution PinesCoreTestRunner
 bash scripts/ci/xcodegen.sh generate
 bash scripts/ci/run-xcode-validation.sh all
+bash scripts/ci/check-release-build-hygiene.sh
+bash scripts/diagnostics/run-ios-ui-performance.sh
 ```
 
 For a direct generic iOS build:

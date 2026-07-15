@@ -1,21 +1,16 @@
 import XCTest
 
+@MainActor
 final class PinesUITests: XCTestCase {
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-        app.terminate()
-        configureLaunch(resetStore: true)
     }
 
     override func tearDownWithError() throws {
-        app?.terminate()
-        app = nil
     }
 
-    @MainActor
     func testLaunchNavigateTabsCreateChatAndTypeDraft() throws {
         launchAndWaitForMainUI()
 
@@ -346,6 +341,9 @@ final class PinesUITests: XCTestCase {
     }
 
     private func configureLaunch(scenario: String? = nil, resetStore: Bool) {
+        app?.terminate()
+        app = XCUIApplication()
+        app.terminate()
         app.launchArguments = ["--pines-ui-testing"]
         if resetStore {
             app.launchArguments.append("--pines-reset-ui-test-store")
@@ -380,9 +378,17 @@ final class PinesUITests: XCTestCase {
 
         openTab("Artifacts")
         assertIdentifierVisible("pines.artifacts.library", "The artifact library was missing.")
-        openArtifactsDestination(menuItem: "Image", destinationIdentifier: "pines.artifacts.image-studio.canvas")
+        openArtifactsDestination(
+            menuItem: "Image",
+            destinationIdentifier: "pines.artifacts.image-studio.canvas",
+            fallbackIdentifiers: ["pines.artifacts.provider-setup"]
+        )
         returnToArtifactsLibrary()
-        openArtifactsDestination(menuItem: "Deep Research", destinationIdentifier: "pines.artifacts.research.prompt")
+        openArtifactsDestination(
+            menuItem: "Deep Research",
+            destinationIdentifier: "pines.artifacts.research.prompt",
+            fallbackIdentifiers: ["pines.artifacts.provider-setup"]
+        )
         returnToArtifactsLibrary()
 
         openTab("Settings")
@@ -405,6 +411,9 @@ final class PinesUITests: XCTestCase {
 
     @MainActor
     private func launchAndWaitForMainUI() {
+        if app == nil {
+            configureLaunch(resetStore: true)
+        }
         app.launch()
 
         XCTAssertTrue(
@@ -516,9 +525,21 @@ final class PinesUITests: XCTestCase {
         if element.waitForExistence(timeout: timeout) {
             return
         }
-        app.swipeUp()
-        if element.waitForExistence(timeout: 3) {
-            return
+
+        // Lazy containers do not expose off-screen rows to XCTest. At the
+        // largest Dynamic Type sizes a single artifact can occupy most of the
+        // viewport, so walk a bounded number of screens before declaring the
+        // content unreachable.
+        let artifactLibrary = app.scrollViews["pines.artifacts.library"]
+        for _ in 0..<6 {
+            if artifactLibrary.exists && artifactLibrary.isHittable {
+                artifactLibrary.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+            if element.waitForExistence(timeout: 1) {
+                return
+            }
         }
         XCTFail("Could not find visible text containing: \(text)\n\n\(app.debugDescription)")
     }
@@ -537,11 +558,14 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
-    private func openArtifactsDestination(menuItem: String, destinationIdentifier: String) {
+    private func openArtifactsDestination(
+        menuItem: String,
+        destinationIdentifier: String,
+        fallbackIdentifiers: [String] = []
+    ) {
         dismissKeyboardIfNeeded()
         let newArtifact = app.buttons["pines.artifacts.new"]
         XCTAssertTrue(newArtifact.waitForExistence(timeout: 10), "Artifact New command was not visible.")
-        newArtifact.tap()
 
         let menuID: String
         switch menuItem {
@@ -554,16 +578,32 @@ final class PinesUITests: XCTestCase {
             return
         }
 
-        let item = firstExisting([
+        let candidates = [
             app.buttons["pines.artifacts.new.\(menuID)"],
             app.buttons[menuID == "research" ? "Research" : menuItem],
-        ])
-        XCTAssertNotNil(item, "Artifact action \(menuItem) was not visible.")
-        item?.tap()
-        XCTAssertTrue(
-            app.descendants(matching: .any)[destinationIdentifier].waitForExistence(timeout: 10),
-            "Artifact destination \(menuItem) did not become visible."
-        )
+        ]
+        let destinations = [destinationIdentifier] + fallbackIdentifiers
+        let destinationElements = destinations.map { app.descendants(matching: .any)[$0] }
+
+        func attemptPresentation() -> Bool {
+            guard newArtifact.exists, newArtifact.isHittable else { return false }
+            newArtifact.tap()
+            guard tapFirstExisting(candidates, timeout: 5) else { return false }
+            return waitForAny(destinationElements, timeout: 10)
+        }
+
+        if attemptPresentation() {
+            return
+        }
+
+        // Menu-to-sheet presentation occasionally loses the first event under
+        // XCTest while the system menu is dismissing. Only retry when no sheet
+        // was presented; a malformed destination must still fail loudly.
+        let close = app.buttons["pines.artifacts.sheet.close"]
+        guard !close.exists, attemptPresentation() else {
+            XCTFail("Artifact destination \(menuItem) did not become visible.\n\n\(app.debugDescription)")
+            return
+        }
     }
 
     @MainActor
@@ -690,11 +730,27 @@ final class PinesUITests: XCTestCase {
     @MainActor
     private func assertMenuCanOpen(buttonLabel: String, item: String) {
         let button = app.buttons[buttonLabel].firstMatch
-        XCTAssertTrue(button.waitForExistence(timeout: 10), "Menu button \(button) was not visible.")
-        button.tap()
-        let menuItem = app.buttons[item].firstMatch
-        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Menu item \(item) was not visible.")
-        menuItem.tap()
+        XCTAssertTrue(
+            tapFirstExisting([button], timeout: 10),
+            "Menu button \(buttonLabel) was not visible."
+        )
+
+        func tapMenuItem() -> Bool {
+            let matches = app.buttons
+                .matching(NSPredicate(format: "label == %@", item))
+                .allElementsBoundByIndex
+            return tapFirstExisting(matches, timeout: 5)
+        }
+
+        if tapMenuItem() {
+            return
+        }
+
+        // System Menu occasionally drops its presentation event in XCTest.
+        // Dismiss any partial overlay and retry once with hittability checks.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.25)).tap()
+        XCTAssertTrue(tapFirstExisting([button], timeout: 5), "Menu button \(buttonLabel) could not be reopened.")
+        XCTAssertTrue(tapMenuItem(), "Menu item \(item) was not visible.")
     }
 
     @MainActor

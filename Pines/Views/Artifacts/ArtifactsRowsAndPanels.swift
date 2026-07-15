@@ -1,9 +1,6 @@
 import SwiftUI
 import PinesCore
 import AVKit
-#if canImport(UIKit)
-import UIKit
-#endif
 
 struct ArtifactsResourceDescriptor: Identifiable, Hashable {
     let id: String
@@ -249,8 +246,6 @@ struct ArtifactsArtifactPreviewSurface: View {
     @Environment(\.pinesTheme) private var theme
     let artifact: ProviderArtifactRecord
     var maxHeight: CGFloat = 280
-    @State private var localImageData: Data?
-    @State private var finishedLoadingLocalImage = false
 
     var body: some View {
         Group {
@@ -278,47 +273,12 @@ struct ArtifactsArtifactPreviewSurface: View {
         .frame(maxWidth: .infinity, minHeight: 140, maxHeight: maxHeight)
         .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
-        .task(id: artifact.id) {
-            localImageData = nil
-            finishedLoadingLocalImage = false
-            guard artifact.galleryPresentation == .image else {
-                finishedLoadingLocalImage = true
-                return
-            }
-            localImageData = await Task.detached(priority: .userInitiated) {
-                artifact.localPreviewImageData
-            }.value
-            finishedLoadingLocalImage = true
-        }
     }
 
     @ViewBuilder
     private var imagePreview: some View {
-        if let data = localImageData {
-            ArtifactsLocalImage(data: data) {
-                placeholder(title: "Image unavailable", systemImage: "photo")
-            }
-        } else if let url = artifact.remoteURL {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFit()
-                case .failure:
-                    placeholder(title: "Image unavailable", systemImage: "photo")
-                case .empty:
-                    ProgressView()
-                        .pinesProgressTint()
-                @unknown default:
-                    EmptyView()
-                }
-            }
-        } else if finishedLoadingLocalImage {
+        ArtifactsPipelineImage(artifact: artifact, contentMode: .fit, priority: .userInitiated) {
             placeholder(title: "Image", systemImage: "photo")
-        } else {
-            ProgressView()
-                .pinesProgressTint()
         }
     }
 
@@ -371,25 +331,6 @@ private struct ArtifactsMediaPlayer: View {
             .onDisappear {
                 player.pause()
             }
-    }
-}
-
-private struct ArtifactsLocalImage<Placeholder: View>: View {
-    let data: Data
-    @ViewBuilder var placeholder: () -> Placeholder
-
-    var body: some View {
-        #if canImport(UIKit)
-        if let image = UIImage(data: data) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-        } else {
-            placeholder()
-        }
-        #else
-        placeholder()
-        #endif
     }
 }
 
@@ -1483,8 +1424,15 @@ extension JSONValue {
 struct ArtifactsArtifactThumbnail: View {
     @Environment(\.pinesTheme) private var theme
     let artifact: ProviderArtifactRecord
-    @State private var localImageData: Data?
-    @State private var finishedLoadingLocalImage = false
+    private let onReady: () -> Void
+
+    init(
+        artifact: ProviderArtifactRecord,
+        onReady: @escaping () -> Void = {}
+    ) {
+        self.artifact = artifact
+        self.onReady = onReady
+    }
 
     var body: some View {
         Group {
@@ -1493,12 +1441,16 @@ struct ArtifactsArtifactThumbnail: View {
                 imageThumbnail
             case .video:
                 placeholder(title: "Video", systemImage: "play.rectangle.fill")
+                    .onAppear(perform: onReady)
             case .audio:
                 placeholder(title: "Audio", systemImage: "waveform")
+                    .onAppear(perform: onReady)
             case .report:
                 reportThumbnail
+                    .onAppear(perform: onReady)
             case .metadata:
                 placeholder(title: artifact.kind.readableArtifactKind, systemImage: artifact.kind.providerArtifactSystemImage)
+                    .onAppear(perform: onReady)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1508,51 +1460,16 @@ struct ArtifactsArtifactThumbnail: View {
             RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
                 .stroke(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
         }
-        .task(id: localLoadKey) {
-            guard artifact.galleryPresentation == .image,
-                  artifact.localURL != nil || artifact.content != nil
-            else {
-                finishedLoadingLocalImage = true
-                return
-            }
-            let record = artifact
-            localImageData = await Task.detached(priority: .utility) {
-                record.localPreviewImageData
-            }.value
-            finishedLoadingLocalImage = true
-        }
-    }
-
-    private var localLoadKey: String {
-        [artifact.id, artifact.localURL?.absoluteString, artifact.responseID]
-            .compactMap { $0 }
-            .joined(separator: "|")
     }
 
     @ViewBuilder
     private var imageThumbnail: some View {
-        if let localImageData, let image = UIImage(data: localImageData) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-        } else if artifact.localURL != nil || artifact.content != nil, !finishedLoadingLocalImage {
-            ProgressView()
-                .pinesProgressTint()
-        } else if let url = artifact.remoteURL {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .empty:
-                    ProgressView()
-                        .pinesProgressTint()
-                case .failure:
-                    placeholder(title: "Image", systemImage: "photo")
-                @unknown default:
-                    placeholder(title: "Image", systemImage: "photo")
-                }
-            }
-        } else {
+        ArtifactsPipelineImage(
+            artifact: artifact,
+            contentMode: .fill,
+            priority: .utility,
+            onReady: onReady
+        ) {
             placeholder(title: "Image", systemImage: "photo")
         }
     }
@@ -1584,5 +1501,181 @@ struct ArtifactsArtifactThumbnail: View {
         }
         .padding(theme.spacing.small)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ArtifactsPipelineImage<Placeholder: View>: View {
+    @Environment(\.displayScale) private var displayScale
+    let artifact: ProviderArtifactRecord
+    let contentMode: ContentMode
+    let priority: TaskPriority
+    let onReady: () -> Void
+    private let placeholder: () -> Placeholder
+
+    @State private var decodedImage: PinesDecodedImage?
+    @State private var loadedSourceKey: String?
+    @State private var finishedLoading = false
+    @State private var notifiedReadySourceKey: String?
+
+    init(
+        artifact: ProviderArtifactRecord,
+        contentMode: ContentMode,
+        priority: TaskPriority,
+        onReady: @escaping () -> Void = {},
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.artifact = artifact
+        self.contentMode = contentMode
+        self.priority = priority
+        self.onReady = onReady
+        self.placeholder = placeholder
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            Group {
+                if let decodedImage {
+                    Image(
+                        decodedImage.cgImage,
+                        scale: decodedImage.scale,
+                        orientation: .up,
+                        label: Text("Artifact image")
+                    )
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                } else if finishedLoading {
+                    placeholder()
+                } else {
+                    ProgressView()
+                        .pinesProgressTint()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .task(id: requestKey(for: proxy.size)) {
+                await loadImage(targetSize: proxy.size)
+            }
+        }
+    }
+
+    private var sourceKey: String {
+        [
+            artifact.id,
+            artifact.localURL?.absoluteString,
+            artifact.remoteURL?.absoluteString,
+            artifact.responseID,
+            artifact.providerFileID,
+            artifact.byteCount.map(String.init),
+            String(artifact.createdAt.timeIntervalSinceReferenceDate),
+        ]
+        .compactMap { $0 }
+        .joined(separator: "|")
+    }
+
+    private var sourceRevision: String {
+        [
+            artifact.responseID,
+            artifact.toolCallID,
+            artifact.providerFileID,
+            artifact.byteCount.map(String.init),
+            String(artifact.createdAt.timeIntervalSinceReferenceDate),
+        ]
+        .compactMap { $0 }
+        .joined(separator: "|")
+    }
+
+    private func requestKey(for size: CGSize) -> String {
+        let width = Int(ceil(max(0, size.width) * displayScale))
+        let height = Int(ceil(max(0, size.height) * displayScale))
+        return "\(sourceKey)|\(width)x\(height)@\(displayScale)"
+    }
+
+    @MainActor
+    private func loadImage(targetSize: CGSize) async {
+        guard targetSize.width > 0, targetSize.height > 0 else { return }
+        let currentSourceKey = sourceKey
+        if loadedSourceKey != currentSourceKey {
+            decodedImage = nil
+            loadedSourceKey = currentSourceKey
+        }
+        finishedLoading = false
+
+        let sources = imageSources()
+        guard !sources.isEmpty else {
+            finishedLoading = true
+            notifyReady(for: currentSourceKey)
+            return
+        }
+        for source in sources {
+            do {
+                let image = try await PinesImagePipeline.shared.image(
+                    for: source,
+                    targetSize: targetSize,
+                    scale: displayScale,
+                    resizeMode: contentMode == .fill ? .aspectFill : .aspectFit,
+                    priority: priority
+                )
+                try Task.checkCancellation()
+                decodedImage = image
+                finishedLoading = true
+                notifyReady(for: currentSourceKey)
+                return
+            } catch is CancellationError {
+                if !Task.isCancelled {
+                    finishedLoading = true
+                }
+                return
+            } catch {
+                continue
+            }
+        }
+        guard !Task.isCancelled else { return }
+        decodedImage = nil
+        finishedLoading = true
+        notifyReady(for: currentSourceKey)
+    }
+
+    @MainActor
+    private func notifyReady(for sourceKey: String) {
+        guard notifiedReadySourceKey != sourceKey else { return }
+        notifiedReadySourceKey = sourceKey
+        onReady()
+    }
+
+    private func imageSources() -> [PinesImageSource] {
+        let identity = "artifact:\(artifact.id)"
+        var sources = [PinesImageSource]()
+        if let localURL = artifact.localURL, localURL.isFileURL {
+            sources.append(
+                .file(
+                    localURL,
+                    identity: "\(identity):file:\(localURL.standardizedFileURL.path)",
+                    revision: sourceRevision
+                )
+            )
+        }
+        if artifact.content != nil {
+            let record = artifact
+            let revision = sourceRevision
+            sources.append(
+                .deferred(identity: "\(identity):embedded", revision: revision) {
+                    guard let data = record.embeddedPreviewImageData else {
+                        throw PinesImagePipelineError.invalidImageData
+                    }
+                    return data
+                }
+            )
+        }
+        if let remoteURL = artifact.remoteURL {
+            sources.append(
+                .remote(
+                    remoteURL,
+                    identity: "\(identity):remote:\(remoteURL.absoluteString)",
+                    revision: sourceRevision
+                )
+            )
+        }
+        return sources
     }
 }

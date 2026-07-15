@@ -11,6 +11,8 @@
 - `Sources/PinesCoreTestRunner/`: framework-free verification runner for environments where Command Line Tools do not expose XCTest or Swift Testing.
 - `project.yml`: XcodeGen source of truth for the Xcode project.
 
+Performance-sensitive boundaries and measurement requirements are specified in [`docs/performance/`](performance/README.md). Lists retain summaries, detail state is evictable, image and render work is off-main and cost-bounded, operation polling uses stable identities, provider lifecycle publication is atomic, and acceptance is based on a Release/Profile device trace rather than Debug timings.
+
 ## Composition Root
 
 `PinesAppServices` owns service construction for the app layer. The default SwiftUI environment creates a no-store instance for previews and early view construction; `PinesRootView` creates live services only after the boot mark has reached the first frame.

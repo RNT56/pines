@@ -6,16 +6,25 @@ import GRDB
 
 extension GRDBPinesStore {
     func listProviderTransfers(providerID: ProviderID?) async throws -> [ProviderTransferRecord] {
-        try await database.read { db in
+        try await listProviderTransfers(providerID: providerID, limit: Int.max)
+    }
+
+    func listProviderTransfers(providerID: ProviderID?, limit: Int) async throws -> [ProviderTransferRecord] {
+        guard limit > 0 else { return [] }
+        return try await database.read { db in
             let rows: [Row]
             if let providerID {
                 rows = try Row.fetchAll(
                     db,
-                    sql: "SELECT * FROM provider_transfers WHERE provider_id = ? ORDER BY updated_at DESC",
-                    arguments: [providerID.rawValue]
+                    sql: "SELECT * FROM provider_transfers WHERE provider_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+                    arguments: [providerID.rawValue, limit]
                 )
             } else {
-                rows = try Row.fetchAll(db, sql: "SELECT * FROM provider_transfers ORDER BY updated_at DESC")
+                rows = try Row.fetchAll(
+                    db,
+                    sql: "SELECT * FROM provider_transfers ORDER BY updated_at DESC, id DESC LIMIT ?",
+                    arguments: [limit]
+                )
             }
             return rows.compactMap(Self.providerTransfer(from:))
         }

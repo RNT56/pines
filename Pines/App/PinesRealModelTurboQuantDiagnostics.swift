@@ -365,4 +365,13 @@ import PinesCore
             }
         }
     }
+#elseif DEBUG
+    // App release/profile builds intentionally do not link IntegrationTestHelpers.
+    // Keep the Debug launch hook compile-safe; real-model benchmarks run through
+    // the standalone SwiftPM diagnostics when the helper product is unavailable.
+    extension PinesAppModel {
+        func runLaunchRealModelTurboQuantBenchIfNeeded(services: PinesAppServices) async {
+            _ = services
+        }
+    }
 #endif

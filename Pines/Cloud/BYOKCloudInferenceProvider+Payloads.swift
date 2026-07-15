@@ -621,9 +621,15 @@ extension BYOKCloudInferenceProvider {
             )
         }
 
+        let maxBytes = kind == .image ? maxInlineImageBytes : maxInlineFileBytes
+        if let fileSize = try? localURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           fileSize > maxBytes {
+            throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) exceeds the \(ByteCountFormatter.string(fromByteCount: Int64(maxBytes), countStyle: .file)) inline limit.")
+        }
+
         let data: Data
         do {
-            data = try Data(contentsOf: localURL)
+            data = try Data(contentsOf: localURL, options: [.mappedIfSafe])
         } catch {
             throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) could not be read from disk: \(error.localizedDescription)")
         }
@@ -631,7 +637,6 @@ extension BYOKCloudInferenceProvider {
             throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) is empty.")
         }
 
-        let maxBytes = kind == .image ? maxInlineImageBytes : maxInlineFileBytes
         guard data.count <= maxBytes else {
             throw InferenceError.invalidRequest("Cloud attachment \(attachment.fileName) exceeds the \(ByteCountFormatter.string(fromByteCount: Int64(maxBytes), countStyle: .file)) inline limit.")
         }

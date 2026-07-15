@@ -87,8 +87,14 @@ jobs:
       - name: Generate project and verify drift
         run: bash scripts/ci/run-xcode-validation.sh generate
 
+      - name: Validate release project hygiene
+        run: bash scripts/ci/check-release-build-hygiene.sh project
+
       - name: Resolve Xcode package dependencies
         run: bash scripts/ci/run-xcode-validation.sh resolve
+
+      - name: Validate release build settings
+        run: bash scripts/ci/check-release-build-hygiene.sh settings
 
       - name: Build unsigned iOS app
         run: bash scripts/ci/run-xcode-validation.sh build-app
@@ -119,6 +125,11 @@ jobs:
             -disableAutomaticPackageResolution \
             CODE_SIGNING_ALLOWED=NO \
             archive | tee build/archive.log
+
+      - name: Validate archived app binary hygiene
+        run: >-
+          bash scripts/ci/check-release-build-hygiene.sh binary
+          build/Pines.xcarchive/Products/Applications/pines.app/pines
 
       - name: Package source release
         run: bash scripts/ci/package-release.sh "${{ steps.release-tag.outputs.tag }}"

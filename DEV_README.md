@@ -21,6 +21,15 @@ Full iOS validation requires a full Xcode install selected with `xcode-select`:
 bash scripts/ci/run-xcode-validation.sh
 ```
 
+For Release/Profile performance validation and the retained-evidence workflow:
+
+```sh
+bash scripts/ci/check-release-build-hygiene.sh
+bash scripts/diagnostics/run-ios-ui-performance.sh
+```
+
+The performance architecture, acceptance budgets, trace journeys, and baseline template live in [`docs/performance/`](docs/performance/README.md).
+
 For a direct generic iOS build:
 
 ```sh
@@ -115,7 +124,7 @@ Provider lifecycle records are generic on purpose. OpenAI Files/vector stores, A
 
 ## Persistence And Sync
 
-The local store is GRDB/SQLite. Schema source of truth is `Sources/PinesCore/Persistence/DatabaseSchema.swift`; the current schema version is `26`.
+The local store is GRDB/SQLite. Schema source of truth is `Sources/PinesCore/Persistence/DatabaseSchema.swift`; the current schema version is `31`.
 
 When changing persistence:
 
@@ -209,6 +218,10 @@ Runtime development rules:
 - Keep runtime diagnostics read-only and visible in Models/Settings where relevant.
 - Log startup phases, generation throughput, vault retrieval latency, memory-pressure events, and MetricKit availability through `PinesRuntimeMetrics`.
 - Treat device model names as hints; verified MLX capabilities decide whether compressed Metal attention is active.
+- Keep SwiftUI list state summary-only; load large bytes, chunks, embeddings, and provider objects through targeted, cancellable detail APIs.
+- Use stable operation identities for polling and `.task(id:)`; mutable status, timestamps, and search text must not restart unrelated network loops.
+- Downsample images to their presentation size off-main and use cost-bounded caches that purge on memory, thermal, and lifecycle pressure.
+- Profile with the Release-configured `PinesPerformance` scheme. Debug coverage builds are not performance evidence.
 
 Current app-level limits and defaults:
 

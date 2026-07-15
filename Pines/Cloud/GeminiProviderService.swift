@@ -74,6 +74,34 @@ struct GeminiProviderService {
         return try await send(request, uploadProgress: uploadProgress)
     }
 
+    func uploadResumableFile(
+        to uploadURL: String,
+        fileURL: URL,
+        byteCount: Int64,
+        finalize: Bool = true,
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> GeminiProviderResponse {
+        guard let url = URL(string: uploadURL), byteCount >= 0 else {
+            throw CloudProviderError.invalidResponse
+        }
+        let hasSecurityScope = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if hasSecurityScope {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue(finalize ? "upload, finalize" : "upload", forHTTPHeaderField: "X-Goog-Upload-Command")
+        request.addValue("0", forHTTPHeaderField: "X-Goog-Upload-Offset")
+        try await applyExtraHeaders(to: &request)
+        return try await send(
+            request,
+            bodyFile: ProviderPreparedUploadBody(url: fileURL, byteCount: byteCount),
+            uploadProgress: uploadProgress
+        )
+    }
+
     func listFiles(_ request: GeminiListRequest = GeminiListRequest()) async throws -> GeminiProviderResponse {
         try await rawJSON(method: .get, path: "files", queryItems: request.queryItems)
     }
@@ -204,14 +232,27 @@ struct GeminiProviderService {
 
     private func send(
         _ request: URLRequest,
+        bodyFile: ProviderPreparedUploadBody? = nil,
         uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> GeminiProviderResponse {
-        let (data, http) = try await BoundedHTTPResponse.data(
-            for: request,
-            session: urlSession,
-            maxBytes: BoundedHTTPResponse.fileLimit,
-            uploadProgress: uploadProgress
-        )
+        let (data, http): (Data, HTTPURLResponse)
+        if let bodyFile {
+            (data, http) = try await BoundedHTTPResponse.uploadFile(
+                for: request,
+                bodyFileURL: bodyFile.url,
+                bodyByteCount: bodyFile.byteCount,
+                session: urlSession,
+                maxBytes: BoundedHTTPResponse.fileLimit,
+                uploadProgress: uploadProgress
+            )
+        } else {
+            (data, http) = try await BoundedHTTPResponse.data(
+                for: request,
+                session: urlSession,
+                maxBytes: BoundedHTTPResponse.fileLimit,
+                uploadProgress: uploadProgress
+            )
+        }
         let providerResponse = GeminiProviderResponse(data: data, httpResponse: http)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(

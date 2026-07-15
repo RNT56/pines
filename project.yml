@@ -35,6 +35,11 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     WATCHOS_DEPLOYMENT_TARGET: "10.0"
     TARGETED_DEVICE_FAMILY: "1,2"
+  configs:
+    Release:
+      # Release is the source configuration for Profile and Archive. Keep it
+      # representative of the shipped binary even when Debug tests collect coverage.
+      ENABLE_CODE_COVERAGE: NO
 targets:
   Pines:
     type: application
@@ -82,10 +87,8 @@ targets:
         product: MLXEmbedders
       - package: MLXSwiftLM
         product: MLXLMCommon
-      - package: MLXSwiftLM
-        product: TurboQuantBench
-      - package: MLXSwiftLM
-        product: IntegrationTestHelpers
+      # TurboQuantBench and IntegrationTestHelpers stay in standalone SwiftPM
+      # diagnostics; linking them here would contaminate the production binary.
       - package: SwiftTransformers
         product: Tokenizers
       - package: GRDB
@@ -191,3 +194,25 @@ schemes:
         PinesWatch: all
     run:
       config: Debug
+  PinesPerformance:
+    build:
+      targets:
+        Pines: [run, profile, analyze, archive]
+        PinesUITests: [test]
+    run:
+      config: Release
+      debugEnabled: false
+    test:
+      config: Release
+      gatherCoverageData: false
+      targets:
+        - PinesUITests
+      environmentVariables:
+        PINES_RUN_UI_PERFORMANCE_TESTS: "1"
+        PINES_PERFORMANCE_ITERATIONS: "$(PINES_PERFORMANCE_ITERATION_COUNT)"
+    profile:
+      config: Release
+    analyze:
+      config: Release
+    archive:
+      config: Release

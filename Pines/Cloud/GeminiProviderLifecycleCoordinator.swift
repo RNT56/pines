@@ -52,6 +52,49 @@ struct GeminiProviderLifecycleCoordinator: Sendable {
         return record
     }
 
+    func uploadFile(
+        fileName: String,
+        contentType: String,
+        fileURL: URL,
+        byteCount: Int64,
+        localURL: URL? = nil,
+        poll: GeminiFilePolling? = nil,
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> ProviderFileRecord {
+        guard byteCount <= Int64(Int.max) else {
+            throw InferenceError.invalidRequest("Gemini upload is too large for this device.")
+        }
+        let session = try await service.startResumableUpload(
+            displayName: fileName,
+            mimeType: contentType,
+            byteCount: Int(byteCount)
+        )
+        let response = try await service.uploadResumableFile(
+            to: session.uploadURL,
+            fileURL: fileURL,
+            byteCount: byteCount,
+            uploadProgress: uploadProgress
+        )
+        guard var record = fileRecord(
+            from: response.json,
+            fallbackFileName: fileName,
+            contentType: contentType,
+            byteCount: Int(byteCount)
+        ) else {
+            throw CloudProviderError.invalidResponse
+        }
+        record.localURL = localURL
+        record.contentType = record.contentType ?? contentType
+        record.byteCount = record.byteCount == 0 ? byteCount : record.byteCount
+        try await repositories.files?.upsertProviderFile(record)
+        try await audit("Uploaded Gemini provider file \(record.fileName)")
+
+        if let poll {
+            return try await pollFile(name: record.id, polling: poll)
+        }
+        return record
+    }
+
     func refreshFile(name: String) async throws -> ProviderFileRecord {
         let response = try await service.getFile(name)
         guard let record = fileRecord(from: response.json) else {

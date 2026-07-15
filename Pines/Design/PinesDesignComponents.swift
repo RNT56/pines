@@ -6,7 +6,12 @@ import UIKit
 struct PinesBootMarkView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pinesPerformancePolicy) private var performancePolicy
     @State private var isAnimating = false
+
+    private var allowsDecorativeMotion: Bool {
+        performancePolicy.allowsDecorativeMotion && !reduceMotion
+    }
 
     private let stages = [
         PinesBootStage(title: "Runtime", systemImage: "cpu", tint: .accent),
@@ -17,14 +22,14 @@ struct PinesBootMarkView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                PinesAmbientBackground(animates: true, showsWatermark: false)
+                PinesAmbientBackground(animates: allowsDecorativeMotion, showsWatermark: false)
                     .ignoresSafeArea()
 
-                PinesBootSignalField(isActive: isAnimating && !reduceMotion)
+                PinesBootSignalField(isActive: isAnimating && allowsDecorativeMotion)
                     .ignoresSafeArea()
 
                 VStack(spacing: theme.spacing.xlarge) {
-                    PinesBootMarkCluster(isActive: isAnimating && !reduceMotion)
+                    PinesBootMarkCluster(isActive: isAnimating && allowsDecorativeMotion)
                         .scaleEffect(isAnimating || reduceMotion ? 1 : 0.98)
 
                     VStack(spacing: theme.spacing.small) {
@@ -53,7 +58,7 @@ struct PinesBootMarkView: View {
                     }
 
                     VStack(spacing: theme.spacing.small) {
-                        PinesBootSignalBar(isActive: isAnimating && !reduceMotion)
+                        PinesBootSignalBar(isActive: isAnimating && allowsDecorativeMotion)
 
                         Text("Starting private workspace")
                             .font(theme.typography.caption.weight(.medium))
@@ -74,13 +79,13 @@ struct PinesBootMarkView: View {
         .onAppear {
             guard !isAnimating else { return }
             PinesRuntimeMetrics.shared.recordStartupPhase("boot_mark_appeared", elapsedSeconds: 0)
-            withAnimation(reduceMotion ? nil : .spring(duration: 0.68, bounce: 0.24)) {
+            withAnimation(allowsDecorativeMotion ? .spring(duration: 0.68, bounce: 0.24) : nil) {
                 isAnimating = true
             }
         }
         .transition(.asymmetric(
-            insertion: .opacity.combined(with: reduceMotion ? .identity : .scale(scale: 0.96)),
-            removal: .opacity.combined(with: reduceMotion ? .identity : .scale(scale: 1.04))
+            insertion: .opacity.combined(with: allowsDecorativeMotion ? .scale(scale: 0.96) : .identity),
+            removal: .opacity.combined(with: allowsDecorativeMotion ? .scale(scale: 1.04) : .identity)
         ))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Pines is starting")
@@ -197,9 +202,14 @@ private struct PinesBootMarkCluster: View {
 private struct PinesBootStageChip: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pinesPerformancePolicy) private var performancePolicy
     let stage: PinesBootStage
     let isActive: Bool
     let delay: Double
+
+    private var allowsDecorativeMotion: Bool {
+        performancePolicy.allowsDecorativeMotion && !reduceMotion
+    }
 
     var body: some View {
         let tint = stage.tint.color(in: theme)
@@ -208,7 +218,7 @@ private struct PinesBootStageChip: View {
                 .font(.system(size: 17, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(tint)
-                .symbolEffect(.pulse, options: .repeating.speed(0.55), value: isActive && !reduceMotion)
+                .symbolEffect(.pulse, options: .repeating.speed(0.55), value: isActive && allowsDecorativeMotion)
 
             Text(stage.title)
                 .font(theme.typography.caption.weight(.semibold))
@@ -224,15 +234,20 @@ private struct PinesBootStageChip: View {
         }
         .opacity(isActive ? 1 : 0)
         .offset(y: isActive || reduceMotion ? 0 : 12)
-        .animation(reduceMotion ? nil : .spring(duration: 0.54, bounce: 0.24).delay(delay), value: isActive)
+        .animation(allowsDecorativeMotion ? .spring(duration: 0.54, bounce: 0.24).delay(delay) : nil, value: isActive)
     }
 }
 
 private struct PinesBootSignalBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesPerformancePolicy) private var performancePolicy
     let isActive: Bool
     @State private var sweep = false
+
+    private var allowsDecorativeMotion: Bool {
+        performancePolicy.allowsDecorativeMotion && !reduceMotion
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -265,13 +280,25 @@ private struct PinesBootSignalBar: View {
         }
         .frame(height: 8)
         .onAppear {
-            guard isActive, !reduceMotion else { return }
+            guard isActive, allowsDecorativeMotion else { return }
             withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
                 sweep = true
             }
         }
         .onChange(of: isActive) { _, active in
-            guard active, !reduceMotion else { return }
+            guard active, allowsDecorativeMotion else {
+                sweep = false
+                return
+            }
+            withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                sweep = true
+            }
+        }
+        .onChange(of: allowsDecorativeMotion) { _, allowed in
+            guard allowed, isActive else {
+                sweep = false
+                return
+            }
             withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
                 sweep = true
             }
@@ -283,8 +310,13 @@ private struct PinesBootSignalBar: View {
 private struct PinesBootSignalField: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.pinesPerformancePolicy) private var performancePolicy
     let isActive: Bool
     @State private var sweep = false
+
+    private var allowsDecorativeMotion: Bool {
+        performancePolicy.allowsDecorativeMotion && !reduceMotion
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -334,13 +366,25 @@ private struct PinesBootSignalField: View {
             .clipped()
         }
         .onAppear {
-            guard isActive, !reduceMotion else { return }
+            guard isActive, allowsDecorativeMotion else { return }
             withAnimation(.easeInOut(duration: 4.6).repeatForever(autoreverses: true)) {
                 sweep = true
             }
         }
         .onChange(of: isActive) { _, active in
-            guard active, !reduceMotion else { return }
+            guard active, allowsDecorativeMotion else {
+                sweep = false
+                return
+            }
+            withAnimation(.easeInOut(duration: 4.6).repeatForever(autoreverses: true)) {
+                sweep = true
+            }
+        }
+        .onChange(of: allowsDecorativeMotion) { _, allowed in
+            guard allowed, isActive else {
+                sweep = false
+                return
+            }
             withAnimation(.easeInOut(duration: 4.6).repeatForever(autoreverses: true)) {
                 sweep = true
             }
@@ -1503,17 +1547,22 @@ struct PinesDivider: View {
 struct PinesStatusIndicator: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pinesPerformancePolicy) private var performancePolicy
     let color: Color
     var isActive = false
     var size: CGFloat = 9
     @State private var pulse = false
+
+    private var allowsDecorativeMotion: Bool {
+        performancePolicy.allowsDecorativeMotion && !reduceMotion
+    }
 
     var body: some View {
         Circle()
             .fill(color)
             .frame(width: size, height: size)
             .overlay {
-                if isActive && !reduceMotion {
+                if isActive && allowsDecorativeMotion {
                     Circle()
                         .stroke(color.opacity(0.35), lineWidth: 1)
                         .scaleEffect(pulse ? 2.4 : 1)
@@ -1522,7 +1571,25 @@ struct PinesStatusIndicator: View {
             }
             .shadow(color: color.opacity(theme.colorScheme == .dark ? 0.44 : 0.24), radius: isActive ? 5 : 2, x: 0, y: 0)
             .onAppear {
-                guard isActive, !reduceMotion else { return }
+                guard isActive, allowsDecorativeMotion else { return }
+                withAnimation(.easeOut(duration: 1.35).repeatForever(autoreverses: false)) {
+                    pulse = true
+                }
+            }
+            .onChange(of: allowsDecorativeMotion) { _, allowed in
+                guard allowed, isActive else {
+                    pulse = false
+                    return
+                }
+                withAnimation(.easeOut(duration: 1.35).repeatForever(autoreverses: false)) {
+                    pulse = true
+                }
+            }
+            .onChange(of: isActive) { _, active in
+                guard active, allowsDecorativeMotion else {
+                    pulse = false
+                    return
+                }
                 withAnimation(.easeOut(duration: 1.35).repeatForever(autoreverses: false)) {
                     pulse = true
                 }
@@ -1577,9 +1644,14 @@ struct PinesProgressBar: View {
 struct PinesAmbientBackground: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pinesPerformancePolicy) private var performancePolicy
     var animates = false
     var showsWatermark = true
     @State private var drift = false
+
+    private var allowsDecorativeMotion: Bool {
+        performancePolicy.allowsDecorativeMotion && !reduceMotion
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -1612,7 +1684,16 @@ struct PinesAmbientBackground: View {
             }
             .clipped()
             .onAppear {
-                guard animates, !reduceMotion else { return }
+                guard animates, allowsDecorativeMotion else { return }
+                withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
+                    drift = true
+                }
+            }
+            .onChange(of: allowsDecorativeMotion) { _, allowed in
+                guard allowed, animates else {
+                    drift = false
+                    return
+                }
                 withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
                     drift = true
                 }
@@ -1623,7 +1704,7 @@ struct PinesAmbientBackground: View {
     }
 
     private var lineOffset: CGFloat {
-        guard animates, !reduceMotion else { return 0 }
+        guard animates, allowsDecorativeMotion else { return 0 }
         return drift ? theme.ambient.drift : -theme.ambient.drift * 0.4
     }
 

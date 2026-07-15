@@ -1,3 +1,4 @@
+import Foundation
 import ImageIO
 import SwiftUI
 import PinesCore
@@ -799,6 +800,10 @@ private struct ChatTranscriptView: View {
     @State private var openSwipeMessageID: UUID?
     @State private var isTranscriptDragging = false
     @State private var lastTranscriptInteractionAt = Date.distantPast
+    @State private var firstVisibleMessageThreadID: UUID?
+    @State private var firstMessageMeasurementThreadID: UUID?
+    @State private var firstMessageInterval: PinesPerformanceInterval?
+    @State private var hasMeasuredFirstMessage = false
     let thread: PinesThreadPreview
 
     private var latestAssistantMessageID: UUID? {
@@ -827,6 +832,10 @@ private struct ChatTranscriptView: View {
                                 openSwipeMessageID: $openSwipeMessageID,
                                 editingMessage: $editingMessage
                             )
+                            .onAppear {
+                                firstVisibleMessageThreadID = thread.id
+                                finishFirstMessageMeasurement()
+                            }
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }
@@ -898,12 +907,17 @@ private struct ChatTranscriptView: View {
         .navigationTitle(thread.title)
         .accessibilityIdentifier("pines.chat.transcript")
         .task(id: thread.id) {
+            startFirstMessageMeasurement()
             await appModel.loadThreadMessages(
                 threadID: thread.id,
                 services: services,
-                force: !thread.messages.isEmpty
+                force: false
             )
+            if chatState.threads.first(where: { $0.id == thread.id })?.messages.isEmpty == true {
+                finishFirstMessageMeasurement()
+            }
         }
+        .onDisappear(perform: finishFirstMessageMeasurement)
         .pinesInlineNavigationTitle()
         .toolbar {
             if horizontalSizeClass == .compact {
@@ -1029,6 +1043,31 @@ private struct ChatTranscriptView: View {
         } else {
             proxy.scrollTo("chat-bottom", anchor: .bottom)
         }
+    }
+
+    @MainActor
+    private func startFirstMessageMeasurement() {
+        if firstMessageMeasurementThreadID != thread.id {
+            if let firstMessageInterval {
+                services.runtimeMetrics.end(firstMessageInterval)
+            }
+            firstMessageInterval = nil
+            firstMessageMeasurementThreadID = thread.id
+            hasMeasuredFirstMessage = false
+        }
+        guard !hasMeasuredFirstMessage, firstMessageInterval == nil else { return }
+        firstMessageInterval = services.runtimeMetrics.begin(.threadToFirstMessage)
+        if firstVisibleMessageThreadID == thread.id {
+            finishFirstMessageMeasurement()
+        }
+    }
+
+    @MainActor
+    private func finishFirstMessageMeasurement() {
+        guard let interval = firstMessageInterval else { return }
+        firstMessageInterval = nil
+        hasMeasuredFirstMessage = true
+        services.runtimeMetrics.end(interval)
     }
 
 }
@@ -1292,6 +1331,8 @@ private struct ChatBubble: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var haptics: PinesHaptics
+    @State private var webSearchCitations: [WebSearchCitation] = []
+    @State private var citationRevision: UInt64 = 0
     let message: ChatMessage
     let isStreaming: Bool
     let canEdit: Bool
@@ -1309,6 +1350,12 @@ private struct ChatBubble: View {
             openBubbleID: $openSwipeMessageID
         ) {
             bubbleContent
+        }
+        .task(id: WebCitationDecodeTaskID(messageID: message.id, revision: citationRevision)) {
+            webSearchCitations = await PinesChatMetadataCache.shared.webSearchCitations(rawJSON: webCitationJSON)
+        }
+        .onChange(of: webCitationJSON) { _, _ in
+            citationRevision &+= 1
         }
     }
 
@@ -1350,7 +1397,6 @@ private struct ChatBubble: View {
                     ChatAttachmentList(attachments: message.attachments)
                 }
 
-                let webSearchCitations = ChatWebSearchCitationList.citations(from: message.providerMetadata)
                 if !webSearchCitations.isEmpty {
                     ChatWebSearchCitationList(citations: webSearchCitations)
                 }
@@ -1402,6 +1448,10 @@ private struct ChatBubble: View {
                     Label("Copy as Plain Text", systemImage: "text.alignleft")
                 }
             }
+    }
+
+    private var webCitationJSON: String {
+        message.providerMetadata[CloudProviderMetadataKeys.webSearchCitationsJSON] ?? ""
     }
 
     private var leadingSwipeActions: [ChatBubbleSwipeAction] {
@@ -1512,6 +1562,14 @@ private struct ChatWebSearchSuggestionsView: View {
 private struct SearchSuggestionsWebView: UIViewRepresentable {
     let html: String
 
+    final class Coordinator {
+        var loadedHTML: String?
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeUIView(context _: Context) -> WKWebView {
         let webView = WKWebView(frame: .zero)
         webView.isOpaque = false
@@ -1521,7 +1579,9 @@ private struct SearchSuggestionsWebView: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context _: Context) {
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        guard context.coordinator.loadedHTML != html else { return }
+        context.coordinator.loadedHTML = html
         webView.loadHTMLString(html, baseURL: nil)
     }
 }
@@ -1586,12 +1646,50 @@ private struct ChatWebSearchCitationList: View {
         .accessibilityLabel("\(citations.count) web search sources")
     }
 
-    static func citations(from metadata: [String: String]) -> [WebSearchCitation] {
-        guard let raw = metadata[CloudProviderMetadataKeys.webSearchCitationsJSON],
-              let data = raw.data(using: .utf8),
+    nonisolated static func citations(from raw: String) -> [WebSearchCitation] {
+        guard let data = raw.data(using: .utf8),
               let citations = try? JSONDecoder().decode([WebSearchCitation].self, from: data)
         else { return [] }
         return citations
+    }
+}
+
+private struct WebCitationDecodeTaskID: Hashable {
+    let messageID: UUID
+    let revision: UInt64
+}
+
+actor PinesChatMetadataCache {
+    static let shared = PinesChatMetadataCache()
+
+    private final class Box: NSObject {
+        let citations: [WebSearchCitation]
+
+        init(_ citations: [WebSearchCitation]) {
+            self.citations = citations
+        }
+    }
+
+    private let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.countLimit = 256
+        cache.totalCostLimit = 4 * 1_024 * 1_024
+        return cache
+    }()
+
+    func webSearchCitations(rawJSON: String) -> [WebSearchCitation] {
+        guard !rawJSON.isEmpty else { return [] }
+        let key = rawJSON as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached.citations
+        }
+        let citations = ChatWebSearchCitationList.citations(from: rawJSON)
+        cache.setObject(Box(citations), forKey: key, cost: max(1, rawJSON.utf8.count))
+        return citations
+    }
+
+    func purge() {
+        cache.removeAllObjects()
     }
 }
 

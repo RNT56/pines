@@ -1,5 +1,14 @@
 # Artifact Gallery UX System
 
+## Performance contract
+
+- The library derives provider and research labels from pre-indexed dictionaries rather than scanning those arrays once per artifact.
+- Search derivation is cancellable and debounced outside the SwiftUI render path; ordering remains deterministic.
+- Activity and research polling are keyed by stable operation IDs, independent of filters, and run through one cancellable scheduler per operation with backoff, jitter, and terminal exit.
+- Thumbnails and previews use `PinesImagePipeline`: ImageIO downsampling occurs off-main, duplicate requests coalesce, remote responses are bounded, and the decoded cache is capped by cost.
+- Embedded base64 payloads are decoded only after an image-cache miss. Cells do not call `UIImage(data:)` or `AsyncImage`.
+- Performance acceptance uses the canonical Artifact journey in [`docs/performance/RUNBOOK.md`](performance/RUNBOOK.md).
+
 ## Product model
 
 Artifacts is a zero-navigation gallery. The root is for scanning output, not managing a dashboard. Search, filter, creation, active work, and inspection stay available without becoming permanent panels or nested destinations.

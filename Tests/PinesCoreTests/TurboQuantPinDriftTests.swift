@@ -127,46 +127,44 @@ struct TurboQuantPinDriftTests {
         })
     }
 
-    @Test func appHostedBenchmarkPathStaysWired() throws {
+    @Test func productionBenchmarkBoundaryStaysUnlinkedAndCompileSafe() throws {
         let root = try Self.repoRoot()
         let projectYML = try Self.read("project.yml", root: root)
         let pbxproj = try Self.read("Pines.xcodeproj/project.pbxproj", root: root)
         let rootView = try Self.read("Pines/App/PinesRootView.swift", root: root)
-        let diagnostics = try Self.read("Pines/App/PinesTurboQuantBenchmarkDiagnostics.swift", root: root)
-        let script = try Self.read("scripts/diagnostics/run-ios-turboquant-bench.sh", root: root)
+        let syntheticDiagnostics = try Self.read(
+            "Pines/App/PinesTurboQuantBenchmarkDiagnostics.swift",
+            root: root
+        )
+        let realModelDiagnostics = try Self.read(
+            "Pines/App/PinesRealModelTurboQuantDiagnostics.swift",
+            root: root
+        )
+        let captureScript = try Self.read(
+            "scripts/diagnostics/capture-turboquant-wave0.sh",
+            root: root
+        )
+        let hygieneGuard = try Self.read(
+            "scripts/ci/check-release-build-hygiene.sh",
+            root: root
+        )
 
-        #expect(projectYML.contains("product: TurboQuantBench"))
-        #expect(pbxproj.contains("productName = TurboQuantBench;"))
+        #expect(!projectYML.contains("product: TurboQuantBench"))
+        #expect(!projectYML.contains("product: IntegrationTestHelpers"))
+        #expect(!pbxproj.contains("productName = TurboQuantBench;"))
+        #expect(!pbxproj.contains("productName = IntegrationTestHelpers;"))
+        #expect(projectYML.contains("ENABLE_CODE_COVERAGE: NO"))
+        #expect(projectYML.contains("PinesPerformance:"))
         #expect(rootView.contains("runLaunchTurboQuantBenchIfNeeded"))
-        #expect(diagnostics.contains("PINES_TURBOQUANT_BENCH"))
-        #expect(diagnostics.contains("PinesTurboQuantBenchAppHost"))
-        #expect(diagnostics.contains("PINES_TQ_BENCH_DEVICE_ID"))
-        #expect(diagnostics.contains("PINES_TQ_BENCH_RUNTIME_MODES"))
-        #expect(diagnostics.contains("PINES_TQ_BENCH_PRECISION_POLICIES"))
-        #expect(diagnostics.contains("PINES_TQ_BENCH_SPARSE_V"))
-        #expect(diagnostics.contains("matrixExecution"))
-        #expect(diagnostics.contains("comparisonBasis"))
-        #expect(diagnostics.contains("real-model-inference-v1"))
-        #expect(diagnostics.contains("TurboQuantBench.sweep"))
-        #expect(diagnostics.contains("pines-turboquant-bench-status.json"))
-        #expect(diagnostics.contains("hybridNativeDiagnostics"))
-        #expect(diagnostics.contains("PinesTurboQuantBenchHybridNativeDiagnostics"))
-        #expect(diagnostics.contains("hybridAttentionKVPolicy"))
-        #expect(diagnostics.contains("nativeStateCachePolicy"))
-        #expect(diagnostics.contains("requestedNativeBackend"))
-        #expect(diagnostics.contains("nativeBackendPerformanceEvidence"))
-        #expect(diagnostics.contains("performanceParityEvidence"))
-        #expect(diagnostics.contains("realModelInferenceEvidence"))
-        #expect(script.contains("PINES_TURBOQUANT_BENCH"))
-        #expect(script.contains("PINES_TQ_BENCH_DEVICE_ID"))
-        #expect(script.contains("PINES_TQ_BENCH_PINES_COMMIT"))
-        #expect(script.contains("PINES_TQ_BENCH_RUNTIME_MODES"))
-        #expect(script.contains("PINES_TQ_BENCH_PRECISION_POLICIES"))
-        #expect(script.contains("PINES_TQ_BENCH_SPARSE_V"))
-        #expect(script.contains("devicectl device process launch"))
-        #expect(script.contains("pines-turboquant-bench-status.json"))
-        #expect(script.contains("hybridNativeDiagnostics"))
-        #expect(script.contains("appHost"))
+        #expect(rootView.contains("runLaunchRealModelTurboQuantBenchIfNeeded"))
+        #expect(syntheticDiagnostics.contains("#if DEBUG && canImport(TurboQuantBench)"))
+        #expect(syntheticDiagnostics.contains("#if canImport(TurboQuantBench)"))
+        #expect(realModelDiagnostics.contains("canImport(IntegrationTestHelpers)"))
+        #expect(realModelDiagnostics.contains("#elseif DEBUG"))
+        #expect(realModelDiagnostics.contains("standalone SwiftPM diagnostics"))
+        #expect(captureScript.contains("swift build --product TurboQuantBenchmark -c release"))
+        #expect(hygieneGuard.contains("[$]s15TurboQuantBench"))
+        #expect(hygieneGuard.contains("[$]s22IntegrationTestHelpers"))
     }
 
     @Test func wave0CaptureHarnessStaysWired() throws {

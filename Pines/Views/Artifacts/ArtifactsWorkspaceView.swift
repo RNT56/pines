@@ -322,6 +322,15 @@ private struct ArtifactsLibraryView: View {
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     @Binding var query: ArtifactsLibraryQuery
     @Binding var pendingConfirmation: ArtifactsConfirmation?
+    @State private var libraryIndex = ArtifactLibraryIndex.empty
+    @State private var libraryProjection = ArtifactLibraryProjection.empty
+    @State private var sourceDerivationTask: Task<Void, Never>?
+    @State private var queryProjectionTask: Task<Void, Never>?
+    @State private var sourceGeneration = 0
+    @State private var queryGeneration = 0
+    @State private var hasBuiltLibraryIndex = false
+    @State private var galleryToFirstThumbnailInterval: PinesPerformanceInterval?
+    @State private var hasMeasuredFirstGalleryThumbnail = false
     let openArtifact: (String) -> Void
     let createArtifact: (ArtifactsMediaKind) -> Void
     let openResearch: (String?) -> Void
@@ -332,72 +341,24 @@ private struct ArtifactsLibraryView: View {
         settingsState.cloudProviders.artifactProviders
     }
 
-    private var items: [ArtifactLibraryItem] {
-        let needle = query.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let filtered = providerState.providerArtifacts
-            .filter(\.isVisibleInArtifactsGallery)
-            .filter { query.category.matches($0) }
-            .filter { query.providerScope.includes($0.providerID) }
-            .map {
-                ArtifactLibraryItem(
-                    artifact: $0,
-                    providers: providers,
-                    researchRuns: providerState.providerResearchRuns
-                )
-            }
-            .filter { item in
-                needle.isEmpty
-                    || item.title.lowercased().contains(needle)
-                    || item.providerName.lowercased().contains(needle)
-                    || item.excerpt?.lowercased().contains(needle) == true
-                    || item.artifact.searchText.lowercased().contains(needle)
-            }
-
-        switch query.sort {
-        case .newest:
-            return filtered.sorted { $0.createdAt > $1.createdAt }
-        case .oldest:
-            return filtered.sorted { $0.createdAt < $1.createdAt }
-        case .provider:
-            return filtered.sorted { $0.providerName.localizedCaseInsensitiveCompare($1.providerName) == .orderedAscending }
-        case .kind:
-            return filtered.sorted { $0.contentKind.title.localizedCaseInsensitiveCompare($1.contentKind.title) == .orderedAscending }
-        }
-    }
-
     private var activeResearchThreads: [ArtifactsResearchThread] {
-        guard query.category == .all || query.category == .reports else { return [] }
-        return ArtifactsResearchThread.threads(from: providerState.providerResearchRuns)
-            .filter { $0.runs.contains(where: { !$0.status.providerIsTerminal }) }
-            .filter { query.providerScope.includes($0.latestRun.providerID) }
+        libraryProjection.activeResearchThreads
     }
 
     private var activeItems: [ArtifactLibraryItem] {
-        providerState.providerArtifacts
-            .filter(\.isVisibleInArtifactsGallery)
-            .filter { query.category.matches($0) }
-            .filter { query.providerScope.includes($0.providerID) }
-            .map {
-                ArtifactLibraryItem(
-                    artifact: $0,
-                    providers: providers,
-                    researchRuns: providerState.providerResearchRuns
-                )
-            }
-            .filter(\.isActive)
-            .sorted { $0.createdAt > $1.createdAt }
+        libraryProjection.activeItems
     }
 
     private var completedItems: [ArtifactLibraryItem] {
-        items.filter { !$0.isActive }
+        libraryProjection.completedItems
     }
 
-    private var activitySignature: String {
-        let artifacts = activeItems.map { "artifact:\($0.id):\($0.operationState.title)" }
-        let research = providerState.providerResearchRuns
-            .filter { !$0.status.providerIsTerminal }
-            .map { "research:\($0.id):\($0.status):\($0.updatedAt.timeIntervalSince1970)" }
-        return (artifacts + research).joined(separator: "|")
+    private var activityOperations: [ArtifactActivityPollOperation] {
+        libraryIndex.activityOperations
+    }
+
+    private var activitySignature: [String] {
+        ArtifactActivityPollOperation.stableSignature(for: activityOperations)
     }
 
     private var usesAccessibilityList: Bool {
@@ -449,7 +410,24 @@ private struct ArtifactsLibraryView: View {
             }
         }
         .task(id: activitySignature) {
-            await monitorActivity()
+            await monitorActivity(activityOperations)
+        }
+        .task {
+            scheduleSourceDerivation()
+        }
+        .onChange(of: providerState.snapshot.artifactLibraryRevision) { _, _ in
+            scheduleSourceDerivation()
+        }
+        .onChange(of: settingsState.cloudProviders) { _, _ in
+            scheduleSourceDerivation()
+        }
+        .onChange(of: query) { previous, current in
+            scheduleQueryProjection(debounced: previous.text != current.text)
+        }
+        .onDisappear {
+            sourceDerivationTask?.cancel()
+            queryProjectionTask?.cancel()
+            finishGalleryToFirstThumbnailMeasurement()
         }
         .pinesAppBackground()
         .accessibilityIdentifier("pines.artifacts.library")
@@ -560,7 +538,8 @@ private struct ArtifactsLibraryView: View {
 
     @ViewBuilder
     private var libraryContent: some View {
-        if providerState.isRefreshingProviderLifecycle && items.isEmpty {
+        if !hasBuiltLibraryIndex
+            || (providerState.isRefreshingProviderLifecycle && libraryProjection.matchingItemCount == 0) {
             ArtifactsLoadingState()
         } else if completedItems.isEmpty {
             ArtifactsLibraryEmptyState(
@@ -579,6 +558,11 @@ private struct ArtifactsLibraryView: View {
                 ForEach(completedItems) { item in
                     ArtifactLibraryRow(
                         item: item,
+                        onThumbnailReady: {
+                            if item.id == completedItems.first?.id {
+                                finishGalleryToFirstThumbnailMeasurement()
+                            }
+                        },
                         open: { openArtifact(item.id) },
                         importToVault: { Task { await importToVault(item.artifact) } },
                         remix: { remix(item.id) },
@@ -595,6 +579,11 @@ private struct ArtifactsLibraryView: View {
                 ForEach(completedItems) { item in
                     ArtifactGalleryTile(
                         item: item,
+                        onThumbnailReady: {
+                            if item.id == completedItems.first?.id {
+                                finishGalleryToFirstThumbnailMeasurement()
+                            }
+                        },
                         open: { openArtifact(item.id) },
                         importToVault: { Task { await importToVault(item.artifact) } },
                         remix: { remix(item.id) },
@@ -603,6 +592,71 @@ private struct ArtifactsLibraryView: View {
                 }
             }
         }
+    }
+
+    @MainActor
+    private func scheduleSourceDerivation() {
+        sourceGeneration &+= 1
+        let generation = sourceGeneration
+        let artifacts = providerState.providerArtifacts
+        let researchRuns = providerState.providerResearchRuns
+        let currentProviders = providers
+
+        sourceDerivationTask?.cancel()
+        queryProjectionTask?.cancel()
+        sourceDerivationTask = Task { @MainActor in
+            let interval = services.runtimeMetrics.begin(.artifactLibraryDerive)
+            let nextIndex = await ArtifactLibraryDerivationEngine.shared.buildIndex(
+                artifacts: artifacts,
+                providers: currentProviders,
+                researchRuns: researchRuns
+            )
+            services.runtimeMetrics.end(interval)
+            guard !Task.isCancelled, generation == sourceGeneration else { return }
+
+            libraryIndex = nextIndex
+            hasBuiltLibraryIndex = true
+            scheduleQueryProjection(debounced: false)
+        }
+    }
+
+    @MainActor
+    private func scheduleQueryProjection(debounced: Bool) {
+        queryGeneration &+= 1
+        let generation = queryGeneration
+        let currentIndex = libraryIndex
+        let currentQuery = query
+
+        queryProjectionTask?.cancel()
+        queryProjectionTask = Task { @MainActor in
+            if debounced {
+                do {
+                    try await Task.sleep(for: .milliseconds(160))
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            let nextProjection = await ArtifactLibraryDerivationEngine.shared.project(
+                index: currentIndex,
+                query: currentQuery
+            )
+            guard !Task.isCancelled, generation == queryGeneration else { return }
+            if !hasMeasuredFirstGalleryThumbnail,
+               galleryToFirstThumbnailInterval == nil,
+               !nextProjection.completedItems.isEmpty {
+                galleryToFirstThumbnailInterval = services.runtimeMetrics.begin(.galleryToFirstThumbnail)
+            }
+            libraryProjection = nextProjection
+        }
+    }
+
+    @MainActor
+    private func finishGalleryToFirstThumbnailMeasurement() {
+        guard let interval = galleryToFirstThumbnailInterval else { return }
+        galleryToFirstThumbnailInterval = nil
+        hasMeasuredFirstGalleryThumbnail = true
+        services.runtimeMetrics.end(interval)
     }
 
     @MainActor
@@ -615,57 +669,41 @@ private struct ArtifactsLibraryView: View {
     }
 
     @MainActor
-    private func monitorActivity() async {
-        guard !PinesUITestLaunchConfiguration.isEnabled else { return }
-        while !Task.isCancelled, !activitySignature.isEmpty {
-            let artifacts = activeItems.prefix(6)
-            let researchRuns = providerState.providerResearchRuns
-                .filter { !$0.status.providerIsTerminal }
-                .prefix(6)
-
-            for item in artifacts where !Task.isCancelled {
-                guard let providerID = item.artifact.providerID else { continue }
-                switch item.artifact.providerKind {
-                case .openAI where item.artifact.kind.lowercased() == "video_job":
-                    _ = try? await appModel.refreshOpenAIVideoArtifact(
-                        id: item.artifact.providerFileID ?? item.artifact.id,
-                        providerID: providerID,
-                        services: services
-                    )
-                case .gemini where item.artifact.kind.lowercased() == "media_operation":
-                    _ = try? await appModel.refreshGeminiGeneratedMediaOperation(
-                        id: item.artifact.responseID ?? item.artifact.id,
-                        providerID: providerID,
-                        services: services
-                    )
-                default:
-                    continue
-                }
-            }
-
-            for run in researchRuns where !Task.isCancelled {
-                switch run.providerKind {
-                case .openAI:
-                    _ = try? await appModel.refreshOpenAIDeepResearchRun(
-                        id: run.id,
-                        providerID: run.providerID,
-                        services: services
-                    )
-                case .gemini:
-                    _ = try? await appModel.refreshGeminiDeepResearchRun(
-                        id: run.id,
-                        providerID: run.providerID,
-                        services: services
-                    )
-                default:
-                    continue
-                }
-            }
-
-            do {
-                try await Task.sleep(for: .seconds(6))
-            } catch {
-                return
+    private func monitorActivity(_ operations: [ArtifactActivityPollOperation]) async {
+        guard !PinesUITestLaunchConfiguration.isEnabled,
+              !PinesUITestLaunchConfiguration.isSimulatorPerformanceTesting
+        else { return }
+        let scheduler = ArtifactActivityPollingScheduler()
+        await scheduler.run(operations: operations) { operation in
+            switch operation.kind {
+            case .openAIVideo:
+                let artifact = try await appModel.refreshOpenAIVideoArtifact(
+                    id: operation.remoteID,
+                    providerID: operation.providerID,
+                    services: services
+                )
+                return artifact.artifactOperationState.isActive ? .active : .terminal
+            case .geminiMedia:
+                let artifact = try await appModel.refreshGeminiGeneratedMediaOperation(
+                    id: operation.remoteID,
+                    providerID: operation.providerID,
+                    services: services
+                )
+                return artifact.artifactOperationState.isActive ? .active : .terminal
+            case .openAIResearch:
+                let run = try await appModel.refreshOpenAIDeepResearchRun(
+                    id: operation.remoteID,
+                    providerID: operation.providerID,
+                    services: services
+                )
+                return run.status.providerIsTerminal ? .terminal : .active
+            case .geminiResearch:
+                let run = try await appModel.refreshGeminiDeepResearchRun(
+                    id: operation.remoteID,
+                    providerID: operation.providerID,
+                    services: services
+                )
+                return run.status.providerIsTerminal ? .terminal : .active
             }
         }
     }
@@ -674,6 +712,7 @@ private struct ArtifactsLibraryView: View {
 private struct ArtifactLibraryRow: View {
     @Environment(\.pinesTheme) private var theme
     let item: ArtifactLibraryItem
+    let onThumbnailReady: () -> Void
     let open: () -> Void
     let importToVault: () -> Void
     let remix: () -> Void
@@ -684,7 +723,10 @@ private struct ArtifactLibraryRow: View {
             HStack(alignment: .top, spacing: theme.spacing.medium) {
                 Button(action: open) {
                     HStack(alignment: .top, spacing: theme.spacing.medium) {
-                        ArtifactsArtifactThumbnail(artifact: item.artifact)
+                        ArtifactsArtifactThumbnail(
+                            artifact: item.artifact,
+                            onReady: onThumbnailReady
+                        )
                             .frame(width: 104, height: 78)
                         labels
                         Spacer(minLength: theme.spacing.small)
@@ -699,7 +741,10 @@ private struct ArtifactLibraryRow: View {
             VStack(alignment: .leading, spacing: theme.spacing.small) {
                 Button(action: open) {
                     VStack(alignment: .leading, spacing: theme.spacing.small) {
-                        ArtifactsArtifactThumbnail(artifact: item.artifact)
+                        ArtifactsArtifactThumbnail(
+                            artifact: item.artifact,
+                            onReady: onThumbnailReady
+                        )
                             .frame(maxWidth: .infinity)
                             .frame(height: 132)
                         labels
@@ -759,6 +804,7 @@ private struct ArtifactLibraryRow: View {
 private struct ArtifactGalleryTile: View {
     @Environment(\.pinesTheme) private var theme
     let item: ArtifactLibraryItem
+    let onThumbnailReady: () -> Void
     let open: () -> Void
     let importToVault: () -> Void
     let remix: () -> Void
@@ -806,7 +852,10 @@ private struct ArtifactGalleryTile: View {
     }
 
     private var thumbnail: some View {
-        ArtifactsArtifactThumbnail(artifact: item.artifact)
+        ArtifactsArtifactThumbnail(
+            artifact: item.artifact,
+            onReady: onThumbnailReady
+        )
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 3.0, contentMode: .fit)
             .clipped()
@@ -2358,10 +2407,6 @@ private struct ArtifactResearchView: View {
         selectedThread?.runs.filter { !$0.status.providerIsTerminal } ?? []
     }
 
-    private var activeRunSignature: String {
-        activeRuns.map { "\($0.id):\($0.status):\($0.updatedAt.timeIntervalSince1970)" }.joined(separator: "|")
-    }
-
     private var composerBinding: Binding<String> {
         Binding(
             get: { selectedThread == nil ? prompt : followUpPrompt },
@@ -2433,9 +2478,6 @@ private struct ArtifactResearchView: View {
         }
         .onAppear(perform: configureInitialSelection)
         .onChange(of: providerID) { _, _ in normalizeSelectedModel() }
-        .task(id: activeRunSignature) {
-            await monitorActiveRuns()
-        }
         .pinesAppBackground()
         .pinesNavigationChrome()
     }
@@ -2486,6 +2528,7 @@ private struct ArtifactResearchView: View {
                             title: "Connect a research provider",
                             detail: "Add OpenAI or Gemini in Settings before starting Deep Research.",
                             actionTitle: "Provider setup",
+                            actionIdentifier: "pines.artifacts.provider-setup",
                             action: { open(.providerSetup) }
                         )
                     } else if let selectedThread {
@@ -2504,6 +2547,7 @@ private struct ArtifactResearchView: View {
                             title: "Turn a question into a sourced brief",
                             detail: "Pines searches, tracks evidence, and keeps every follow-up with the final report.",
                             actionTitle: nil,
+                            actionIdentifier: nil,
                             action: {}
                         )
                     }
@@ -2526,6 +2570,7 @@ private struct ArtifactResearchView: View {
         title: String,
         detail: String,
         actionTitle: String?,
+        actionIdentifier: String?,
         action: @escaping () -> Void
     ) -> some View {
         VStack(spacing: theme.spacing.large) {
@@ -2556,6 +2601,7 @@ private struct ArtifactResearchView: View {
             if let actionTitle {
                 Button(actionTitle, action: action)
                     .pinesButtonStyle(.secondary)
+                    .accessibilityIdentifier(actionIdentifier ?? "pines.artifacts.research.empty-action")
             } else {
                 researchStarterPrompts
             }
@@ -3065,20 +3111,6 @@ private struct ArtifactResearchView: View {
         for run in activeRuns { await refreshRun(run) }
     }
 
-    @MainActor
-    private func monitorActiveRuns() async {
-        guard !activeRuns.isEmpty else { return }
-        while !Task.isCancelled {
-            do {
-                try await Task.sleep(for: .seconds(4))
-            } catch {
-                return
-            }
-            guard !activeRuns.isEmpty else { return }
-            await refreshActiveRuns()
-        }
-    }
-
     private static func derivedResearchTitle(from prompt: String) -> String {
         let line = prompt.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
         let clipped = String(line.prefix(72)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3103,7 +3135,7 @@ private struct ArtifactResearchView: View {
     }
 }
 
-struct ArtifactsResearchThread: Identifiable, Hashable {
+struct ArtifactsResearchThread: Identifiable, Hashable, Sendable {
     var id: String
     var runs: [ProviderResearchRunRecord]
 

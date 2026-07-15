@@ -29,9 +29,21 @@ enum PinesUITestLaunchConfiguration {
         #endif
     }
 
+    static var isSimulatorPerformanceTesting: Bool {
+        #if targetEnvironment(simulator)
+        ProcessInfo.processInfo.environment["PINES_RUN_UI_PERFORMANCE_TESTS"] == "1"
+        #else
+        false
+        #endif
+    }
+
+    private static var isHarnessEnabled: Bool {
+        isEnabled || isSimulatorPerformanceTesting
+    }
+
     static var resetsStore: Bool {
-        #if DEBUG
-        guard isEnabled else { return false }
+        #if DEBUG || targetEnvironment(simulator)
+        guard isHarnessEnabled else { return false }
         let process = ProcessInfo.processInfo
         return process.environment["PINES_UI_TEST_RESET_STORE"] == "1"
             || process.arguments.contains("--pines-reset-ui-test-store")
@@ -41,7 +53,7 @@ enum PinesUITestLaunchConfiguration {
     }
 
     static var databaseFileName: String {
-        #if DEBUG
+        #if DEBUG || targetEnvironment(simulator)
         let configuredName = ProcessInfo.processInfo.environment["PINES_UI_TEST_DATABASE_FILE"]
         if let fileName = configuredName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !fileName.isEmpty {
@@ -54,8 +66,8 @@ enum PinesUITestLaunchConfiguration {
     }
 
     static var usesPlaintextDatabase: Bool {
-        #if DEBUG
-        guard isEnabled else { return false }
+        #if DEBUG || targetEnvironment(simulator)
+        guard isHarnessEnabled else { return false }
         let process = ProcessInfo.processInfo
         return process.environment["PINES_UI_TEST_DATABASE_PLAINTEXT"] == "1"
             || process.arguments.contains("--pines-ui-test-plaintext-database")
@@ -65,8 +77,8 @@ enum PinesUITestLaunchConfiguration {
     }
 
     static var seedsArtifactLibrary: Bool {
-        #if DEBUG
-        guard isEnabled else { return false }
+        #if DEBUG || targetEnvironment(simulator)
+        guard isHarnessEnabled else { return false }
         return ProcessInfo.processInfo.environment["PINES_UI_TEST_ARTIFACTS_FIXTURE"] == "1"
         #else
         return false
@@ -92,7 +104,7 @@ enum PinesUITestLaunchConfiguration {
     }
 
     static var storeConfiguration: LocalStoreConfiguration {
-        guard isEnabled else { return .init() }
+        guard isHarnessEnabled else { return .init() }
         return LocalStoreConfiguration(
             databaseFileName: databaseFileName,
             dataProtection: .completeUntilFirstUserAuthentication,
@@ -156,7 +168,7 @@ enum PinesUITestLaunchConfiguration {
 
     @MainActor
     static func seedArtifactLibraryIfNeeded(services: PinesAppServices) async throws {
-        #if DEBUG
+        #if DEBUG || targetEnvironment(simulator)
         guard seedsArtifactLibrary else { return }
 
         let providerID = ProviderID(rawValue: "pines-ui-test-openai")

@@ -14,7 +14,7 @@ extension PinesAppModel {
         if pollUntilTerminal {
             let completed = try await orchestrator.poll(run, untilTerminal: true)
             applyOpenAIDeepResearchRun(completed)
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderArtifactRecords(services: services)
             return completed
         }
         return run
@@ -29,7 +29,7 @@ extension PinesAppModel {
         let run = try await orchestrator.retrieve(runID: id)
         applyOpenAIDeepResearchRun(run)
         if run.openAIBackgroundStatus.isTerminal {
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderArtifactRecords(services: services)
         }
         return run
     }
@@ -56,7 +56,7 @@ extension PinesAppModel {
             applyOpenAIDeepResearchRun(run)
         }
         if pollUntilTerminal || result.refreshedRuns.contains(where: { $0.openAIBackgroundStatus.isTerminal }) {
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderArtifactRecords(services: services)
         }
         return result
     }
@@ -98,16 +98,7 @@ extension PinesAppModel {
     }
 
     private func applyOpenAIDeepResearchRun(_ run: ProviderResearchRunRecord) {
-        var runs = providerResearchRuns
-        if let index = runs.firstIndex(where: { $0.id == run.id }) {
-            runs[index] = run
-        } else {
-            runs.append(run)
-        }
-        runs.sort { $0.updatedAt > $1.updatedAt }
-        providerResearchRuns = runs
-        providerResearchRunPreviews = runs.map(Self.deepResearchPreview)
-        providerLifecycleError = nil
+        upsertProviderResearchRunRecords([run], preview: Self.deepResearchPreview)
     }
 
     private static func deepResearchPreview(from record: ProviderResearchRunRecord) -> PinesProviderResearchRunPreview {

@@ -30,7 +30,7 @@ extension PinesAppModel {
         for artifact in annotated {
             try await services.providerArtifactRepository?.upsertProviderArtifact(artifact)
         }
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords(annotated)
         return annotated
     }
 
@@ -55,6 +55,7 @@ extension PinesAppModel {
         }
         updated.content = .object(object)
         try await services.providerArtifactRepository?.upsertProviderArtifact(updated)
+        upsertProviderArtifactRecords([updated])
         return updated
     }
 
@@ -63,7 +64,7 @@ extension PinesAppModel {
             throw InferenceError.invalidRequest("Provider artifact storage is unavailable.")
         }
         try await repository.deleteProviderArtifact(id: id)
-        await refreshProviderLifecycleState(services: services)
+        removeProviderArtifactRecords(ids: [id])
     }
 
     @discardableResult
@@ -74,7 +75,7 @@ extension PinesAppModel {
         guard let ingestion = services.vaultIngestionService else {
             throw InferenceError.invalidRequest("Vault ingestion service is unavailable.")
         }
-        guard let artifact = try await artifactRepository.listProviderArtifacts(responseID: nil).first(where: { $0.id == id }) else {
+        guard let artifact = try await artifactRepository.providerArtifact(id: id) else {
             throw InferenceError.invalidRequest("Provider artifact \(id) was not found.")
         }
 
@@ -112,7 +113,7 @@ extension PinesAppModel {
         }
 
         let document = try await ingestion.importFile(url: sourceURL)
-        await refreshAll(services: services)
+        await refreshVaultDocuments(services: services)
         return document
     }
 
@@ -126,7 +127,7 @@ extension PinesAppModel {
     ) async throws -> [ProviderArtifactRecord] {
         let artifacts = try await artifactOpenAILifecycle(providerID: providerID, services: services)
             .createImageArtifacts(prompt: prompt, model: modelID?.rawValue, fields: fields)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords(artifacts)
         return artifacts
     }
 
@@ -146,7 +147,7 @@ extension PinesAppModel {
                 reference: reference,
                 fields: fields
             )
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords(artifacts)
         return artifacts
     }
 
