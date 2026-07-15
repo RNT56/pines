@@ -480,7 +480,7 @@ struct PinesRootView: View {
                 .accessibilityIdentifier("pines.tab.settings")
         }
         .accessibilityIdentifier("pines.root.tabs")
-        .pinesAdaptiveTabViewStyle()
+        .pinesFixedTabBarStyle()
         .tint(theme.colors.accent)
         .background {
             Rectangle()
@@ -517,15 +517,12 @@ struct PinesOpenProviderSettingsAction: Sendable {
 
 private extension View {
     @ViewBuilder
-    func pinesAdaptiveTabViewStyle() -> some View {
-        if PinesUITestLaunchConfiguration.isEnabled {
-            if #available(iOS 18.0, *) {
-                tabViewStyle(.tabBarOnly)
-            } else {
-                self
-            }
-        } else if #available(iOS 18.0, *) {
-            tabViewStyle(.sidebarAdaptable)
+    func pinesFixedTabBarStyle() -> some View {
+        if #available(iOS 18.0, *) {
+            // Pines already provides purpose-built sidebars inside its workspaces.
+            // Keep the app-level destinations in the system tab bar so iPad does
+            // not offer a second, user-movable navigation sidebar.
+            tabViewStyle(.tabBarOnly)
         } else {
             self
         }

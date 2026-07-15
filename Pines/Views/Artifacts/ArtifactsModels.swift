@@ -157,6 +157,10 @@ enum ArtifactsAssetKindFilter: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    var deskTitle: String {
+        self == .all ? "Everything" : title
+    }
+
     var systemImage: String {
         switch self {
         case .all: "square.grid.2x2"

@@ -2,31 +2,73 @@ import SwiftUI
 import PinesCore
 
 struct ArtifactsWorkspaceView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesServices) private var services
+    @Environment(\.openPinesProviderSettings) private var openProviderSettings
     @EnvironmentObject private var appModel: PinesAppModel
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
-    @State private var path = [ArtifactsRoute]()
     @State private var query = ArtifactsLibraryQuery()
+    @State private var selectedArtifactID: String?
+    @State private var presentedSheet: ArtifactsDeskSheet?
     @State private var pendingConfirmation: ArtifactsConfirmation?
 
+    private var usesInspector: Bool {
+        horizontalSizeClass != .compact
+    }
+
+    private var selectedArtifact: ProviderArtifactRecord? {
+        selectedArtifactID.flatMap { id in
+            providerState.providerArtifacts.first(where: { $0.id == id })
+        }
+    }
+
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             ArtifactsLibraryView(
                 query: $query,
+                selectedArtifactID: usesInspector ? selectedArtifactID : nil,
                 pendingConfirmation: $pendingConfirmation,
-                open: open
+                openArtifact: openArtifact,
+                startNew: { presentedSheet = .commandDeck },
+                openResearch: { threadID in present(.research(threadID: threadID)) },
+                remix: { artifactID in present(.create(kind: .image, referenceArtifactID: artifactID)) },
+                openProviderSettings: showProviderSettings
             )
             .navigationTitle("Artifacts")
-            .searchable(text: $query.text, prompt: "Search artifacts")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    createMenu
-                }
-            }
-            .navigationDestination(for: ArtifactsRoute.self, destination: destination)
+            .navigationBarTitleDisplayMode(.inline)
             .task {
                 await appModel.refreshProviderLifecycleState(services: services)
             }
+        }
+        .inspector(isPresented: inspectorPresentation) {
+            NavigationStack {
+                inspectorContent
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close", systemImage: "xmark") {
+                                selectedArtifactID = nil
+                            }
+                            .labelStyle(.iconOnly)
+                            .accessibilityLabel("Close artifact details")
+                        }
+                    }
+            }
+            .inspectorColumnWidth(min: 340, ideal: 420, max: 520)
+            .accessibilityIdentifier("pines.artifacts.inspector")
+        }
+        .sheet(item: $presentedSheet) { sheet in
+            NavigationStack {
+                sheetContent(sheet)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") {
+                                presentedSheet = nil
+                            }
+                            .accessibilityIdentifier("pines.artifacts.sheet.close")
+                        }
+                    }
+            }
+            .presentationDragIndicator(.visible)
         }
         .confirmationDialog(
             pendingConfirmation?.title ?? "Confirm",
@@ -39,52 +81,58 @@ struct ArtifactsWorkspaceView: View {
             actions: confirmationActions,
             message: { confirmation in Text(confirmation.message) }
         )
+        .onChange(of: horizontalSizeClass) { _, sizeClass in
+            adaptSelection(to: sizeClass)
+        }
         .accessibilityIdentifier("pines.screen.artifacts")
     }
 
-    private var createMenu: some View {
-        Menu {
-            Section("Create") {
-                Button {
-                    open(.create(kind: .image, referenceArtifactID: nil))
-                } label: {
-                    Label("Image", systemImage: "photo")
-                }
-
-                Button {
-                    open(.create(kind: .video, referenceArtifactID: nil))
-                } label: {
-                    Label("Video", systemImage: "film")
-                }
-
-                Button {
-                    open(.create(kind: .speech, referenceArtifactID: nil))
-                } label: {
-                    Label("Speech", systemImage: "waveform")
-                }
+    private var inspectorPresentation: Binding<Bool> {
+        Binding(
+            get: { usesInspector && selectedArtifactID != nil },
+            set: { isPresented in
+                if !isPresented { selectedArtifactID = nil }
             }
-
-            Button {
-                open(.research(threadID: nil))
-            } label: {
-                Label("Deep Research", systemImage: "doc.text.magnifyingglass")
-            }
-        } label: {
-            Image(systemName: "plus")
-        }
-        .accessibilityLabel("Create artifact")
-        .accessibilityIdentifier("pines.artifacts.create-menu")
+        )
     }
 
     @ViewBuilder
-    private func destination(_ route: ArtifactsRoute) -> some View {
-        switch route {
+    private var inspectorContent: some View {
+        if let selectedArtifact {
+            ArtifactDetailView(
+                artifact: selectedArtifact,
+                presentation: .inspector,
+                pendingConfirmation: $pendingConfirmation,
+                open: handle
+            )
+        } else {
+            ArtifactsMissingRecordView()
+        }
+    }
+
+    @ViewBuilder
+    private func sheetContent(_ sheet: ArtifactsDeskSheet) -> some View {
+        switch sheet {
+        case .commandDeck:
+            ArtifactCommandDeck { command in
+                switch command {
+                case .image:
+                    present(.create(kind: .image, referenceArtifactID: nil))
+                case .video:
+                    present(.create(kind: .video, referenceArtifactID: nil))
+                case .speech:
+                    present(.create(kind: .speech, referenceArtifactID: nil))
+                case .research:
+                    present(.research(threadID: nil))
+                }
+            }
         case .artifact(let id):
             if let artifact = providerState.providerArtifacts.first(where: { $0.id == id }) {
                 ArtifactDetailView(
                     artifact: artifact,
+                    presentation: .sheet,
                     pendingConfirmation: $pendingConfirmation,
-                    open: open
+                    open: handle
                 )
             } else {
                 ArtifactsMissingRecordView()
@@ -94,21 +142,70 @@ struct ArtifactsWorkspaceView: View {
                 initialKind: kind,
                 referenceArtifactID: referenceArtifactID,
                 pendingConfirmation: $pendingConfirmation,
-                open: open
+                open: handle
             )
         case .research(let threadID):
             ArtifactResearchView(
                 initialThreadID: threadID,
                 pendingConfirmation: $pendingConfirmation,
-                open: open
+                open: handle
             )
-        case .providerSetup:
-            ArtifactsProviderSetupView()
         }
     }
 
-    private func open(_ route: ArtifactsRoute) {
-        path.append(route)
+    private func handle(_ route: ArtifactsRoute) {
+        switch route {
+        case .artifact(let id):
+            openArtifact(id)
+        case .create(let kind, let referenceArtifactID):
+            present(.create(kind: kind, referenceArtifactID: referenceArtifactID))
+        case .research(let threadID):
+            present(.research(threadID: threadID))
+        case .providerSetup:
+            showProviderSettings()
+        }
+    }
+
+    private func openArtifact(_ id: String) {
+        if usesInspector {
+            presentedSheet = nil
+            Task { @MainActor in
+                await Task.yield()
+                selectedArtifactID = id
+            }
+        } else {
+            present(.artifact(id))
+        }
+    }
+
+    private func present(_ sheet: ArtifactsDeskSheet) {
+        selectedArtifactID = nil
+        guard presentedSheet != nil else {
+            presentedSheet = sheet
+            return
+        }
+        presentedSheet = nil
+        Task { @MainActor in
+            await Task.yield()
+            presentedSheet = sheet
+        }
+    }
+
+    private func showProviderSettings() {
+        selectedArtifactID = nil
+        presentedSheet = nil
+        Task { @MainActor in
+            await Task.yield()
+            openProviderSettings()
+        }
+    }
+
+    private func adaptSelection(to sizeClass: UserInterfaceSizeClass?) {
+        guard let selectedArtifactID else { return }
+        if sizeClass == .compact {
+            self.selectedArtifactID = nil
+            presentedSheet = .artifact(selectedArtifactID)
+        }
     }
 
     @ViewBuilder
@@ -135,9 +232,8 @@ struct ArtifactsWorkspaceView: View {
         do {
             try await appModel.deleteProviderArtifactRecord(id: artifact.id, services: services)
             pendingConfirmation = nil
-            if path.last == .artifact(artifact.id) {
-                path.removeLast()
-            }
+            if selectedArtifactID == artifact.id { selectedArtifactID = nil }
+            if presentedSheet == .artifact(artifact.id) { presentedSheet = nil }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
         }
@@ -189,6 +285,133 @@ struct ArtifactsWorkspaceView: View {
     }
 }
 
+private enum ArtifactsDeskSheet: Hashable, Identifiable {
+    case commandDeck
+    case artifact(String)
+    case create(kind: ArtifactsMediaKind, referenceArtifactID: String?)
+    case research(threadID: String?)
+
+    var id: String {
+        switch self {
+        case .commandDeck:
+            "command-deck"
+        case .artifact(let id):
+            "artifact-\(id)"
+        case .create(let kind, let referenceArtifactID):
+            "create-\(kind.rawValue)-\(referenceArtifactID ?? "new")"
+        case .research(let threadID):
+            "research-\(threadID ?? "new")"
+        }
+    }
+}
+
+private enum ArtifactDetailPresentation {
+    case sheet
+    case inspector
+}
+
+private enum ArtifactDeskCommand: String, CaseIterable, Identifiable {
+    case image
+    case video
+    case speech
+    case research
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .image: "Image"
+        case .video: "Video"
+        case .speech: "Speech"
+        case .research: "Research"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .image: "Generate a new image or begin a visual remix."
+        case .video: "Create a motion artifact from a written direction."
+        case .speech: "Turn text into a reusable narrated audio file."
+        case .research: "Investigate the web and produce a cited report."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .image: "photo"
+        case .video: "film"
+        case .speech: "waveform"
+        case .research: "doc.text.magnifyingglass"
+        }
+    }
+}
+
+private struct ArtifactCommandDeck: View {
+    @Environment(\.pinesTheme) private var theme
+    let choose: (ArtifactDeskCommand) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: theme.spacing.large) {
+                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                    Text("Choose an outcome")
+                        .font(theme.typography.title.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                        .accessibilityIdentifier("pines.artifacts.command-deck")
+                    Text("Start with what you want to make. Provider and model choices come next, inside the focused composer.")
+                        .font(theme.typography.body)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 240), spacing: theme.spacing.small)],
+                    spacing: theme.spacing.small
+                ) {
+                    ForEach(ArtifactDeskCommand.allCases) { command in
+                        Button {
+                            choose(command)
+                        } label: {
+                            HStack(alignment: .top, spacing: theme.spacing.medium) {
+                                Image(systemName: command.systemImage)
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundStyle(theme.colors.accent)
+                                    .frame(width: 44, height: 44)
+                                    .background(theme.colors.accentSoft, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+                                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                                    Text(command.title)
+                                        .font(theme.typography.headline)
+                                        .foregroundStyle(theme.colors.primaryText)
+                                    Text(command.detail)
+                                        .font(theme.typography.caption)
+                                        .foregroundStyle(theme.colors.secondaryText)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: theme.spacing.small)
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(theme.colors.tertiaryText)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .pinesSurface(.panel, padding: theme.spacing.medium)
+                        .accessibilityIdentifier("pines.artifacts.command.\(command.rawValue)")
+                    }
+                }
+            }
+            .padding(theme.spacing.large)
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .navigationTitle("New Artifact")
+        .navigationBarTitleDisplayMode(.inline)
+        .pinesAppBackground()
+    }
+}
+
 private struct ArtifactsLibraryView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -198,8 +421,13 @@ private struct ArtifactsLibraryView: View {
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     @Binding var query: ArtifactsLibraryQuery
+    let selectedArtifactID: String?
     @Binding var pendingConfirmation: ArtifactsConfirmation?
-    let open: (ArtifactsRoute) -> Void
+    let openArtifact: (String) -> Void
+    let startNew: () -> Void
+    let openResearch: (String?) -> Void
+    let remix: (String) -> Void
+    let openProviderSettings: () -> Void
     @State private var showsFilters = false
 
     private var providers: [CloudProviderConfiguration] {
@@ -274,16 +502,15 @@ private struct ArtifactsLibraryView: View {
         return (artifacts + research).joined(separator: "|")
     }
 
-    private var usesMediaGrid: Bool {
-        !dynamicTypeSize.isAccessibilitySize
-            && (query.category == .images || query.category == .video)
+    private var usesGrid: Bool {
+        horizontalSizeClass != .compact && !dynamicTypeSize.isAccessibilitySize
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: theme.spacing.large) {
-                categoryBar
-                activeSection
+                commandStrip
+                workQueue
                 resultsHeader
                 libraryContent
             }
@@ -320,101 +547,168 @@ private struct ArtifactsLibraryView: View {
         .accessibilityIdentifier("pines.artifacts.library")
     }
 
-    private var categoryBar: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: theme.spacing.small) {
-                    ForEach(ArtifactsAssetKindFilter.allCases, id: \.self) { category in
-                        ArtifactCategoryChip(
-                            category: category,
-                            isSelected: query.category == category,
-                            select: { query.category = category }
-                        )
-                        .id(category)
-                    }
-
-                    Color.clear
-                        .frame(width: theme.spacing.large * 3, height: 1)
-                        .accessibilityHidden(true)
-                }
+    private var commandStrip: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: theme.spacing.small) {
+                searchField
+                    .frame(minWidth: 240, maxWidth: 440)
+                scopeMenu
+                refineButton
+                Spacer(minLength: theme.spacing.small)
+                newArtifactButton
             }
-            .onChange(of: query.category) { _, category in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    proxy.scrollTo(category, anchor: .leading)
+
+            VStack(spacing: theme.spacing.small) {
+                searchField
+                HStack(spacing: theme.spacing.small) {
+                    scopeMenu
+                    refineButton
+                    Spacer(minLength: theme.spacing.xsmall)
+                    newArtifactButton
                 }
             }
         }
-        .pinesExpressiveHorizontalScrollHaptics()
+    }
+
+    private var searchField: some View {
+        HStack(spacing: theme.spacing.small) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(theme.colors.secondaryText)
+            TextField("Search artifacts", text: $query.text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("pines.artifacts.search")
+            if !query.text.isEmpty {
+                Button {
+                    query.text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.colors.tertiaryText)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, theme.spacing.medium)
+        .frame(minHeight: 46)
+        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .stroke(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+        }
+    }
+
+    private var scopeMenu: some View {
+        Menu {
+            ForEach(ArtifactsAssetKindFilter.allCases) { category in
+                Button {
+                    query.category = category
+                } label: {
+                    Label(category.deskTitle, systemImage: query.category == category ? "checkmark" : category.systemImage)
+                }
+            }
+        } label: {
+            Label(query.category.deskTitle, systemImage: query.category.systemImage)
+                .lineLimit(1)
+        }
+        .pinesButtonStyle(.secondary)
+        .accessibilityLabel("Artifact scope, \(query.category.deskTitle)")
+        .accessibilityIdentifier("pines.artifacts.scope")
+    }
+
+    private var refineButton: some View {
+        Button {
+            showsFilters = true
+        } label: {
+            Label(query.hasSheetFilters ? "Refined" : "Refine", systemImage: "line.3.horizontal.decrease")
+        }
+        .pinesButtonStyle(query.hasSheetFilters ? .primary : .secondary)
+        .accessibilityIdentifier("pines.artifacts.library.filter")
+    }
+
+    private var newArtifactButton: some View {
+        Button(action: startNew) {
+            Label("New", systemImage: "plus")
+        }
+        .pinesButtonStyle(.primary)
+        .keyboardShortcut("n", modifiers: .command)
+        .accessibilityLabel("New artifact")
+        .accessibilityIdentifier("pines.artifacts.new")
     }
 
     @ViewBuilder
-    private var activeSection: some View {
+    private var workQueue: some View {
         if !activeItems.isEmpty || !activeResearchThreads.isEmpty {
             VStack(alignment: .leading, spacing: theme.spacing.small) {
-                Text("Activity")
-                    .font(theme.typography.headline)
-                    .foregroundStyle(theme.colors.primaryText)
-
-                ForEach(activeResearchThreads) { thread in
-                    ArtifactsActivityRow(
-                        title: thread.title,
-                        detail: "Deep Research · \(thread.providerKind.pinesLifecycleTitle)",
-                        status: thread.statusText,
-                        systemImage: "doc.text.magnifyingglass"
-                    ) {
-                        open(.research(threadID: thread.id))
-                    }
+                HStack(spacing: theme.spacing.xsmall) {
+                    Text("In progress")
+                        .font(theme.typography.headline)
+                        .foregroundStyle(theme.colors.primaryText)
+                    Text("\(activeItems.count + activeResearchThreads.count)")
+                        .font(theme.typography.caption.weight(.semibold))
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .padding(.horizontal, theme.spacing.xsmall)
+                        .padding(.vertical, theme.spacing.xxsmall)
+                        .background(theme.colors.controlFill, in: Capsule())
                 }
 
-                ForEach(activeItems) { item in
-                    ArtifactsActivityRow(
-                        title: item.title,
-                        detail: "\(item.contentKind.title) · \(item.providerName)",
-                        status: item.operationState.title,
-                        systemImage: item.contentKind.systemImage
-                    ) {
-                        open(.artifact(item.id))
+                if dynamicTypeSize.isAccessibilitySize {
+                    LazyVStack(spacing: theme.spacing.small) {
+                        workQueueRows(fixedWidth: false)
                     }
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: theme.spacing.small) {
+                            workQueueRows(fixedWidth: true)
+                        }
+                    }
+                    .pinesExpressiveHorizontalScrollHaptics()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .pinesSurface(.inset, padding: theme.spacing.medium)
+        }
+    }
+
+    @ViewBuilder
+    private func workQueueRows(fixedWidth: Bool) -> some View {
+        ForEach(activeResearchThreads) { thread in
+            ArtifactsActivityRow(
+                title: thread.title,
+                detail: "Research · \(thread.providerKind.pinesLifecycleTitle)",
+                status: thread.statusText,
+                systemImage: "doc.text.magnifyingglass"
+            ) {
+                openResearch(thread.id)
+            }
+            .frame(width: fixedWidth ? 300 : nil)
+            .frame(maxWidth: fixedWidth ? nil : .infinity, alignment: .leading)
+        }
+
+        ForEach(activeItems) { item in
+            ArtifactsActivityRow(
+                title: item.title,
+                detail: "\(item.contentKind.title) · \(item.providerName)",
+                status: item.operationState.title,
+                systemImage: item.contentKind.systemImage
+            ) {
+                openArtifact(item.id)
+            }
+            .frame(width: fixedWidth ? 300 : nil)
+            .frame(maxWidth: fixedWidth ? nil : .infinity, alignment: .leading)
         }
     }
 
     private var resultsHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: theme.spacing.small) {
-                resultsTitle
-                Spacer(minLength: theme.spacing.small)
-                filterButton
-            }
-            VStack(alignment: .leading, spacing: theme.spacing.small) {
-                resultsTitle
-                filterButton
-            }
-        }
-    }
-
-    private var resultsTitle: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-            Text(query.category == .all ? "Recent" : query.category.title)
+        HStack(alignment: .firstTextBaseline, spacing: theme.spacing.small) {
+            Text(query.category == .all ? "Recent work" : query.category.title)
                 .font(theme.typography.title.weight(.semibold))
                 .foregroundStyle(theme.colors.primaryText)
-            Text("\(completedItems.count) \(completedItems.count == 1 ? "artifact" : "artifacts")")
-                .font(theme.typography.caption)
-                .foregroundStyle(theme.colors.secondaryText)
+            Text("\(completedItems.count)")
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.tertiaryText)
                 .monospacedDigit()
+            Spacer(minLength: 0)
         }
-    }
-
-    private var filterButton: some View {
-        Button {
-            showsFilters = true
-        } label: {
-            Label(query.hasSheetFilters ? "Filters on" : "Filter", systemImage: "line.3.horizontal.decrease")
-        }
-        .pinesButtonStyle(query.hasSheetFilters ? .primary : .secondary)
-        .accessibilityIdentifier("pines.artifacts.library.filter")
     }
 
     @ViewBuilder
@@ -429,22 +723,23 @@ private struct ArtifactsLibraryView: View {
                     query.text = ""
                     query.resetFilters()
                 },
-                create: { open(.create(kind: .image, referenceArtifactID: nil)) },
-                research: { open(.research(threadID: nil)) },
-                connectProvider: { open(.providerSetup) }
+                create: startNew,
+                research: { openResearch(nil) },
+                connectProvider: openProviderSettings
             )
-        } else if usesMediaGrid {
+        } else if usesGrid {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: horizontalSizeClass == .compact ? 220 : 300), spacing: theme.spacing.medium)],
+                columns: [GridItem(.adaptive(minimum: 260, maximum: 360), spacing: theme.spacing.medium)],
                 alignment: .leading,
                 spacing: theme.spacing.medium
             ) {
                 ForEach(completedItems) { item in
-                    ArtifactMediaTile(
+                    ArtifactDeskTile(
                         item: item,
-                        open: { open(.artifact(item.id)) },
+                        isSelected: selectedArtifactID == item.id,
+                        open: { openArtifact(item.id) },
                         importToVault: { Task { await importToVault(item.artifact) } },
-                        remix: { open(.create(kind: .image, referenceArtifactID: item.id)) },
+                        remix: { remix(item.id) },
                         remove: { pendingConfirmation = .deleteArtifactRecord(item.artifact) }
                     )
                 }
@@ -454,9 +749,10 @@ private struct ArtifactsLibraryView: View {
                 ForEach(completedItems) { item in
                     ArtifactLibraryRow(
                         item: item,
-                        open: { open(.artifact(item.id)) },
+                        isSelected: selectedArtifactID == item.id,
+                        open: { openArtifact(item.id) },
                         importToVault: { Task { await importToVault(item.artifact) } },
-                        remix: { open(.create(kind: .image, referenceArtifactID: item.id)) },
+                        remix: { remix(item.id) },
                         remove: { pendingConfirmation = .deleteArtifactRecord(item.artifact) }
                     )
                 }
@@ -530,28 +826,6 @@ private struct ArtifactsLibraryView: View {
     }
 }
 
-private struct ArtifactCategoryChip: View {
-    @Environment(\.pinesTheme) private var theme
-    let category: ArtifactsAssetKindFilter
-    let isSelected: Bool
-    let select: () -> Void
-
-    var body: some View {
-        Button(action: select) {
-            Label(category.title, systemImage: category.systemImage)
-                .font(theme.typography.callout.weight(.semibold))
-                .padding(.horizontal, theme.spacing.medium)
-                .frame(minHeight: 40)
-                .foregroundStyle(isSelected ? theme.colors.appBackground : theme.colors.secondaryText)
-                .background {
-                    Capsule().fill(isSelected ? theme.colors.accent : theme.colors.controlFill)
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
 private struct ArtifactsLibraryFilterSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var query: ArtifactsLibraryQuery
@@ -608,28 +882,21 @@ private struct ArtifactsActivityRow: View {
 
     var body: some View {
         Button(action: action) {
-            if dynamicTypeSize.isAccessibilitySize {
-                HStack(alignment: .top, spacing: theme.spacing.small) {
-                    activityIndicator
-                    VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                        activityLabels
-                        statusLabel
-                    }
-                    Spacer(minLength: 0)
-                    disclosureIndicator
-                }
-            } else {
-                HStack(spacing: theme.spacing.small) {
-                    activityIndicator
+            HStack(alignment: .top, spacing: theme.spacing.small) {
+                activityIndicator
+                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
                     activityLabels
-                    Spacer(minLength: theme.spacing.small)
-                    statusLabel
-                    disclosureIndicator
+                    HStack(spacing: theme.spacing.xsmall) {
+                        statusLabel
+                        Spacer(minLength: theme.spacing.small)
+                        disclosureIndicator
+                    }
                 }
             }
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
+        .pinesSurface(.inset, padding: theme.spacing.small)
     }
 
     private var activityIndicator: some View {
@@ -642,10 +909,12 @@ private struct ArtifactsActivityRow: View {
             Text(title)
                 .font(theme.typography.callout.weight(.semibold))
                 .foregroundStyle(theme.colors.primaryText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .fixedSize(horizontal: false, vertical: true)
             Text(detail)
                 .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.secondaryText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -668,6 +937,7 @@ private struct ArtifactLibraryRow: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let item: ArtifactLibraryItem
+    let isSelected: Bool
     let open: () -> Void
     let importToVault: () -> Void
     let remix: () -> Void
@@ -713,7 +983,7 @@ private struct ArtifactLibraryRow: View {
         }
         .padding(theme.spacing.small)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .pinesSurface(.panel, padding: 0)
+        .pinesSurface(isSelected ? .selected : .panel, padding: 0)
     }
 
     private var rowAccessibilityLabel: String {
@@ -753,10 +1023,10 @@ private struct ArtifactLibraryRow: View {
     }
 }
 
-private struct ArtifactMediaTile: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+private struct ArtifactDeskTile: View {
     @Environment(\.pinesTheme) private var theme
     let item: ArtifactLibraryItem
+    let isSelected: Bool
     let open: () -> Void
     let importToVault: () -> Void
     let remix: () -> Void
@@ -784,7 +1054,7 @@ private struct ArtifactMediaTile: View {
 
                 HStack(alignment: .center, spacing: theme.spacing.xxsmall) {
                     Button(action: open) {
-                        Text("\(item.providerName) · \(RelativeDateTimeFormatter.shortLabel(for: item.createdAt))")
+                        Text("\(item.contentKind.title) · \(item.providerName) · \(RelativeDateTimeFormatter.shortLabel(for: item.createdAt))")
                             .font(theme.typography.caption)
                             .foregroundStyle(theme.colors.secondaryText)
                             .lineLimit(1)
@@ -805,20 +1075,14 @@ private struct ArtifactMediaTile: View {
             }
         }
         .padding(theme.spacing.small)
-        .pinesSurface(.panel, padding: 0)
+        .pinesSurface(isSelected ? .selected : .panel, padding: 0)
     }
 
-    @ViewBuilder
     private var thumbnail: some View {
-        if horizontalSizeClass == .regular {
-            ArtifactsArtifactThumbnail(artifact: item.artifact)
-                .aspectRatio(1.08, contentMode: .fit)
-        } else {
-            ArtifactsArtifactThumbnail(artifact: item.artifact)
-                .frame(maxWidth: .infinity)
-                .frame(height: 220)
-                .clipped()
-        }
+        ArtifactsArtifactThumbnail(artifact: item.artifact)
+            .frame(maxWidth: .infinity)
+            .frame(height: 200)
+            .clipped()
     }
 }
 
@@ -963,6 +1227,7 @@ private struct ArtifactDetailView: View {
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     let artifact: ProviderArtifactRecord
+    let presentation: ArtifactDetailPresentation
     @Binding var pendingConfirmation: ArtifactsConfirmation?
     let open: (ArtifactsRoute) -> Void
 
@@ -976,7 +1241,7 @@ private struct ArtifactDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: theme.spacing.large) {
+            VStack(alignment: .leading, spacing: presentation == .inspector ? theme.spacing.medium : theme.spacing.large) {
                 preview
                 titleBlock
                 primaryActions
@@ -985,11 +1250,11 @@ private struct ArtifactDetailView: View {
                 }
                 provenance
             }
-            .padding(theme.spacing.large)
-            .frame(maxWidth: 900, alignment: .leading)
+            .padding(presentation == .inspector ? theme.spacing.medium : theme.spacing.large)
+            .frame(maxWidth: presentation == .inspector ? 520 : 900, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle(item.contentKind.title)
+        .navigationTitle(presentation == .inspector ? "Details" : item.contentKind.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -1038,9 +1303,16 @@ private struct ArtifactDetailView: View {
     private var preview: some View {
         if item.contentKind == .report {
             ArtifactsArtifactThumbnail(artifact: artifact)
-                .frame(maxWidth: .infinity, minHeight: 180, maxHeight: 240)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: presentation == .inspector ? 140 : 180,
+                    maxHeight: presentation == .inspector ? 190 : 240
+                )
         } else {
-            ArtifactsArtifactPreviewSurface(artifact: artifact, maxHeight: 560)
+            ArtifactsArtifactPreviewSurface(
+                artifact: artifact,
+                maxHeight: presentation == .inspector ? 260 : 560
+            )
                 .frame(maxWidth: .infinity)
         }
     }
@@ -1048,7 +1320,7 @@ private struct ArtifactDetailView: View {
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: theme.spacing.small) {
             Text(item.title)
-                .font(theme.typography.hero)
+                .font(presentation == .inspector ? theme.typography.title.weight(.semibold) : theme.typography.hero)
                 .foregroundStyle(theme.colors.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -1201,40 +1473,6 @@ private struct ArtifactsMissingRecordView: View {
     }
 }
 
-private struct ArtifactsProviderSetupView: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.openPinesProviderSettings) private var openProviderSettings
-
-    var body: some View {
-        VStack(spacing: theme.spacing.large) {
-            Image(systemName: "cloud.badge.plus")
-                .font(.system(size: 36, weight: .semibold))
-                .foregroundStyle(theme.colors.accent)
-                .frame(width: 76, height: 76)
-                .background(theme.colors.accentSoft, in: Circle())
-            VStack(spacing: theme.spacing.small) {
-                Text("Connect a provider")
-                    .font(theme.typography.title.weight(.semibold))
-                Text("Add an OpenAI or Gemini provider in Settings → Cloud & Providers, then return here to create artifacts and run Deep Research.")
-                    .font(theme.typography.body)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .multilineTextAlignment(.center)
-            }
-            Button {
-                openProviderSettings()
-            } label: {
-                Label("Open Provider Settings", systemImage: "gearshape")
-            }
-            .pinesButtonStyle(.primary)
-        }
-        .padding(theme.spacing.large)
-        .frame(maxWidth: 560)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Provider Setup")
-        .pinesAppBackground()
-    }
-}
-
 private struct ArtifactCreateView: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
@@ -1309,8 +1547,7 @@ private struct ArtifactCreateView: View {
                 if providers.isEmpty {
                     noProviderState
                 } else {
-                    configurationSummary
-                    kindPicker
+                    creationContext
                     if let selectedReference {
                         referenceCard(selectedReference)
                     }
@@ -1324,20 +1561,8 @@ private struct ArtifactCreateView: View {
             .frame(maxWidth: 820, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle(selectedReference == nil ? "Create \(mediaKind.title)" : "Remix Image")
+        .navigationTitle(selectedReference == nil ? "New \(mediaKind.title)" : "Remix Image")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if !providers.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showsSettings = true
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                    }
-                    .accessibilityLabel("Creation settings")
-                }
-            }
-        }
         .safeAreaInset(edge: .top, spacing: 0) {
             if let error = providerState.providerLifecycleError {
                 PinesGlobalErrorBanner(message: error) {
@@ -1382,12 +1607,62 @@ private struct ArtifactCreateView: View {
         .frame(maxWidth: .infinity, minHeight: 360)
     }
 
-    private var configurationSummary: some View {
+    private var creationContext: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: theme.spacing.medium) {
+                kindMenu
+                Divider()
+                configurationButton
+            }
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                kindMenu
+                Divider()
+                configurationButton
+            }
+        }
+        .pinesSurface(.inset, padding: theme.spacing.medium)
+    }
+
+    private var kindMenu: some View {
+        Menu {
+            ForEach(ArtifactsMediaKind.allCases) { kind in
+                Button {
+                    mediaKind = kind
+                } label: {
+                    Label(kind.title, systemImage: mediaKind == kind ? "checkmark" : kind.systemImage)
+                }
+            }
+        } label: {
+            HStack(spacing: theme.spacing.small) {
+                Image(systemName: mediaKind.systemImage)
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text("Output")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                    Text(mediaKind.title)
+                        .font(theme.typography.callout.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.tertiaryText)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(selectedReference != nil)
+        .accessibilityLabel("Output type, \(mediaKind.title)")
+        .accessibilityIdentifier("pines.artifacts.create.type")
+    }
+
+    private var configurationButton: some View {
         Button {
             showsSettings = true
         } label: {
             HStack(spacing: theme.spacing.small) {
-                Image(systemName: "sparkles")
+                Image(systemName: "slider.horizontal.3")
                     .foregroundStyle(theme.colors.accent)
                     .frame(width: 28, height: 28)
                 VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
@@ -1400,43 +1675,15 @@ private struct ArtifactCreateView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: theme.spacing.small)
-                Text("Change")
+                Text("Adjust")
                     .font(theme.typography.caption.weight(.semibold))
                     .foregroundStyle(theme.colors.accent)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.tertiaryText)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .pinesSurface(.inset, padding: theme.spacing.medium)
-    }
-
-    private var kindPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: theme.spacing.small) {
-                ForEach(ArtifactsMediaKind.allCases) { kind in
-                    Button {
-                        mediaKind = kind
-                    } label: {
-                        Label(kind.title, systemImage: kind.systemImage)
-                            .font(theme.typography.callout.weight(.semibold))
-                            .padding(.horizontal, theme.spacing.medium)
-                            .frame(minHeight: 44)
-                            .foregroundStyle(mediaKind == kind ? theme.colors.appBackground : theme.colors.secondaryText)
-                            .background {
-                                Capsule().fill(mediaKind == kind ? theme.colors.accent : theme.colors.controlFill)
-                            }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(mediaKind == kind ? .isSelected : [])
-                }
-            }
-        }
-        .pinesExpressiveHorizontalScrollHaptics()
-        .disabled(selectedReference != nil)
-        .accessibilityLabel("Artifact type")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("pines.artifacts.create.configuration")
     }
 
     private func referenceCard(_ artifact: ProviderArtifactRecord) -> some View {
@@ -1470,18 +1717,7 @@ private struct ArtifactCreateView: View {
                     .accessibilityIdentifier("pines.artifacts.create.prompt")
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: theme.spacing.small) {
-                    createButton
-                    Button("Options") { showsSettings = true }
-                        .pinesButtonStyle(.secondary)
-                }
-                VStack(spacing: theme.spacing.small) {
-                    createButton
-                    Button("Options") { showsSettings = true }
-                        .pinesButtonStyle(.secondary)
-                }
-            }
+            createButton
         }
         .pinesSurface(.panel, padding: theme.spacing.large)
     }
@@ -1493,7 +1729,7 @@ private struct ArtifactCreateView: View {
             Label(isCreating ? "Creating…" : createButtonTitle, systemImage: isCreating ? "hourglass" : "sparkles")
         }
         .disabled(!canCreate)
-        .pinesButtonStyle(.primary)
+        .pinesButtonStyle(.primary, fillWidth: true)
         .accessibilityIdentifier("pines.artifacts.create.submit")
     }
 
@@ -1763,7 +1999,6 @@ private struct ArtifactResearchView: View {
     @State private var usesProviderFiles = false
     @State private var isStarting = false
     @State private var showsSettings = false
-    @State private var showsHistory = false
     @State private var clarificationDraft: ArtifactsResearchClarificationDraft?
     @State private var clarificationAnswers = [String: String]()
     @FocusState private var composerFocused: Bool
@@ -1837,60 +2072,15 @@ private struct ArtifactResearchView: View {
                 .padding(.top, theme.spacing.xsmall)
             }
 
+            researchContextBar
             conversation
             composer
         }
-        .navigationTitle(selectedThread?.title ?? "Deep Research")
+        .navigationTitle("Research")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    startNewThread()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-                .accessibilityLabel("New research")
-                .accessibilityIdentifier("pines.artifacts.research.new")
-
-                Menu {
-                    Button {
-                        showsHistory = true
-                    } label: {
-                        Label("Research history", systemImage: "clock.arrow.circlepath")
-                    }
-                    .disabled(threads.isEmpty)
-                    Button {
-                        showsSettings = true
-                    } label: {
-                        Label("Research settings", systemImage: "slider.horizontal.3")
-                    }
-                    if !activeRuns.isEmpty {
-                        Button {
-                            Task { await refreshActiveRuns() }
-                        } label: {
-                            Label("Refresh progress", systemImage: "arrow.clockwise")
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel("Research actions")
-            }
-        }
         .sheet(isPresented: $showsSettings) {
             researchSettings
                 .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showsHistory) {
-            ArtifactsResearchHistoryView(
-                threads: threads,
-                selectedThreadID: selectedThreadID,
-                select: { thread in
-                    selectThread(thread)
-                    showsHistory = false
-                }
-            )
-            .presentationDetents([.medium, .large])
         }
         .sheet(item: $clarificationDraft) { draft in
             ArtifactsResearchClarificationView(
@@ -1911,6 +2101,92 @@ private struct ArtifactResearchView: View {
         }
         .pinesAppBackground()
         .accessibilityIdentifier("pines.artifacts.research")
+    }
+
+    private var researchContextBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: theme.spacing.small) {
+                researchThreadMenu
+                Spacer(minLength: theme.spacing.small)
+                researchUtilityButtons
+            }
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                researchThreadMenu
+                HStack(spacing: theme.spacing.small) {
+                    researchUtilityButtons
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.horizontal, theme.spacing.large)
+        .padding(.vertical, theme.spacing.small)
+        .background(theme.colors.chromeBackground)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private var researchThreadMenu: some View {
+        Menu {
+            Button {
+                startNewThread()
+            } label: {
+                Label("New research", systemImage: "square.and.pencil")
+            }
+
+            if !threads.isEmpty {
+                Divider()
+                Section("Recent research") {
+                    ForEach(threads) { thread in
+                        Button {
+                            selectThread(thread)
+                        } label: {
+                            Label(
+                                thread.title,
+                                systemImage: selectedThreadID == thread.id ? "checkmark" : "doc.text"
+                            )
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label(selectedThread?.title ?? "Research history", systemImage: "clock.arrow.circlepath")
+                .lineLimit(1)
+        }
+        .pinesButtonStyle(.secondary)
+        .accessibilityLabel(selectedThread == nil ? "Research history" : "Current research, \(selectedThread?.title ?? "")")
+        .accessibilityIdentifier("pines.artifacts.research.thread-menu")
+    }
+
+    @ViewBuilder
+    private var researchUtilityButtons: some View {
+        if selectedThread != nil {
+            Button {
+                startNewThread()
+            } label: {
+                Label("New", systemImage: "square.and.pencil")
+            }
+            .pinesButtonStyle(.secondary)
+            .accessibilityIdentifier("pines.artifacts.research.new")
+        }
+
+        Button {
+            showsSettings = true
+        } label: {
+            Label("Setup", systemImage: "slider.horizontal.3")
+        }
+        .pinesButtonStyle(.secondary)
+        .accessibilityIdentifier("pines.artifacts.research.settings")
+
+        if !activeRuns.isEmpty {
+            Button {
+                Task { await refreshActiveRuns() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .pinesButtonStyle(.secondary)
+            .accessibilityLabel("Refresh research progress")
+        }
     }
 
     private var conversation: some View {
@@ -1939,8 +2215,8 @@ private struct ArtifactResearchView: View {
                         researchEmptyState(
                             title: "What should we research?",
                             detail: "Ask a question below. Pines can clarify scope before starting, then keeps sources, progress, and the final report together.",
-                            actionTitle: threads.isEmpty ? nil : "Open history",
-                            action: { showsHistory = true }
+                            actionTitle: nil,
+                            action: {}
                         )
                     }
                 }
@@ -2568,58 +2844,6 @@ enum ArtifactResearchReportText {
             return value
         case .number, .bool, .null, nil:
             return nil
-        }
-    }
-}
-
-private struct ArtifactsResearchHistoryView: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.dismiss) private var dismiss
-    let threads: [ArtifactsResearchThread]
-    let selectedThreadID: String?
-    let select: (ArtifactsResearchThread) -> Void
-    @State private var query = ""
-
-    private var filteredThreads: [ArtifactsResearchThread] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return needle.isEmpty ? threads : threads.filter {
-            $0.title.lowercased().contains(needle)
-                || $0.runs.contains(where: { $0.researchDisplayPrompt.lowercased().contains(needle) })
-        }
-    }
-
-    var body: some View {
-        NavigationStack {
-            List(filteredThreads) { thread in
-                Button {
-                    select(thread)
-                } label: {
-                    HStack(alignment: .top, spacing: theme.spacing.small) {
-                        Image(systemName: thread.id == selectedThreadID ? "checkmark.circle.fill" : "doc.text.magnifyingglass")
-                            .foregroundStyle(thread.id == selectedThreadID ? theme.colors.accent : theme.colors.secondaryText)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                            Text(thread.title)
-                                .font(theme.typography.callout.weight(.semibold))
-                                .foregroundStyle(theme.colors.primaryText)
-                                .lineLimit(2)
-                            Text("\(thread.providerKind.pinesLifecycleTitle) · \(thread.statusText) · \(thread.sourceCount) sources")
-                                .font(theme.typography.caption)
-                                .foregroundStyle(theme.colors.secondaryText)
-                            Text(RelativeDateTimeFormatter.shortLabel(for: thread.updatedAt))
-                                .font(theme.typography.caption)
-                                .foregroundStyle(theme.colors.tertiaryText)
-                        }
-                    }
-                }
-            }
-            .searchable(text: $query, prompt: "Search research")
-            .navigationTitle("Research History")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
         }
     }
 }

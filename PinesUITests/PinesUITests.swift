@@ -118,12 +118,14 @@ final class PinesUITests: XCTestCase {
         assertVisibleText(containing: "Low-impact woodland materials", timeout: 10)
         captureScreenshot(named: "Artifacts - Library")
 
-        let images = app.buttons["Images"]
-        XCTAssertTrue(images.waitForExistence(timeout: 10), "Artifact image category was missing.")
-        images.tap()
+        openArtifactDetail(title: "Architectural study of a glass cabin")
+        captureScreenshot(named: "Artifacts - Detail")
+        closeArtifactDetail()
+
+        setArtifactScope("Images")
         assertVisibleText(containing: "Architectural study of a glass cabin", timeout: 10)
         captureScreenshot(named: "Artifacts - Images")
-        app.buttons["All"].tap()
+        setArtifactScope("Everything")
 
         openArtifactsDestination(menuItem: "Image", destinationIdentifier: "pines.artifacts.create")
         assertVisibleText(containing: "OpenAI Studio", timeout: 10)
@@ -145,13 +147,9 @@ final class PinesUITests: XCTestCase {
         XCTAssertTrue(setup.waitForExistence(timeout: 10), "Artifact creation did not offer provider setup.")
         setup.tap()
 
-        let openSettings = app.buttons["Open Provider Settings"]
-        XCTAssertTrue(openSettings.waitForExistence(timeout: 10), "Provider setup did not offer a Settings handoff.")
-        openSettings.tap()
-
         assertIdentifierVisible(
             "pines.settings.detail.cloudProviders",
-            "Artifact provider setup did not open Cloud & Providers directly."
+            "Artifact provider setup did not hand off directly to Cloud & Providers."
         )
     }
 
@@ -459,15 +457,24 @@ final class PinesUITests: XCTestCase {
     @MainActor
     private func openArtifactsDestination(menuItem: String, destinationIdentifier: String) {
         dismissKeyboardIfNeeded()
-        let menu = app.buttons["pines.artifacts.create-menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 10), "Artifact create menu was not visible.")
-        menu.tap()
+        let newArtifact = app.buttons["pines.artifacts.new"]
+        XCTAssertTrue(newArtifact.waitForExistence(timeout: 10), "Artifact New command was not visible.")
+        newArtifact.tap()
+        assertIdentifierVisible("pines.artifacts.command-deck", "The Artifact command deck did not open.")
+        captureScreenshot(named: "Artifacts - Command Deck - \(menuItem)")
 
-        let item = app.buttons[menuItem]
-        if !item.waitForExistence(timeout: 2) {
-            dismissKeyboardIfNeeded()
-            menu.tap()
+        let commandID: String
+        switch menuItem {
+        case "Image": commandID = "image"
+        case "Video": commandID = "video"
+        case "Speech": commandID = "speech"
+        case "Deep Research", "Research": commandID = "research"
+        default:
+            XCTFail("Unknown Artifact command: \(menuItem)")
+            return
         }
+
+        let item = app.buttons["pines.artifacts.command.\(commandID)"]
         XCTAssertTrue(item.waitForExistence(timeout: 5), "Artifact action \(menuItem) was not visible.")
         item.tap()
         XCTAssertTrue(
@@ -479,13 +486,54 @@ final class PinesUITests: XCTestCase {
     @MainActor
     private func returnToArtifactsLibrary() {
         dismissKeyboardIfNeeded()
-        let back = firstExisting([
-            app.navigationBars.buttons["Artifacts"],
-            app.buttons["Artifacts"],
-        ])
-        XCTAssertNotNil(back, "Artifact destination had no back action.")
-        back?.tap()
+        let close = app.buttons["pines.artifacts.sheet.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "Artifact destination had no close action.")
+        close.tap()
         assertIdentifierVisible("pines.artifacts.library", "Artifact library did not reappear.")
+    }
+
+    @MainActor
+    private func openArtifactDetail(title: String) {
+        let opener = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", title)
+        ).firstMatch
+        XCTAssertTrue(opener.waitForExistence(timeout: 10), "Artifact \(title) was not visible.")
+        opener.tap()
+
+        let detail = app.descendants(matching: .any)["pines.artifacts.detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 10), "Artifact details did not open.")
+
+        if app.frame.width >= 700 {
+            XCTAssertTrue(
+                app.descendants(matching: .any)["pines.artifacts.inspector"].waitForExistence(timeout: 5),
+                "iPad should show artifact details in a trailing inspector, not another navigation column."
+            )
+        } else {
+            XCTAssertTrue(
+                app.buttons["pines.artifacts.sheet.close"].waitForExistence(timeout: 5),
+                "iPhone should show artifact details in a dismissible sheet."
+            )
+        }
+    }
+
+    @MainActor
+    private func closeArtifactDetail() {
+        let closed = tapFirstExisting([
+            app.buttons["Close artifact details"],
+            app.buttons["pines.artifacts.sheet.close"],
+        ], timeout: 10)
+        XCTAssertTrue(closed, "Artifact details had no close action.")
+        assertIdentifierVisible("pines.artifacts.library", "Artifact library did not remain visible after closing details.")
+    }
+
+    @MainActor
+    private func setArtifactScope(_ title: String) {
+        let scope = app.buttons["pines.artifacts.scope"]
+        XCTAssertTrue(scope.waitForExistence(timeout: 10), "Artifact scope control was missing.")
+        scope.tap()
+        let option = app.buttons[title]
+        XCTAssertTrue(option.waitForExistence(timeout: 5), "Artifact scope \(title) was missing.")
+        option.tap()
     }
 
     @MainActor
