@@ -894,6 +894,7 @@ private struct ArtifactsActivityRow: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .buttonStyle(.plain)
         .contentShape(Rectangle())
         .pinesSurface(.inset, padding: theme.spacing.small)
