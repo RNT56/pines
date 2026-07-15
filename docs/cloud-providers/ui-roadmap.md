@@ -13,7 +13,7 @@ Add advanced cloud-provider capabilities without turning Pines into a dashboard 
 Updated 2026-07-15:
 
 - Pines has shared provider lifecycle records and previews for files, artifacts, caches/vector stores, batches, research runs, live sessions, and model capabilities.
-- The Artifacts tab now uses the Artifact Desk system: one searchable canvas, one compact scope/refine command strip, an in-progress queue, unified result cards/rows, an outcome-first New deck, focused creation/research sheets, and contextual detail (sheet on iPhone, trailing inspector on iPad). It does not add another iPad sidebar or nested category navigation.
+- The Artifacts tab now uses a zero-navigation gallery: native search/filter controls, one transient running line, uniform unframed gallery cells, a direct outcome New menu, focused creation/research sheets, and Quick Look sheets on both iPhone and iPad. It does not add an iPad inspector, another sidebar, or nested category navigation.
 - Vault/provider storage views show OpenAI, Anthropic, and Gemini provider-hosted files separately from local Vault items, with refresh/delete/export/import paths where supported.
 - Anthropic now has Settings capability rows, prompt/thinking quick settings, file management, batch create/count/refresh/cancel/import flows, citations/source panels, hosted-tool timeline rows, and run provenance pills.
 - Gemini now has file/media management, context cache management, generated media creation, Deep Research, realtime session records, batch rows, and capability previews.
@@ -141,7 +141,7 @@ Production requirements:
 
 Purpose: Handle generated or provider-returned files/media.
 
-Current implementation: the Artifact Desk described in [ARTIFACT-DESK.md](../ARTIFACT-DESK.md), with a searchable/filterable library for image, video, audio, and research-report outputs; a compact in-progress queue; dense phone rows; a balanced iPad grid; contextual artifact detail; Vault import; original-provider links; image remix; and local-record removal. Creation metadata is retained across provider job refreshes so prompts produce readable library titles instead of opaque filenames.
+Current implementation: the Artifact gallery described in [ARTIFACT-DESK.md](../ARTIFACT-DESK.md), with a searchable/filterable library for image, video, audio, and research-report outputs; one transient running line; balanced phone and iPad grids; sheet-based Quick Look; Vault import; original-provider links; image remix; and local-record removal. Creation metadata is retained across provider job refreshes so prompts produce readable library titles instead of opaque filenames.
 
 Components:
 

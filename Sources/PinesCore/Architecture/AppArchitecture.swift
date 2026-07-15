@@ -416,13 +416,17 @@ public protocol ModelInstallRepository: Sendable {
 
 public protocol VaultRepository: Sendable {
     func listDocuments() async throws -> [VaultDocumentRecord]
+    func document(id: UUID) async throws -> VaultDocumentRecord?
     func observeDocuments() -> AsyncStream<[VaultDocumentRecord]>
     func upsertDocument(_ document: VaultDocumentRecord, localURL: URL?, checksum: String?) async throws
     func deleteDocument(id: UUID) async throws
     func deleteChunk(id: String, documentID: UUID) async throws
     func moveDocument(_ documentID: UUID, toProject projectID: UUID?) async throws
     func chunks(documentID: UUID) async throws -> [VaultChunk]
+    func chunks(documentID: UUID, limit: Int, offset: Int) async throws -> [VaultChunk]
+    func chunkUTF8ByteCount(documentID: UUID) async throws -> Int64
     func embeddings(documentID: UUID) async throws -> [VaultStoredEmbedding]
+    func embeddingCount(documentID: UUID, profileID: String?) async throws -> Int
     func listEmbeddingProfiles() async throws -> [VaultEmbeddingProfile]
     func observeEmbeddingProfiles() -> AsyncStream<[VaultEmbeddingProfile]>
     func activeEmbeddingProfile() async throws -> VaultEmbeddingProfile?
@@ -443,8 +447,29 @@ public protocol VaultRepository: Sendable {
 }
 
 public extension VaultRepository {
+    func document(id: UUID) async throws -> VaultDocumentRecord? {
+        try await listDocuments().first(where: { $0.id == id })
+    }
+
+    func chunks(documentID: UUID, limit: Int, offset: Int) async throws -> [VaultChunk] {
+        guard limit > 0 else { return [] }
+        return Array(try await chunks(documentID: documentID).dropFirst(max(0, offset)).prefix(limit))
+    }
+
+    func chunkUTF8ByteCount(documentID: UUID) async throws -> Int64 {
+        Int64(try await chunks(documentID: documentID).reduce(0) { partial, chunk in
+            partial + chunk.text.utf8.count
+        })
+    }
+
     func embeddings(documentID: UUID) async throws -> [VaultStoredEmbedding] {
         []
+    }
+
+    func embeddingCount(documentID: UUID, profileID: String?) async throws -> Int {
+        let stored = try await embeddings(documentID: documentID)
+        guard let profileID else { return stored.count }
+        return stored.lazy.filter { $0.profileID == profileID }.count
     }
 
     func listEmbeddingProfiles() async throws -> [VaultEmbeddingProfile] {
@@ -979,96 +1004,164 @@ public struct ProviderModelCapabilityRecord: Identifiable, Hashable, Codable, Se
 
 public protocol ProviderFileRepository: Sendable {
     func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord]
+    func listProviderFiles(providerID: ProviderID?, limit: Int) async throws -> [ProviderFileRecord]
     func upsertProviderFile(_ file: ProviderFileRecord) async throws
     func deleteProviderFile(id: String) async throws
 }
 
 public protocol ProviderArtifactRepository: Sendable {
     func listProviderArtifacts(responseID: String?) async throws -> [ProviderArtifactRecord]
+    func listRecentProviderArtifacts(limit: Int, before cursor: ProviderArtifactCursor?) async throws -> [ProviderArtifactRecord]
+    func providerArtifact(id: String) async throws -> ProviderArtifactRecord?
     func upsertProviderArtifact(_ artifact: ProviderArtifactRecord) async throws
     func deleteProviderArtifact(id: String) async throws
 }
 
+public struct ProviderArtifactCursor: Hashable, Codable, Sendable {
+    public var createdAt: Date
+    public var id: String
+
+    public init(createdAt: Date, id: String) {
+        self.createdAt = createdAt
+        self.id = id
+    }
+}
+
 public protocol ProviderCacheRepository: Sendable {
     func listProviderCaches(providerID: ProviderID?, kind: String?) async throws -> [ProviderCacheRecord]
+    func listProviderCaches(providerID: ProviderID?, kind: String?, limit: Int) async throws -> [ProviderCacheRecord]
     func upsertProviderCache(_ cache: ProviderCacheRecord) async throws
     func deleteProviderCache(id: String) async throws
 }
 
 public protocol ProviderBatchRepository: Sendable {
     func listProviderBatches(providerID: ProviderID?) async throws -> [ProviderBatchRecord]
+    func listProviderBatches(providerID: ProviderID?, limit: Int) async throws -> [ProviderBatchRecord]
     func upsertProviderBatch(_ batch: ProviderBatchRecord) async throws
     func deleteProviderBatch(id: String) async throws
 }
 
 public protocol ProviderLiveSessionRepository: Sendable {
     func listProviderLiveSessions(providerID: ProviderID?) async throws -> [ProviderLiveSessionRecord]
+    func listProviderLiveSessions(providerID: ProviderID?, limit: Int) async throws -> [ProviderLiveSessionRecord]
     func upsertProviderLiveSession(_ session: ProviderLiveSessionRecord) async throws
     func deleteProviderLiveSession(id: String) async throws
 }
 
 public protocol ProviderStructuredOutputRepository: Sendable {
     func listProviderStructuredOutputs(responseID: String?) async throws -> [ProviderStructuredOutputRecord]
+    func listProviderStructuredOutputs(responseID: String?, limit: Int) async throws -> [ProviderStructuredOutputRecord]
     func upsertProviderStructuredOutput(_ output: ProviderStructuredOutputRecord) async throws
     func deleteProviderStructuredOutput(id: UUID) async throws
 }
 
 public protocol ProviderModelCapabilityRepository: Sendable {
     func listProviderModelCapabilities(providerID: ProviderID?) async throws -> [ProviderModelCapabilityRecord]
+    func listProviderModelCapabilities(providerID: ProviderID?, limit: Int) async throws -> [ProviderModelCapabilityRecord]
     func upsertProviderModelCapability(_ capability: ProviderModelCapabilityRecord) async throws
     func deleteProviderModelCapability(providerID: ProviderID, modelID: ModelID) async throws
 }
 
 public protocol ProviderResearchRunRepository: Sendable {
     func listProviderResearchRuns(providerID: ProviderID?, status: String?) async throws -> [ProviderResearchRunRecord]
+    func listProviderResearchRuns(providerID: ProviderID?, status: String?, limit: Int) async throws -> [ProviderResearchRunRecord]
     func upsertProviderResearchRun(_ run: ProviderResearchRunRecord) async throws
     func deleteProviderResearchRun(id: String) async throws
 }
 
 public extension ProviderFileRepository {
     func listProviderFiles(providerID: ProviderID?) async throws -> [ProviderFileRecord] { [] }
+    func listProviderFiles(providerID: ProviderID?, limit: Int) async throws -> [ProviderFileRecord] {
+        guard limit > 0 else { return [] }
+        return Array(try await listProviderFiles(providerID: providerID).prefix(limit))
+    }
     func upsertProviderFile(_ file: ProviderFileRecord) async throws {}
     func deleteProviderFile(id: String) async throws {}
 }
 
 public extension ProviderArtifactRepository {
     func listProviderArtifacts(responseID: String?) async throws -> [ProviderArtifactRecord] { [] }
+    func listRecentProviderArtifacts(limit: Int, before cursor: ProviderArtifactCursor?) async throws -> [ProviderArtifactRecord] {
+        guard limit > 0 else { return [] }
+        let records = try await listProviderArtifacts(responseID: nil)
+        return Array(
+            records
+                .filter { record in
+                    guard let cursor else { return true }
+                    return record.createdAt < cursor.createdAt
+                        || (record.createdAt == cursor.createdAt && record.id < cursor.id)
+                }
+                .sorted { lhs, rhs in
+                    lhs.createdAt == rhs.createdAt
+                        ? lhs.id > rhs.id
+                        : lhs.createdAt > rhs.createdAt
+                }
+                .prefix(limit)
+        )
+    }
+    func providerArtifact(id: String) async throws -> ProviderArtifactRecord? {
+        try await listProviderArtifacts(responseID: nil).first(where: { $0.id == id })
+    }
     func upsertProviderArtifact(_ artifact: ProviderArtifactRecord) async throws {}
     func deleteProviderArtifact(id: String) async throws {}
 }
 
 public extension ProviderCacheRepository {
     func listProviderCaches(providerID: ProviderID?, kind: String?) async throws -> [ProviderCacheRecord] { [] }
+    func listProviderCaches(providerID: ProviderID?, kind: String?, limit: Int) async throws -> [ProviderCacheRecord] {
+        guard limit > 0 else { return [] }
+        return Array(try await listProviderCaches(providerID: providerID, kind: kind).prefix(limit))
+    }
     func upsertProviderCache(_ cache: ProviderCacheRecord) async throws {}
     func deleteProviderCache(id: String) async throws {}
 }
 
 public extension ProviderBatchRepository {
     func listProviderBatches(providerID: ProviderID?) async throws -> [ProviderBatchRecord] { [] }
+    func listProviderBatches(providerID: ProviderID?, limit: Int) async throws -> [ProviderBatchRecord] {
+        guard limit > 0 else { return [] }
+        return Array(try await listProviderBatches(providerID: providerID).prefix(limit))
+    }
     func upsertProviderBatch(_ batch: ProviderBatchRecord) async throws {}
     func deleteProviderBatch(id: String) async throws {}
 }
 
 public extension ProviderLiveSessionRepository {
     func listProviderLiveSessions(providerID: ProviderID?) async throws -> [ProviderLiveSessionRecord] { [] }
+    func listProviderLiveSessions(providerID: ProviderID?, limit: Int) async throws -> [ProviderLiveSessionRecord] {
+        guard limit > 0 else { return [] }
+        return Array(try await listProviderLiveSessions(providerID: providerID).prefix(limit))
+    }
     func upsertProviderLiveSession(_ session: ProviderLiveSessionRecord) async throws {}
     func deleteProviderLiveSession(id: String) async throws {}
 }
 
 public extension ProviderStructuredOutputRepository {
     func listProviderStructuredOutputs(responseID: String?) async throws -> [ProviderStructuredOutputRecord] { [] }
+    func listProviderStructuredOutputs(responseID: String?, limit: Int) async throws -> [ProviderStructuredOutputRecord] {
+        guard limit > 0 else { return [] }
+        return Array(try await listProviderStructuredOutputs(responseID: responseID).prefix(limit))
+    }
     func upsertProviderStructuredOutput(_ output: ProviderStructuredOutputRecord) async throws {}
     func deleteProviderStructuredOutput(id: UUID) async throws {}
 }
 
 public extension ProviderModelCapabilityRepository {
     func listProviderModelCapabilities(providerID: ProviderID?) async throws -> [ProviderModelCapabilityRecord] { [] }
+    func listProviderModelCapabilities(providerID: ProviderID?, limit: Int) async throws -> [ProviderModelCapabilityRecord] {
+        guard limit > 0 else { return [] }
+        return Array(try await listProviderModelCapabilities(providerID: providerID).prefix(limit))
+    }
     func upsertProviderModelCapability(_ capability: ProviderModelCapabilityRecord) async throws {}
     func deleteProviderModelCapability(providerID: ProviderID, modelID: ModelID) async throws {}
 }
 
 public extension ProviderResearchRunRepository {
     func listProviderResearchRuns(providerID: ProviderID?, status: String?) async throws -> [ProviderResearchRunRecord] { [] }
+    func listProviderResearchRuns(providerID: ProviderID?, status: String?, limit: Int) async throws -> [ProviderResearchRunRecord] {
+        guard limit > 0 else { return [] }
+        return Array(try await listProviderResearchRuns(providerID: providerID, status: status).prefix(limit))
+    }
     func upsertProviderResearchRun(_ run: ProviderResearchRunRecord) async throws {}
     func deleteProviderResearchRun(id: String) async throws {}
 }

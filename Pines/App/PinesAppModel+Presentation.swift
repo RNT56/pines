@@ -614,14 +614,13 @@ extension PinesAppModel {
             title: record.title,
             kind: kind,
             detail: "\(record.chunkCount) indexed chunks",
-            chunks: [],
             updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt),
             sensitivity: .local,
             linkedThreads: 0,
             activeProfileEmbeddedChunks: 0,
             activeProfileTotalChunks: record.chunkCount,
             sourceContentType: record.sourceType,
-            sourceData: nil
+            sourceRevision: record.checksum ?? String(record.updatedAt.timeIntervalSinceReferenceDate)
         )
     }
 

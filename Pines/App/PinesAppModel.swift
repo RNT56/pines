@@ -85,6 +85,18 @@ private enum ChatContextAssembly {
     static let defaultContextTokens = 65_536
 }
 
+private enum VaultDetailPerformance {
+    static let chunkPageSize = 32
+    static let textPreviewByteLimit = 48_000
+    static let imagePreviewByteLimit = 32 * 1_024 * 1_024
+    static let authenticatedEncryptionOverheadAllowance = 64
+}
+
+enum ProviderLifecyclePerformance {
+    static let retainedRecordLimit = 250
+    static let retainedCapabilityLimit = 500
+}
+
 private enum ChatLocalGenerationPerformance {
     static let minimumElapsedSeconds: TimeInterval = 0.05
 
@@ -135,6 +147,18 @@ private struct RemoteModelFileMetadata: Sendable {
     var repository: String
     var estimatedBytes: Int64?
     var isResourceRejected: Bool
+}
+
+private enum ProviderLifecycleLoadedDomain: Sendable {
+    case transfers([ProviderTransferRecord])
+    case files([ProviderFileRecord])
+    case artifacts([ProviderArtifactRecord])
+    case caches([ProviderCacheRecord])
+    case batches([ProviderBatchRecord])
+    case liveSessions([ProviderLiveSessionRecord])
+    case structuredOutputs([ProviderStructuredOutputRecord])
+    case capabilities([ProviderModelCapabilityRecord])
+    case researchRuns([ProviderResearchRunRecord])
 }
 
 @MainActor
@@ -207,6 +231,11 @@ final class PinesAppModel: ObservableObject {
     var vaultItems: [PinesVaultItemPreview] {
         get { vaultState.vaultItems }
         set { vaultState.vaultItems = newValue }
+    }
+
+    var selectedVaultItemDetail: PinesVaultItemDetail? {
+        get { vaultState.selectedItemDetail }
+        set { vaultState.selectedItemDetail = newValue }
     }
 
     var vaultEmbeddingProfiles: [VaultEmbeddingProfile] {
@@ -614,6 +643,7 @@ final class PinesAppModel: ObservableObject {
     private var currentRunToken: UUID?
     private var currentRunUsesLocalRuntime = false
     private var vaultReindexToken: UUID?
+    private var vaultDetailLoadID: UUID?
     var approvalContinuation: CheckedContinuation<ToolApprovalStatus, Never>?
     var hostedToolApprovalContinuation: CheckedContinuation<Bool, Never>?
     var cloudContextContinuation: CheckedContinuation<CloudContextApprovalDecision, Never>?
@@ -684,7 +714,7 @@ final class PinesAppModel: ObservableObject {
         )
         do {
             try await syncService.syncNow()
-            await refreshAll(services: services)
+            await refreshSynchronizedState(services: services)
             setIfChanged(
                 \.cloudKitSyncStatus,
                 PinesCloudKitSyncStatus(
@@ -1065,7 +1095,7 @@ final class PinesAppModel: ObservableObject {
         guard !isBootstrapping else { return }
         isBootstrapping = true
 
-        #if DEBUG
+        #if DEBUG || targetEnvironment(simulator)
         do {
             try await PinesUITestLaunchConfiguration.seedArtifactLibraryIfNeeded(services: services)
         } catch {
@@ -1134,7 +1164,13 @@ final class PinesAppModel: ObservableObject {
             await repairInterruptedChatRuns(services: services)
             try await services.providerTransferRepository?.markActiveProviderTransfersInterrupted(at: Date())
             try await services.modelLifecycleService?.validateInstalledModels()
-            await refreshProviderLifecycleState(services: services)
+            #if DEBUG
+            // UI fixtures need their seeded lifecycle rows synchronously. The
+            // shipping app defers this broad read to background bootstrap.
+            if PinesUITestLaunchConfiguration.isEnabled {
+                await refreshProviderLifecycleState(services: services)
+            }
+            #endif
             try await refreshModelPreviews(services: services, enrichRuntime: false)
             setIfChanged(\.serviceError, nil)
         } catch {
@@ -1159,6 +1195,9 @@ final class PinesAppModel: ObservableObject {
 
     private func finishBackgroundBootstrap(services: PinesAppServices) async {
         let startedAt = Date()
+        _ = try? await ProviderMultipartBodyFileBuilder.shared.purge(
+            olderThan: Date().addingTimeInterval(-24 * 60 * 60)
+        )
         await services.bootstrap()
         await reconcileModelDownloads(services: services)
         await refreshPostBootstrapState(services: services)
@@ -1285,6 +1324,7 @@ final class PinesAppModel: ObservableObject {
         setIfChanged(\.isSearchingModels, false)
         setIfChanged(\.modelSearchError, nil)
         setIfChanged(\.vaultItems, [])
+        setIfChanged(\.selectedVaultItemDetail, nil)
         setIfChanged(\.vaultEmbeddingProfiles, [])
         setIfChanged(\.vaultEmbeddingJobs, [])
         setIfChanged(\.vaultRetrievalEvents, [])
@@ -1374,6 +1414,55 @@ final class PinesAppModel: ObservableObject {
         }
     }
 
+    func refreshProjects(services: PinesAppServices) async {
+        do {
+            guard let repository = services.projectRepository else { return }
+            let projectPreviews = try await repository.listProjects().map(Self.projectPreview(from:))
+            setIfChanged(\.projects, projectPreviews)
+            if let selectedProjectID, !projectPreviews.contains(where: { $0.id == selectedProjectID }) {
+                setIfChanged(\.selectedProjectID, nil)
+            }
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    func refreshVaultDocuments(services: PinesAppServices) async {
+        do {
+            guard let repository = services.vaultRepository else { return }
+            setIfChanged(\.vaultItems, try await repository.listDocuments().map(Self.vaultPreview(from:)))
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    func refreshMCPState(services: PinesAppServices) async {
+        do {
+            guard let repository = services.mcpServerRepository else { return }
+            setIfChanged(\.mcpServers, try await repository.listMCPServers())
+            setIfChanged(\.mcpTools, try await repository.listMCPTools(serverID: nil))
+            setIfChanged(\.mcpResources, try await repository.listMCPResources(serverID: nil))
+            setIfChanged(\.mcpResourceTemplates, try await repository.listMCPResourceTemplates(serverID: nil))
+            setIfChanged(\.mcpPrompts, try await repository.listMCPPrompts(serverID: nil))
+        } catch {
+            setIfChanged(\.serviceError, error.localizedDescription)
+        }
+    }
+
+    /// Refreshes only repositories whose records can be changed by CloudKit.
+    /// Model discovery, provider lifecycle, MCP, credentials, and entitlements
+    /// are deliberately excluded from this synchronization hot path.
+    func refreshSynchronizedState(services: PinesAppServices) async {
+        if let settingsRepository = services.settingsRepository,
+           let settings = try? await settingsRepository.loadSettings() {
+            applySettings(settings)
+        }
+        await refreshConversationPreviews(services: services)
+        await refreshProjects(services: services)
+        await refreshVaultDocuments(services: services)
+        await refreshCloudProviders(services: services)
+    }
+
     private func refreshVaultEmbeddingState(services: PinesAppServices) async {
         do {
             if let embeddingService = services.vaultEmbeddingService {
@@ -1391,69 +1480,466 @@ final class PinesAppModel: ObservableObject {
     }
 
     func refreshProviderLifecycleState(services: PinesAppServices) async {
-        isRefreshingProviderLifecycle = true
-        defer { isRefreshingProviderLifecycle = false }
-
+        let interval = services.runtimeMetrics.begin(.providerLifecycleRefresh)
+        defer { services.runtimeMetrics.end(interval) }
+        let refreshGeneration = providerLifecycleState.beginRefresh()
         do {
-            if let repository = services.providerTransferRepository {
-                setIfChanged(\.providerTransfers, try await repository.listProviderTransfers(providerID: nil))
-            }
-            if let repository = services.providerFileRepository {
-                let records = try await repository.listProviderFiles(providerID: nil)
-                setIfChanged(\.providerFiles, records)
-                setIfChanged(\.providerFilePreviews, records.map(Self.providerFilePreview(from:)))
+            let loadedDomains = try await withThrowingTaskGroup(
+                of: ProviderLifecycleLoadedDomain.self,
+                returning: [ProviderLifecycleLoadedDomain].self
+            ) { group in
+                if let repository = services.providerTransferRepository {
+                    group.addTask {
+                        .transfers(
+                            try await repository.listProviderTransfers(
+                                providerID: nil,
+                                limit: ProviderLifecyclePerformance.retainedRecordLimit
+                            )
+                        )
+                    }
+                }
+                if let repository = services.providerFileRepository {
+                    group.addTask {
+                        .files(
+                            try await repository.listProviderFiles(
+                                providerID: nil,
+                                limit: ProviderLifecyclePerformance.retainedRecordLimit
+                            )
+                        )
+                    }
+                }
+                if let repository = services.providerArtifactRepository {
+                    group.addTask { .artifacts(try await repository.listRecentProviderArtifacts(limit: 250, before: nil)) }
+                }
+                if let repository = services.providerCacheRepository {
+                    group.addTask {
+                        .caches(
+                            try await repository.listProviderCaches(
+                                providerID: nil,
+                                kind: nil,
+                                limit: ProviderLifecyclePerformance.retainedRecordLimit
+                            )
+                        )
+                    }
+                }
+                if let repository = services.providerBatchRepository {
+                    group.addTask {
+                        .batches(
+                            try await repository.listProviderBatches(
+                                providerID: nil,
+                                limit: ProviderLifecyclePerformance.retainedRecordLimit
+                            )
+                        )
+                    }
+                }
+                if let repository = services.providerLiveSessionRepository {
+                    group.addTask {
+                        .liveSessions(
+                            try await repository.listProviderLiveSessions(
+                                providerID: nil,
+                                limit: ProviderLifecyclePerformance.retainedRecordLimit
+                            )
+                        )
+                    }
+                }
+                if let repository = services.providerStructuredOutputRepository {
+                    group.addTask {
+                        .structuredOutputs(
+                            try await repository.listProviderStructuredOutputs(
+                                responseID: nil,
+                                limit: ProviderLifecyclePerformance.retainedRecordLimit
+                            )
+                        )
+                    }
+                }
+                if let repository = services.providerModelCapabilityRepository {
+                    group.addTask {
+                        .capabilities(
+                            try await repository.listProviderModelCapabilities(
+                                providerID: nil,
+                                limit: ProviderLifecyclePerformance.retainedCapabilityLimit
+                            )
+                        )
+                    }
+                }
+                if let repository = services.providerResearchRunRepository {
+                    group.addTask {
+                        .researchRuns(
+                            try await repository.listProviderResearchRuns(
+                                providerID: nil,
+                                status: nil,
+                                limit: ProviderLifecyclePerformance.retainedRecordLimit
+                            )
+                        )
+                    }
+                }
+
+                var loaded: [ProviderLifecycleLoadedDomain] = []
+                loaded.reserveCapacity(9)
+                for try await domain in group {
+                    loaded.append(domain)
+                }
+                return loaded
             }
 
-            if let repository = services.providerArtifactRepository {
-                let records = try await repository.listProviderArtifacts(responseID: nil)
-                setIfChanged(\.providerArtifacts, records)
-                setIfChanged(\.providerArtifactPreviews, records.map(Self.providerArtifactPreview(from:)))
+            var snapshot = providerLifecycleState.snapshot
+            for domain in loadedDomains {
+                switch domain {
+                case let .transfers(records):
+                    snapshot.providerTransfers = records
+                case let .files(records):
+                    snapshot.providerFiles = records
+                    snapshot.providerFilePreviews = records.map(Self.providerFilePreview(from:))
+                case let .artifacts(records):
+                    snapshot.providerArtifacts = records
+                    snapshot.providerArtifactPreviews = records.map(Self.providerArtifactPreview(from:))
+                case let .caches(records):
+                    let vectorStores = records.filter { $0.kind == "vector_store" }
+                    snapshot.providerCaches = records
+                    snapshot.providerCachePreviews = records.map(Self.providerCachePreview(from:))
+                    snapshot.providerVectorStores = vectorStores
+                    snapshot.providerVectorStorePreviews = vectorStores.map(Self.providerCachePreview(from:))
+                case let .batches(records):
+                    snapshot.providerBatches = records
+                    snapshot.providerBatchPreviews = records.map(Self.providerBatchPreview(from:))
+                case let .liveSessions(records):
+                    snapshot.providerLiveSessions = records
+                    snapshot.providerLiveSessionPreviews = records.map(Self.providerLiveSessionPreview(from:))
+                case let .structuredOutputs(records):
+                    snapshot.providerStructuredOutputs = records
+                    snapshot.providerStructuredOutputPreviews = records.map(Self.providerStructuredOutputPreview(from:))
+                case let .capabilities(records):
+                    snapshot.providerModelCapabilities = records
+                    snapshot.providerModelCapabilityPreviews = records.map(Self.providerModelCapabilityPreview(from:))
+                case let .researchRuns(records):
+                    snapshot.providerResearchRuns = records
+                    snapshot.providerResearchRunPreviews = records.map(Self.providerResearchRunPreview(from:))
+                }
             }
-
-            if let repository = services.providerCacheRepository {
-                let records = try await repository.listProviderCaches(providerID: nil, kind: nil)
-                let vectorStores = records.filter { $0.kind == "vector_store" }
-                setIfChanged(\.providerCaches, records)
-                setIfChanged(\.providerCachePreviews, records.map(Self.providerCachePreview(from:)))
-                setIfChanged(\.providerVectorStores, vectorStores)
-                setIfChanged(\.providerVectorStorePreviews, vectorStores.map(Self.providerCachePreview(from:)))
-            }
-
-            if let repository = services.providerBatchRepository {
-                let records = try await repository.listProviderBatches(providerID: nil)
-                setIfChanged(\.providerBatches, records)
-                setIfChanged(\.providerBatchPreviews, records.map(Self.providerBatchPreview(from:)))
-            }
-
-            if let repository = services.providerLiveSessionRepository {
-                let records = try await repository.listProviderLiveSessions(providerID: nil)
-                setIfChanged(\.providerLiveSessions, records)
-                setIfChanged(\.providerLiveSessionPreviews, records.map(Self.providerLiveSessionPreview(from:)))
-            }
-
-            if let repository = services.providerStructuredOutputRepository {
-                let records = try await repository.listProviderStructuredOutputs(responseID: nil)
-                setIfChanged(\.providerStructuredOutputs, records)
-                setIfChanged(\.providerStructuredOutputPreviews, records.map(Self.providerStructuredOutputPreview(from:)))
-            }
-
-            if let repository = services.providerModelCapabilityRepository {
-                let records = try await repository.listProviderModelCapabilities(providerID: nil)
-                setIfChanged(\.providerModelCapabilities, records)
-                setIfChanged(\.providerModelCapabilityPreviews, records.map(Self.providerModelCapabilityPreview(from:)))
-            }
-
-            if let repository = services.providerResearchRunRepository {
-                let records = try await repository.listProviderResearchRuns(providerID: nil, status: nil)
-                setIfChanged(\.providerResearchRuns, records)
-                setIfChanged(\.providerResearchRunPreviews, records.map(Self.providerResearchRunPreview(from:)))
-            }
-
-            setIfChanged(\.providerLifecycleError, nil)
+            guard providerLifecycleState.completeRefresh(snapshot, generation: refreshGeneration) else { return }
         } catch {
-            setIfChanged(\.providerLifecycleError, error.localizedDescription)
+            guard providerLifecycleState.failRefresh(error.localizedDescription, generation: refreshGeneration) else { return }
             recordRecoverableIssue("provider_lifecycle.refresh", error: error, services: services)
         }
+    }
+
+    /// Merges the lifecycle domains returned by a provider-scoped refresh in
+    /// one publication. Older local rows remain visible when the provider API
+    /// returned only a filtered or paginated subset.
+    func upsertProviderStorageRecords(
+        files: [ProviderFileRecord]? = nil,
+        caches: [ProviderCacheRecord]? = nil,
+        batches: [ProviderBatchRecord]? = nil,
+        capabilities: [ProviderModelCapabilityRecord]? = nil
+    ) {
+        providerLifecycleState.updateIncrementally { snapshot in
+            if let files {
+                let records = Self.upserting(
+                    files,
+                    into: snapshot.providerFiles,
+                    orderedBefore: Self.providerFileOrderedBefore
+                )
+                snapshot.providerFiles = records
+                snapshot.providerFilePreviews = records.map(Self.providerFilePreview(from:))
+            }
+            if let caches {
+                let records = Self.upserting(
+                    caches,
+                    into: snapshot.providerCaches,
+                    orderedBefore: Self.providerCacheOrderedBefore
+                )
+                Self.applyProviderCaches(records, to: &snapshot)
+            }
+            if let batches {
+                let records = Self.upserting(
+                    batches,
+                    into: snapshot.providerBatches,
+                    orderedBefore: Self.providerBatchOrderedBefore
+                )
+                snapshot.providerBatches = records
+                snapshot.providerBatchPreviews = records.map(Self.providerBatchPreview(from:))
+            }
+            if let capabilities {
+                let records = Self.upserting(
+                    capabilities,
+                    into: snapshot.providerModelCapabilities,
+                    orderedBefore: Self.providerModelCapabilityOrderedBefore
+                )
+                snapshot.providerModelCapabilities = records
+                snapshot.providerModelCapabilityPreviews = records.map(Self.providerModelCapabilityPreview(from:))
+            }
+        }
+    }
+
+    func upsertProviderFileRecords(_ records: [ProviderFileRecord]) {
+        guard !records.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            let updated = Self.upserting(
+                records,
+                into: snapshot.providerFiles,
+                orderedBefore: Self.providerFileOrderedBefore
+            )
+            snapshot.providerFiles = updated
+            snapshot.providerFilePreviews = updated.map(Self.providerFilePreview(from:))
+        }
+    }
+
+    func upsertProviderTransferRecords(_ records: [ProviderTransferRecord]) {
+        guard !records.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            snapshot.providerTransfers = Self.upserting(
+                records,
+                into: snapshot.providerTransfers,
+                orderedBefore: Self.providerTransferOrderedBefore
+            )
+        }
+    }
+
+    func removeProviderTransferRecord(id: UUID) {
+        providerLifecycleState.updateIncrementally { snapshot in
+            snapshot.providerTransfers.removeAll { $0.id == id }
+        }
+    }
+
+    func upsertProviderArtifactRecords(_ records: [ProviderArtifactRecord]) {
+        guard !records.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            let updated = Self.upserting(
+                records,
+                into: snapshot.providerArtifacts,
+                orderedBefore: Self.providerArtifactOrderedBefore
+            )
+            snapshot.providerArtifacts = Array(updated.prefix(250))
+            snapshot.providerArtifactPreviews = snapshot.providerArtifacts.map(Self.providerArtifactPreview(from:))
+        }
+    }
+
+    func removeProviderArtifactRecords(ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            let updated = snapshot.providerArtifacts.filter { !ids.contains($0.id) }
+            snapshot.providerArtifacts = updated
+            snapshot.providerArtifactPreviews = updated.map(Self.providerArtifactPreview(from:))
+        }
+    }
+
+    func upsertProviderCacheRecords(_ records: [ProviderCacheRecord]) {
+        guard !records.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            let updated = Self.upserting(
+                records,
+                into: snapshot.providerCaches,
+                orderedBefore: Self.providerCacheOrderedBefore
+            )
+            Self.applyProviderCaches(updated, to: &snapshot)
+        }
+    }
+
+    func upsertProviderBatchRecords(_ records: [ProviderBatchRecord]) {
+        guard !records.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            let updated = Self.upserting(
+                records,
+                into: snapshot.providerBatches,
+                orderedBefore: Self.providerBatchOrderedBefore
+            )
+            snapshot.providerBatches = updated
+            snapshot.providerBatchPreviews = updated.map(Self.providerBatchPreview(from:))
+        }
+    }
+
+    func upsertProviderLiveSessionRecords(_ records: [ProviderLiveSessionRecord]) {
+        guard !records.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            let updated = Self.upserting(
+                records,
+                into: snapshot.providerLiveSessions,
+                orderedBefore: Self.providerLiveSessionOrderedBefore
+            )
+            snapshot.providerLiveSessions = updated
+            snapshot.providerLiveSessionPreviews = updated.map(Self.providerLiveSessionPreview(from:))
+        }
+    }
+
+    func upsertProviderStructuredOutputRecords(_ records: [ProviderStructuredOutputRecord]) {
+        guard !records.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            let updated = Self.upserting(
+                records,
+                into: snapshot.providerStructuredOutputs,
+                orderedBefore: Self.providerStructuredOutputOrderedBefore
+            )
+            snapshot.providerStructuredOutputs = updated
+            snapshot.providerStructuredOutputPreviews = updated.map(Self.providerStructuredOutputPreview(from:))
+        }
+    }
+
+    func upsertProviderModelCapabilityRecords(_ records: [ProviderModelCapabilityRecord]) {
+        guard !records.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            let updated = Self.upserting(
+                records,
+                into: snapshot.providerModelCapabilities,
+                orderedBefore: Self.providerModelCapabilityOrderedBefore
+            )
+            snapshot.providerModelCapabilities = updated
+            snapshot.providerModelCapabilityPreviews = updated.map(Self.providerModelCapabilityPreview(from:))
+        }
+    }
+
+    func upsertProviderResearchRunRecords(
+        _ records: [ProviderResearchRunRecord],
+        preview: (ProviderResearchRunRecord) -> PinesProviderResearchRunPreview
+    ) {
+        guard !records.isEmpty else { return }
+        providerLifecycleState.updateIncrementally { snapshot in
+            let updated = Self.upserting(
+                records,
+                into: snapshot.providerResearchRuns,
+                orderedBefore: Self.providerResearchRunOrderedBefore
+            )
+            snapshot.providerResearchRuns = updated
+            snapshot.providerResearchRunPreviews = updated.map(preview)
+        }
+    }
+
+    /// Reloads one local lifecycle table after a mutation whose provider API
+    /// does not return the normalized local identifier (for example deletes).
+    func refreshProviderFileRecords(services: PinesAppServices) async {
+        guard let repository = services.providerFileRepository else { return }
+        do {
+            let records = try await repository.listProviderFiles(
+                providerID: nil,
+                limit: ProviderLifecyclePerformance.retainedRecordLimit
+            )
+            providerLifecycleState.updateIncrementally { snapshot in
+                snapshot.providerFiles = records
+                snapshot.providerFilePreviews = records.map(Self.providerFilePreview(from:))
+            }
+        } catch {
+            applyProviderLifecycleMutationError(error)
+            recordRecoverableIssue("provider_lifecycle.refresh_files", error: error, services: services)
+        }
+    }
+
+    func refreshProviderCacheRecords(services: PinesAppServices) async {
+        guard let repository = services.providerCacheRepository else { return }
+        do {
+            let records = try await repository.listProviderCaches(
+                providerID: nil,
+                kind: nil,
+                limit: ProviderLifecyclePerformance.retainedRecordLimit
+            )
+            providerLifecycleState.updateIncrementally { snapshot in
+                Self.applyProviderCaches(records, to: &snapshot)
+            }
+        } catch {
+            applyProviderLifecycleMutationError(error)
+            recordRecoverableIssue("provider_lifecycle.refresh_caches", error: error, services: services)
+        }
+    }
+
+    func refreshProviderArtifactRecords(services: PinesAppServices) async {
+        guard let repository = services.providerArtifactRepository else { return }
+        do {
+            let records = try await repository.listRecentProviderArtifacts(limit: 250, before: nil)
+            providerLifecycleState.updateIncrementally { snapshot in
+                snapshot.providerArtifacts = records
+                snapshot.providerArtifactPreviews = records.map(Self.providerArtifactPreview(from:))
+            }
+        } catch {
+            applyProviderLifecycleMutationError(error)
+            recordRecoverableIssue("provider_lifecycle.refresh_artifacts", error: error, services: services)
+        }
+    }
+
+    private func applyProviderLifecycleMutationError(_ error: Error) {
+        providerLifecycleState.updateIncrementally { snapshot in
+            snapshot.error = error.localizedDescription
+        }
+    }
+
+    private static func upserting<Record: Identifiable>(
+        _ newRecords: [Record],
+        into currentRecords: [Record],
+        orderedBefore: (Record, Record) -> Bool
+    ) -> [Record] where Record.ID: Equatable {
+        var updated = currentRecords
+        for record in newRecords {
+            if let index = updated.firstIndex(where: { $0.id == record.id }) {
+                updated[index] = record
+            } else {
+                updated.append(record)
+            }
+        }
+        updated.sort(by: orderedBefore)
+        return updated
+    }
+
+    private static func providerFileOrderedBefore(_ lhs: ProviderFileRecord, _ rhs: ProviderFileRecord) -> Bool {
+        lhs.createdAt == rhs.createdAt ? lhs.id > rhs.id : lhs.createdAt > rhs.createdAt
+    }
+
+    private static func providerTransferOrderedBefore(
+        _ lhs: ProviderTransferRecord,
+        _ rhs: ProviderTransferRecord
+    ) -> Bool {
+        lhs.updatedAt == rhs.updatedAt
+            ? lhs.id.uuidString > rhs.id.uuidString
+            : lhs.updatedAt > rhs.updatedAt
+    }
+
+    private static func providerArtifactOrderedBefore(_ lhs: ProviderArtifactRecord, _ rhs: ProviderArtifactRecord) -> Bool {
+        lhs.createdAt == rhs.createdAt ? lhs.id > rhs.id : lhs.createdAt > rhs.createdAt
+    }
+
+    private static func providerCacheOrderedBefore(_ lhs: ProviderCacheRecord, _ rhs: ProviderCacheRecord) -> Bool {
+        lhs.createdAt == rhs.createdAt ? lhs.id > rhs.id : lhs.createdAt > rhs.createdAt
+    }
+
+    private static func providerBatchOrderedBefore(_ lhs: ProviderBatchRecord, _ rhs: ProviderBatchRecord) -> Bool {
+        lhs.createdAt == rhs.createdAt ? lhs.id > rhs.id : lhs.createdAt > rhs.createdAt
+    }
+
+    private static func providerLiveSessionOrderedBefore(
+        _ lhs: ProviderLiveSessionRecord,
+        _ rhs: ProviderLiveSessionRecord
+    ) -> Bool {
+        lhs.createdAt == rhs.createdAt ? lhs.id > rhs.id : lhs.createdAt > rhs.createdAt
+    }
+
+    private static func providerStructuredOutputOrderedBefore(
+        _ lhs: ProviderStructuredOutputRecord,
+        _ rhs: ProviderStructuredOutputRecord
+    ) -> Bool {
+        lhs.createdAt == rhs.createdAt
+            ? lhs.id.uuidString > rhs.id.uuidString
+            : lhs.createdAt > rhs.createdAt
+    }
+
+    private static func providerModelCapabilityOrderedBefore(
+        _ lhs: ProviderModelCapabilityRecord,
+        _ rhs: ProviderModelCapabilityRecord
+    ) -> Bool {
+        lhs.fetchedAt == rhs.fetchedAt ? lhs.id > rhs.id : lhs.fetchedAt > rhs.fetchedAt
+    }
+
+    private static func providerResearchRunOrderedBefore(
+        _ lhs: ProviderResearchRunRecord,
+        _ rhs: ProviderResearchRunRecord
+    ) -> Bool {
+        lhs.updatedAt == rhs.updatedAt ? lhs.id > rhs.id : lhs.updatedAt > rhs.updatedAt
+    }
+
+    private static func applyProviderCaches(
+        _ records: [ProviderCacheRecord],
+        to snapshot: inout PinesProviderLifecycleSnapshot
+    ) {
+        let vectorStores = records.filter { $0.kind == "vector_store" }
+        snapshot.providerCaches = records
+        snapshot.providerCachePreviews = records.map(Self.providerCachePreview(from:))
+        snapshot.providerVectorStores = vectorStores
+        snapshot.providerVectorStorePreviews = vectorStores.map(Self.providerCachePreview(from:))
     }
 
     private func persistProviderLifecycleOutputs(
@@ -1481,6 +1967,7 @@ final class PinesAppModel: ObservableObject {
         guard hasProviderRecords || Self.usesStructuredOutput(request) else { return }
 
         do {
+            var structuredOutput: ProviderStructuredOutputRecord?
             if let repository = services.providerStructuredOutputRepository,
                let record = Self.providerStructuredOutputRecord(
                 providerID: providerID,
@@ -1492,21 +1979,26 @@ final class PinesAppModel: ObservableObject {
                 request: request
                ) {
                 try await repository.upsertProviderStructuredOutput(record)
+                structuredOutput = record
             }
 
+            var artifacts: [ProviderArtifactRecord] = []
             if let repository = services.providerArtifactRepository {
-                let records = Self.providerArtifactRecords(
+                artifacts = Self.providerArtifactRecords(
                     providerID: providerID,
                     providerKind: providerKind,
                     responseID: responseID,
                     providerMetadata: providerMetadata
                 )
-                for record in records {
+                for record in artifacts {
                     try await repository.upsertProviderArtifact(record)
                 }
             }
 
-            await refreshProviderLifecycleState(services: services)
+            if let structuredOutput {
+                upsertProviderStructuredOutputRecords([structuredOutput])
+            }
+            upsertProviderArtifactRecords(artifacts)
         } catch {
             recordRecoverableIssue("provider_lifecycle.persist_chat_outputs", error: error, services: services)
         }
@@ -1955,7 +2447,7 @@ final class PinesAppModel: ObservableObject {
             }
             let project = try await repository.createProject(name: name)
             setIfChanged(\.selectedProjectID, project.id)
-            await refreshAll(services: services)
+            await refreshProjects(services: services)
             scheduleCloudKitSync(services: services, reason: "project_created")
             emitHaptic(.primaryAction)
             return project.id
@@ -1970,7 +2462,7 @@ final class PinesAppModel: ObservableObject {
         do {
             guard let repository = services.projectRepository else { return }
             try await repository.setProjectVaultEnabled(enabled, projectID: projectID)
-            await refreshAll(services: services)
+            await refreshProjects(services: services)
             scheduleCloudKitSync(services: services, reason: "project_updated")
             emitHaptic(.primaryAction)
         } catch {
@@ -1988,7 +2480,7 @@ final class PinesAppModel: ObservableObject {
         do {
             guard let repository = services.projectRepository else { return }
             try await repository.updateProjectName(String(trimmed.prefix(80)), projectID: project.id)
-            await refreshAll(services: services)
+            await refreshProjects(services: services)
             scheduleCloudKitSync(services: services, reason: "project_renamed")
             emitHaptic(.primaryAction)
         } catch {
@@ -2004,7 +2496,8 @@ final class PinesAppModel: ObservableObject {
             if selectedProjectID == project.id {
                 setIfChanged(\.selectedProjectID, nil)
             }
-            await refreshAll(services: services)
+            await refreshProjects(services: services)
+            await refreshVaultDocuments(services: services)
             scheduleCloudKitSync(services: services, reason: "project_deleted")
             emitHaptic(.destructiveAction)
         } catch {
@@ -2246,7 +2739,7 @@ final class PinesAppModel: ObservableObject {
         }
 
         if importedCount > 0 {
-            await refreshAll(services: services)
+            await refreshVaultDocuments(services: services)
             clearChatError()
             emitHaptic(.runCompleted)
         }
@@ -4455,7 +4948,7 @@ final class PinesAppModel: ObservableObject {
             if let selectedProjectID, let repository = services.vaultRepository {
                 try await repository.moveDocument(document.id, toProject: selectedProjectID)
             }
-            await refreshAll(services: services)
+            await refreshVaultDocuments(services: services)
             scheduleCloudKitSync(services: services, reason: "vault_document_imported")
         } catch {
             serviceError = error.localizedDescription
@@ -4574,43 +5067,77 @@ final class PinesAppModel: ObservableObject {
     }
 
     func loadVaultItemDetails(id: UUID, services: PinesAppServices) async {
+        let loadID = UUID()
+        vaultDetailLoadID = loadID
+        if selectedVaultItemDetail?.id != id {
+            setIfChanged(\.selectedVaultItemDetail, nil)
+        }
+        let interval = services.runtimeMetrics.begin(.vaultDetailReady)
+        defer { services.runtimeMetrics.end(interval) }
         do {
-            guard let repository = services.vaultRepository else { return }
-            let chunks = try await repository.chunks(documentID: id)
-            let storedEmbeddings = try await repository.embeddings(documentID: id)
+            guard let repository = services.vaultRepository,
+                  let item = vaultItems.first(where: { $0.id == id })
+            else { return }
             let activeProfileID = vaultEmbeddingProfiles.first(where: \.isActive)?.id
-            let activeEmbeddingCount = activeProfileID.map { profileID in
-                storedEmbeddings.filter { $0.profileID == profileID }.count
-            } ?? 0
-            guard let index = vaultItems.firstIndex(where: { $0.id == id }) else { return }
-            let item = vaultItems[index]
-            var items = vaultItems
-            items[index] = PinesVaultItemPreview(
-                id: item.id,
-                projectID: item.projectID,
-                title: item.title,
-                kind: item.kind,
-                detail: item.detail,
-                chunks: chunks,
-                updatedLabel: item.updatedLabel,
-                sensitivity: item.sensitivity,
-                linkedThreads: vaultRetrievalEvents.filter { $0.resultCount > 0 }.count,
-                activeProfileEmbeddedChunks: activeEmbeddingCount,
-                activeProfileTotalChunks: chunks.count,
-                sourceContentType: item.sourceContentType,
-                sourceData: await vaultSourceData(for: item.id, services: services)
+            async let chunks = repository.chunks(
+                documentID: id,
+                limit: VaultDetailPerformance.chunkPageSize,
+                offset: 0
             )
-            setIfChanged(\.vaultItems, items)
+            async let activeEmbeddingCount = repository.embeddingCount(
+                documentID: id,
+                profileID: activeProfileID
+            )
+            async let chunkUTF8ByteCount = repository.chunkUTF8ByteCount(documentID: id)
+            async let sourceData = vaultSourceData(for: id, services: services)
+            let loadedChunks = try await chunks
+            let loadedEmbeddingCount = try await activeEmbeddingCount
+            let loadedChunkUTF8ByteCount = try await chunkUTF8ByteCount
+            let loadedSourceData = await sourceData
+            try Task.checkCancellation()
+            guard vaultDetailLoadID == loadID else { return }
+            setIfChanged(
+                \.selectedVaultItemDetail,
+                PinesVaultItemDetail(
+                    id: item.id,
+                    chunks: loadedChunks,
+                    totalChunkCount: item.activeProfileTotalChunks,
+                    chunkUTF8ByteCount: loadedChunkUTF8ByteCount,
+                    linkedThreads: vaultRetrievalEvents.filter { $0.resultCount > 0 }.count,
+                    activeProfileEmbeddedChunks: loadedEmbeddingCount,
+                    sourceContentType: item.sourceContentType,
+                    sourceRevision: item.sourceRevision,
+                    sourceData: loadedSourceData
+                )
+            )
+            vaultDetailLoadID = nil
+        } catch is CancellationError {
+            if vaultDetailLoadID == loadID {
+                vaultDetailLoadID = nil
+            }
         } catch {
+            guard vaultDetailLoadID == loadID else { return }
+            vaultDetailLoadID = nil
             setIfChanged(\.serviceError, error.localizedDescription)
         }
+    }
+
+    func clearVaultItemDetail(id: UUID? = nil) {
+        guard id == nil || selectedVaultItemDetail?.id == id else { return }
+        vaultDetailLoadID = nil
+        setIfChanged(\.selectedVaultItemDetail, nil)
+    }
+
+    func handleUIPerformancePressure() {
+        vaultDetailLoadID = nil
+        setIfChanged(\.selectedVaultItemDetail, nil)
     }
 
     func deleteVaultChunk(_ chunk: VaultChunk, documentID: UUID, services: PinesAppServices) async {
         do {
             guard let repository = services.vaultRepository else { return }
             try await repository.deleteChunk(id: chunk.id, documentID: documentID)
-            await refreshAll(services: services)
+            await refreshVaultDocuments(services: services)
             await loadVaultItemDetails(id: documentID, services: services)
             scheduleCloudKitSync(services: services, reason: "vault_chunk_deleted")
         } catch {
@@ -4622,7 +5149,9 @@ final class PinesAppModel: ObservableObject {
         do {
             guard let repository = services.vaultRepository else { return }
             try await repository.deleteDocument(id: id)
-            await refreshAll(services: services)
+            clearVaultItemDetail(id: id)
+            await refreshVaultEmbeddingState(services: services)
+            await refreshVaultDocuments(services: services)
             scheduleCloudKitSync(services: services, reason: "vault_document_deleted")
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)
@@ -4633,7 +5162,7 @@ final class PinesAppModel: ObservableObject {
         do {
             guard let repository = services.vaultRepository else { return }
             try await repository.moveDocument(id, toProject: projectID)
-            await refreshAll(services: services)
+            await refreshVaultDocuments(services: services)
             await loadVaultItemDetails(id: id, services: services)
             scheduleCloudKitSync(services: services, reason: "vault_document_moved")
             emitHaptic(.primaryAction)
@@ -4646,7 +5175,7 @@ final class PinesAppModel: ObservableObject {
     private func vaultSourceData(for id: UUID, services: PinesAppServices) async -> Data? {
         let store = services.encryptedBlobStore
         guard let repository = services.vaultRepository,
-              let document = try? await repository.listDocuments().first(where: { $0.id == id }),
+              let document = try? await repository.document(id: id),
               let localURL = document.localURL,
               let checksum = document.checksum
         else {
@@ -4661,7 +5190,21 @@ final class PinesAppModel: ObservableObject {
             keyID: SecureKeyStore.blobKeyID,
             relativePath: localURL.lastPathComponent
         )
-        return try? await store.read(metadata)
+        let isImage = document.sourceType == "image" || document.sourceType == "photo"
+        let plaintextLimit = isImage
+            ? VaultDetailPerformance.imagePreviewByteLimit
+            : VaultDetailPerformance.textPreviewByteLimit
+        guard let encryptedFile = try? await ProviderTransferFileService.shared.inspect(localURL),
+              encryptedFile.byteCount <= Int64(
+                plaintextLimit + VaultDetailPerformance.authenticatedEncryptionOverheadAllowance
+              )
+        else { return nil }
+        guard let data = try? await store.read(metadata) else { return nil }
+        if isImage {
+            guard data.count <= VaultDetailPerformance.imagePreviewByteLimit else { return nil }
+            return data
+        }
+        return Data(data.prefix(VaultDetailPerformance.textPreviewByteLimit))
     }
 
     func reindexVault(services: PinesAppServices) async {
@@ -4757,7 +5300,8 @@ final class PinesAppModel: ObservableObject {
                     try await repository.upsertEmbeddingJob(job)
                 }
             }
-            await refreshAll(services: services)
+            await refreshVaultEmbeddingState(services: services)
+            await refreshVaultDocuments(services: services)
             emitHaptic(.runCompleted)
         } catch is CancellationError {
             if let repository = services.vaultRepository {
@@ -4994,7 +5538,10 @@ final class PinesAppModel: ObservableObject {
                 setIfChanged(\.defaultModelID, nil)
                 await saveSettings(services: services)
             }
-            await refreshAll(services: services)
+            await refreshCloudProviders(services: services)
+            await refreshProviderLifecycleState(services: services)
+            await refreshCloudModelCatalog(services: services)
+            await refreshVaultEmbeddingState(services: services)
         } catch {
             serviceError = error.localizedDescription
         }
@@ -5359,10 +5906,10 @@ final class PinesAppModel: ObservableObject {
                 maxSamplingRequestsPerSession: maxSamplingRequestsPerSession
             )
             try await service.saveServer(server, bearerToken: bearerToken.isEmpty ? nil : bearerToken)
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         } catch {
             serviceError = error.localizedDescription
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         }
     }
 
@@ -5404,10 +5951,10 @@ final class PinesAppModel: ObservableObject {
                 return
             }
             try await service.refresh(server)
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         } catch {
             serviceError = error.localizedDescription
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         }
     }
 
@@ -5418,10 +5965,10 @@ final class PinesAppModel: ObservableObject {
                 return
             }
             try await service.deleteServer(server)
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         } catch {
             serviceError = error.localizedDescription
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         }
     }
 
@@ -5432,17 +5979,17 @@ final class PinesAppModel: ObservableObject {
                 return
             }
             try await service.setToolEnabled(serverID: tool.serverID, namespacedName: tool.namespacedName, enabled: enabled)
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         } catch {
             serviceError = error.localizedDescription
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         }
     }
 
     func refreshMCPResources(_ server: MCPServerConfiguration, services: PinesAppServices) async {
         do {
             try await services.mcpServerService?.refreshResources(server)
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         } catch {
             serviceError = error.localizedDescription
         }
@@ -5451,7 +5998,7 @@ final class PinesAppModel: ObservableObject {
     func refreshMCPPrompts(_ server: MCPServerConfiguration, services: PinesAppServices) async {
         do {
             try await services.mcpServerService?.refreshPrompts(server)
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         } catch {
             serviceError = error.localizedDescription
         }
@@ -5460,7 +6007,7 @@ final class PinesAppModel: ObservableObject {
     func setMCPResourceSelected(_ resource: MCPResourceRecord, selected: Bool, services: PinesAppServices) async {
         do {
             try await services.mcpServerService?.setResourceSelected(resource, selected: selected)
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         } catch {
             serviceError = error.localizedDescription
         }
@@ -5469,7 +6016,7 @@ final class PinesAppModel: ObservableObject {
     func setMCPResourceSubscribed(_ resource: MCPResourceRecord, subscribed: Bool, services: PinesAppServices) async {
         do {
             try await services.mcpServerService?.setResourceSubscribed(resource, subscribed: subscribed)
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         } catch {
             serviceError = error.localizedDescription
         }
@@ -5536,7 +6083,7 @@ final class PinesAppModel: ObservableObject {
     func disconnectMCPOAuth(_ server: MCPServerConfiguration, services: PinesAppServices) async {
         do {
             try await MCPOAuthService(secretStore: services.secretStore, auditRepository: services.auditRepository).disconnect(server: server)
-            await refreshAll(services: services)
+            await refreshMCPState(services: services)
         } catch {
             serviceError = error.localizedDescription
         }

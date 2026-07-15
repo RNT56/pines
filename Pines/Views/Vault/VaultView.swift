@@ -628,7 +628,7 @@ private struct VaultDetailView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: theme.spacing.small)], alignment: .leading, spacing: theme.spacing.small) {
                     PinesMetricPill(title: item.kind.title, systemImage: item.kind.systemImage)
                     PinesMetricPill(title: item.sensitivity.title, systemImage: item.sensitivity.systemImage, tint: item.sensitivity == .locked ? theme.colors.warning : theme.colors.accent)
-                    PinesMetricPill(title: "\(item.linkedThreads) links", systemImage: "link")
+                    PinesMetricPill(title: "\(loadedDetail?.linkedThreads ?? item.linkedThreads) links", systemImage: "link")
                 }
 
                 HStack {
@@ -655,7 +655,10 @@ private struct VaultDetailView: View {
                     .pinesButtonStyle(.destructive)
                 }
 
-                VaultSourcePreview(item: item)
+                VaultSourcePreview(
+                    item: item,
+                    sourceData: loadedDetail?.sourceData
+                )
 
                 VStack(alignment: .leading, spacing: theme.spacing.medium) {
                     Label("Private context", systemImage: "lock.shield")
@@ -666,7 +669,7 @@ private struct VaultDetailView: View {
                         .foregroundStyle(theme.colors.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    ForEach(item.chunks.prefix(4)) { chunk in
+                    ForEach(detailChunks.prefix(4)) { chunk in
                         VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
                             HStack(alignment: .firstTextBaseline) {
                                 Text("Chunk \(chunk.ordinal + 1) · \(chunk.characterCount) characters")
@@ -687,6 +690,12 @@ private struct VaultDetailView: View {
                                 .lineLimit(5)
                         }
                         .padding(.vertical, theme.spacing.xsmall)
+                    }
+
+                    if loadedDetail?.hasMoreChunks == true {
+                        Text("Showing the first \(detailChunks.count) of \(item.activeProfileTotalChunks) chunks.")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.tertiaryText)
                     }
                 }
                 .pinesSurface(.elevated)
@@ -711,7 +720,7 @@ private struct VaultDetailView: View {
                                     systemImage: providerStorageExportInFlightID == nil ? "square.and.arrow.up" : "hourglass"
                                 )
                             }
-                            .disabled(providerStorageExportInFlightID != nil)
+                            .disabled(providerStorageExportInFlightID != nil || loadedDetail == nil)
                         }
 
                         Text("Exported Vault documents become cloud copies and can be deleted separately from local Vault files.")
@@ -758,6 +767,9 @@ private struct VaultDetailView: View {
         .task(id: item.id) {
             await appModel.loadVaultItemDetails(id: item.id, services: services)
         }
+        .onDisappear {
+            appModel.clearVaultItemDetail(id: item.id)
+        }
         .pinesExpressiveScrollHaptics()
         .pinesInlineNavigationTitle()
         .pinesAppBackground()
@@ -794,9 +806,18 @@ private struct VaultDetailView: View {
 
     private var indexSummary: String {
         if let active = vaultState.vaultEmbeddingProfiles.first(where: \.isActive) {
-            return "\(item.activeProfileEmbeddedChunks)/\(item.activeProfileTotalChunks) chunks are embedded with \(active.displayName). Text search covers all chunks."
+            return "\(loadedDetail?.activeProfileEmbeddedChunks ?? item.activeProfileEmbeddedChunks)/\(item.activeProfileTotalChunks) chunks are embedded with \(active.displayName). Text search covers all chunks."
         }
-        return "\(item.chunks.count) chunks are available for text search. Add an embedding provider for semantic retrieval."
+        return "\(item.activeProfileTotalChunks) chunks are available for text search. Add an embedding provider for semantic retrieval."
+    }
+
+    private var loadedDetail: PinesVaultItemDetail? {
+        guard vaultState.selectedItemDetail?.id == item.id else { return nil }
+        return vaultState.selectedItemDetail
+    }
+
+    private var detailChunks: [VaultChunk] {
+        loadedDetail?.chunks ?? []
     }
 
     private var projectLabel: String {
@@ -815,9 +836,8 @@ private struct VaultDetailView: View {
     }
 
     private var providerStorageByteCount: Int64 {
-        Int64(item.chunks.reduce(0) { partial, chunk in
-            partial + chunk.text.utf8.count
-        })
+        guard let detail = loadedDetail else { return 0 }
+        return detail.chunkUTF8ByteCount + Int64(max(0, detail.totalChunkCount - 1) * 2)
     }
 
     @MainActor
@@ -873,14 +893,18 @@ private struct VaultDetailView: View {
 
 private struct VaultSourcePreview: View {
     @Environment(\.pinesTheme) private var theme
+    @Environment(\.displayScale) private var displayScale
+    @State private var decodedImage: UIImage?
+    @State private var imageDecodeFailed = false
     let item: PinesVaultItemPreview
+    let sourceData: Data?
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.spacing.medium) {
             Label("File preview", systemImage: item.kind.systemImage)
                 .font(theme.typography.section)
 
-            if let data = item.sourceData {
+            if let data = sourceData {
                 preview(for: data)
             } else {
                 PinesEmptyState(title: "Preview unavailable", detail: "Extracted content appears below.", systemImage: "eye.slash")
@@ -894,15 +918,25 @@ private struct VaultSourcePreview: View {
         switch item.kind {
         case .image:
             #if canImport(UIKit)
-            if let image = UIImage(data: data) {
-                Image(uiImage: image)
+            if let decodedImage {
+                Image(uiImage: decodedImage)
                     .resizable()
                     .scaledToFit()
                     .frame(maxHeight: 320)
                     .frame(maxWidth: .infinity)
                     .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+            } else if imageDecodeFailed {
+                PinesEmptyState(
+                    title: "Preview unavailable",
+                    detail: "The stored image could not be decoded.",
+                    systemImage: "photo.badge.exclamationmark"
+                )
             } else {
-                fallbackTextPreview(data)
+                ProgressView("Preparing preview")
+                    .frame(maxWidth: .infinity, minHeight: 160)
+                    .task(id: item.sourceRevision) {
+                        await decodeImage(data)
+                    }
             }
             #else
             fallbackTextPreview(data)
@@ -924,6 +958,29 @@ private struct VaultSourcePreview: View {
         }
         .frame(maxHeight: 320)
         .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+    }
+
+    @MainActor
+    private func decodeImage(_ data: Data) async {
+        imageDecodeFailed = false
+        do {
+            let decoded = try await PinesImagePipeline.shared.image(
+                for: .data(
+                    data,
+                    identity: "vault:\(item.id.uuidString)",
+                    revision: item.sourceRevision
+                ),
+                targetSize: CGSize(width: 720, height: 320),
+                scale: displayScale
+            )
+            try Task.checkCancellation()
+            decodedImage = UIImage(cgImage: decoded.cgImage, scale: decoded.scale, orientation: .up)
+        } catch is CancellationError {
+            return
+        } catch {
+            decodedImage = nil
+            imageDecodeFailed = true
+        }
     }
 }
 

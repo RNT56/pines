@@ -381,14 +381,29 @@ struct PinesVaultItemPreview: Identifiable, Hashable {
     let title: String
     let kind: PinesVaultKind
     let detail: String
-    let chunks: [VaultChunk]
     let updatedLabel: String
     let sensitivity: PinesVaultSensitivity
     let linkedThreads: Int
     let activeProfileEmbeddedChunks: Int
     let activeProfileTotalChunks: Int
     let sourceContentType: String?
+    let sourceRevision: String
+}
+
+struct PinesVaultItemDetail: Identifiable, Hashable {
+    let id: UUID
+    let chunks: [VaultChunk]
+    let totalChunkCount: Int
+    let chunkUTF8ByteCount: Int64
+    let linkedThreads: Int
+    let activeProfileEmbeddedChunks: Int
+    let sourceContentType: String?
+    let sourceRevision: String
     let sourceData: Data?
+
+    var hasMoreChunks: Bool {
+        chunks.count < totalChunkCount
+    }
 }
 
 struct PinesProviderFilePreview: Identifiable, Hashable {

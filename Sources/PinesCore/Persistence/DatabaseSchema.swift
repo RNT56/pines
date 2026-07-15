@@ -1455,6 +1455,32 @@ public enum PinesDatabaseSchema {
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_cloudkit_conflicts_unresolved_entity ON cloudkit_conflicts(entity, entity_id) WHERE resolution = 'unresolved';",
         "CREATE INDEX IF NOT EXISTS idx_cloudkit_conflicts_resolution ON cloudkit_conflicts(resolution, detected_at DESC);",
       ]),
+    DatabaseMigration(
+      version: 29, name: "provider-artifact-pagination",
+      sql: [
+        "CREATE INDEX IF NOT EXISTS idx_provider_artifacts_created ON provider_artifacts(created_at DESC, id DESC);",
+      ]),
+    DatabaseMigration(
+      version: 30, name: "vault-detail-queries",
+      sql: [
+        "CREATE INDEX IF NOT EXISTS idx_vault_chunks_document_ordinal ON vault_chunks(document_id, ordinal ASC);",
+        "CREATE INDEX IF NOT EXISTS idx_vault_embeddings_document_profile ON vault_embeddings(document_id, profile_id);",
+      ]),
+    DatabaseMigration(
+      version: 31, name: "provider-lifecycle-bounded-lists",
+      sql: [
+        "CREATE INDEX IF NOT EXISTS idx_provider_transfers_recent ON provider_transfers(updated_at DESC, id DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_files_recent ON provider_files(created_at DESC, id DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_caches_recent ON provider_caches(created_at DESC, id DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_caches_kind_recent ON provider_caches(kind, created_at DESC, id DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_batches_recent ON provider_batches(created_at DESC, id DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_live_sessions_recent ON provider_live_sessions(created_at DESC, id DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_structured_outputs_recent ON provider_structured_outputs(created_at DESC, id DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_structured_outputs_response_recent ON provider_structured_outputs(response_id, created_at ASC, id ASC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_model_capabilities_recent ON provider_model_capabilities(fetched_at DESC, provider_id DESC, model_id DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_recent ON provider_research_runs(updated_at DESC, id DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_provider_research_runs_provider_recent ON provider_research_runs(provider_id, updated_at DESC, id DESC);",
+      ]),
     ]
 }
 

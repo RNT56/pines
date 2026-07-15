@@ -266,8 +266,12 @@ final class PinesHaptics: ObservableObject {
         #else
         guard mode != .off else { return }
         guard event.allowsLowPowerPlayback || !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        let performancePolicy = PinesPerformancePolicy.current()
+        let playbackMode: PinesHapticMode = mode == .expressive && !performancePolicy.allowsExpressiveHaptics
+            ? .standard
+            : mode
 
-        switch mode {
+        switch playbackMode {
         case .off:
             break
         case .standard:

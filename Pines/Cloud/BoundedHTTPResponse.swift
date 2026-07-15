@@ -24,9 +24,57 @@ enum BoundedHTTPResponse {
         let redirectPolicy = BoundedRedirectPolicy(
             originURL: originURL,
             scope: redirectScope,
-            uploadProgress: uploadProgress
+            uploadProgress: uploadProgress,
+            bodyFileURL: nil
         )
         let (bytes, response) = try await session.bytes(for: request, delegate: redirectPolicy)
+        guard let http = response as? HTTPURLResponse else {
+            throw CloudProviderError.invalidResponse
+        }
+        guard let finalURL = http.url,
+              BoundedRedirectPolicy.isAllowed(finalURL, from: originURL, scope: redirectScope)
+        else {
+            throw CloudProviderError.invalidResponse
+        }
+        try validate(expectedContentLength: http.expectedContentLength, maxBytes: maxBytes)
+
+        var data = Data()
+        if http.expectedContentLength > 0 {
+            data.reserveCapacity(min(maxBytes, Int(http.expectedContentLength)))
+        }
+        for try await byte in bytes {
+            try append(byte, to: &data, maxBytes: maxBytes)
+        }
+        return (data, http)
+    }
+
+    /// Streams a file-backed request body while retaining the same bounded
+    /// response and redirect policy as ordinary provider requests.
+    static func uploadFile(
+        for request: URLRequest,
+        bodyFileURL: URL,
+        bodyByteCount: Int64,
+        session: URLSession,
+        maxBytes: Int,
+        redirectScope: RedirectScope = .sameOrigin,
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> (Data, HTTPURLResponse) {
+        guard let originURL = request.url,
+              bodyByteCount >= 0,
+              let stream = InputStream(url: bodyFileURL)
+        else { throw CloudProviderError.invalidResponse }
+
+        var streamedRequest = request
+        streamedRequest.httpBody = nil
+        streamedRequest.httpBodyStream = stream
+        streamedRequest.setValue(String(bodyByteCount), forHTTPHeaderField: "Content-Length")
+        let redirectPolicy = BoundedRedirectPolicy(
+            originURL: originURL,
+            scope: redirectScope,
+            uploadProgress: uploadProgress,
+            bodyFileURL: bodyFileURL
+        )
+        let (bytes, response) = try await session.bytes(for: streamedRequest, delegate: redirectPolicy)
         guard let http = response as? HTTPURLResponse else {
             throw CloudProviderError.invalidResponse
         }
@@ -65,15 +113,26 @@ private final class BoundedRedirectPolicy: NSObject, URLSessionTaskDelegate, @un
     private let originURL: URL
     private let scope: BoundedHTTPResponse.RedirectScope
     private let uploadProgress: ProviderUploadProgress?
+    private let bodyFileURL: URL?
 
     init(
         originURL: URL,
         scope: BoundedHTTPResponse.RedirectScope,
-        uploadProgress: ProviderUploadProgress?
+        uploadProgress: ProviderUploadProgress?,
+        bodyFileURL: URL?
     ) {
         self.originURL = originURL
         self.scope = scope
         self.uploadProgress = uploadProgress
+        self.bodyFileURL = bodyFileURL
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        needNewBodyStream completionHandler: @escaping @Sendable (InputStream?) -> Void
+    ) {
+        completionHandler(bodyFileURL.flatMap(InputStream.init(url:)))
     }
 
     func urlSession(

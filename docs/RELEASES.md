@@ -25,6 +25,8 @@ The CodeQL workflow runs separately from the main CI gate on pull requests, push
 
 The release workflow uses the same Xcode validation phases as CI, verifies the iOS and watchOS scheme destinations before installing missing platforms, runs SwiftPM and Xcode with automatic package resolution disabled, validates the site build, builds an unsigned iOS archive from the committed deployment graph, and packages source artifacts. Keep both package lockfiles, `scripts/ci/select-xcode.sh`, `scripts/ci/run-xcode-validation.sh`, `scripts/ci/ensure-xcode-platforms.sh`, `ci.yml`, `codeql.yml`, and `release.yml` aligned when adding required checks.
 
+CI and release validation also run `scripts/ci/check-release-build-hygiene.sh`. It verifies that the optimized shipping graph and built Mach-O do not link `TurboQuantBench` or `IntegrationTestHelpers`. Performance capture uses the Release-configured `PinesPerformance` scheme with coverage disabled; benchmark helpers remain standalone SwiftPM diagnostics. See [`docs/performance/RUNBOOK.md`](performance/RUNBOOK.md) for the device-trace gate.
+
 Release artifacts include a CycloneDX SBOM generated from SwiftPM and npm lockfiles. The release workflow also creates GitHub artifact attestations for the source bundle, checksum, and SBOM.
 
 ## Release Tags
@@ -79,6 +81,7 @@ Before pushing the tag, verify:
 - `swift run --disable-automatic-resolution PinesCoreTestRunner`
 - `npm --prefix site ci && npm --prefix site audit --audit-level=low && npm --prefix site run build`
 - `bash scripts/ci/run-xcode-validation.sh all`
+- `bash scripts/ci/check-release-build-hygiene.sh`
 - `bash scripts/ci/package-release.sh v0.1.0`
 
 For TurboQuant-related release candidates, also verify that `docs/turboquant-implementation/compatibility-pair.json` is synchronized with `project.yml`, `Pines.xcodeproj`, the Xcode `Package.resolved`, and `MLXRuntimeBridge.turboQuantCompatibilityPairID`. A green compatibility pair requires native backend performance, real-model-inference performance parity or explicitly scoped capacity-mode status, current real-device app-host evidence, benchmark matrix coverage, lower-V/Sparse-V fallback evidence, and quality/memory/fallback gates; real-device profile evidence is still required before product compatibility labels can become `Verified` or `Certified`.

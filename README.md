@@ -43,7 +43,7 @@ OpenRouter is treated as a routing platform rather than a generic text endpoint:
 
 Provider-hosted files, vector stores, caches, batches, research runs, live sessions, generated artifacts, citations, and hosted tool calls are shown as provider resources. They are not confused with your local Vault, and they carry the same local-first rule: use cloud when you choose it, show what left the device, and keep deletion/import paths explicit.
 
-The Artifacts tab uses an Artifact Desk: one command strip, a compact in-progress queue, and a unified output canvas for images, video, speech, and research reports. Types are filter scopes rather than nested tabs. Phone uses dense rows and sheets; iPad uses a responsive grid with a contextual detail inspector. New work begins from an outcome-first command deck, while provider setup, advanced options, and provenance stay available without becoming permanent navigation.
+The Artifacts tab uses a zero-navigation gallery for images, video, speech, and research reports. Native search and filtering keep the canvas uncluttered, New opens a direct outcome menu, and active work appears only as one slim transient line. Phone uses a balanced two-column gallery; iPad uses a denser adaptive grid without adding another sidebar. Every item opens in a Quick Look sheet. Image creation uses a canvas-first studio, while Research uses a conversation-first workspace; both keep their primary input in a floating chat-style composer and move setup or provenance into focused supporting surfaces.
 
 ## Local Mobile AI, Treated Like It Matters
 

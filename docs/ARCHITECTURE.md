@@ -11,6 +11,8 @@
 - `Sources/PinesCoreTestRunner/`: framework-free verification runner for environments where Command Line Tools do not expose XCTest or Swift Testing.
 - `project.yml`: XcodeGen source of truth for the Xcode project.
 
+Performance-sensitive boundaries and measurement requirements are specified in [`docs/performance/`](performance/README.md). Lists retain summaries, detail state is evictable, image and render work is off-main and cost-bounded, operation polling uses stable identities, provider lifecycle publication is atomic, and acceptance is based on a Release/Profile device trace rather than Debug timings.
+
 ## Composition Root
 
 `PinesAppServices` owns service construction for the app layer. The default SwiftUI environment creates a no-store instance for previews and early view construction; `PinesRootView` creates live services only after the boot mark has reached the first frame.
@@ -76,7 +78,7 @@ Vault source files are copied only long enough for extraction, then encrypted th
 
 Provider-hosted files and artifacts are tracked separately from local Vault documents. OpenAI Files/vector stores, Anthropic Files, Gemini Files/context caches, provider batches, generated media, generated files, realtime/live sessions, and Deep Research runs all map into generic provider lifecycle records before the UI renders them. Provider raw IDs remain strings at the persistence boundary; typed wrappers are used at API edges so provider-specific IDs do not leak into shared storage. Importing a provider artifact into Vault is an explicit workflow and does not imply provider-side deletion.
 
-The user-facing Artifacts root projects those generic records into the Artifact Desk model. One stable canvas shows completed output and a compact active-work queue; type is a filter scope rather than page navigation. Creation and research launch from an outcome command deck. Artifact detail is contextual—a trailing inspector at regular width and a sheet at compact width—so the canvas does not grow another sidebar or nested route hierarchy. Provider-file and vector-store administration stays with Vault, and provider configuration stays in Settings.
+The user-facing Artifacts root projects those generic records into a zero-navigation gallery. One stable canvas shows completed output, while active work collapses into one slim transient summary line; type, provider, and sort are filters rather than page navigation. New chooses an outcome directly and opens a focused creation or research sheet. Image creation is canvas-first, with a safe-area floating prompt dock and visual session grid. Research is conversation-first, with a safe-area floating composer, optional brief clarification, flat run progress, expandable evidence, and saved-report preview. Artifact detail always uses a Quick Look sheet—including at regular width—so iPad never gains an Artifact inspector, second sidebar, or nested route hierarchy. Provider-file and vector-store administration stays with Vault, and provider configuration stays in Settings.
 
 The GRDB implementation is split by repository concern: encrypted local-store opening, plaintext-to-SQLCipher migration, and base repository operations remain in `GRDBPinesStore.swift`, while CloudKit snapshot/apply/delete merge support lives in `GRDBPinesStore+CloudKit.swift`.
 

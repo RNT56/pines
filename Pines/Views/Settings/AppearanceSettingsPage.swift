@@ -50,6 +50,7 @@ struct AppearanceSettingsPage: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("pines.settings.theme.\(template.rawValue)")
                             .accessibilityAddTraits(selectedThemeTemplate == template ? .isSelected : [])
                         }
                     }

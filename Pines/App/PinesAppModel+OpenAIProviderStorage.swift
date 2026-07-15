@@ -40,7 +40,7 @@ extension PinesAppModel {
         do {
             let coordinator = try await openAIProviderStorageCoordinator(providerID: providerID, services: services)
             let result = try await coordinator.refreshProviderStorage(purpose: purpose, limit: limit)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderStorageRecords(files: result.files, caches: result.vectorStores)
             providerLifecycleError = nil
             return result
         } catch {
@@ -65,18 +65,17 @@ extension PinesAppModel {
         do {
             try validateOpenAIProviderStorageConsent(consent)
             let coordinator = try await openAIProviderStorageCoordinator(providerID: providerID, services: services)
-            let hasSecurityScope = fileURL.startAccessingSecurityScopedResource()
-            defer {
-                if hasSecurityScope {
-                    fileURL.stopAccessingSecurityScopedResource()
-                }
+            let source = try await ProviderTransferFileService.shared.inspect(fileURL)
+            guard source.byteCount > 0 else {
+                throw InferenceError.invalidRequest("OpenAI file upload \(fileURL.lastPathComponent) is empty.")
             }
-
-            let data = try Data(contentsOf: fileURL)
             let file = try await coordinator.uploadFile(
                 fileName: fileURL.lastPathComponent,
-                contentType: contentType ?? Self.providerStorageContentType(for: fileURL),
-                data: data,
+                contentType: contentType
+                    ?? source.contentType
+                    ?? Self.providerStorageContentType(for: fileURL),
+                fileURL: fileURL,
+                byteCount: source.byteCount,
                 purpose: purpose,
                 localURL: fileURL,
                 uploadProgress: uploadProgress
@@ -88,7 +87,10 @@ extension PinesAppModel {
                 attached = nil
             }
             try await auditOpenAIProviderStorageConsent(consent, providerID: coordinator.providerID, services: services)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderFileRecords([file])
+            if let attached {
+                upsertProviderCacheRecords([attached])
+            }
             providerLifecycleError = nil
             return PinesOpenAIProviderUploadResult(file: file, attachedVectorStore: attached)
         } catch {
@@ -106,35 +108,29 @@ extension PinesAppModel {
         consent: PinesOpenAIProviderStorageConsent,
         attachToVectorStoreID: String? = nil,
         vectorStoreAttributes: JSONValue? = nil,
+        uploadProgress: ProviderUploadProgress? = nil,
         services: PinesAppServices
     ) async throws -> PinesOpenAIProviderUploadResult {
         do {
             try validateOpenAIProviderStorageConsent(consent)
-            guard let vaultRepository = services.vaultRepository else {
-                throw InferenceError.invalidRequest("Vault storage is unavailable.")
-            }
             let coordinator = try await openAIProviderStorageCoordinator(providerID: providerID, services: services)
-            let documents = try await vaultRepository.listDocuments()
-            guard let document = documents.first(where: { $0.id == documentID }) else {
-                throw InferenceError.invalidRequest("Vault document \(documentID.uuidString) was not found.")
+            let staged = try await stageVaultDocumentForProviderUpload(documentID: documentID, services: services)
+            let file: ProviderFileRecord
+            do {
+                file = try await coordinator.uploadFile(
+                    fileName: staged.file.url.lastPathComponent,
+                    contentType: staged.file.contentType ?? "text/plain; charset=utf-8",
+                    fileURL: staged.file.url,
+                    byteCount: staged.file.byteCount,
+                    purpose: purpose,
+                    localURL: nil,
+                    uploadProgress: uploadProgress
+                )
+                try? await ProviderTransferFileService.shared.removeStagedTransfer(containing: staged.file.url)
+            } catch {
+                try? await ProviderTransferFileService.shared.removeStagedTransfer(containing: staged.file.url)
+                throw error
             }
-            let chunks = try await vaultRepository.chunks(documentID: documentID)
-            let text = chunks
-                .sorted { $0.ordinal < $1.ordinal }
-                .map(\.text)
-                .joined(separator: "\n\n")
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw InferenceError.invalidRequest("Vault document \(document.title) has no text to upload.")
-            }
-
-            let data = Data(text.utf8)
-            let file = try await coordinator.uploadFile(
-                fileName: Self.providerStorageSafeFileName(document.title, fallbackExtension: "txt"),
-                contentType: "text/plain; charset=utf-8",
-                data: data,
-                purpose: purpose,
-                localURL: nil
-            )
             let attached: ProviderCacheRecord?
             if let attachToVectorStoreID {
                 attached = try await coordinator.attachFile(file.id, toVectorStore: attachToVectorStoreID, attributes: vectorStoreAttributes)
@@ -142,7 +138,10 @@ extension PinesAppModel {
                 attached = nil
             }
             try await auditOpenAIProviderStorageConsent(consent, providerID: coordinator.providerID, services: services)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderFileRecords([file])
+            if let attached {
+                upsertProviderCacheRecords([attached])
+            }
             providerLifecycleError = nil
             return PinesOpenAIProviderUploadResult(file: file, attachedVectorStore: attached)
         } catch {
@@ -171,7 +170,7 @@ extension PinesAppModel {
                 expiresAfter: expiresAfter,
                 metadata: metadata
             )
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderCacheRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -189,7 +188,7 @@ extension PinesAppModel {
         do {
             let coordinator = try await openAIProviderStorageCoordinator(providerID: providerID, services: services)
             try await coordinator.deleteFile(id: fileID)
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderFileRecords(services: services)
             providerLifecycleError = nil
         } catch {
             providerLifecycleError = error.localizedDescription
@@ -208,7 +207,7 @@ extension PinesAppModel {
         do {
             let coordinator = try await openAIProviderStorageCoordinator(providerID: providerID, services: services)
             let record = try await coordinator.updateVectorStore(id: vectorStoreID, mutation: mutation)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderCacheRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -226,7 +225,7 @@ extension PinesAppModel {
         do {
             let coordinator = try await openAIProviderStorageCoordinator(providerID: providerID, services: services)
             try await coordinator.deleteVectorStore(id: vectorStoreID)
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderCacheRecords(services: services)
             providerLifecycleError = nil
         } catch {
             providerLifecycleError = error.localizedDescription
@@ -246,7 +245,7 @@ extension PinesAppModel {
         do {
             let coordinator = try await openAIProviderStorageCoordinator(providerID: providerID, services: services)
             let record = try await coordinator.attachFile(fileID, toVectorStore: vectorStoreID, attributes: attributes)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderCacheRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -266,7 +265,7 @@ extension PinesAppModel {
         do {
             let coordinator = try await openAIProviderStorageCoordinator(providerID: providerID, services: services)
             let records = try await coordinator.listVectorStoreFiles(vectorStoreID: vectorStoreID, limit: limit)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderFileRecords(records)
             providerLifecycleError = nil
             return records
         } catch {
@@ -286,7 +285,7 @@ extension PinesAppModel {
         do {
             let coordinator = try await openAIProviderStorageCoordinator(providerID: providerID, services: services)
             let record = try await coordinator.detachFile(fileID, fromVectorStore: vectorStoreID)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderCacheRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -313,7 +312,8 @@ extension PinesAppModel {
                 attributes: attributes,
                 polling: polling
             )
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderBatchRecords([record])
+            await refreshProviderCacheRecords(services: services)
             providerLifecycleError = nil
             return record
         } catch {

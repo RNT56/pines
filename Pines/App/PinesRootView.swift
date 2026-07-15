@@ -34,6 +34,9 @@ struct PinesRootView: View {
     @State private var isPrivacyLocked = false
     @State private var appUnlockError: String?
     @State private var isUITestBootstrapReady = false
+    @State private var launchToInteractiveInterval: PinesPerformanceInterval?
+    @State private var thermalState = ProcessInfo.processInfo.thermalState
+    @State private var lowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     init() {
         let chatState = PinesChatState()
@@ -70,6 +73,14 @@ struct PinesRootView: View {
 
     private var canShowPrivacyLock: Bool {
         !PinesUITestLaunchConfiguration.isEnabled
+    }
+
+    private var performancePolicy: PinesPerformancePolicy {
+        .resolve(
+            lowPowerModeEnabled: lowPowerModeEnabled,
+            thermalState: thermalState,
+            reduceMotion: reduceMotion
+        )
     }
 
     var body: some View {
@@ -132,8 +143,14 @@ struct PinesRootView: View {
             }
             #endif
         }
+        .environment(\.pinesPerformancePolicy, performancePolicy)
         .pinesHighRefreshRate()
-        .preferredColorScheme(settingsState.interfaceMode.colorScheme)
+        .pinesUITestAccessibilityTextIfRequested()
+        .preferredColorScheme(
+            PinesUITestLaunchConfiguration.usesDarkAppearance
+                ? .dark
+                : settingsState.interfaceMode.colorScheme
+        )
         .task {
             guard !didStartBootstrap, !isBootstrapping else { return }
             didStartBootstrap = true
@@ -141,6 +158,7 @@ struct PinesRootView: View {
 
             let totalStartedAt = Date()
             PinesRuntimeMetrics.shared.start()
+            launchToInteractiveInterval = PinesRuntimeMetrics.shared.begin(.launchToInteractive)
             PinesRuntimeMetrics.shared.recordStartupPhase("root_task_visible", elapsedSeconds: Date().timeIntervalSince(rootCreatedAt))
             await Task.yield()
             PinesRuntimeMetrics.shared.recordStartupPhase("boot_first_frame_yield", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
@@ -165,6 +183,10 @@ struct PinesRootView: View {
             #endif
 
             isMainUIReady = true
+            if let launchToInteractiveInterval {
+                PinesRuntimeMetrics.shared.end(launchToInteractiveInterval)
+                self.launchToInteractiveInterval = nil
+            }
             withAnimation(reduceMotion ? nil : theme.motion.emphasized) {
                 showsBootMark = false
             }
@@ -222,19 +244,31 @@ struct PinesRootView: View {
             Task { await authenticateAppUnlock() }
         }
         .onPinesMemoryWarning {
+            appModel.handleUIPerformancePressure()
             if let services {
                 Task {
+                    await PinesImagePipeline.shared.purge()
+                    await PinesChatRenderCaches.purge()
                     await services.handleMemoryPressure()
                 }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
-            guard ProcessInfo.processInfo.thermalState == .critical else { return }
+            let newThermalState = ProcessInfo.processInfo.thermalState
+            thermalState = newThermalState
+            guard newThermalState == .serious || newThermalState == .critical else { return }
+            appModel.handleUIPerformancePressure()
             if let services {
                 Task {
-                    await services.handleThermalPressure()
+                    await purgeUIPerformanceCaches()
+                    if ProcessInfo.processInfo.thermalState == .critical {
+                        await services.handleThermalPressure()
+                    }
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+            lowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
         .onReceive(NotificationCenter.default.publisher(for: .pinesRecoveredModelDownloadDidFinish)) { _ in
             guard let services else { return }
@@ -407,8 +441,11 @@ struct PinesRootView: View {
             }
         case .inactive, .background:
             isPrivacyCoverVisible = canShowPrivacyLock
+            appModel.handleUIPerformancePressure()
             if let services {
                 Task {
+                    await PinesImagePipeline.shared.purge()
+                    await PinesChatRenderCaches.purge()
                     await appModel.stopLocalRuntimeForBackground(services: services)
                 }
             }
@@ -421,6 +458,11 @@ struct PinesRootView: View {
         @unknown default:
             isPrivacyCoverVisible = canShowPrivacyLock
         }
+    }
+
+    private func purgeUIPerformanceCaches() async {
+        await PinesImagePipeline.shared.purge()
+        await PinesChatRenderCaches.purge()
     }
 
     @MainActor
@@ -497,6 +539,22 @@ struct PinesRootView: View {
         }
     }
 }
+
+private extension View {
+    @ViewBuilder
+    func pinesUITestAccessibilityTextIfRequested() -> some View {
+        #if DEBUG
+        if PinesUITestLaunchConfiguration.usesAccessibilityTextSize {
+            dynamicTypeSize(.accessibility5)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
 struct PinesOpenModelsPageAction: Sendable {
     var action: @MainActor @Sendable () -> Void
 

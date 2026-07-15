@@ -9,7 +9,7 @@ enum ArtifactsRoute: Hashable {
     case providerSetup
 }
 
-enum ArtifactContentKind: String, CaseIterable, Identifiable, Hashable {
+enum ArtifactContentKind: String, CaseIterable, Identifiable, Hashable, Sendable {
     case report
     case image
     case video
@@ -39,7 +39,7 @@ enum ArtifactContentKind: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-enum ArtifactAvailability: Hashable {
+enum ArtifactAvailability: Hashable, Sendable {
     case embedded
     case local
     case remote
@@ -67,7 +67,7 @@ enum ArtifactAvailability: Hashable {
     }
 }
 
-enum ArtifactOperationState: Hashable {
+enum ArtifactOperationState: Hashable, Sendable {
     case ready
     case queued
     case processing
@@ -108,7 +108,7 @@ enum ArtifactOperationState: Hashable {
     }
 }
 
-enum ArtifactsProviderScope: Hashable, Identifiable {
+enum ArtifactsProviderScope: Hashable, Identifiable, Sendable {
     case all
     case provider(ProviderID)
 
@@ -138,7 +138,7 @@ enum ArtifactsProviderScope: Hashable, Identifiable {
     }
 }
 
-enum ArtifactsAssetKindFilter: String, CaseIterable, Identifiable, Hashable {
+enum ArtifactsAssetKindFilter: String, CaseIterable, Identifiable, Hashable, Sendable {
     case all
     case reports
     case images
@@ -187,7 +187,7 @@ enum ArtifactsAssetKindFilter: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-enum ArtifactsSort: String, CaseIterable, Identifiable, Hashable {
+enum ArtifactsSort: String, CaseIterable, Identifiable, Hashable, Sendable {
     case newest
     case oldest
     case provider
@@ -228,7 +228,7 @@ struct ArtifactsResourceFilter: Hashable {
     }
 }
 
-struct ArtifactsLibraryQuery: Hashable {
+struct ArtifactsLibraryQuery: Hashable, Sendable {
     var text = ""
     var category: ArtifactsAssetKindFilter = .all
     var providerScope: ArtifactsProviderScope = .all
@@ -356,7 +356,7 @@ struct ArtifactsAssetViewModel: Identifiable {
     var createdAt: Date? { summary.createdAt }
 }
 
-struct ArtifactLibraryItem: Identifiable {
+struct ArtifactLibraryItem: Identifiable, Sendable {
     var id: String { artifact.id }
     let artifact: ProviderArtifactRecord
     let title: String
@@ -366,6 +366,7 @@ struct ArtifactLibraryItem: Identifiable {
     let operationState: ArtifactOperationState
     let providerName: String
     let createdAt: Date
+    let normalizedSearchText: String
 
     var isActive: Bool { operationState.isActive }
     var canImportToVault: Bool { artifact.isImportableToVault }
@@ -376,21 +377,39 @@ struct ArtifactLibraryItem: Identifiable {
         providers: [CloudProviderConfiguration],
         researchRuns: [ProviderResearchRunRecord]
     ) {
+        let providerName = artifact.providerID.flatMap { id in
+            providers.first(where: { $0.id == id })?.displayName
+        } ?? artifact.providerKind.pinesLifecycleTitle
+        let researchTitle = researchRuns.first(where: { $0.finalReportArtifactID == artifact.id })?.title
+        self.init(artifact: artifact, providerName: providerName, researchTitle: researchTitle)
+    }
+
+    init(
+        artifact: ProviderArtifactRecord,
+        providerName: String,
+        researchTitle: String?
+    ) {
         self.artifact = artifact
         contentKind = artifact.artifactContentKind
         availability = artifact.artifactAvailability
         operationState = artifact.artifactOperationState
-        providerName = artifact.providerID.flatMap { id in
-            providers.first(where: { $0.id == id })?.displayName
-        } ?? artifact.providerKind.pinesLifecycleTitle
+        self.providerName = providerName
         createdAt = artifact.createdAt
 
-        let researchTitle = researchRuns.first(where: { $0.finalReportArtifactID == artifact.id })?.title
         let resolvedTitle = researchTitle ?? artifact.artifactDisplayTitle
-        title = resolvedTitle
-        excerpt = contentKind == .report
+        let resolvedExcerpt = contentKind == .report
             ? Self.cleanedReportExcerpt(artifact.artifactExcerpt, title: resolvedTitle)
             : artifact.artifactExcerpt
+        title = resolvedTitle
+        excerpt = resolvedExcerpt
+        normalizedSearchText = [resolvedTitle, providerName, resolvedExcerpt, artifact.searchText]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+    }
+
+    func matches(normalizedQuery: String) -> Bool {
+        normalizedQuery.isEmpty || normalizedSearchText.contains(normalizedQuery)
     }
 
     private static func cleanedReportExcerpt(_ excerpt: String?, title: String) -> String? {
@@ -1228,10 +1247,7 @@ extension ProviderArtifactRecord {
         localURL ?? remoteURL
     }
 
-    var localPreviewImageData: Data? {
-        if let localURL, localURL.isFileURL, let data = try? Data(contentsOf: localURL), !data.isEmpty {
-            return data
-        }
+    var embeddedPreviewImageData: Data? {
         return content.flatMap(Self.firstBase64ImageData(in:))
     }
 

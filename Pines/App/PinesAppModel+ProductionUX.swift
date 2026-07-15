@@ -34,7 +34,7 @@ extension PinesAppModel {
             if resolution == .keepDevice {
                 await syncCloudKitNow(services: services, reason: "conflict_keep_device")
             } else {
-                await refreshAll(services: services)
+                await refreshSynchronizedState(services: services)
             }
         } catch {
             setIfChanged(\.serviceError, error.localizedDescription)

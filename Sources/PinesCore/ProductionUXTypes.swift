@@ -100,9 +100,17 @@ public struct ProviderTransferRecord: Identifiable, Hashable, Codable, Sendable 
 
 public protocol ProviderTransferRepository: Sendable {
     func listProviderTransfers(providerID: ProviderID?) async throws -> [ProviderTransferRecord]
+    func listProviderTransfers(providerID: ProviderID?, limit: Int) async throws -> [ProviderTransferRecord]
     func upsertProviderTransfer(_ transfer: ProviderTransferRecord) async throws
     func deleteProviderTransfer(id: UUID) async throws
     func markActiveProviderTransfersInterrupted(at date: Date) async throws
+}
+
+public extension ProviderTransferRepository {
+    func listProviderTransfers(providerID: ProviderID?, limit: Int) async throws -> [ProviderTransferRecord] {
+        guard limit > 0 else { return [] }
+        return Array(try await listProviderTransfers(providerID: providerID).prefix(limit))
+    }
 }
 
 // MARK: - Hosted-tool consent
