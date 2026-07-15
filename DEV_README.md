@@ -518,7 +518,7 @@ bash scripts/ci/run-xcode-validation.sh
 ```
 
 The default local run executes the complete `PinesUITests` target. Required CI uses
-three independently bounded critical-journey shards so a slow hosted simulator cannot
+five independently bounded critical-journey shards so a slow hosted simulator cannot
 consume one shared watchdog for the whole suite. Reproduce that exact CI selection with:
 
 ```sh
@@ -526,9 +526,10 @@ PINES_XCODE_UI_TEST_MODE=smoke bash scripts/ci/run-xcode-validation.sh
 ```
 
 The smoke selection covers launch/navigation/chat composition, accessibility-sized
-primary surfaces, and the complete Artifact library/create/research journey. Keep the
-default `full` mode for exhaustive UI regression work, including the light/dark theme
-matrix; `PINES_XCODE_UI_TEST_MODE` accepts only `smoke` or `full`.
+primary surfaces, and separately isolated Artifact library/Image Studio,
+video/speech configuration, and research/running-work journeys. Keep the default
+`full` mode for exhaustive UI regression work, including the light/dark theme matrix;
+`PINES_XCODE_UI_TEST_MODE` accepts only `smoke` or `full`.
 
 Useful targeted scripts:
 

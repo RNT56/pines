@@ -250,7 +250,9 @@ run_ui_tests() {
       local smoke_tests=(
         "PinesUITests/PinesUITests/testLaunchNavigateTabsCreateChatAndTypeDraft"
         "PinesUITests/PinesUITests/testAccessibilityTextSizeKeepsPrimarySurfacesReachable"
-        "PinesUITests/PinesUITests/testArtifactsLibraryAndFocusedDestinations"
+        "PinesUITests/PinesUITests/testArtifactsLibraryAndImageStudio"
+        "PinesUITests/PinesUITests/testArtifactsVideoAndSpeechConfiguration"
+        "PinesUITests/PinesUITests/testArtifactsResearchComposerAndRunningWork"
       )
       local test
       for test in "${smoke_tests[@]}"; do

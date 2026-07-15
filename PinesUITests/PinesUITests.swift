@@ -101,13 +101,8 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
-    func testArtifactsLibraryAndFocusedDestinations() throws {
-        configureLaunch(resetStore: true)
-        app.launchEnvironment["PINES_UI_TEST_ARTIFACTS_FIXTURE"] = "1"
-        launchAndWaitForMainUI()
-
-        openTab("Artifacts")
-        assertIdentifierVisible("pines.artifacts.library", "The populated Artifact library was missing.")
+    func testArtifactsLibraryAndImageStudio() throws {
+        launchArtifactsFixture()
         assertVisibleText(containing: "Architectural study of a glass cabin", timeout: 10)
         assertVisibleText(containing: "Low-impact woodland materials", timeout: 10)
         captureScreenshot(named: "Artifacts - Library")
@@ -128,17 +123,27 @@ final class PinesUITests: XCTestCase {
         captureScreenshot(named: "Artifacts - Create")
 
         let imageSettings = app.buttons["pines.artifacts.image-studio.configuration"]
-        XCTAssertTrue(imageSettings.waitForExistence(timeout: 5), "Image Studio settings were not reachable from the engine row.")
-        imageSettings.tap()
-        assertVisibleText(containing: "Shape the output", timeout: 5)
+        presentArtifactSettings(
+            button: imageSettings,
+            markerIdentifier: "pines.artifacts.image-studio.settings",
+            failureMessage: "Image Studio settings were not reachable from the engine row."
+        )
         captureScreenshot(named: "Artifacts - Image Settings")
         XCTAssertTrue(tapFirstExisting([app.buttons["Done"]], timeout: 5), "Image Studio settings had no Done action.")
         returnToArtifactsLibrary()
+    }
+
+    @MainActor
+    func testArtifactsVideoAndSpeechConfiguration() throws {
+        launchArtifactsFixture()
 
         openArtifactsDestination(menuItem: "Video", destinationIdentifier: "pines.artifacts.create.prompt")
         let videoSettings = app.buttons["pines.artifacts.create.configuration"]
-        XCTAssertTrue(videoSettings.waitForExistence(timeout: 5), "Video settings were not reachable.")
-        videoSettings.tap()
+        presentArtifactSettings(
+            button: videoSettings,
+            markerIdentifier: "pines.artifacts.media.settings",
+            failureMessage: "Video settings were not reachable."
+        )
         assertVisibleText(containing: "Configure the render", timeout: 5)
         captureScreenshot(named: "Artifacts - Video Settings")
         XCTAssertTrue(tapFirstExisting([app.buttons["Done"]], timeout: 5), "Video settings had no Done action.")
@@ -146,12 +151,20 @@ final class PinesUITests: XCTestCase {
 
         openArtifactsDestination(menuItem: "Speech", destinationIdentifier: "pines.artifacts.create.prompt")
         let speechSettings = app.buttons["pines.artifacts.create.configuration"]
-        XCTAssertTrue(speechSettings.waitForExistence(timeout: 5), "Speech settings were not reachable.")
-        speechSettings.tap()
+        presentArtifactSettings(
+            button: speechSettings,
+            markerIdentifier: "pines.artifacts.media.settings",
+            failureMessage: "Speech settings were not reachable."
+        )
         assertVisibleText(containing: "Shape the voice", timeout: 5)
         captureScreenshot(named: "Artifacts - Speech Settings")
         XCTAssertTrue(tapFirstExisting([app.buttons["Done"]], timeout: 5), "Speech settings had no Done action.")
         returnToArtifactsLibrary()
+    }
+
+    @MainActor
+    func testArtifactsResearchComposerAndRunningWork() throws {
+        launchArtifactsFixture()
 
         openArtifactsDestination(menuItem: "Deep Research", destinationIdentifier: "pines.artifacts.research.prompt")
         assertVisibleText(containing: "Turn a question into a sourced brief", timeout: 10)
@@ -159,9 +172,11 @@ final class PinesUITests: XCTestCase {
         captureScreenshot(named: "Artifacts - Deep Research")
 
         let researchSettings = app.buttons["pines.artifacts.research.settings"]
-        XCTAssertTrue(researchSettings.waitForExistence(timeout: 5), "Research setup was not reachable.")
-        researchSettings.tap()
-        assertVisibleText(containing: "Define the research brief", timeout: 5)
+        presentArtifactSettings(
+            button: researchSettings,
+            markerIdentifier: "pines.artifacts.research.settings-sheet",
+            failureMessage: "Research setup was not reachable."
+        )
         captureScreenshot(named: "Artifacts - Research Settings")
         XCTAssertTrue(tapFirstExisting([app.buttons["Done"]], timeout: 5), "Research settings had no Done action.")
 
@@ -604,6 +619,47 @@ final class PinesUITests: XCTestCase {
             XCTFail("Artifact destination \(menuItem) did not become visible.\n\n\(app.debugDescription)")
             return
         }
+    }
+
+    @MainActor
+    private func launchArtifactsFixture() {
+        configureLaunch(resetStore: true)
+        app.launchEnvironment["PINES_UI_TEST_ARTIFACTS_FIXTURE"] = "1"
+        launchAndWaitForMainUI()
+        openTab("Artifacts")
+        assertIdentifierVisible("pines.artifacts.library", "The populated Artifact library was missing.")
+    }
+
+    @MainActor
+    private func presentArtifactSettings(
+        button: XCUIElement,
+        markerIdentifier: String,
+        failureMessage: String
+    ) {
+        let marker = app.descendants(matching: .any)[markerIdentifier]
+        for attempt in 0..<2 {
+            if marker.exists {
+                return
+            }
+
+            guard button.waitForExistence(timeout: 10), button.isHittable else {
+                if marker.waitForExistence(timeout: 10) {
+                    return
+                }
+                continue
+            }
+
+            if attempt == 0 {
+                button.tap()
+            } else {
+                button.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
+            }
+            if marker.waitForExistence(timeout: 15) {
+                return
+            }
+        }
+
+        XCTFail("\(failureMessage)\n\n\(app.debugDescription)")
     }
 
     @MainActor

@@ -1937,6 +1937,7 @@ private struct ArtifactCreateView: View {
                         Text("Shape the output")
                             .font(theme.typography.title.weight(.semibold))
                             .foregroundStyle(theme.colors.primaryText)
+                            .accessibilityIdentifier("pines.artifacts.image-studio.settings")
                         Text("Choose the engine, canvas, and finish. The prompt stays in the studio.")
                             .font(theme.typography.callout)
                             .foregroundStyle(theme.colors.secondaryText)
@@ -2093,6 +2094,7 @@ private struct ArtifactCreateView: View {
                         Text(mediaKind == .speech ? "Shape the voice" : "Configure the render")
                             .font(theme.typography.title.weight(.semibold))
                             .foregroundStyle(theme.colors.primaryText)
+                            .accessibilityIdentifier("pines.artifacts.media.settings")
                         Text(mediaKind == .speech
                              ? "Choose the engine and voice. Your script stays in the creation workspace."
                              : "Choose the engine and decide whether Pines should keep watching for the finished render.")
@@ -2740,6 +2742,7 @@ private struct ArtifactResearchView: View {
                         Text("Define the research brief")
                             .font(theme.typography.title.weight(.semibold))
                             .foregroundStyle(theme.colors.primaryText)
+                            .accessibilityIdentifier("pines.artifacts.research.settings-sheet")
                         Text("Choose where Pines looks and how deeply it should investigate. You can refine the question in the composer.")
                             .font(theme.typography.callout)
                             .foregroundStyle(theme.colors.secondaryText)
