@@ -133,7 +133,12 @@ struct PinesRootView: View {
             #endif
         }
         .pinesHighRefreshRate()
-        .preferredColorScheme(settingsState.interfaceMode.colorScheme)
+        .pinesUITestAccessibilityTextIfRequested()
+        .preferredColorScheme(
+            PinesUITestLaunchConfiguration.usesDarkAppearance
+                ? .dark
+                : settingsState.interfaceMode.colorScheme
+        )
         .task {
             guard !didStartBootstrap, !isBootstrapping else { return }
             didStartBootstrap = true
@@ -497,6 +502,22 @@ struct PinesRootView: View {
         }
     }
 }
+
+private extension View {
+    @ViewBuilder
+    func pinesUITestAccessibilityTextIfRequested() -> some View {
+        #if DEBUG
+        if PinesUITestLaunchConfiguration.usesAccessibilityTextSize {
+            dynamicTypeSize(.accessibility5)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
 struct PinesOpenModelsPageAction: Sendable {
     var action: @MainActor @Sendable () -> Void
 

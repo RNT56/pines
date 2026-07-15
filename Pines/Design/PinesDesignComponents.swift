@@ -1472,6 +1472,34 @@ struct PinesButtonStyle: ButtonStyle {
     }
 }
 
+/// A press treatment for controls whose label already supplies its own Pines
+/// surface. This keeps cards, rows, and media previews visually unadorned while
+/// still sharing the active theme's motion language.
+struct PinesBareButtonStyle: ButtonStyle {
+    @Environment(\.pinesTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.78 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.992 : 1)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: configuration.isPressed)
+    }
+}
+
+/// The theme-aware separator used by composed Pines surfaces. Native list and
+/// menu separators remain system-owned; separators inside app content use this.
+struct PinesDivider: View {
+    @Environment(\.pinesTheme) private var theme
+
+    var body: some View {
+        Rectangle()
+            .fill(theme.colors.separator)
+            .frame(height: theme.stroke.hairline)
+            .accessibilityHidden(true)
+    }
+}
+
 struct PinesStatusIndicator: View {
     @Environment(\.pinesTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -2767,6 +2795,25 @@ private struct PinesThemedFormModifier: ViewModifier {
     }
 }
 
+private struct PinesProgressTintModifier: ViewModifier {
+    @Environment(\.pinesTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content.tint(theme.colors.accent)
+    }
+}
+
+private struct PinesNavigationChromeModifier: ViewModifier {
+    @Environment(\.pinesTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .tint(theme.colors.accent)
+            .toolbarBackground(theme.colors.chromeBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+    }
+}
+
 private struct PinesSidebarListChromeModifier: ViewModifier {
     @Environment(\.pinesTheme) private var theme
 
@@ -2845,8 +2892,20 @@ extension View {
         modifier(PinesThemedFormModifier())
     }
 
+    func pinesProgressTint() -> some View {
+        modifier(PinesProgressTintModifier())
+    }
+
+    func pinesNavigationChrome() -> some View {
+        modifier(PinesNavigationChromeModifier())
+    }
+
     func pinesButtonStyle(_ kind: PinesButtonKind = .secondary, fillWidth: Bool = false) -> some View {
         buttonStyle(PinesButtonStyle(kind: kind, fillWidth: fillWidth))
+    }
+
+    func pinesBareButtonStyle() -> some View {
+        buttonStyle(PinesBareButtonStyle())
     }
 
     func pinesSidebarListChrome() -> some View {

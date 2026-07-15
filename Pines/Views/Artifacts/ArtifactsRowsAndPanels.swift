@@ -151,7 +151,7 @@ struct ArtifactsResourceList: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .pinesBareButtonStyle()
                         .overlay {
                             RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
                                 .strokeBorder(
@@ -309,6 +309,7 @@ struct ArtifactsArtifactPreviewSurface: View {
                     placeholder(title: "Image unavailable", systemImage: "photo")
                 case .empty:
                     ProgressView()
+                        .pinesProgressTint()
                 @unknown default:
                     EmptyView()
                 }
@@ -317,13 +318,14 @@ struct ArtifactsArtifactPreviewSurface: View {
             placeholder(title: "Image", systemImage: "photo")
         } else {
             ProgressView()
+                .pinesProgressTint()
         }
     }
 
     private var reportPreview: some View {
         ScrollView {
             Text(reportPreviewText)
-                .font(.system(.caption, design: .default))
+                .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.primaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(theme.spacing.small)
@@ -343,7 +345,7 @@ struct ArtifactsArtifactPreviewSurface: View {
     private func placeholder(title: String, systemImage: String) -> some View {
         VStack(spacing: theme.spacing.xsmall) {
             Image(systemName: systemImage)
-                .font(.system(size: 28, weight: .semibold))
+                .font(theme.typography.title.weight(.semibold))
                 .foregroundStyle(theme.colors.secondaryText)
             Text(title)
                 .font(theme.typography.caption.weight(.semibold))
@@ -513,7 +515,7 @@ struct ArtifactsDetailPanel: View {
         } else if let text = artifact.text, !text.isEmpty {
             previewSection(title: "Text Preview", systemImage: "text.alignleft") {
                 Text(text)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(theme.typography.code)
                     .foregroundStyle(theme.colors.primaryText)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -521,7 +523,7 @@ struct ArtifactsDetailPanel: View {
         } else if let content = artifact.content {
             previewSection(title: "JSON Preview", systemImage: "curlybraces.square") {
                 Text(content.prettyJSONString)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(theme.typography.code)
                     .foregroundStyle(theme.colors.primaryText)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -536,7 +538,7 @@ struct ArtifactsDetailPanel: View {
             if let content = output.content {
                 previewSection(title: "Output JSON", systemImage: "curlybraces.square") {
                     Text(content.prettyJSONString)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(theme.typography.code)
                         .foregroundStyle(theme.colors.primaryText)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -546,7 +548,7 @@ struct ArtifactsDetailPanel: View {
             if let schema = output.schema {
                 previewSection(title: "Schema", systemImage: "checklist") {
                     Text(schema.prettyJSONString)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(theme.typography.code)
                         .foregroundStyle(theme.colors.primaryText)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -822,7 +824,7 @@ private struct ArtifactsResourceFieldGrid: View {
                 HStack(alignment: .top, spacing: theme.spacing.xsmall) {
                     if let systemImage = field.systemImage {
                         Image(systemName: systemImage)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(theme.typography.caption.weight(.semibold))
                             .foregroundStyle(field.tone.color(in: theme))
                             .frame(width: 18, height: 18)
                     }
@@ -1504,7 +1506,7 @@ struct ArtifactsArtifactThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
-                .stroke(theme.colors.controlBorder, lineWidth: 0.5)
+                .stroke(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
         }
         .task(id: localLoadKey) {
             guard artifact.galleryPresentation == .image,
@@ -1535,6 +1537,7 @@ struct ArtifactsArtifactThumbnail: View {
                 .scaledToFill()
         } else if artifact.localURL != nil || artifact.content != nil, !finishedLoadingLocalImage {
             ProgressView()
+                .pinesProgressTint()
         } else if let url = artifact.remoteURL {
             AsyncImage(url: url) { phase in
                 switch phase {
@@ -1542,6 +1545,7 @@ struct ArtifactsArtifactThumbnail: View {
                     image.resizable().scaledToFill()
                 case .empty:
                     ProgressView()
+                        .pinesProgressTint()
                 case .failure:
                     placeholder(title: "Image", systemImage: "photo")
                 @unknown default:
@@ -1556,7 +1560,7 @@ struct ArtifactsArtifactThumbnail: View {
     private var reportThumbnail: some View {
         VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
             Image(systemName: "doc.text")
-                .font(.system(size: 20, weight: .semibold))
+                .font(theme.typography.callout.weight(.semibold))
                 .foregroundStyle(theme.colors.accent)
             ForEach(0..<3, id: \.self) { index in
                 Capsule()
@@ -1571,7 +1575,7 @@ struct ArtifactsArtifactThumbnail: View {
     private func placeholder(title: String, systemImage: String) -> some View {
         VStack(spacing: theme.spacing.xsmall) {
             Image(systemName: systemImage)
-                .font(.system(size: 22, weight: .semibold))
+                .font(theme.typography.title.weight(.semibold))
                 .foregroundStyle(theme.colors.secondaryText)
             Text(title)
                 .font(theme.typography.caption.weight(.semibold))

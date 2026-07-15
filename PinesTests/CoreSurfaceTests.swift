@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import XCTest
 import PinesCore
 @testable import pines
@@ -247,21 +248,83 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(models.contains("isVisibleInArtifactsGallery"))
         XCTAssertTrue(workspace.contains("ArtifactsLibraryView"))
         XCTAssertTrue(workspace.contains("ArtifactLibraryRow"))
-        XCTAssertTrue(workspace.contains("ArtifactDeskTile"))
-        XCTAssertTrue(workspace.contains("ArtifactCommandDeck"))
-        XCTAssertTrue(workspace.contains("private var commandStrip"))
-        XCTAssertTrue(workspace.contains("pines.artifacts.inspector"))
-        XCTAssertTrue(workspace.contains("ArtifactDetailView"))
+        XCTAssertTrue(workspace.contains("ArtifactGalleryTile"))
+        XCTAssertTrue(workspace.contains("private var activityStrip"))
+        XCTAssertTrue(workspace.contains("private var newArtifactMenu"))
+        XCTAssertTrue(workspace.contains("private var filterMenu"))
+        XCTAssertTrue(workspace.contains(".searchable(text: $query.text"))
+        XCTAssertTrue(workspace.contains("ArtifactQuickLookView"))
         XCTAssertTrue(workspace.contains("ArtifactCreateView"))
+        XCTAssertTrue(workspace.contains("private var imageStudio"))
+        XCTAssertTrue(workspace.contains("private var imagePromptDock"))
+        XCTAssertTrue(workspace.contains("pines.artifacts.create.prompt"))
+        XCTAssertTrue(workspace.contains("private var researchComposer"))
+        XCTAssertTrue(workspace.contains("pines.artifacts.research.prompt"))
+        XCTAssertTrue(workspace.contains("pines.artifacts.research.send"))
+        XCTAssertTrue(workspace.contains("safeAreaInset(edge: .bottom"))
         XCTAssertTrue(workspace.contains("This session"))
         XCTAssertTrue(workspace.contains("New \\(mediaKind.title)"))
         XCTAssertTrue(workspace.contains("Generate \\(mediaKind.title.lowercased())"))
+        XCTAssertFalse(workspace.contains("ArtifactCommandDeck"))
+        XCTAssertFalse(workspace.contains("private var commandStrip"))
+        XCTAssertFalse(workspace.contains(".inspector("))
+        XCTAssertFalse(workspace.contains("ArtifactsLibraryFilterSheet"))
         XCTAssertFalse(workspace.contains("ArtifactCategoryChip"))
         XCTAssertFalse(workspace.contains("ArtifactMediaTile"))
         XCTAssertFalse(workspace.contains("Create (mediaKind.title)"))
         XCTAssertFalse(workspace.contains("Generate (mediaKind.title.lowercased())"))
         XCTAssertFalse(workspace.contains("PinesCardSection(\"Generate Media\""))
         XCTAssertFalse(workspace.contains("PinesCardSection(\"Gallery\""))
+        XCTAssertFalse(workspace.contains(".background(.ultraThinMaterial)"))
+    }
+
+    func testArtifactSurfacesUsePinesThemePrimitivesEndToEnd() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let workspace = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Artifacts/ArtifactsWorkspaceView.swift"),
+            encoding: .utf8
+        )
+        let sharedPanels = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Views/Artifacts/ArtifactsRowsAndPanels.swift"),
+            encoding: .utf8
+        )
+        let artifactSources = workspace + sharedPanels
+
+        XCTAssertTrue(workspace.contains(".pinesNavigationChrome()"))
+        XCTAssertTrue(workspace.contains(".pinesAppBackground()"))
+        XCTAssertTrue(workspace.contains(".pinesSurface(.chrome"))
+        XCTAssertTrue(workspace.contains("PinesDivider()"))
+        XCTAssertTrue(artifactSources.contains(".pinesProgressTint()"))
+        XCTAssertTrue(artifactSources.contains(".pinesBareButtonStyle()"))
+        XCTAssertTrue(workspace.contains("private var mediaCreationSettings"))
+        XCTAssertTrue(workspace.contains("Shape the voice"))
+        XCTAssertTrue(workspace.contains("Configure the render"))
+        XCTAssertFalse(artifactSources.contains(".buttonStyle(.plain)"))
+        XCTAssertFalse(artifactSources.contains(".font(.system"))
+        XCTAssertFalse(artifactSources.contains("lineWidth: 0.5"))
+        XCTAssertFalse(artifactSources.contains(".foregroundStyle(.red"))
+        XCTAssertFalse(artifactSources.contains(".foregroundStyle(.blue"))
+        XCTAssertFalse(artifactSources.contains(".foregroundStyle(.green"))
+    }
+
+    func testEveryPinesThemeResolvesForArtifactLightAndDarkAppearances() {
+        for template in PinesThemeTemplate.allCases {
+            for mode in [PinesInterfaceMode.light, .dark] {
+                let theme = PinesTheme.resolve(template: template, mode: mode, systemScheme: .light)
+
+                XCTAssertEqual(theme.template, template)
+                XCTAssertEqual(theme.mode, mode)
+                XCTAssertEqual(theme.colorScheme, mode == .dark ? .dark : .light)
+                XCTAssertGreaterThan(theme.spacing.contentMaxWidth, 0)
+                XCTAssertGreaterThan(theme.radius.control, 0)
+                XCTAssertGreaterThan(theme.radius.panel, 0)
+                XCTAssertGreaterThan(theme.radius.sheet, 0)
+                XCTAssertGreaterThan(theme.stroke.hairline, 0)
+                XCTAssertGreaterThan(theme.dashboard.actionMinHeight, 0)
+            }
+        }
     }
 
     func testArtifactLibraryProjectionUsesPromptAndLifecycleState() {
@@ -662,7 +725,7 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(stress.contains("if status != .complete"))
     }
 
-    func testArtifactsWorkspaceUsesDeskCanvasCommandDeckAndContextualDestinations() throws {
+    func testArtifactsWorkspaceUsesZeroNavigationGalleryAndQuickLookSheets() throws {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -679,17 +742,28 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(models.contains("case artifact(String)"))
         XCTAssertTrue(models.contains("case create(kind: ArtifactsMediaKind"))
         XCTAssertTrue(models.contains("case research(threadID: String?)"))
-        XCTAssertTrue(workspace.contains("private enum ArtifactsDeskSheet"))
-        XCTAssertTrue(workspace.contains("ArtifactCommandDeck"))
-        XCTAssertTrue(workspace.contains(".inspector(isPresented: inspectorPresentation)"))
-        XCTAssertTrue(workspace.contains("private var scopeMenu"))
-        XCTAssertTrue(workspace.contains("private var workQueue"))
+        XCTAssertTrue(workspace.contains("private enum ArtifactSheet"))
+        XCTAssertTrue(workspace.contains("ArtifactGalleryTile"))
+        XCTAssertTrue(workspace.contains("ArtifactQuickLookView"))
+        XCTAssertTrue(workspace.contains("private var newArtifactMenu"))
+        XCTAssertTrue(workspace.contains("private var filterMenu"))
+        XCTAssertTrue(workspace.contains("private var activityStrip"))
+        XCTAssertTrue(workspace.contains(".sheet(item: $presentedSheet)"))
+        XCTAssertFalse(workspace.contains("ArtifactCommandDeck"))
+        XCTAssertFalse(workspace.contains(".inspector("))
+        XCTAssertFalse(workspace.contains("private var commandStrip"))
+        XCTAssertFalse(workspace.contains("private var scopeMenu"))
+        XCTAssertFalse(workspace.contains("private var workQueue"))
         XCTAssertFalse(workspace.contains("NavigationStack(path: $path)"))
         XCTAssertFalse(workspace.contains("ArtifactCategoryChip"))
         XCTAssertFalse(workspace.contains("ArtifactsResearchHistoryView"))
         XCTAssertTrue(workspace.contains("ArtifactCreateView"))
         XCTAssertTrue(workspace.contains("ArtifactResearchView"))
-        XCTAssertTrue(workspace.contains("ArtifactDetailView"))
+        XCTAssertTrue(workspace.contains("Image Studio"))
+        XCTAssertTrue(workspace.contains("Turn a question into a sourced brief"))
+        XCTAssertTrue(workspace.contains("Shape the Brief"))
+        XCTAssertTrue(workspace.contains("private var imageStudioSettings"))
+        XCTAssertTrue(workspace.contains("private var researchSettings"))
         XCTAssertFalse(workspace.contains("PinesWorkspaceSwitcher"))
         XCTAssertFalse(workspace.contains("ArtifactsStorageWorkspace"))
         XCTAssertFalse(workspace.contains("ArtifactsFilesWorkspace"))

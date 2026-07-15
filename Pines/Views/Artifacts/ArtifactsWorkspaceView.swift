@@ -2,59 +2,46 @@ import SwiftUI
 import PinesCore
 
 struct ArtifactsWorkspaceView: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @Environment(\.openPinesProviderSettings) private var openProviderSettings
     @EnvironmentObject private var appModel: PinesAppModel
+    @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     @State private var query = ArtifactsLibraryQuery()
-    @State private var selectedArtifactID: String?
-    @State private var presentedSheet: ArtifactsDeskSheet?
+    @State private var presentedSheet: ArtifactSheet?
     @State private var pendingConfirmation: ArtifactsConfirmation?
 
-    private var usesInspector: Bool {
-        horizontalSizeClass != .compact
-    }
-
-    private var selectedArtifact: ProviderArtifactRecord? {
-        selectedArtifactID.flatMap { id in
-            providerState.providerArtifacts.first(where: { $0.id == id })
-        }
+    private var artifactProviders: [CloudProviderConfiguration] {
+        settingsState.cloudProviders.artifactProviders
     }
 
     var body: some View {
         NavigationStack {
             ArtifactsLibraryView(
                 query: $query,
-                selectedArtifactID: usesInspector ? selectedArtifactID : nil,
                 pendingConfirmation: $pendingConfirmation,
-                openArtifact: openArtifact,
-                startNew: { presentedSheet = .commandDeck },
+                openArtifact: { id in present(.artifact(id)) },
+                createArtifact: { kind in present(.create(kind: kind, referenceArtifactID: nil)) },
                 openResearch: { threadID in present(.research(threadID: threadID)) },
                 remix: { artifactID in present(.create(kind: .image, referenceArtifactID: artifactID)) },
                 openProviderSettings: showProviderSettings
             )
             .navigationTitle("Artifacts")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query.text, prompt: "Search artifacts")
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    filterMenu
+                    newArtifactMenu
+                }
+            }
             .task {
                 await appModel.refreshProviderLifecycleState(services: services)
             }
-        }
-        .inspector(isPresented: inspectorPresentation) {
-            NavigationStack {
-                inspectorContent
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Close", systemImage: "xmark") {
-                                selectedArtifactID = nil
-                            }
-                            .labelStyle(.iconOnly)
-                            .accessibilityLabel("Close artifact details")
-                        }
-                    }
-            }
-            .inspectorColumnWidth(min: 340, ideal: 420, max: 520)
-            .accessibilityIdentifier("pines.artifacts.inspector")
+            .pinesNavigationChrome()
         }
         .sheet(item: $presentedSheet) { sheet in
             NavigationStack {
@@ -66,9 +53,12 @@ struct ArtifactsWorkspaceView: View {
                             }
                             .accessibilityIdentifier("pines.artifacts.sheet.close")
                         }
-                    }
+                }
+                .pinesNavigationChrome()
             }
             .presentationDragIndicator(.visible)
+            .presentationDetents([.large])
+            .presentationBackground(theme.colors.sheetBackground)
         }
         .confirmationDialog(
             pendingConfirmation?.title ?? "Confirm",
@@ -81,56 +71,99 @@ struct ArtifactsWorkspaceView: View {
             actions: confirmationActions,
             message: { confirmation in Text(confirmation.message) }
         )
-        .onChange(of: horizontalSizeClass) { _, sizeClass in
-            adaptSelection(to: sizeClass)
-        }
         .accessibilityIdentifier("pines.screen.artifacts")
     }
 
-    private var inspectorPresentation: Binding<Bool> {
-        Binding(
-            get: { usesInspector && selectedArtifactID != nil },
-            set: { isPresented in
-                if !isPresented { selectedArtifactID = nil }
-            }
-        )
-    }
-
-    @ViewBuilder
-    private var inspectorContent: some View {
-        if let selectedArtifact {
-            ArtifactDetailView(
-                artifact: selectedArtifact,
-                presentation: .inspector,
-                pendingConfirmation: $pendingConfirmation,
-                open: handle
-            )
-        } else {
-            ArtifactsMissingRecordView()
-        }
-    }
-
-    @ViewBuilder
-    private func sheetContent(_ sheet: ArtifactsDeskSheet) -> some View {
-        switch sheet {
-        case .commandDeck:
-            ArtifactCommandDeck { command in
-                switch command {
-                case .image:
-                    present(.create(kind: .image, referenceArtifactID: nil))
-                case .video:
-                    present(.create(kind: .video, referenceArtifactID: nil))
-                case .speech:
-                    present(.create(kind: .speech, referenceArtifactID: nil))
-                case .research:
-                    present(.research(threadID: nil))
+    private var filterMenu: some View {
+        Menu {
+            Section("Type") {
+                ForEach(ArtifactsAssetKindFilter.allCases) { category in
+                    Button {
+                        query.category = category
+                    } label: {
+                        Label(category.title, systemImage: query.category == category ? "checkmark" : category.systemImage)
+                    }
                 }
             }
+
+            Section("Provider") {
+                Button {
+                    query.providerScope = .all
+                } label: {
+                    Label("All providers", systemImage: query.providerScope == .all ? "checkmark" : "cloud")
+                }
+                ForEach(artifactProviders) { provider in
+                    Button {
+                        query.providerScope = .provider(provider.id)
+                    } label: {
+                        Label(
+                            provider.displayName,
+                            systemImage: query.providerScope == .provider(provider.id) ? "checkmark" : "cloud"
+                        )
+                    }
+                }
+            }
+
+            Section("Sort") {
+                ForEach(ArtifactsSort.allCases) { sort in
+                    Button {
+                        query.sort = sort
+                    } label: {
+                        Label(sort.title, systemImage: query.sort == sort ? "checkmark" : "arrow.up.arrow.down")
+                    }
+                }
+            }
+
+            if query.hasActiveFilters {
+                Divider()
+                Button("Reset filters", systemImage: "arrow.counterclockwise") {
+                    query.resetFilters()
+                }
+            }
+        } label: {
+            Image(systemName: query.hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        }
+        .accessibilityLabel(query.hasActiveFilters ? "Artifact filters, active" : "Artifact filters")
+        .accessibilityIdentifier("pines.artifacts.filter")
+    }
+
+    private var newArtifactMenu: some View {
+        Menu {
+            Section("Create") {
+                Button("Image", systemImage: "photo") {
+                    present(.create(kind: .image, referenceArtifactID: nil))
+                }
+                .accessibilityIdentifier("pines.artifacts.new.image")
+
+                Button("Video", systemImage: "film") {
+                    present(.create(kind: .video, referenceArtifactID: nil))
+                }
+                .accessibilityIdentifier("pines.artifacts.new.video")
+
+                Button("Speech", systemImage: "waveform") {
+                    present(.create(kind: .speech, referenceArtifactID: nil))
+                }
+                .accessibilityIdentifier("pines.artifacts.new.speech")
+            }
+
+            Button("Research", systemImage: "doc.text.magnifyingglass") {
+                present(.research(threadID: nil))
+            }
+            .accessibilityIdentifier("pines.artifacts.new.research")
+        } label: {
+            Label("New", systemImage: "plus")
+        }
+        .accessibilityLabel("New artifact")
+        .accessibilityIdentifier("pines.artifacts.new")
+    }
+
+    @ViewBuilder
+    private func sheetContent(_ sheet: ArtifactSheet) -> some View {
+        switch sheet {
         case .artifact(let id):
             if let artifact = providerState.providerArtifacts.first(where: { $0.id == id }) {
-                ArtifactDetailView(
+                ArtifactQuickLookView(
                     artifact: artifact,
-                    presentation: .sheet,
                     pendingConfirmation: $pendingConfirmation,
                     open: handle
                 )
@@ -156,7 +189,7 @@ struct ArtifactsWorkspaceView: View {
     private func handle(_ route: ArtifactsRoute) {
         switch route {
         case .artifact(let id):
-            openArtifact(id)
+            present(.artifact(id))
         case .create(let kind, let referenceArtifactID):
             present(.create(kind: kind, referenceArtifactID: referenceArtifactID))
         case .research(let threadID):
@@ -166,20 +199,7 @@ struct ArtifactsWorkspaceView: View {
         }
     }
 
-    private func openArtifact(_ id: String) {
-        if usesInspector {
-            presentedSheet = nil
-            Task { @MainActor in
-                await Task.yield()
-                selectedArtifactID = id
-            }
-        } else {
-            present(.artifact(id))
-        }
-    }
-
-    private func present(_ sheet: ArtifactsDeskSheet) {
-        selectedArtifactID = nil
+    private func present(_ sheet: ArtifactSheet) {
         guard presentedSheet != nil else {
             presentedSheet = sheet
             return
@@ -192,19 +212,10 @@ struct ArtifactsWorkspaceView: View {
     }
 
     private func showProviderSettings() {
-        selectedArtifactID = nil
         presentedSheet = nil
         Task { @MainActor in
             await Task.yield()
             openProviderSettings()
-        }
-    }
-
-    private func adaptSelection(to sizeClass: UserInterfaceSizeClass?) {
-        guard let selectedArtifactID else { return }
-        if sizeClass == .compact {
-            self.selectedArtifactID = nil
-            presentedSheet = .artifact(selectedArtifactID)
         }
     }
 
@@ -232,7 +243,6 @@ struct ArtifactsWorkspaceView: View {
         do {
             try await appModel.deleteProviderArtifactRecord(id: artifact.id, services: services)
             pendingConfirmation = nil
-            if selectedArtifactID == artifact.id { selectedArtifactID = nil }
             if presentedSheet == .artifact(artifact.id) { presentedSheet = nil }
         } catch {
             providerState.providerLifecycleError = error.localizedDescription
@@ -285,16 +295,13 @@ struct ArtifactsWorkspaceView: View {
     }
 }
 
-private enum ArtifactsDeskSheet: Hashable, Identifiable {
-    case commandDeck
+private enum ArtifactSheet: Hashable, Identifiable {
     case artifact(String)
     case create(kind: ArtifactsMediaKind, referenceArtifactID: String?)
     case research(threadID: String?)
 
     var id: String {
         switch self {
-        case .commandDeck:
-            "command-deck"
         case .artifact(let id):
             "artifact-\(id)"
         case .create(let kind, let referenceArtifactID):
@@ -302,113 +309,6 @@ private enum ArtifactsDeskSheet: Hashable, Identifiable {
         case .research(let threadID):
             "research-\(threadID ?? "new")"
         }
-    }
-}
-
-private enum ArtifactDetailPresentation {
-    case sheet
-    case inspector
-}
-
-private enum ArtifactDeskCommand: String, CaseIterable, Identifiable {
-    case image
-    case video
-    case speech
-    case research
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .image: "Image"
-        case .video: "Video"
-        case .speech: "Speech"
-        case .research: "Research"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .image: "Generate a new image or begin a visual remix."
-        case .video: "Create a motion artifact from a written direction."
-        case .speech: "Turn text into a reusable narrated audio file."
-        case .research: "Investigate the web and produce a cited report."
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .image: "photo"
-        case .video: "film"
-        case .speech: "waveform"
-        case .research: "doc.text.magnifyingglass"
-        }
-    }
-}
-
-private struct ArtifactCommandDeck: View {
-    @Environment(\.pinesTheme) private var theme
-    let choose: (ArtifactDeskCommand) -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: theme.spacing.large) {
-                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                    Text("Choose an outcome")
-                        .font(theme.typography.title.weight(.semibold))
-                        .foregroundStyle(theme.colors.primaryText)
-                        .accessibilityIdentifier("pines.artifacts.command-deck")
-                    Text("Start with what you want to make. Provider and model choices come next, inside the focused composer.")
-                        .font(theme.typography.body)
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 240), spacing: theme.spacing.small)],
-                    spacing: theme.spacing.small
-                ) {
-                    ForEach(ArtifactDeskCommand.allCases) { command in
-                        Button {
-                            choose(command)
-                        } label: {
-                            HStack(alignment: .top, spacing: theme.spacing.medium) {
-                                Image(systemName: command.systemImage)
-                                    .font(.title3.weight(.semibold))
-                                    .foregroundStyle(theme.colors.accent)
-                                    .frame(width: 44, height: 44)
-                                    .background(theme.colors.accentSoft, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
-                                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                                    Text(command.title)
-                                        .font(theme.typography.headline)
-                                        .foregroundStyle(theme.colors.primaryText)
-                                    Text(command.detail)
-                                        .font(theme.typography.caption)
-                                        .foregroundStyle(theme.colors.secondaryText)
-                                        .multilineTextAlignment(.leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                Spacer(minLength: theme.spacing.small)
-                                Image(systemName: "arrow.up.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(theme.colors.tertiaryText)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .pinesSurface(.panel, padding: theme.spacing.medium)
-                        .accessibilityIdentifier("pines.artifacts.command.\(command.rawValue)")
-                    }
-                }
-            }
-            .padding(theme.spacing.large)
-            .frame(maxWidth: 720, alignment: .leading)
-            .frame(maxWidth: .infinity)
-        }
-        .navigationTitle("New Artifact")
-        .navigationBarTitleDisplayMode(.inline)
-        .pinesAppBackground()
     }
 }
 
@@ -421,14 +321,12 @@ private struct ArtifactsLibraryView: View {
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     @Binding var query: ArtifactsLibraryQuery
-    let selectedArtifactID: String?
     @Binding var pendingConfirmation: ArtifactsConfirmation?
     let openArtifact: (String) -> Void
-    let startNew: () -> Void
+    let createArtifact: (ArtifactsMediaKind) -> Void
     let openResearch: (String?) -> Void
     let remix: (String) -> Void
     let openProviderSettings: () -> Void
-    @State private var showsFilters = false
 
     private var providers: [CloudProviderConfiguration] {
         settingsState.cloudProviders.artifactProviders
@@ -502,21 +400,37 @@ private struct ArtifactsLibraryView: View {
         return (artifacts + research).joined(separator: "|")
     }
 
-    private var usesGrid: Bool {
-        horizontalSizeClass != .compact && !dynamicTypeSize.isAccessibilitySize
+    private var usesAccessibilityList: Bool {
+        dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var galleryColumns: [GridItem] {
+        if horizontalSizeClass == .compact {
+            return [
+                GridItem(.flexible(), spacing: theme.spacing.medium),
+                GridItem(.flexible(), spacing: theme.spacing.medium),
+            ]
+        }
+        return [
+            GridItem(.adaptive(minimum: 205, maximum: 270), spacing: theme.spacing.large),
+        ]
+    }
+
+    private var activeCount: Int {
+        activeItems.count + activeResearchThreads.count
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: theme.spacing.large) {
-                commandStrip
-                workQueue
-                resultsHeader
+            VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                activityStrip
+                collectionHeader
                 libraryContent
             }
-            .padding(.horizontal, theme.spacing.large)
-            .padding(.vertical, theme.spacing.medium)
-            .frame(maxWidth: 1180, alignment: .leading)
+            .padding(.horizontal, horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large)
+            .padding(.top, theme.spacing.small)
+            .padding(.bottom, theme.spacing.xlarge)
+            .frame(maxWidth: 1240, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .pinesExpressiveScrollHaptics()
@@ -534,180 +448,113 @@ private struct ArtifactsLibraryView: View {
                 .background(theme.colors.appBackground)
             }
         }
-        .sheet(isPresented: $showsFilters) {
-            ArtifactsLibraryFilterSheet(
-                query: $query,
-                providers: providers
-            )
-            .presentationDetents([.medium, .large])
-        }
         .task(id: activitySignature) {
             await monitorActivity()
         }
+        .pinesAppBackground()
         .accessibilityIdentifier("pines.artifacts.library")
     }
 
-    private var commandStrip: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: theme.spacing.small) {
-                searchField
-                    .frame(minWidth: 240, maxWidth: 440)
-                scopeMenu
-                refineButton
-                Spacer(minLength: theme.spacing.small)
-                newArtifactButton
-            }
-
-            VStack(spacing: theme.spacing.small) {
-                searchField
-                HStack(spacing: theme.spacing.small) {
-                    scopeMenu
-                    refineButton
-                    Spacer(minLength: theme.spacing.xsmall)
-                    newArtifactButton
-                }
-            }
-        }
-    }
-
-    private var searchField: some View {
-        HStack(spacing: theme.spacing.small) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(theme.colors.secondaryText)
-            TextField("Search artifacts", text: $query.text)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("pines.artifacts.search")
-            if !query.text.isEmpty {
-                Button {
-                    query.text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(theme.colors.tertiaryText)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, theme.spacing.medium)
-        .frame(minHeight: 46)
-        .background(theme.colors.controlFill, in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
-                .stroke(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
-        }
-    }
-
-    private var scopeMenu: some View {
-        Menu {
-            ForEach(ArtifactsAssetKindFilter.allCases) { category in
-                Button {
-                    query.category = category
-                } label: {
-                    Label(category.deskTitle, systemImage: query.category == category ? "checkmark" : category.systemImage)
-                }
-            }
-        } label: {
-            Label(query.category.deskTitle, systemImage: query.category.systemImage)
-                .lineLimit(1)
-        }
-        .pinesButtonStyle(.secondary)
-        .accessibilityLabel("Artifact scope, \(query.category.deskTitle)")
-        .accessibilityIdentifier("pines.artifacts.scope")
-    }
-
-    private var refineButton: some View {
-        Button {
-            showsFilters = true
-        } label: {
-            Label(query.hasSheetFilters ? "Refined" : "Refine", systemImage: "line.3.horizontal.decrease")
-        }
-        .pinesButtonStyle(query.hasSheetFilters ? .primary : .secondary)
-        .accessibilityIdentifier("pines.artifacts.library.filter")
-    }
-
-    private var newArtifactButton: some View {
-        Button(action: startNew) {
-            Label("New", systemImage: "plus")
-        }
-        .pinesButtonStyle(.primary)
-        .keyboardShortcut("n", modifiers: .command)
-        .accessibilityLabel("New artifact")
-        .accessibilityIdentifier("pines.artifacts.new")
-    }
-
     @ViewBuilder
-    private var workQueue: some View {
-        if !activeItems.isEmpty || !activeResearchThreads.isEmpty {
-            VStack(alignment: .leading, spacing: theme.spacing.small) {
-                HStack(spacing: theme.spacing.xsmall) {
-                    Text("In progress")
-                        .font(theme.typography.headline)
-                        .foregroundStyle(theme.colors.primaryText)
-                    Text("\(activeItems.count + activeResearchThreads.count)")
-                        .font(theme.typography.caption.weight(.semibold))
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .padding(.horizontal, theme.spacing.xsmall)
-                        .padding(.vertical, theme.spacing.xxsmall)
-                        .background(theme.colors.controlFill, in: Capsule())
-                }
-
-                if dynamicTypeSize.isAccessibilitySize {
-                    LazyVStack(spacing: theme.spacing.small) {
-                        workQueueRows(fixedWidth: false)
-                    }
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: theme.spacing.small) {
-                            workQueueRows(fixedWidth: true)
+    private var activityStrip: some View {
+        if activeCount > 0 {
+            Menu {
+                Section("Running now") {
+                    ForEach(activeResearchThreads) { thread in
+                        Button {
+                            openResearch(thread.id)
+                        } label: {
+                            Label(
+                                "\(thread.title) — \(thread.statusText)",
+                                systemImage: "doc.text.magnifyingglass"
+                            )
                         }
                     }
-                    .pinesExpressiveHorizontalScrollHaptics()
-                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    ForEach(activeItems) { item in
+                        Button {
+                            openArtifact(item.id)
+                        } label: {
+                            Label(
+                                "\(item.title) — \(item.operationState.title)",
+                                systemImage: item.contentKind.systemImage
+                            )
+                        }
+                    }
+                }
+            } label: {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: theme.spacing.small) {
+                        activityLead
+                        Spacer(minLength: theme.spacing.small)
+                        Text(activitySummary)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(theme.typography.caption.weight(.semibold))
+                            .foregroundStyle(theme.colors.tertiaryText)
+                    }
+
+                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                        activityLead
+                        Text(activitySummary)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
+            .pinesBareButtonStyle()
+            .padding(.vertical, theme.spacing.xsmall)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .bottom) { PinesDivider() }
+            .accessibilityLabel("\(activeCount) running. \(activitySummary)")
+            .accessibilityIdentifier("pines.artifacts.activity")
         }
     }
 
-    @ViewBuilder
-    private func workQueueRows(fixedWidth: Bool) -> some View {
-        ForEach(activeResearchThreads) { thread in
-            ArtifactsActivityRow(
-                title: thread.title,
-                detail: "Research · \(thread.providerKind.pinesLifecycleTitle)",
-                status: thread.statusText,
-                systemImage: "doc.text.magnifyingglass"
-            ) {
-                openResearch(thread.id)
-            }
-            .frame(width: fixedWidth ? 300 : nil)
-            .frame(maxWidth: fixedWidth ? nil : .infinity, alignment: .leading)
+    private var activityLead: some View {
+        HStack(spacing: theme.spacing.xsmall) {
+            PinesStatusIndicator(color: theme.colors.accent, isActive: true, size: 8)
+                .frame(width: 16, height: 16)
+            Text("\(activeCount) running")
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.accent)
         }
-
-        ForEach(activeItems) { item in
-            ArtifactsActivityRow(
-                title: item.title,
-                detail: "\(item.contentKind.title) · \(item.providerName)",
-                status: item.operationState.title,
-                systemImage: item.contentKind.systemImage
-            ) {
-                openArtifact(item.id)
-            }
-            .frame(width: fixedWidth ? 300 : nil)
-            .frame(maxWidth: fixedWidth ? nil : .infinity, alignment: .leading)
-        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
-    private var resultsHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: theme.spacing.small) {
-            Text(query.category == .all ? "Recent work" : query.category.title)
-                .font(theme.typography.title.weight(.semibold))
+    private var activitySummary: String {
+        if let thread = activeResearchThreads.first {
+            return "\(thread.title) · \(thread.statusText)"
+        }
+        if let item = activeItems.first {
+            return "\(item.title) · \(item.operationState.title)"
+        }
+        return "Open running work"
+    }
+
+    private var collectionHeader: some View {
+        HStack(alignment: .center, spacing: theme.spacing.xsmall) {
+            Text(query.category == .all ? "All artifacts" : query.category.title)
+                .font(theme.typography.headline)
                 .foregroundStyle(theme.colors.primaryText)
             Text("\(completedItems.count)")
                 .font(theme.typography.caption.weight(.semibold))
                 .foregroundStyle(theme.colors.tertiaryText)
                 .monospacedDigit()
             Spacer(minLength: 0)
+
+            if query.hasActiveFilters {
+                Button("Clear") {
+                    query.resetFilters()
+                }
+                .font(theme.typography.caption.weight(.semibold))
+                .pinesBareButtonStyle()
+                .foregroundStyle(theme.colors.accent)
+                .accessibilityLabel("Clear artifact filters")
+            }
         }
     }
 
@@ -723,20 +570,15 @@ private struct ArtifactsLibraryView: View {
                     query.text = ""
                     query.resetFilters()
                 },
-                create: startNew,
+                create: { createArtifact(.image) },
                 research: { openResearch(nil) },
                 connectProvider: openProviderSettings
             )
-        } else if usesGrid {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 260, maximum: 360), spacing: theme.spacing.medium)],
-                alignment: .leading,
-                spacing: theme.spacing.medium
-            ) {
+        } else if usesAccessibilityList {
+            LazyVStack(spacing: 0) {
                 ForEach(completedItems) { item in
-                    ArtifactDeskTile(
+                    ArtifactLibraryRow(
                         item: item,
-                        isSelected: selectedArtifactID == item.id,
                         open: { openArtifact(item.id) },
                         importToVault: { Task { await importToVault(item.artifact) } },
                         remix: { remix(item.id) },
@@ -745,11 +587,14 @@ private struct ArtifactsLibraryView: View {
                 }
             }
         } else {
-            LazyVStack(spacing: theme.spacing.small) {
+            LazyVGrid(
+                columns: galleryColumns,
+                alignment: .leading,
+                spacing: theme.spacing.large
+            ) {
                 ForEach(completedItems) { item in
-                    ArtifactLibraryRow(
+                    ArtifactGalleryTile(
                         item: item,
-                        isSelected: selectedArtifactID == item.id,
                         open: { openArtifact(item.id) },
                         importToVault: { Task { await importToVault(item.artifact) } },
                         remix: { remix(item.id) },
@@ -826,165 +671,53 @@ private struct ArtifactsLibraryView: View {
     }
 }
 
-private struct ArtifactsLibraryFilterSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var query: ArtifactsLibraryQuery
-    let providers: [CloudProviderConfiguration]
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Provider") {
-                    Picker("Provider", selection: $query.providerScope) {
-                        Text("All providers").tag(ArtifactsProviderScope.all)
-                        ForEach(providers) { provider in
-                            Text(provider.displayName).tag(ArtifactsProviderScope.provider(provider.id))
-                        }
-                    }
-                }
-
-                Section("Sort") {
-                    Picker("Sort", selection: $query.sort) {
-                        ForEach(ArtifactsSort.allCases) { sort in
-                            Text(sort.title).tag(sort)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
-                }
-
-                if query.hasActiveFilters {
-                    Section {
-                        Button("Reset filters", role: .destructive) {
-                            query.resetFilters()
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Filter Artifacts")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-    }
-}
-
-private struct ArtifactsActivityRow: View {
-    @Environment(\.pinesTheme) private var theme
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    let title: String
-    let detail: String
-    let status: String
-    let systemImage: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: theme.spacing.small) {
-                activityIndicator
-                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-                    activityLabels
-                    HStack(spacing: theme.spacing.xsmall) {
-                        statusLabel
-                        Spacer(minLength: theme.spacing.small)
-                        disclosureIndicator
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .buttonStyle(.plain)
-        .contentShape(Rectangle())
-        .pinesSurface(.inset, padding: theme.spacing.small)
-    }
-
-    private var activityIndicator: some View {
-        PinesStatusIndicator(color: theme.colors.accent, isActive: true, size: 9)
-            .frame(width: 24, height: 24)
-    }
-
-    private var activityLabels: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-            Text(title)
-                .font(theme.typography.callout.weight(.semibold))
-                .foregroundStyle(theme.colors.primaryText)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(detail)
-                .font(theme.typography.caption)
-                .foregroundStyle(theme.colors.secondaryText)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var statusLabel: some View {
-        Text(status)
-            .font(theme.typography.caption.weight(.semibold))
-            .foregroundStyle(theme.colors.accent)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var disclosureIndicator: some View {
-        Image(systemName: "chevron.right")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(theme.colors.tertiaryText)
-    }
-}
-
 private struct ArtifactLibraryRow: View {
     @Environment(\.pinesTheme) private var theme
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let item: ArtifactLibraryItem
-    let isSelected: Bool
     let open: () -> Void
     let importToVault: () -> Void
     let remix: () -> Void
     let remove: () -> Void
 
     var body: some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: theme.spacing.small) {
-                    Button(action: open) {
-                        VStack(alignment: .leading, spacing: theme.spacing.small) {
-                            ArtifactsArtifactThumbnail(artifact: item.artifact)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 156)
-                            labels
-                        }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: theme.spacing.medium) {
+                Button(action: open) {
+                    HStack(alignment: .top, spacing: theme.spacing.medium) {
+                        ArtifactsArtifactThumbnail(artifact: item.artifact)
+                            .frame(width: 104, height: 78)
+                        labels
+                        Spacer(minLength: theme.spacing.small)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(rowAccessibilityLabel)
+                    .contentShape(Rectangle())
+                }
+                .pinesBareButtonStyle()
+                .accessibilityLabel(rowAccessibilityLabel)
+                overflowMenu
+            }
 
-                    HStack {
-                        Spacer(minLength: 0)
-                        overflowMenu
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                Button(action: open) {
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        ArtifactsArtifactThumbnail(artifact: item.artifact)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 132)
+                        labels
                     }
                 }
-            } else {
-                HStack(alignment: .center, spacing: theme.spacing.medium) {
-                    Button(action: open) {
-                        HStack(alignment: .center, spacing: theme.spacing.medium) {
-                            ArtifactsArtifactThumbnail(artifact: item.artifact)
-                                .frame(width: 92, height: 72)
-                            labels
-                            Spacer(minLength: theme.spacing.small)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(rowAccessibilityLabel)
-
+                .pinesBareButtonStyle()
+                .accessibilityLabel(rowAccessibilityLabel)
+                HStack {
+                    Spacer(minLength: 0)
                     overflowMenu
                 }
             }
         }
-        .padding(theme.spacing.small)
+        .padding(.vertical, theme.spacing.medium)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .pinesSurface(isSelected ? .selected : .panel, padding: 0)
+        .overlay(alignment: .bottom) {
+            PinesDivider()
+        }
     }
 
     private var rowAccessibilityLabel: String {
@@ -996,14 +729,13 @@ private struct ArtifactLibraryRow: View {
             Text(item.title)
                 .font(theme.typography.headline)
                 .foregroundStyle(theme.colors.primaryText)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let excerpt = item.excerpt, item.contentKind == .report {
                 Text(excerpt)
                     .font(theme.typography.callout)
                     .foregroundStyle(theme.colors.secondaryText)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
+                    .lineLimit(3)
             }
 
             Text("\(item.contentKind.title) · \(item.providerName) · \(RelativeDateTimeFormatter.shortLabel(for: item.createdAt))")
@@ -1024,65 +756,59 @@ private struct ArtifactLibraryRow: View {
     }
 }
 
-private struct ArtifactDeskTile: View {
+private struct ArtifactGalleryTile: View {
     @Environment(\.pinesTheme) private var theme
     let item: ArtifactLibraryItem
-    let isSelected: Bool
     let open: () -> Void
     let importToVault: () -> Void
     let remix: () -> Void
     let remove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
             Button(action: open) {
-                thumbnail
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open \(item.title)")
+                VStack(alignment: .leading, spacing: theme.spacing.small) {
+                    thumbnail
 
-            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                Button(action: open) {
                     Text(item.title)
-                        .font(theme.typography.callout.weight(.semibold))
+                        .font(theme.typography.headline)
                         .foregroundStyle(theme.colors.primaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
-                        .contentShape(Rectangle())
+                        .frame(minHeight: 38, alignment: .topLeading)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open \(item.title)")
+                .contentShape(Rectangle())
+            }
+            .pinesBareButtonStyle()
+            .accessibilityLabel("Open \(item.title), \(item.contentKind.title), \(item.providerName)")
 
-                HStack(alignment: .center, spacing: theme.spacing.xxsmall) {
-                    Button(action: open) {
-                        Text("\(item.contentKind.title) · \(item.providerName) · \(RelativeDateTimeFormatter.shortLabel(for: item.createdAt))")
-                            .font(theme.typography.caption)
-                            .foregroundStyle(theme.colors.secondaryText)
-                            .lineLimit(1)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Open \(item.title)")
+            HStack(alignment: .center, spacing: theme.spacing.xsmall) {
+                Image(systemName: item.contentKind.systemImage)
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .accessibilityHidden(true)
+                Text("\(item.providerName) · \(RelativeDateTimeFormatter.shortLabel(for: item.createdAt))")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(1)
 
-                    Spacer(minLength: 0)
-                    ArtifactOverflowMenu(
-                        item: item,
-                        open: open,
-                        importToVault: importToVault,
-                        remix: remix,
-                        remove: remove
-                    )
-                }
+                Spacer(minLength: 0)
+                ArtifactOverflowMenu(
+                    item: item,
+                    open: open,
+                    importToVault: importToVault,
+                    remix: remix,
+                    remove: remove
+                )
             }
         }
-        .padding(theme.spacing.small)
-        .pinesSurface(isSelected ? .selected : .panel, padding: 0)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var thumbnail: some View {
         ArtifactsArtifactThumbnail(artifact: item.artifact)
             .frame(maxWidth: .infinity)
-            .frame(height: 200)
+            .aspectRatio(4.0 / 3.0, contentMode: .fit)
             .clipped()
     }
 }
@@ -1118,7 +844,7 @@ private struct ArtifactOverflowMenu: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .pinesBareButtonStyle()
         .accessibilityLabel("More actions for \(item.title)")
     }
 }
@@ -1129,6 +855,7 @@ private struct ArtifactsLoadingState: View {
     var body: some View {
         VStack(spacing: theme.spacing.medium) {
             ProgressView()
+                .pinesProgressTint()
             Text("Refreshing artifacts")
                 .font(theme.typography.callout.weight(.semibold))
                 .foregroundStyle(theme.colors.secondaryText)
@@ -1149,7 +876,7 @@ private struct ArtifactsLibraryEmptyState: View {
     var body: some View {
         VStack(spacing: theme.spacing.medium) {
             Image(systemName: hasQuery ? "magnifyingglass" : "rectangle.stack")
-                .font(.system(size: 32, weight: .semibold))
+                .font(theme.typography.title.weight(.semibold))
                 .foregroundStyle(theme.colors.accent)
                 .frame(width: 68, height: 68)
                 .background(theme.colors.accentSoft, in: Circle())
@@ -1220,7 +947,9 @@ private struct ArtifactsLibraryEmptyState: View {
     }
 }
 
-private struct ArtifactDetailView: View {
+private struct ArtifactQuickLookView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @Environment(\.openURL) private var openURL
@@ -1228,7 +957,6 @@ private struct ArtifactDetailView: View {
     @EnvironmentObject private var settingsState: PinesSettingsState
     @EnvironmentObject private var providerState: PinesProviderLifecycleState
     let artifact: ProviderArtifactRecord
-    let presentation: ArtifactDetailPresentation
     @Binding var pendingConfirmation: ArtifactsConfirmation?
     let open: (ArtifactsRoute) -> Void
 
@@ -1242,20 +970,29 @@ private struct ArtifactDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: presentation == .inspector ? theme.spacing.medium : theme.spacing.large) {
-                preview
-                titleBlock
-                primaryActions
+            VStack(alignment: .leading, spacing: theme.spacing.large) {
+                if usesWideLayout {
+                    HStack(alignment: .top, spacing: theme.spacing.xlarge) {
+                        preview
+                            .frame(maxWidth: 560)
+                        detailColumn
+                            .frame(maxWidth: 380, alignment: .topLeading)
+                    }
+                } else {
+                    preview
+                    detailColumn
+                }
+
                 if item.contentKind == .report, let text = reportText {
                     reportBody(text)
                 }
-                provenance
             }
-            .padding(presentation == .inspector ? theme.spacing.medium : theme.spacing.large)
-            .frame(maxWidth: presentation == .inspector ? 520 : 900, alignment: .leading)
+            .padding(horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large)
+            .padding(.bottom, theme.spacing.xlarge)
+            .frame(maxWidth: 980, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle(presentation == .inspector ? "Details" : item.contentKind.title)
+        .navigationTitle(item.contentKind.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -1297,31 +1034,42 @@ private struct ArtifactDetailView: View {
             }
         }
         .pinesAppBackground()
+        .pinesNavigationChrome()
         .accessibilityIdentifier("pines.artifacts.detail")
+    }
+
+    private var usesWideLayout: Bool {
+        horizontalSizeClass != .compact && !dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var detailColumn: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.large) {
+            titleBlock
+            primaryActions
+            provenance
+        }
     }
 
     @ViewBuilder
     private var preview: some View {
         if item.contentKind == .report {
             ArtifactsArtifactThumbnail(artifact: artifact)
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: presentation == .inspector ? 140 : 180,
-                    maxHeight: presentation == .inspector ? 190 : 240
-                )
+                .frame(maxWidth: .infinity)
+                .aspectRatio(4.0 / 3.0, contentMode: .fit)
         } else {
             ArtifactsArtifactPreviewSurface(
                 artifact: artifact,
-                maxHeight: presentation == .inspector ? 260 : 560
+                maxHeight: usesWideLayout ? 420 : 300
             )
-                .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity)
+            .aspectRatio(item.contentKind == .image ? 4.0 / 3.0 : 16.0 / 9.0, contentMode: .fit)
         }
     }
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: theme.spacing.small) {
             Text(item.title)
-                .font(presentation == .inspector ? theme.typography.title.weight(.semibold) : theme.typography.hero)
+                .font(theme.typography.title.weight(.semibold))
                 .foregroundStyle(theme.colors.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -1400,32 +1148,36 @@ private struct ArtifactDetailView: View {
 
     private func reportBody(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: theme.spacing.medium) {
+            PinesDivider()
             Text("Report")
                 .font(theme.typography.title.weight(.semibold))
             MarkdownMessageView(messageID: UUID(), content: text, isStreaming: false)
         }
         .textSelection(.enabled)
-        .pinesSurface(.panel, padding: theme.spacing.large)
     }
 
     private var provenance: some View {
-        DisclosureGroup {
-            VStack(spacing: theme.spacing.small) {
-                ArtifactMetadataRow(title: "Provider", value: item.providerName, systemImage: "cloud")
-                ArtifactMetadataRow(title: "Kind", value: artifact.kind.readableArtifactKind, systemImage: "tag")
-                ArtifactMetadataRow(title: "Created", value: item.createdAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
-                ArtifactMetadataRow(title: "Availability", value: item.availability.title, systemImage: item.availability.systemImage)
-                ArtifactMetadataRow(title: "Size", value: artifact.byteCount.map(providerByteCountLabel) ?? "Unknown", systemImage: "internaldrive")
-                if let id = artifact.providerFileID ?? artifact.responseID {
-                    ArtifactMetadataRow(title: "Provider ID", value: id, systemImage: "number")
+        VStack(spacing: theme.spacing.small) {
+            PinesDivider()
+            DisclosureGroup {
+                VStack(spacing: theme.spacing.small) {
+                    ArtifactMetadataRow(title: "Provider", value: item.providerName, systemImage: "cloud")
+                    ArtifactMetadataRow(title: "Kind", value: artifact.kind.readableArtifactKind, systemImage: "tag")
+                    ArtifactMetadataRow(title: "Created", value: item.createdAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
+                    ArtifactMetadataRow(title: "Availability", value: item.availability.title, systemImage: item.availability.systemImage)
+                    ArtifactMetadataRow(title: "Size", value: artifact.byteCount.map(providerByteCountLabel) ?? "Unknown", systemImage: "internaldrive")
+                    if let id = artifact.providerFileID ?? artifact.responseID {
+                        ArtifactMetadataRow(title: "Provider ID", value: id, systemImage: "number")
+                    }
                 }
+                .padding(.top, theme.spacing.small)
+            } label: {
+                Label("Provenance", systemImage: "info.circle")
+                    .font(theme.typography.headline)
             }
-            .padding(.top, theme.spacing.small)
-        } label: {
-            Label("Provenance", systemImage: "info.circle")
-                .font(theme.typography.headline)
+            .tint(theme.colors.accent)
+            .foregroundStyle(theme.colors.primaryText)
         }
-        .pinesSurface(.inset, padding: theme.spacing.medium)
     }
 
     @MainActor
@@ -1475,6 +1227,8 @@ private struct ArtifactsMissingRecordView: View {
 }
 
 private struct ArtifactCreateView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
@@ -1542,28 +1296,68 @@ private struct ArtifactCreateView: View {
             && !isCreating
     }
 
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: theme.spacing.large) {
-                if providers.isEmpty {
-                    noProviderState
-                } else {
-                    creationContext
-                    if let selectedReference {
-                        referenceCard(selectedReference)
-                    }
-                    composer
-                    if !outputs.isEmpty {
-                        outputSection
-                    }
-                }
-            }
-            .padding(theme.spacing.large)
-            .frame(maxWidth: 820, alignment: .leading)
-            .frame(maxWidth: .infinity)
+    private var selectedModelTitle: String {
+        modelOptions.first(where: { $0.id == modelID })?.title ?? "Choose a model"
+    }
+
+    private var imageOutputSummary: String {
+        "\(imageSizeTitle) · \(imageQualityTitle)"
+    }
+
+    private var imageSizeTitle: String {
+        switch imageSize {
+        case "1024x1024": "Square"
+        case "1536x1024": "Landscape"
+        case "1024x1536": "Portrait"
+        default: "Auto size"
         }
-        .navigationTitle(selectedReference == nil ? "New \(mediaKind.title)" : "Remix Image")
+    }
+
+    private var imageSizeSystemImage: String {
+        switch imageSize {
+        case "1024x1024": "square"
+        case "1536x1024": "rectangle"
+        case "1024x1536": "rectangle.portrait"
+        default: "aspectratio"
+        }
+    }
+
+    private var imageQualityTitle: String {
+        imageQuality == "auto" ? "Auto quality" : imageQuality.capitalized
+    }
+
+    private var imageCanvasAspectRatio: CGFloat {
+        switch imageSize {
+        case "1024x1024": 1
+        case "1536x1024": 1.5
+        case "1024x1536": 2.0 / 3.0
+        default: 4.0 / 3.0
+        }
+    }
+
+    private var studioOutputColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: horizontalSizeClass == .compact ? 240 : 260, maximum: 360), spacing: theme.spacing.medium)]
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            theme.colors.appBackground
+                .ignoresSafeArea()
+
+            creationContent
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if mediaKind == .image, !providers.isEmpty {
+                imagePromptDock
+            }
+        }
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                creationMenu
+            }
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             if let error = providerState.providerLifecycleError {
                 PinesGlobalErrorBanner(message: error) {
@@ -1576,6 +1370,8 @@ private struct ArtifactCreateView: View {
         .sheet(isPresented: $showsSettings) {
             createSettings
                 .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(theme.colors.sheetBackground)
         }
         .onAppear {
             if providerID == nil { providerID = providers.first?.id }
@@ -1583,14 +1379,66 @@ private struct ArtifactCreateView: View {
         }
         .onChange(of: providerID) { _, _ in normalizeSelectedModel() }
         .onChange(of: mediaKind) { _, _ in normalizeSelectedModel() }
-        .pinesAppBackground()
-        .accessibilityIdentifier("pines.artifacts.create")
+        .pinesNavigationChrome()
+    }
+
+    @ViewBuilder
+    private var creationContent: some View {
+        if providers.isEmpty {
+            noProviderState
+                .padding(theme.spacing.large)
+        } else if mediaKind == .image {
+            imageStudio
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: theme.spacing.large) {
+                    configurationSummary
+                    composer
+                    if !outputs.isEmpty {
+                        outputSection
+                    }
+                }
+                .padding(theme.spacing.large)
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var imageStudio: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: theme.spacing.large) {
+                studioConfigurationBar
+
+                if let selectedReference {
+                    referenceCanvas(selectedReference)
+                }
+
+                if outputs.isEmpty {
+                    blankImageCanvas
+                } else {
+                    outputSection
+                }
+            }
+            .padding(.horizontal, horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large)
+            .padding(.top, theme.spacing.small)
+            .padding(.bottom, theme.spacing.large)
+            .frame(maxWidth: 920, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .accessibilityIdentifier("pines.artifacts.image-studio")
+    }
+
+    private var navigationTitle: String {
+        if selectedReference != nil { return "Remix Image" }
+        return mediaKind == .image ? "Image Studio" : "New \(mediaKind.title)"
     }
 
     private var noProviderState: some View {
         VStack(spacing: theme.spacing.medium) {
             Image(systemName: "cloud.badge.plus")
-                .font(.system(size: 32, weight: .semibold))
+                .font(theme.typography.title.weight(.semibold))
                 .foregroundStyle(theme.colors.accent)
             Text("Connect a provider")
                 .font(theme.typography.title)
@@ -1604,112 +1452,281 @@ private struct ArtifactCreateView: View {
                 Label("Provider setup", systemImage: "cloud")
             }
             .pinesButtonStyle(.primary)
+            .accessibilityIdentifier("pines.artifacts.provider-setup")
         }
         .frame(maxWidth: .infinity, minHeight: 360)
     }
 
-    private var creationContext: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: theme.spacing.medium) {
-                kindMenu
-                Divider()
-                configurationButton
-            }
-            VStack(alignment: .leading, spacing: theme.spacing.small) {
-                kindMenu
-                Divider()
-                configurationButton
-            }
-        }
-        .pinesSurface(.inset, padding: theme.spacing.medium)
-    }
-
-    private var kindMenu: some View {
+    private var creationMenu: some View {
         Menu {
-            ForEach(ArtifactsMediaKind.allCases) { kind in
-                Button {
-                    mediaKind = kind
-                } label: {
-                    Label(kind.title, systemImage: mediaKind == kind ? "checkmark" : kind.systemImage)
+            if selectedReference == nil {
+                Section("Output") {
+                    ForEach(ArtifactsMediaKind.allCases) { kind in
+                        Button {
+                            mediaKind = kind
+                        } label: {
+                            Label(kind.title, systemImage: mediaKind == kind ? "checkmark" : kind.systemImage)
+                        }
+                    }
                 }
             }
+
+            Button("Provider & options", systemImage: "slider.horizontal.3") {
+                showsSettings = true
+            }
+            .accessibilityIdentifier("pines.artifacts.create.configuration")
         } label: {
-            HStack(spacing: theme.spacing.small) {
-                Image(systemName: mediaKind.systemImage)
-                    .foregroundStyle(theme.colors.accent)
-                    .frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                    Text("Output")
-                        .font(theme.typography.caption)
-                        .foregroundStyle(theme.colors.secondaryText)
-                    Text(mediaKind.title)
-                        .font(theme.typography.callout.weight(.semibold))
-                        .foregroundStyle(theme.colors.primaryText)
-                }
-                Image(systemName: "chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.tertiaryText)
-            }
-            .contentShape(Rectangle())
+            Image(systemName: "slider.horizontal.3")
         }
-        .buttonStyle(.plain)
-        .disabled(selectedReference != nil)
-        .accessibilityLabel("Output type, \(mediaKind.title)")
+        .accessibilityLabel("\(mediaKind.title) creation options")
         .accessibilityIdentifier("pines.artifacts.create.type")
     }
 
-    private var configurationButton: some View {
+    private var studioConfigurationBar: some View {
         Button {
             showsSettings = true
         } label: {
             HStack(spacing: theme.spacing.small) {
-                Image(systemName: "slider.horizontal.3")
-                    .foregroundStyle(theme.colors.accent)
-                    .frame(width: 28, height: 28)
-                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                    Text(provider?.displayName ?? "Choose provider")
-                        .font(theme.typography.callout.weight(.semibold))
-                        .foregroundStyle(theme.colors.primaryText)
-                    Text(modelOptions.first(where: { $0.id == modelID })?.title ?? "Choose a model")
-                        .font(theme.typography.caption)
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .lineLimit(1)
-                }
+                studioEngineLabel
                 Spacer(minLength: theme.spacing.small)
-                Text("Adjust")
+                Image(systemName: "chevron.right")
                     .font(theme.typography.caption.weight(.semibold))
-                    .foregroundStyle(theme.colors.accent)
+                    .foregroundStyle(theme.colors.tertiaryText)
             }
+            .padding(.vertical, theme.spacing.xsmall)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityIdentifier("pines.artifacts.create.configuration")
+        .pinesBareButtonStyle()
+        .overlay(alignment: .bottom) { PinesDivider() }
+        .accessibilityLabel("Image settings, \(provider?.displayName ?? "choose provider"), \(selectedModelTitle), \(imageOutputSummary)")
+        .accessibilityIdentifier("pines.artifacts.image-studio.configuration")
     }
 
-    private func referenceCard(_ artifact: ProviderArtifactRecord) -> some View {
-        HStack(spacing: theme.spacing.medium) {
-            ArtifactsArtifactThumbnail(artifact: artifact)
-                .frame(width: 84, height: 72)
-            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                Text("Reference image")
+    private var studioEngineLabel: some View {
+        HStack(spacing: theme.spacing.small) {
+            Image(systemName: "wand.and.stars")
+                .foregroundStyle(theme.colors.accent)
+                .frame(width: 20, height: 20)
+            Text(provider?.displayName ?? "Choose provider")
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.primaryText)
+            Text("·")
+                .foregroundStyle(theme.colors.tertiaryText)
+            Text(selectedModelTitle)
+                .font(theme.typography.caption)
+                .foregroundStyle(theme.colors.secondaryText)
+                .lineLimit(1)
+        }
+    }
+
+    private var blankImageCanvas: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            theme.colors.accentSoft,
+                            theme.colors.secondaryBackground,
+                            theme.colors.infoSoft,
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
+                .fill(theme.colors.accent.opacity(0.08))
+                .frame(width: 190, height: 140)
+                .rotationEffect(.degrees(-12))
+                .offset(x: -80, y: 35)
+                .accessibilityHidden(true)
+
+            Circle()
+                .fill(theme.colors.info.opacity(0.08))
+                .frame(width: 180, height: 180)
+                .offset(x: 120, y: -70)
+                .accessibilityHidden(true)
+
+            VStack(spacing: theme.spacing.medium) {
+                Image(systemName: "photo.badge.plus")
+                    .font(theme.typography.title.weight(.semibold))
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 64, height: 64)
+                    .background(theme.colors.chromeBackground, in: Circle())
+
+                VStack(spacing: theme.spacing.xsmall) {
+                    Text("Your next image starts with a sentence")
+                        .font(theme.typography.title.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                        .multilineTextAlignment(.center)
+                    Text("Describe the subject, composition, light, and feeling in the prompt below.")
+                        .font(theme.typography.callout)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: 440)
+            }
+            .padding(theme.spacing.large)
+        }
+        .aspectRatio(imageCanvasAspectRatio, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: horizontalSizeClass == .compact ? 440 : 500)
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous)
+                .strokeBorder(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("pines.artifacts.image-studio.canvas")
+    }
+
+    private func referenceCanvas(_ artifact: ProviderArtifactRecord) -> some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            HStack {
+                Label("Reference", systemImage: "photo.on.rectangle")
                     .font(theme.typography.caption.weight(.semibold))
                     .foregroundStyle(theme.colors.accent)
+                Spacer(minLength: theme.spacing.small)
                 Text(artifact.artifactDisplayTitle)
-                    .font(theme.typography.callout.weight(.semibold))
-                    .foregroundStyle(theme.colors.primaryText)
-                    .lineLimit(2)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(1)
             }
-            Spacer(minLength: 0)
+
+            ArtifactsArtifactThumbnail(artifact: artifact)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(imageCanvasAspectRatio, contentMode: .fit)
+                .frame(maxHeight: 460)
+                .clipShape(RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
         }
-        .pinesSurface(.panel, padding: theme.spacing.small)
+        .accessibilityIdentifier("pines.artifacts.image-studio.reference")
+    }
+
+    private var imagePromptDock: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            TextField(promptPlaceholder, text: $prompt, axis: .vertical)
+                .lineLimit(1...6)
+                .textFieldStyle(.plain)
+                .focused($promptFocused)
+                .font(theme.typography.body)
+                .foregroundStyle(theme.colors.primaryText)
+                .padding(.vertical, theme.spacing.xsmall)
+                .submitLabel(.go)
+                .onSubmit {
+                    guard canCreate else { return }
+                    Task { await createMedia() }
+                }
+                .accessibilityIdentifier("pines.artifacts.create.prompt")
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: theme.spacing.xsmall) {
+                    imageSizeMenu
+                    imageQualityMenu
+                    Spacer(minLength: theme.spacing.small)
+                    imageGenerateButton(fillWidth: false, showsLabel: false)
+                }
+
+                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                    HStack(spacing: theme.spacing.xsmall) {
+                        imageSizeMenu
+                        imageQualityMenu
+                        Spacer(minLength: 0)
+                    }
+                    imageGenerateButton(fillWidth: true, showsLabel: true)
+                }
+            }
+        }
+        .pinesSurface(.chrome, padding: theme.spacing.medium)
+        .frame(maxWidth: 780)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large)
+        .padding(.bottom, theme.spacing.xsmall)
+    }
+
+    private var imageSizeMenu: some View {
+        Menu {
+            Button("Automatic", systemImage: imageSize == "auto" ? "checkmark" : "aspectratio") { imageSize = "auto" }
+            Button("Square", systemImage: imageSize == "1024x1024" ? "checkmark" : "square") { imageSize = "1024x1024" }
+            Button("Landscape", systemImage: imageSize == "1536x1024" ? "checkmark" : "rectangle") { imageSize = "1536x1024" }
+            Button("Portrait", systemImage: imageSize == "1024x1536" ? "checkmark" : "rectangle.portrait") { imageSize = "1024x1536" }
+        } label: {
+            Label(imageSizeTitle, systemImage: imageSizeSystemImage)
+        }
+        .pinesButtonStyle(.ghost)
+        .accessibilityLabel("Image size, \(imageSizeTitle)")
+        .accessibilityIdentifier("pines.artifacts.image-studio.size")
+    }
+
+    private var imageQualityMenu: some View {
+        Menu {
+            ForEach(["auto", "low", "medium", "high"], id: \.self) { value in
+                Button {
+                    imageQuality = value
+                } label: {
+                    Label(value == "auto" ? "Automatic" : value.capitalized, systemImage: imageQuality == value ? "checkmark" : "circle")
+                }
+            }
+        } label: {
+            Label(imageQualityTitle, systemImage: "dial.medium")
+        }
+        .pinesButtonStyle(.ghost)
+        .accessibilityLabel("Image quality, \(imageQualityTitle)")
+        .accessibilityIdentifier("pines.artifacts.image-studio.quality")
+    }
+
+    private func imageGenerateButton(fillWidth: Bool, showsLabel: Bool) -> some View {
+        Button {
+            Task { await createMedia() }
+        } label: {
+            if showsLabel {
+                Label(isCreating ? "Creating…" : "Generate", systemImage: isCreating ? "hourglass" : "sparkles")
+            } else {
+                Image(systemName: isCreating ? "hourglass" : "sparkles")
+                    .frame(width: 20, height: 20)
+            }
+        }
+        .disabled(!canCreate)
+        .pinesButtonStyle(canCreate ? .primary : .secondary, fillWidth: fillWidth)
+        .accessibilityLabel(isCreating ? "Creating image" : "Generate image")
+        .accessibilityIdentifier("pines.artifacts.create.submit")
+    }
+
+    private var configurationSummary: some View {
+        Button {
+            showsSettings = true
+        } label: {
+            HStack(spacing: theme.spacing.small) {
+                Image(systemName: "cloud")
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 20, height: 20)
+                Text(provider?.displayName ?? "Choose provider")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                Text("·")
+                    .foregroundStyle(theme.colors.tertiaryText)
+                Text(selectedModelTitle)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(1)
+                Spacer(minLength: theme.spacing.small)
+                Image(systemName: "chevron.right")
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(theme.colors.tertiaryText)
+            }
+            .padding(.vertical, theme.spacing.xsmall)
+            .contentShape(Rectangle())
+        }
+        .pinesBareButtonStyle()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) { PinesDivider() }
+        .accessibilityIdentifier("pines.artifacts.create.configuration")
     }
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: theme.spacing.medium) {
             VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
                 Text(promptTitle)
-                    .font(theme.typography.headline)
+                    .font(theme.typography.title.weight(.semibold))
                     .foregroundStyle(theme.colors.primaryText)
                 TextField(promptPlaceholder, text: $prompt, axis: .vertical)
                     .lineLimit(4...10)
@@ -1720,7 +1737,6 @@ private struct ArtifactCreateView: View {
 
             createButton
         }
-        .pinesSurface(.panel, padding: theme.spacing.large)
     }
 
     private var createButton: some View {
@@ -1735,116 +1751,414 @@ private struct ArtifactCreateView: View {
     }
 
     private var outputSection: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
-            Text("This session")
-                .font(theme.typography.title)
-            ForEach(outputs) { artifact in
-                let item = ArtifactLibraryItem(
-                    artifact: artifact,
-                    providers: providers,
-                    researchRuns: providerState.providerResearchRuns
-                )
-                Button {
-                    open(.artifact(artifact.id))
-                } label: {
-                    HStack(spacing: theme.spacing.medium) {
-                        ArtifactsArtifactThumbnail(artifact: artifact)
-                            .frame(width: 88, height: 68)
-                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                            Text(item.title)
-                                .font(theme.typography.callout.weight(.semibold))
-                                .foregroundStyle(theme.colors.primaryText)
-                                .lineLimit(2)
-                            Text(item.operationState.title)
-                                .font(theme.typography.caption)
-                                .foregroundStyle(item.operationState.tone.color(in: theme))
-                        }
-                        Spacer()
-                        if item.isActive {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "chevron.right")
-                                .foregroundStyle(theme.colors.tertiaryText)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    if item.isActive {
-                        Button(role: .destructive) {
-                            pendingConfirmation = .cancelMediaOperation(artifact)
-                        } label: {
-                            Label("Cancel operation", systemImage: "xmark")
-                        }
-                    }
-                    Button(role: .destructive) {
-                        pendingConfirmation = .deleteArtifactRecord(artifact)
-                    } label: {
-                        Label("Remove from Pines", systemImage: "trash")
+        VStack(alignment: .leading, spacing: theme.spacing.medium) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("This session")
+                    .font(theme.typography.title)
+                    .foregroundStyle(theme.colors.primaryText)
+                Spacer(minLength: theme.spacing.small)
+                Text("\(outputs.count) \(outputs.count == 1 ? "image" : "images")")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .monospacedDigit()
+            }
+
+            if mediaKind == .image {
+                LazyVGrid(columns: studioOutputColumns, alignment: .leading, spacing: theme.spacing.large) {
+                    ForEach(outputs) { artifact in
+                        imageSessionOutput(artifact)
                     }
                 }
-                .pinesSurface(.inset, padding: theme.spacing.small)
+            } else {
+                ForEach(outputs) { artifact in
+                    mediaSessionOutput(artifact)
+                }
             }
         }
     }
 
-    private var createSettings: some View {
-        NavigationStack {
-            Form {
-                Section("Provider") {
-                    Picker("Provider", selection: $providerID) {
-                        ForEach(providers) { provider in
-                            Text(provider.displayName).tag(Optional(provider.id))
-                        }
-                    }
-                    Picker("Model", selection: $modelID) {
-                        ForEach(modelOptions) { option in
-                            Text(option.title).tag(option.id)
-                        }
+    private func imageSessionOutput(_ artifact: ProviderArtifactRecord) -> some View {
+        let item = ArtifactLibraryItem(
+            artifact: artifact,
+            providers: providers,
+            researchRuns: providerState.providerResearchRuns
+        )
+        return Button {
+            open(.artifact(artifact.id))
+        } label: {
+            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                ZStack(alignment: .topTrailing) {
+                    ArtifactsArtifactThumbnail(artifact: artifact)
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
+
+                    if item.isActive {
+                        ProgressView()
+                            .pinesProgressTint()
+                            .padding(theme.spacing.small)
+                            .background(theme.colors.chromeBackground, in: Circle())
+                            .padding(theme.spacing.small)
                     }
                 }
 
-                if mediaKind == .image {
-                    Section("Image") {
-                        Picker("Quality", selection: $imageQuality) {
-                            Text("Automatic").tag("auto")
-                            Text("Low").tag("low")
-                            Text("Medium").tag("medium")
-                            Text("High").tag("high")
+                Text(item.title)
+                    .font(theme.typography.callout.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Text(item.operationState.title)
+                    .font(theme.typography.caption.weight(.medium))
+                    .foregroundStyle(item.operationState.tone.color(in: theme))
+            }
+            .contentShape(Rectangle())
+        }
+        .pinesBareButtonStyle()
+        .contextMenu { sessionOutputActions(artifact: artifact, item: item) }
+        .accessibilityLabel("Open \(item.title), \(item.operationState.title)")
+    }
+
+    private func mediaSessionOutput(_ artifact: ProviderArtifactRecord) -> some View {
+        let item = ArtifactLibraryItem(
+            artifact: artifact,
+            providers: providers,
+            researchRuns: providerState.providerResearchRuns
+        )
+        return Button {
+            open(.artifact(artifact.id))
+        } label: {
+            HStack(spacing: theme.spacing.medium) {
+                ArtifactsArtifactThumbnail(artifact: artifact)
+                    .frame(width: 88, height: 68)
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(item.title)
+                        .font(theme.typography.callout.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                        .lineLimit(2)
+                    Text(item.operationState.title)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(item.operationState.tone.color(in: theme))
+                }
+                Spacer()
+                if item.isActive {
+                    ProgressView()
+                        .pinesProgressTint()
+                } else {
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(theme.colors.tertiaryText)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .pinesBareButtonStyle()
+        .contextMenu { sessionOutputActions(artifact: artifact, item: item) }
+        .pinesSurface(.inset, padding: theme.spacing.small)
+    }
+
+    @ViewBuilder
+    private func sessionOutputActions(artifact: ProviderArtifactRecord, item: ArtifactLibraryItem) -> some View {
+        if item.isActive {
+            Button(role: .destructive) {
+                pendingConfirmation = .cancelMediaOperation(artifact)
+            } label: {
+                Label("Cancel operation", systemImage: "xmark")
+            }
+        }
+        Button(role: .destructive) {
+            pendingConfirmation = .deleteArtifactRecord(artifact)
+        } label: {
+            Label("Remove from Pines", systemImage: "trash")
+        }
+    }
+
+    @ViewBuilder
+    private var createSettings: some View {
+        if mediaKind == .image {
+            imageStudioSettings
+        } else {
+            mediaCreationSettings
+        }
+    }
+
+    private var imageStudioSettings: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: theme.spacing.large) {
+                    VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                        Text("Shape the output")
+                            .font(theme.typography.title.weight(.semibold))
+                            .foregroundStyle(theme.colors.primaryText)
+                        Text("Choose the engine, canvas, and finish. The prompt stays in the studio.")
+                            .font(theme.typography.callout)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        Label("Engine", systemImage: "wand.and.stars")
+                            .font(theme.typography.headline)
+                            .foregroundStyle(theme.colors.primaryText)
+                        VStack(spacing: 0) {
+                            HStack(spacing: theme.spacing.small) {
+                                Label("Provider", systemImage: "cloud")
+                                    .foregroundStyle(theme.colors.secondaryText)
+                                Spacer(minLength: theme.spacing.small)
+                                Picker("Provider", selection: $providerID) {
+                                    ForEach(providers) { provider in
+                                        Text(provider.displayName).tag(Optional(provider.id))
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                            }
+                            .padding(theme.spacing.medium)
+
+                            PinesDivider()
+
+                            HStack(spacing: theme.spacing.small) {
+                                Label("Model", systemImage: "cpu")
+                                    .foregroundStyle(theme.colors.secondaryText)
+                                Spacer(minLength: theme.spacing.small)
+                                Picker("Model", selection: $modelID) {
+                                    ForEach(modelOptions) { option in
+                                        Text(option.title).tag(option.id)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                            }
+                            .padding(theme.spacing.medium)
                         }
-                        Picker("Size", selection: $imageSize) {
-                            Text("Automatic").tag("auto")
-                            Text("Square").tag("1024x1024")
-                            Text("Landscape").tag("1536x1024")
-                            Text("Portrait").tag("1024x1536")
+                        .pinesSurface(.panel, padding: 0)
+                    }
+
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        Label("Canvas", systemImage: "aspectratio")
+                            .font(theme.typography.headline)
+                            .foregroundStyle(theme.colors.primaryText)
+                        LazyVGrid(columns: studioSettingsColumns, spacing: theme.spacing.small) {
+                            studioOptionButton("Automatic", detail: "Provider default", systemImage: "aspectratio", isSelected: imageSize == "auto") {
+                                imageSize = "auto"
+                            }
+                            studioOptionButton("Square", detail: "1:1", systemImage: "square", isSelected: imageSize == "1024x1024") {
+                                imageSize = "1024x1024"
+                            }
+                            studioOptionButton("Landscape", detail: "3:2", systemImage: "rectangle", isSelected: imageSize == "1536x1024") {
+                                imageSize = "1536x1024"
+                            }
+                            studioOptionButton("Portrait", detail: "2:3", systemImage: "rectangle.portrait", isSelected: imageSize == "1024x1536") {
+                                imageSize = "1024x1536"
+                            }
                         }
+                    }
+
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        Label("Finish", systemImage: "dial.medium")
+                            .font(theme.typography.headline)
+                            .foregroundStyle(theme.colors.primaryText)
+                        LazyVGrid(columns: studioSettingsColumns, spacing: theme.spacing.small) {
+                            studioOptionButton("Automatic", detail: "Provider choice", systemImage: "wand.and.stars", isSelected: imageQuality == "auto") {
+                                imageQuality = "auto"
+                            }
+                            studioOptionButton("Low", detail: "Faster", systemImage: "hare", isSelected: imageQuality == "low") {
+                                imageQuality = "low"
+                            }
+                            studioOptionButton("Medium", detail: "Balanced", systemImage: "circle.lefthalf.filled", isSelected: imageQuality == "medium") {
+                                imageQuality = "medium"
+                            }
+                            studioOptionButton("High", detail: "Maximum detail", systemImage: "sparkles", isSelected: imageQuality == "high") {
+                                imageQuality = "high"
+                            }
+                        }
+
                         Picker("Format", selection: $imageFormat) {
                             Text("PNG").tag("png")
                             Text("JPEG").tag("jpeg")
                             Text("WebP").tag("webp")
                         }
-                    }
-                } else if mediaKind == .speech {
-                    Section("Speech") {
-                        Picker("Voice", selection: $speechVoice) {
-                            ForEach(["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"], id: \.self) { voice in
-                                Text(voice.capitalized).tag(voice)
-                            }
-                        }
-                    }
-                } else {
-                    Section("Video") {
-                        Toggle("Check for output after creation", isOn: $refreshAfterVideoCreate)
+                        .pickerStyle(.segmented)
+                        .pinesSegmentedPickerChrome()
                     }
                 }
+                .padding(theme.spacing.large)
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .navigationTitle("Creation Settings")
+            .navigationTitle("Image Settings")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { showsSettings = false }
                 }
             }
+            .pinesAppBackground()
+            .pinesNavigationChrome()
+        }
+    }
+
+    private var studioSettingsColumns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return [GridItem(.flexible())]
+        }
+        return [GridItem(.flexible()), GridItem(.flexible())]
+    }
+
+    private func studioOptionButton(
+        _ title: String,
+        detail: String,
+        systemImage: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: theme.spacing.small) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(isSelected ? theme.colors.accent : theme.colors.secondaryText)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(title)
+                        .font(theme.typography.callout.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                    Text(detail)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+                Spacer(minLength: 0)
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(theme.colors.accent)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .pinesBareButtonStyle()
+        .pinesSurface(isSelected ? .selected : .inset, padding: theme.spacing.small)
+        .accessibilityValue(isSelected ? "Selected" : "")
+    }
+
+    private var mediaCreationSettings: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: theme.spacing.large) {
+                    VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                        Text(mediaKind == .speech ? "Shape the voice" : "Configure the render")
+                            .font(theme.typography.title.weight(.semibold))
+                            .foregroundStyle(theme.colors.primaryText)
+                        Text(mediaKind == .speech
+                             ? "Choose the engine and voice. Your script stays in the creation workspace."
+                             : "Choose the engine and decide whether Pines should keep watching for the finished render.")
+                            .font(theme.typography.callout)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        Label("Engine", systemImage: "cpu")
+                            .font(theme.typography.headline)
+                            .foregroundStyle(theme.colors.primaryText)
+                        VStack(spacing: 0) {
+                            HStack(spacing: theme.spacing.small) {
+                                Label("Provider", systemImage: "cloud")
+                                    .foregroundStyle(theme.colors.secondaryText)
+                                Spacer(minLength: theme.spacing.small)
+                                Picker("Provider", selection: $providerID) {
+                                    ForEach(providers) { provider in
+                                        Text(provider.displayName).tag(Optional(provider.id))
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                            }
+                            .padding(theme.spacing.medium)
+
+                            PinesDivider()
+
+                            HStack(spacing: theme.spacing.small) {
+                                Label("Model", systemImage: "brain")
+                                    .foregroundStyle(theme.colors.secondaryText)
+                                Spacer(minLength: theme.spacing.small)
+                                Picker("Model", selection: $modelID) {
+                                    ForEach(modelOptions) { option in
+                                        Text(option.title).tag(option.id)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                            }
+                            .padding(theme.spacing.medium)
+                        }
+                        .pinesSurface(.panel, padding: 0)
+                    }
+
+                    if mediaKind == .speech {
+                        VStack(alignment: .leading, spacing: theme.spacing.small) {
+                            Label("Voice", systemImage: "waveform")
+                                .font(theme.typography.headline)
+                                .foregroundStyle(theme.colors.primaryText)
+                            LazyVGrid(columns: studioSettingsColumns, spacing: theme.spacing.small) {
+                                ForEach(Self.speechVoices, id: \.self) { voice in
+                                    studioOptionButton(
+                                        voice.capitalized,
+                                        detail: speechVoiceDetail(voice),
+                                        systemImage: "waveform",
+                                        isSelected: speechVoice == voice
+                                    ) {
+                                        speechVoice = voice
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: theme.spacing.small) {
+                            Label("Delivery", systemImage: "film.stack")
+                                .font(theme.typography.headline)
+                                .foregroundStyle(theme.colors.primaryText)
+                            Toggle(isOn: $refreshAfterVideoCreate) {
+                                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                                    Text("Watch for the finished render")
+                                        .font(theme.typography.callout.weight(.semibold))
+                                        .foregroundStyle(theme.colors.primaryText)
+                                    Text("Pines refreshes the provider job and adds the completed video to this session.")
+                                        .font(theme.typography.caption)
+                                        .foregroundStyle(theme.colors.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .tint(theme.colors.accent)
+                            .pinesSurface(.panel, padding: theme.spacing.medium)
+                        }
+                    }
+                }
+                .padding(theme.spacing.large)
+                .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
+            }
+            .navigationTitle("\(mediaKind.title) Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showsSettings = false }
+                }
+            }
+            .pinesAppBackground()
+            .pinesNavigationChrome()
+        }
+    }
+
+    private static let speechVoices = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]
+
+    private func speechVoiceDetail(_ voice: String) -> String {
+        switch voice {
+        case "alloy": "Balanced"
+        case "ash": "Clear"
+        case "coral": "Warm"
+        case "echo": "Resonant"
+        case "fable": "Expressive"
+        case "nova": "Bright"
+        case "onyx": "Deep"
+        case "sage": "Calm"
+        case "shimmer": "Airy"
+        default: "Provider voice"
         }
     }
 
@@ -1982,6 +2296,8 @@ private struct ArtifactCreateView: View {
 
 private struct ArtifactResearchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
@@ -2073,15 +2389,33 @@ private struct ArtifactResearchView: View {
                 .padding(.top, theme.spacing.xsmall)
             }
 
-            researchContextBar
             conversation
-            composer
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !providers.isEmpty {
+                researchComposer
+            }
         }
         .navigationTitle("Research")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                researchThreadMenu
+
+                Button {
+                    showsSettings = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .accessibilityLabel("Research setup")
+                .accessibilityIdentifier("pines.artifacts.research.settings")
+            }
+        }
         .sheet(isPresented: $showsSettings) {
             researchSettings
                 .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(theme.colors.sheetBackground)
         }
         .sheet(item: $clarificationDraft) { draft in
             ArtifactsResearchClarificationView(
@@ -2094,6 +2428,8 @@ private struct ArtifactResearchView: View {
                 cancel: { clarificationDraft = nil }
             )
             .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(theme.colors.sheetBackground)
         }
         .onAppear(perform: configureInitialSelection)
         .onChange(of: providerID) { _, _ in normalizeSelectedModel() }
@@ -2101,30 +2437,7 @@ private struct ArtifactResearchView: View {
             await monitorActiveRuns()
         }
         .pinesAppBackground()
-        .accessibilityIdentifier("pines.artifacts.research")
-    }
-
-    private var researchContextBar: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: theme.spacing.small) {
-                researchThreadMenu
-                Spacer(minLength: theme.spacing.small)
-                researchUtilityButtons
-            }
-            VStack(alignment: .leading, spacing: theme.spacing.small) {
-                researchThreadMenu
-                HStack(spacing: theme.spacing.small) {
-                    researchUtilityButtons
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-        .padding(.horizontal, theme.spacing.large)
-        .padding(.vertical, theme.spacing.small)
-        .background(theme.colors.chromeBackground)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
+        .pinesNavigationChrome()
     }
 
     private var researchThreadMenu: some View {
@@ -2150,44 +2463,18 @@ private struct ArtifactResearchView: View {
                     }
                 }
             }
+
+            if !activeRuns.isEmpty {
+                Divider()
+                Button("Refresh progress", systemImage: "arrow.clockwise") {
+                    Task { await refreshActiveRuns() }
+                }
+            }
         } label: {
-            Label(selectedThread?.title ?? "Research history", systemImage: "clock.arrow.circlepath")
-                .lineLimit(1)
+            Image(systemName: "clock.arrow.circlepath")
         }
-        .pinesButtonStyle(.secondary)
         .accessibilityLabel(selectedThread == nil ? "Research history" : "Current research, \(selectedThread?.title ?? "")")
         .accessibilityIdentifier("pines.artifacts.research.thread-menu")
-    }
-
-    @ViewBuilder
-    private var researchUtilityButtons: some View {
-        if selectedThread != nil {
-            Button {
-                startNewThread()
-            } label: {
-                Label("New", systemImage: "square.and.pencil")
-            }
-            .pinesButtonStyle(.secondary)
-            .accessibilityIdentifier("pines.artifacts.research.new")
-        }
-
-        Button {
-            showsSettings = true
-        } label: {
-            Label("Setup", systemImage: "slider.horizontal.3")
-        }
-        .pinesButtonStyle(.secondary)
-        .accessibilityIdentifier("pines.artifacts.research.settings")
-
-        if !activeRuns.isEmpty {
-            Button {
-                Task { await refreshActiveRuns() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .pinesButtonStyle(.secondary)
-            .accessibilityLabel("Refresh research progress")
-        }
     }
 
     private var conversation: some View {
@@ -2214,8 +2501,8 @@ private struct ArtifactResearchView: View {
                         }
                     } else {
                         researchEmptyState(
-                            title: "What should we research?",
-                            detail: "Ask a question below. Pines can clarify scope before starting, then keeps sources, progress, and the final report together.",
+                            title: "Turn a question into a sourced brief",
+                            detail: "Pines searches, tracks evidence, and keeps every follow-up with the final report.",
                             actionTitle: nil,
                             action: {}
                         )
@@ -2225,6 +2512,7 @@ private struct ArtifactResearchView: View {
                 .frame(maxWidth: 880, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: selectedThread?.latestRun.id) { _, id in
                 guard let id else { return }
                 withAnimation(reduceMotion ? nil : theme.motion.fast) {
@@ -2240,120 +2528,337 @@ private struct ArtifactResearchView: View {
         actionTitle: String?,
         action: @escaping () -> Void
     ) -> some View {
-        VStack(spacing: theme.spacing.medium) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(theme.colors.accent)
-                .frame(width: 68, height: 68)
-                .background(theme.colors.accentSoft, in: Circle())
-            Text(title)
-                .font(theme.typography.title)
-                .multilineTextAlignment(.center)
-            Text(detail)
-                .font(theme.typography.body)
-                .foregroundStyle(theme.colors.secondaryText)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: theme.spacing.large) {
+            ZStack {
+                Circle()
+                    .fill(theme.colors.accentSoft)
+                    .frame(width: 82, height: 82)
+                Circle()
+                    .strokeBorder(theme.colors.accent.opacity(0.18), lineWidth: theme.stroke.hairline)
+                    .frame(width: 66, height: 66)
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(theme.typography.title.weight(.semibold))
+                    .foregroundStyle(theme.colors.accent)
+            }
+
+            VStack(spacing: theme.spacing.small) {
+                Text(title)
+                    .font(theme.typography.title.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                    .multilineTextAlignment(.center)
+                Text(detail)
+                    .font(theme.typography.body)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if let actionTitle {
                 Button(actionTitle, action: action)
                     .pinesButtonStyle(.secondary)
+            } else {
+                researchStarterPrompts
             }
         }
-        .padding(.vertical, theme.spacing.xlarge)
-        .frame(maxWidth: 620, minHeight: 360)
+        .padding(.vertical, theme.spacing.large)
+        .frame(maxWidth: 640, minHeight: 340)
         .frame(maxWidth: .infinity)
     }
 
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
-            if selectedThread == nil {
-                Button {
-                    showsSettings = true
-                } label: {
-                    Label(researchConfigurationLabel, systemImage: usesProviderFiles ? "globe.badge.chevron.backward" : "globe")
-                        .font(theme.typography.caption.weight(.semibold))
-                        .foregroundStyle(theme.colors.secondaryText)
-                }
-                .buttonStyle(.plain)
+    private var researchStarterPrompts: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: theme.spacing.small) {
+                researchStarterButton("Compare options", systemImage: "arrow.left.arrow.right", prompt: "Compare the leading options for ")
+                researchStarterButton("Map a market", systemImage: "map", prompt: "Map the current market for ")
+                researchStarterButton("Verify a claim", systemImage: "checkmark.seal", prompt: "Verify the evidence behind the claim that ")
             }
+            .padding(.vertical, 1)
+        }
+        .scrollClipDisabled()
+    }
 
-            HStack(alignment: .bottom, spacing: theme.spacing.small) {
-                TextField(selectedThread == nil ? "Ask a research question" : "Ask a follow-up", text: composerBinding, axis: .vertical)
-                    .lineLimit(1...6)
-                    .focused($composerFocused)
-                    .pinesFieldChrome()
-                    .accessibilityIdentifier(selectedThread == nil ? "pines.artifacts.research.prompt" : "pines.artifacts.research.follow-up")
+    private func researchStarterButton(_ title: String, systemImage: String, prompt seed: String) -> some View {
+        Button {
+            prompt = seed
+            composerFocused = true
+        } label: {
+            Label(title, systemImage: systemImage)
+        }
+        .pinesButtonStyle(.secondary)
+    }
 
-                Button {
+    private var researchComposer: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.small) {
+            TextField(selectedThread == nil ? "Ask a research question" : "Ask a follow-up", text: composerBinding, axis: .vertical)
+                .lineLimit(1...6)
+                .textFieldStyle(.plain)
+                .focused($composerFocused)
+                .font(theme.typography.body)
+                .foregroundStyle(theme.colors.primaryText)
+                .padding(.vertical, theme.spacing.xsmall)
+                .submitLabel(.send)
+                .onSubmit {
+                    guard !sendDisabled else { return }
                     Task { await commitComposer() }
-                } label: {
-                    Image(systemName: isStarting ? "hourglass" : "arrow.up")
-                        .frame(width: 20, height: 20)
                 }
-                .disabled(sendDisabled)
-                .pinesButtonStyle(.primary)
-                .accessibilityLabel(selectedThread == nil ? "Start research" : "Send follow-up")
-                .accessibilityIdentifier("pines.artifacts.research.send")
+                .accessibilityIdentifier(selectedThread == nil ? "pines.artifacts.research.prompt" : "pines.artifacts.research.follow-up")
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: theme.spacing.xsmall) {
+                    researchSourceMenu
+                    researchDepthMenu
+                    Spacer(minLength: theme.spacing.small)
+                    researchSendButton(fillWidth: false, showsLabel: false)
+                }
+
+                VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                    HStack(spacing: theme.spacing.xsmall) {
+                        researchSourceMenu
+                        researchDepthMenu
+                        Spacer(minLength: 0)
+                    }
+                    researchSendButton(fillWidth: true, showsLabel: true)
+                }
             }
         }
-        .padding(.horizontal, theme.spacing.large)
-        .padding(.vertical, theme.spacing.small)
+        .pinesSurface(.chrome, padding: theme.spacing.medium)
         .frame(maxWidth: 880)
         .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
+        .padding(.horizontal, horizontalSizeClass == .compact ? theme.spacing.medium : theme.spacing.large)
+        .padding(.bottom, theme.spacing.xsmall)
     }
 
-    private var researchConfigurationLabel: String {
-        let providerName = provider?.displayName ?? "Choose provider"
-        let source = usesProviderFiles ? "web + provider files" : "web only"
-        return "\(providerName) · \(source)"
+    private var researchSourceMenu: some View {
+        Menu {
+            Button {
+                usesProviderFiles = false
+            } label: {
+                Label("Web only", systemImage: usesProviderFiles ? "globe" : "checkmark")
+            }
+            Button {
+                usesProviderFiles = true
+            } label: {
+                Label("Web + provider files", systemImage: usesProviderFiles ? "checkmark" : "folder.badge.plus")
+            }
+        } label: {
+            Label(usesProviderFiles ? "Web + files" : "Web", systemImage: usesProviderFiles ? "folder.badge.plus" : "globe")
+        }
+        .pinesButtonStyle(.ghost)
+        .accessibilityLabel("Research sources, \(usesProviderFiles ? "web and provider files" : "web only")")
+    }
+
+    private var researchDepthMenu: some View {
+        Menu {
+            ForEach(OpenAIDeepResearchDepth.allCases, id: \.self) { value in
+                Button {
+                    depth = value
+                } label: {
+                    Label(
+                        value.rawValue.readableArtifactKind,
+                        systemImage: depth == value ? "checkmark" : "gauge.with.dots.needle.33percent"
+                    )
+                }
+            }
+        } label: {
+            Label(depth.rawValue.readableArtifactKind, systemImage: "gauge.with.dots.needle.33percent")
+        }
+        .pinesButtonStyle(.ghost)
+        .accessibilityLabel("Research depth, \(depth.rawValue.readableArtifactKind)")
+    }
+
+    private func researchSendButton(fillWidth: Bool, showsLabel: Bool) -> some View {
+        Button {
+            Task { await commitComposer() }
+        } label: {
+            if showsLabel {
+                Label(
+                    isStarting ? "Starting…" : (selectedThread == nil ? "Research" : "Send"),
+                    systemImage: isStarting ? "hourglass" : "arrow.up"
+                )
+            } else {
+                Image(systemName: isStarting ? "hourglass" : "arrow.up")
+                    .frame(width: 20, height: 20)
+            }
+        }
+        .disabled(sendDisabled)
+        .pinesButtonStyle(sendDisabled ? .secondary : .primary, fillWidth: fillWidth)
+        .accessibilityLabel(selectedThread == nil ? "Start research" : "Send follow-up")
+        .accessibilityIdentifier("pines.artifacts.research.send")
     }
 
     private var researchSettings: some View {
         NavigationStack {
-            Form {
-                Section("Provider") {
-                    Picker("Provider", selection: $providerID) {
-                        ForEach(providers) { provider in
-                            Text(provider.displayName).tag(Optional(provider.id))
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: theme.spacing.large) {
+                    VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                        Text("Define the research brief")
+                            .font(theme.typography.title.weight(.semibold))
+                            .foregroundStyle(theme.colors.primaryText)
+                        Text("Choose where Pines looks and how deeply it should investigate. You can refine the question in the composer.")
+                            .font(theme.typography.callout)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Picker("Model", selection: $modelID) {
-                        ForEach(modelOptions) { option in
-                            Text(option.title).tag(option.id)
-                        }
-                    }
-                }
 
-                Section("Sources") {
-                    Toggle("Include provider files", isOn: $usesProviderFiles)
-                    Text(usesProviderFiles
-                         ? "Research may use files and vector stores already hosted with this provider, in addition to the web."
-                         : "Research uses the web only. Provider-hosted files are excluded.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        Label("Engine", systemImage: "cpu")
+                            .font(theme.typography.headline)
+                        VStack(spacing: 0) {
+                            HStack(spacing: theme.spacing.small) {
+                                Label("Provider", systemImage: "cloud")
+                                    .foregroundStyle(theme.colors.secondaryText)
+                                Spacer(minLength: theme.spacing.small)
+                                Picker("Provider", selection: $providerID) {
+                                    ForEach(providers) { provider in
+                                        Text(provider.displayName).tag(Optional(provider.id))
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                            }
+                            .padding(theme.spacing.medium)
 
-                Section("Report") {
-                    Picker("Depth", selection: $depth) {
-                        ForEach(OpenAIDeepResearchDepth.allCases, id: \.self) { value in
-                            Text(value.rawValue.readableArtifactKind).tag(value)
+                            PinesDivider()
+
+                            HStack(spacing: theme.spacing.small) {
+                                Label("Model", systemImage: "brain")
+                                    .foregroundStyle(theme.colors.secondaryText)
+                                Spacer(minLength: theme.spacing.small)
+                                Picker("Model", selection: $modelID) {
+                                    ForEach(modelOptions) { option in
+                                        Text(option.title).tag(option.id)
+                                    }
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                            }
+                            .padding(theme.spacing.medium)
+                        }
+                        .pinesSurface(.panel, padding: 0)
+                    }
+
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        Label("Sources", systemImage: "globe")
+                            .font(theme.typography.headline)
+                        LazyVGrid(columns: researchSettingsColumns, spacing: theme.spacing.small) {
+                            researchSettingsChoice(
+                                "Web only",
+                                detail: "Public web sources",
+                                systemImage: "globe",
+                                isSelected: !usesProviderFiles
+                            ) {
+                                usesProviderFiles = false
+                            }
+                            researchSettingsChoice(
+                                "Web + files",
+                                detail: "Include provider-hosted context",
+                                systemImage: "folder.badge.plus",
+                                isSelected: usesProviderFiles
+                            ) {
+                                usesProviderFiles = true
+                            }
+                        }
+                        Text(usesProviderFiles
+                             ? "Research may use files and vector stores already hosted with this provider, in addition to the web."
+                             : "Research uses the web only. Provider-hosted files are excluded.")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        Label("Depth", systemImage: "gauge.with.dots.needle.33percent")
+                            .font(theme.typography.headline)
+                        LazyVGrid(columns: researchSettingsColumns, spacing: theme.spacing.small) {
+                            researchSettingsChoice("Quick", detail: "Fast scan", systemImage: "hare", isSelected: depth == .quick) {
+                                depth = .quick
+                            }
+                            researchSettingsChoice("Standard", detail: "Balanced brief", systemImage: "text.page", isSelected: depth == .standard) {
+                                depth = .standard
+                            }
+                            researchSettingsChoice("Deep", detail: "Thorough investigation", systemImage: "binoculars", isSelected: depth == .deep) {
+                                depth = .deep
+                            }
                         }
                     }
-                    Picker("Format", selection: $reportFormat) {
-                        ForEach(OpenAIDeepResearchReportFormat.allCases, id: \.self) { value in
-                            Text(value.rawValue.readableArtifactKind).tag(value)
+
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        Label("Deliverable", systemImage: "doc.richtext")
+                            .font(theme.typography.headline)
+                        HStack(spacing: theme.spacing.small) {
+                            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                                Text("Report format")
+                                    .font(theme.typography.callout.weight(.semibold))
+                                Text("Controls the structure of the saved artifact")
+                                    .font(theme.typography.caption)
+                                    .foregroundStyle(theme.colors.secondaryText)
+                            }
+                            Spacer(minLength: theme.spacing.small)
+                            Picker("Report format", selection: $reportFormat) {
+                                ForEach(OpenAIDeepResearchReportFormat.allCases, id: \.self) { value in
+                                    Text(value.rawValue.readableArtifactKind).tag(value)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
                         }
+                        .pinesSurface(.panel, padding: theme.spacing.medium)
                     }
                 }
+                .padding(theme.spacing.large)
+                .frame(maxWidth: 720, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
             .navigationTitle("Research Settings")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { showsSettings = false }
                 }
             }
+            .pinesAppBackground()
+            .pinesNavigationChrome()
         }
+    }
+
+    private var researchSettingsColumns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return [GridItem(.flexible())]
+        }
+        return [GridItem(.flexible()), GridItem(.flexible())]
+    }
+
+    private func researchSettingsChoice(
+        _ title: String,
+        detail: String,
+        systemImage: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: theme.spacing.small) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(isSelected ? theme.colors.accent : theme.colors.secondaryText)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                    Text(title)
+                        .font(theme.typography.callout.weight(.semibold))
+                        .foregroundStyle(theme.colors.primaryText)
+                    Text(detail)
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+                Spacer(minLength: 0)
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(theme.colors.accent)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .pinesBareButtonStyle()
+        .pinesSurface(isSelected ? .selected : .inset, padding: theme.spacing.small)
+        .accessibilityValue(isSelected ? "Selected" : "")
     }
 
     @MainActor
@@ -2670,7 +3175,7 @@ private struct ArtifactsResearchRunView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.medium) {
+        VStack(alignment: .leading, spacing: theme.spacing.large) {
             PinesMessageBubble(role: .user, maxWidth: 640) {
                 Text(run.researchDisplayPrompt)
                     .font(theme.typography.body)
@@ -2679,71 +3184,104 @@ private struct ArtifactsResearchRunView: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
 
-            VStack(alignment: .leading, spacing: theme.spacing.medium) {
-                HStack(spacing: theme.spacing.small) {
-                    PinesStatusIndicator(
-                        color: run.status.providerCloudStatus.tone.color(in: theme),
-                        isActive: !run.status.providerIsTerminal,
-                        size: 9
-                    )
-                    VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
-                        Text(run.status.providerCloudStatus.title)
-                            .font(theme.typography.callout.weight(.semibold))
-                        Text("\(run.providerKind.pinesLifecycleTitle) · \(run.modelID.rawValue)")
-                            .font(theme.typography.caption)
-                            .foregroundStyle(theme.colors.secondaryText)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                    Menu {
-                        Button(action: refresh) {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                        if !run.status.providerIsTerminal {
-                            Button(role: .destructive, action: cancel) {
-                                Label("Cancel research", systemImage: "xmark")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("Research run actions")
-                }
+            HStack(alignment: .top, spacing: theme.spacing.medium) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(theme.typography.callout.weight(.semibold))
+                    .foregroundStyle(theme.colors.accent)
+                    .frame(width: 36, height: 36)
+                    .background(theme.colors.accentSoft, in: Circle())
+                    .accessibilityHidden(true)
 
-                ArtifactsResearchActivityDisclosure(events: events, sources: sources)
-
-                if let report {
-                    Button {
-                        openReport(report)
-                    } label: {
-                        VStack(alignment: .leading, spacing: theme.spacing.small) {
-                            HStack {
-                                Label("Final report", systemImage: "doc.richtext")
-                                    .font(theme.typography.callout.weight(.semibold))
-                                    .foregroundStyle(theme.colors.success)
-                                Spacer()
-                                Image(systemName: "arrow.up.right.square")
-                                    .foregroundStyle(theme.colors.secondaryText)
-                            }
-                            Text(ArtifactResearchReportText.text(from: report) ?? "Open the saved report")
-                                .font(theme.typography.callout)
+                VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                    HStack(spacing: theme.spacing.small) {
+                        PinesStatusIndicator(
+                            color: run.status.providerCloudStatus.tone.color(in: theme),
+                            isActive: !run.status.providerIsTerminal,
+                            size: 9
+                        )
+                        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                            Text(run.status.providerCloudStatus.title)
+                                .font(theme.typography.callout.weight(.semibold))
                                 .foregroundStyle(theme.colors.primaryText)
-                                .lineLimit(5)
-                                .multilineTextAlignment(.leading)
+                            Text("\(run.providerKind.pinesLifecycleTitle) · \(run.modelID.rawValue)")
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.secondaryText)
+                                .lineLimit(1)
                         }
-                        .contentShape(Rectangle())
+                        Spacer()
+                        Menu {
+                            Button(action: refresh) {
+                                Label("Refresh", systemImage: "arrow.clockwise")
+                            }
+                            if !run.status.providerIsTerminal {
+                                Button(role: .destructive, action: cancel) {
+                                    Label("Cancel research", systemImage: "xmark")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Research run actions")
                     }
-                    .buttonStyle(.plain)
-                    .pinesSurface(.inset, padding: theme.spacing.medium)
-                } else if run.status.providerIsTerminal {
-                    Text(run.lastError ?? "The provider completed without a saved report artifact.")
-                        .font(theme.typography.callout)
-                        .foregroundStyle(run.lastError == nil ? theme.colors.secondaryText : theme.colors.danger)
+
+                    if !run.status.providerIsTerminal {
+                        ProgressView()
+                            .pinesProgressTint()
+                            .progressViewStyle(.linear)
+                            .tint(theme.colors.accent)
+                            .accessibilityLabel("Research in progress")
+                    }
+
+                    ArtifactsResearchActivityDisclosure(events: events, sources: sources)
+
+                    if let report {
+                        Button {
+                            openReport(report)
+                        } label: {
+                            VStack(alignment: .leading, spacing: theme.spacing.small) {
+                                HStack {
+                                    Label("Final report", systemImage: "doc.richtext")
+                                        .font(theme.typography.callout.weight(.semibold))
+                                        .foregroundStyle(theme.colors.success)
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right.square")
+                                        .foregroundStyle(theme.colors.secondaryText)
+                                }
+                                Text(ArtifactResearchReportText.text(from: report) ?? "Open the saved report")
+                                    .font(theme.typography.callout)
+                                    .foregroundStyle(theme.colors.primaryText)
+                                    .lineLimit(6)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .padding(theme.spacing.medium)
+                            .contentShape(Rectangle())
+                        }
+                        .pinesBareButtonStyle()
+                        .background(
+                            LinearGradient(
+                                colors: [theme.colors.successSoft, theme.colors.cardBackground],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
+                                .strokeBorder(theme.colors.success.opacity(0.22), lineWidth: theme.stroke.hairline)
+                        }
+                    } else if run.status.providerIsTerminal {
+                        Text(run.lastError ?? "The provider completed without a saved report artifact.")
+                            .font(theme.typography.callout)
+                            .foregroundStyle(run.lastError == nil ? theme.colors.secondaryText : theme.colors.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .frame(maxWidth: 720, alignment: .leading)
             }
-            .pinesSurface(.panel, padding: theme.spacing.medium)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .accessibilityIdentifier("pines.artifacts.research.run")
     }
 }
 
@@ -2790,7 +3328,10 @@ private struct ArtifactsResearchActivityDisclosure: View {
                     .foregroundStyle(theme.colors.secondaryText)
             }
         }
-        .pinesSurface(.inset, padding: theme.spacing.small)
+        .tint(theme.colors.accent)
+        .foregroundStyle(theme.colors.primaryText)
+        .padding(.vertical, theme.spacing.xsmall)
+        .overlay(alignment: .bottom) { PinesDivider() }
     }
 
     private func researchSourceRow(_ source: ArtifactsResearchSource) -> some View {
@@ -2895,7 +3436,6 @@ private enum ArtifactsResearchClarifier {
 
 private struct ArtifactsResearchClarificationView: View {
     @Environment(\.pinesTheme) private var theme
-    @Environment(\.dismiss) private var dismiss
     let draft: ArtifactsResearchClarificationDraft
     @Binding var answers: [String: String]
     let start: (String) -> Void
@@ -2903,38 +3443,93 @@ private struct ArtifactsResearchClarificationView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Text("A little more context can make the report substantially more useful. Every answer is optional.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(draft.questions) { question in
-                    Section(question.title) {
-                        TextField(question.placeholder, text: Binding(
-                            get: { answers[question.id] ?? "" },
-                            set: { answers[question.id] = $0 }
-                        ), axis: .vertical)
-                        .lineLimit(1...4)
+            ScrollView {
+                VStack(alignment: .leading, spacing: theme.spacing.large) {
+                    VStack(alignment: .leading, spacing: theme.spacing.small) {
+                        Label("Sharpen the question", systemImage: "scope")
+                            .font(theme.typography.title.weight(.semibold))
+                            .foregroundStyle(theme.colors.primaryText)
+                        Text("A little context helps Pines produce a more decisive, better sourced report. Every answer is optional.")
+                            .font(theme.typography.callout)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                        Text("Research question")
+                            .font(theme.typography.caption.weight(.semibold))
+                            .foregroundStyle(theme.colors.accent)
+                        Text(draft.originalPrompt)
+                            .font(theme.typography.body)
+                            .foregroundStyle(theme.colors.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .pinesSurface(.inset, padding: theme.spacing.medium)
+
+                    ForEach(draft.questions) { question in
+                        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                            Text(question.title)
+                                .font(theme.typography.callout.weight(.semibold))
+                                .foregroundStyle(theme.colors.primaryText)
+                            TextField(question.placeholder, text: Binding(
+                                get: { answers[question.id] ?? "" },
+                                set: { answers[question.id] = $0 }
+                            ), axis: .vertical)
+                            .lineLimit(1...4)
+                                .pinesFieldChrome()
+                        }
                     }
                 }
-                Section {
-                    Button("Start with these answers") {
-                        start(draft.providerPrompt(answers: answers))
-                    }
-                    Button("Use reasonable assumptions") {
-                        start(draft.providerPrompt(answers: [:]))
-                    }
-                }
+                .padding(theme.spacing.large)
+                .frame(maxWidth: 680, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .navigationTitle("Clarify Research")
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: theme.spacing.small) {
+                        Button("Use assumptions") {
+                            start(draft.providerPrompt(answers: [:]))
+                        }
+                        .pinesButtonStyle(.ghost)
+                        Spacer(minLength: theme.spacing.small)
+                        Button {
+                            start(draft.providerPrompt(answers: answers))
+                        } label: {
+                            Label("Start research", systemImage: "arrow.up")
+                        }
+                        .pinesButtonStyle(.primary)
+                    }
+
+                    VStack(spacing: theme.spacing.small) {
+                        Button {
+                            start(draft.providerPrompt(answers: answers))
+                        } label: {
+                            Label("Start research", systemImage: "arrow.up")
+                        }
+                        .pinesButtonStyle(.primary, fillWidth: true)
+                        Button("Use reasonable assumptions") {
+                            start(draft.providerPrompt(answers: [:]))
+                        }
+                        .pinesButtonStyle(.ghost, fillWidth: true)
+                    }
+                }
+                .pinesSurface(.chrome, padding: theme.spacing.medium)
+                .frame(maxWidth: 680)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, theme.spacing.medium)
+                .padding(.bottom, theme.spacing.xsmall)
+            }
+            .navigationTitle("Shape the Brief")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         cancel()
-                        dismiss()
                     }
                 }
             }
+            .pinesAppBackground()
+            .pinesNavigationChrome()
         }
     }
 }

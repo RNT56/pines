@@ -73,6 +73,24 @@ enum PinesUITestLaunchConfiguration {
         #endif
     }
 
+    static var usesAccessibilityTextSize: Bool {
+        #if DEBUG
+        guard isEnabled else { return false }
+        return ProcessInfo.processInfo.environment["PINES_UI_TEST_ACCESSIBILITY_TEXT"] == "1"
+        #else
+        return false
+        #endif
+    }
+
+    static var usesDarkAppearance: Bool {
+        #if DEBUG
+        guard isEnabled else { return false }
+        return ProcessInfo.processInfo.environment["PINES_UI_TEST_DARK_APPEARANCE"] == "1"
+        #else
+        return false
+        #endif
+    }
+
     static var storeConfiguration: LocalStoreConfiguration {
         guard isEnabled else { return .init() }
         return LocalStoreConfiguration(
