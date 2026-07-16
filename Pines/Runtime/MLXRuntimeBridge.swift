@@ -140,6 +140,41 @@ private final class MLXGenerationTelemetryBox: @unchecked Sendable {
     }
 }
 
+private func runtimeInstallsMatch(_ lhs: ModelInstall?, _ rhs: ModelInstall) -> Bool {
+    guard let lhs else { return false }
+    let lhsRevision = lhs.revision?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "main"
+    let rhsRevision = rhs.revision?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "main"
+    let lhsPath = lhs.localURL?.standardizedFileURL.path
+    let rhsPath = rhs.localURL?.standardizedFileURL.path
+    return lhs.modelID == rhs.modelID
+        && lhs.repository.caseInsensitiveCompare(rhs.repository) == .orderedSame
+        && lhsRevision == rhsRevision
+        && lhsPath == rhsPath
+}
+
+private final class MLXRuntimeResidencyBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var loadedInstall: ModelInstall?
+
+    func setLoadedInstall(_ install: ModelInstall) {
+        lock.lock()
+        loadedInstall = install
+        lock.unlock()
+    }
+
+    func clear() {
+        lock.lock()
+        loadedInstall = nil
+        lock.unlock()
+    }
+
+    func snapshot() -> ModelInstall? {
+        lock.lock()
+        defer { lock.unlock() }
+        return loadedInstall
+    }
+}
+
 #if canImport(MLX)
 private final class MLXCachePressureController: @unchecked Sendable {
     static let shared = MLXCachePressureController()
@@ -457,9 +492,16 @@ struct MLXRuntimeBridge: Sendable {
         #endif
     }
 
-    private let state = MLXRuntimeState()
+    private let residency: MLXRuntimeResidencyBox
+    private let state: MLXRuntimeState
     private let deviceMonitor = DeviceRuntimeMonitor()
     private let supervisor = LocalRuntimeSupervisor()
+
+    init() {
+        let residency = MLXRuntimeResidencyBox()
+        self.residency = residency
+        state = MLXRuntimeState(residency: residency)
+    }
 
     #if canImport(MLXLLM)
     private static func pinesTurboQuantCacheTopology(
@@ -1178,6 +1220,7 @@ struct MLXRuntimeBridge: Sendable {
     ) -> RuntimeProfile {
         let deviceProfile = deviceMonitor.currentProfile()
         let memoryCounters = deviceMonitor.memoryCounters()
+        let loadedInstall = residency.snapshot()
         let effectiveModalities = install.effectiveTurboQuantModalities
         let hasVision = effectiveModalities.contains(.vision)
         let isCompact = deviceProfile.memoryTier == .compact
@@ -1185,6 +1228,12 @@ struct MLXRuntimeBridge: Sendable {
         let recommendedMaxKVSize = hasVision
             ? min(deviceProfile.recommendedContextTokens, 4096)
             : (isSmallTextModel ? deviceProfile.recommendedSmallModelContextTokens : deviceProfile.recommendedContextTokens)
+        let productContextCap = LocalModelRuntimePolicy.contextTokenCap(
+            for: install,
+            deviceProfile: deviceProfile,
+            userMode: userMode,
+            deviceRecommendedTokens: recommendedMaxKVSize
+        )
         let backend = turboQuantBackendSnapshot()
         let linked = isLinked
         let usesTurboQuant = Self.usesTurboQuantByDefault(for: install)
@@ -1193,8 +1242,16 @@ struct MLXRuntimeBridge: Sendable {
             requestedContextLength ?? (usesTurboQuant ? recommendedMaxKVSize : min(recommendedMaxKVSize, 8192))
         )
         let requestedMaxKVSize = usesTurboQuant
-            ? normalizedRequestedContextLength
-            : min(normalizedRequestedContextLength, recommendedMaxKVSize, 8192)
+            ? min(normalizedRequestedContextLength, productContextCap)
+            : min(normalizedRequestedContextLength, productContextCap, 8192)
+        let admissionMemoryBasis = LocalModelRuntimePolicy.admissionMemoryBasis(
+            availableMemoryBytes: memoryCounters.availableMemoryBytes,
+            mlxActiveMemoryBytes: memoryCounters.mlxActiveMemoryBytes,
+            loadedModelEstimatedBytes: loadedInstall?.estimatedBytes,
+            targetModelEstimatedBytes: install.estimatedBytes,
+            hasLoadedModel: loadedInstall != nil,
+            reusesLoadedModel: runtimeInstallsMatch(loadedInstall, install)
+        )
         let fallbackReason = usesTurboQuant
             ? backend.fallbackReason
             : turboQuantDisabledReason
@@ -1214,12 +1271,19 @@ struct MLXRuntimeBridge: Sendable {
             backend: backend,
             defaults: turboQuantDefaults,
             turboQuantDisabledReason: turboQuantDisabledReason,
-            memoryCounters: memoryCounters
+            memoryCounters: memoryCounters,
+            memoryBasis: admissionMemoryBasis
         )
         var turboQuantProfileDiagnostics = [
             "TurboQuant family support stored=\(install.turboQuantFamilySupport.rawValue) effective=\(install.effectiveTurboQuantFamilySupport.rawValue)",
             "TurboQuant runtime selection=\(usesTurboQuant ? "throwing_attention" : "plain_kv")",
+            "Admission memory basis=\(admissionMemoryBasis.kind.rawValue) current_available=\(admissionMemoryBasis.currentAvailableMemoryBytes) planner_available=\(admissionMemoryBasis.plannerAvailableMemoryBytes) reclaimable_model=\(admissionMemoryBasis.reclaimableLoadedModelBytes) incremental_target=\(admissionMemoryBasis.incrementalTargetModelBytes)",
         ]
+        if requestedMaxKVSize < normalizedRequestedContextLength {
+            turboQuantProfileDiagnostics.append(
+                "Device-safe context cap reduced requested context from \(normalizedRequestedContextLength) to \(requestedMaxKVSize) tokens."
+            )
+        }
         if let turboQuantDisabledReason {
             turboQuantProfileDiagnostics.append(turboQuantDisabledReason)
         }
@@ -1366,7 +1430,8 @@ struct MLXRuntimeBridge: Sendable {
         ),
         defaults: TurboQuantRuntimeDefaults?,
         turboQuantDisabledReason: String?,
-        memoryCounters: RuntimeMemoryCounters
+        memoryCounters: RuntimeMemoryCounters,
+        memoryBasis: LocalModelAdmissionMemoryBasis
     ) -> KVCacheAdmission {
         var diagnostics = defaults?.profileDiagnostics ?? []
         guard requestedTurboQuant else {
@@ -1387,7 +1452,8 @@ struct MLXRuntimeBridge: Sendable {
             requestedContextLength: requestedMaxKVSize,
             userMode: userMode,
             defaults: defaults,
-            memoryCounters: memoryCounters
+            memoryCounters: memoryCounters,
+            memoryBasis: memoryBasis
         )
         diagnostics.append(productAdmission.userMessage)
         if let primaryDowngrade = productAdmission.primaryDowngradeReason {
@@ -1448,14 +1514,16 @@ struct MLXRuntimeBridge: Sendable {
         requestedContextLength: Int,
         userMode: PinesCore.TurboQuantUserMode,
         defaults: TurboQuantRuntimeDefaults?,
-        memoryCounters: RuntimeMemoryCounters
+        memoryCounters: RuntimeMemoryCounters,
+        memoryBasis: LocalModelAdmissionMemoryBasis
     ) -> PinesCore.TurboQuantAdmission {
         #if canImport(MLXLMCommon) && canImport(MLX)
         if let memoryProfile = mlxModelMemoryProfile(for: install) {
             let planner = MLXLMCommon.TurboQuantAdmissionPlanner()
             let memorySample = mlxAdmissionMemorySample(
                 counters: memoryCounters,
-                modelResidentBytes: memoryProfile.resolvedWeightBytes
+                modelResidentBytes: memoryProfile.resolvedWeightBytes,
+                memoryBasis: memoryBasis
             )
             let admission = planner.admit(
                 profile: memoryProfile,
@@ -1478,7 +1546,8 @@ struct MLXRuntimeBridge: Sendable {
             requestedContextLength: requestedContextLength,
             userMode: userMode,
             defaults: defaults,
-            memoryCounters: memoryCounters
+            memoryCounters: memoryCounters,
+            memoryBasis: memoryBasis
         )
     }
 
@@ -1487,10 +1556,11 @@ struct MLXRuntimeBridge: Sendable {
         requestedContextLength: Int,
         userMode: PinesCore.TurboQuantUserMode,
         defaults: TurboQuantRuntimeDefaults?,
-        memoryCounters: RuntimeMemoryCounters
+        memoryCounters: RuntimeMemoryCounters,
+        memoryBasis: LocalModelAdmissionMemoryBasis
     ) -> PinesCore.TurboQuantAdmission {
         let requestedContext = max(1, requestedContextLength)
-        let available = intClamped(memoryCounters.availableMemoryBytes)
+        let available = intClamped(memoryBasis.plannerAvailableMemoryBytes)
             ?? intClamped(memoryCounters.physicalMemoryBytes).map { max(0, $0 / 2) }
             ?? 4 * 1024 * 1024 * 1024
         let safetyReserve = min(available, max(512 * 1024 * 1024, available / 5))
@@ -1509,9 +1579,11 @@ struct MLXRuntimeBridge: Sendable {
             )
         )
         let packedFallbackBytesPerToken = max(1, compressedBytesPerToken * 2)
-        let modelResidentBytes = intClamped(install.estimatedBytes) ?? intClamped(memoryCounters.mlxActiveMemoryBytes) ?? 0
-        let mlxCacheBytes = intClamped(memoryCounters.mlxCacheMemoryBytes) ?? 0
-        let mlxActiveBytes = intClamped(memoryCounters.mlxActiveMemoryBytes) ?? 0
+        let modelResidentBytes = memoryBasis.kind == .warmReuse
+            ? 0
+            : intClamped(install.estimatedBytes) ?? 0
+        let mlxCacheBytes = 0
+        let mlxActiveBytes = 0
         let promptAndTokenizerBytes = 64 * 1024 * 1024
         let uiReserveBytes = 256 * 1024 * 1024
         let scratchBytes = max(96 * 1024 * 1024, rawBytesPerToken * min(requestedContext, 512) / max(1, shape.layerCount))
@@ -1780,16 +1852,20 @@ struct MLXRuntimeBridge: Sendable {
 
     private static func mlxAdmissionMemorySample(
         counters: RuntimeMemoryCounters,
-        modelResidentBytes: Int
+        modelResidentBytes: Int,
+        memoryBasis: LocalModelAdmissionMemoryBasis
     ) -> MLXLMCommon.TurboQuantRuntimeMemorySample? {
-        guard let available = intClamped(counters.availableMemoryBytes), available > 0 else {
+        guard let available = intClamped(memoryBasis.plannerAvailableMemoryBytes), available > 0 else {
             return nil
         }
+        let incrementalModelBytes = memoryBasis.kind == .warmReuse ? 0 : modelResidentBytes
         return MLXLMCommon.TurboQuantRuntimeMemorySample(
             availableAppMemoryBytes: available,
-            mlxActiveBytes: intClamped(counters.mlxActiveMemoryBytes) ?? 0,
-            mlxCacheBytes: intClamped(counters.mlxCacheMemoryBytes) ?? 0,
-            modelResidentBytes: max(modelResidentBytes, intClamped(counters.mlxActiveMemoryBytes) ?? 0),
+            // Apple's available-memory value already subtracts current MLX allocations.
+            // Only prospective allocations belong on the right-hand side of the plan.
+            mlxActiveBytes: 0,
+            mlxCacheBytes: 0,
+            modelResidentBytes: incrementalModelBytes,
             tokenizerBytes: 64 * 1024 * 1024,
             promptBytes: 0,
             uiReserveBytes: 256 * 1024 * 1024,
@@ -2661,12 +2737,23 @@ struct MLXRuntimeBridge: Sendable {
             )
             #endif
         } catch {
-            await supervisor.block(reason: error.localizedDescription, modelID: install.modelID)
+            let restoredModelID = await state.loadedModelID()
+            if let restoredModelID {
+                await supervisor.markReady(modelID: restoredModelID)
+            } else {
+                await supervisor.block(reason: error.localizedDescription, modelID: install.modelID)
+            }
             #if DEBUG
+            var failureMetadata = runtimeMemoryMetadata(merging: [
+                "model_id": install.modelID.rawValue,
+            ])
+            if let restoredModelID {
+                failureMetadata["restored_model_id"] = restoredModelID.rawValue
+            }
             await FreezeBreadcrumbJournal.shared.record(
                 stage: "mlx.load.failed",
                 detail: error.localizedDescription,
-                metadata: runtimeMemoryMetadata(merging: ["model_id": install.modelID.rawValue])
+                metadata: failureMetadata
             )
             #endif
             throw error
@@ -2941,6 +3028,7 @@ private actor MLXRuntimeState {
     private static let maxSoftMemoryWarningsPerGeneration = 4
 
     private let deviceMonitor = DeviceRuntimeMonitor()
+    private let residency: MLXRuntimeResidencyBox
     private var activeInstall: ModelInstall?
     private var activeProfile = RuntimeProfile()
     private var activePartitionSummary: String?
@@ -2950,6 +3038,10 @@ private actor MLXRuntimeState {
     private var activeGenerationCancellation: MLXGenerationCancellationBox?
     private var activeGenerationSoftMemoryWarningCount = 0
     private var isLoading = false
+
+    init(residency: MLXRuntimeResidencyBox) {
+        self.residency = residency
+    }
 
     private func runtimeMemoryMetadata(
         merging base: [String: String] = [:]
@@ -3023,8 +3115,7 @@ private actor MLXRuntimeState {
         #endif
         #if canImport(MLXLMCommon)
         let runtimeModalities = install.effectiveTurboQuantModalities
-        let matchingInstall = activeInstall?.modelID == install.modelID
-            && activeInstall?.repository == install.repository
+        let matchingInstall = runtimeInstallsMatch(activeInstall, install)
         if matchingInstall {
             let hasCompatibleContainer: Bool
             if runtimeModalities.contains(.vision) || runtimeModalities.contains(.audio) {
@@ -3049,56 +3140,153 @@ private actor MLXRuntimeState {
                     await promptKVCacheStore.evictAll(reason: "runtime_profile_changed")
                 }
                 activeProfile = profile
+                activeInstall = install
+                residency.setLoadedInstall(install)
                 return
             }
         }
         #endif
         isLoading = true
         defer { isLoading = false }
-        #if canImport(MLXLMCommon)
-        if activeInstall?.modelID != install.modelID
-            || activeInstall?.repository != install.repository
-            || activeProfile != profile {
-            await promptKVCacheStore.evictAll(reason: "model_or_profile_changed")
-        }
-        #endif
-        activeInstall = install
-        activeProfile = profile
 
         #if canImport(MLX) && canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await registerModelAliasesIfNeeded()
-        try Self.configureGlobalRuntimePolicy(profile: profile, install: install)
+        let hasLoadedGenerationContainer = textContainer != nil || visionContainer != nil
+        let previousRuntime = hasLoadedGenerationContainer
+            ? activeInstall.map { PreviousGenerationRuntime(install: $0, profile: activeProfile) }
+            : nil
+        let loadedModel = try await LocalModelReplacementTransaction.perform(
+            hasCurrentModel: previousRuntime != nil,
+            releaseCurrent: {
+                await self.releaseLoadedGenerationModel(reason: "model_transition")
+            },
+            loadReplacement: {
+                try await self.loadGenerationModel(install, profile: profile)
+            },
+            cleanupFailedReplacement: {
+                await self.releaseLoadedGenerationModel(reason: "failed_model_transition")
+            },
+            restoreCurrent: {
+                guard let previousRuntime else { return }
+                let restoredModel = try await self.loadGenerationModel(
+                    previousRuntime.install,
+                    profile: previousRuntime.profile
+                )
+                self.commitLoadedGenerationModel(
+                    restoredModel,
+                    install: previousRuntime.install,
+                    profile: previousRuntime.profile
+                )
+            }
+        )
+        commitLoadedGenerationModel(loadedModel, install: install, profile: profile)
+        #else
+        throw InferenceError.providerUnavailable("mlx-local")
+        #endif
+    }
+
+    private struct PreviousGenerationRuntime {
+        var install: ModelInstall
+        var profile: RuntimeProfile
+    }
+
+    #if canImport(MLX) && canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
+    private struct LoadedGenerationModel {
+        var textContainer: MLXLMCommon.ModelContainer?
+        var visionContainer: MLXLMCommon.ModelContainer?
+        var partitionSummary: String?
+        var stopStrings: Set<String>
+    }
+
+    private func loadGenerationModel(
+        _ install: ModelInstall,
+        profile: RuntimeProfile
+    ) async throws -> LoadedGenerationModel {
+        let runtimeModalities = install.effectiveTurboQuantModalities
         if runtimeModalities.contains(.vision) || runtimeModalities.contains(.audio) {
             var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .visionLanguage)
             resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
-            activeStopStrings = resolvedConfiguration.hints.stopStrings
-            visionContainer = try await MLX.withError {
+            try Self.configureGlobalRuntimePolicy(profile: profile, install: install)
+            let loadedContainer = try await MLX.withError {
                 try await VLMModelFactory.shared.loadContainer(
                     from: PinesHubDownloader(),
                     using: PinesTokenizerLoader(),
                     configuration: resolvedConfiguration.configuration
                 )
             }
-            activePartitionSummary = await Self.configureLoadedContainer(
-                visionContainer, profile: profile)
-            textContainer = nil
-        } else if runtimeModalities.contains(.text) {
+            let partitionSummary = await Self.configureLoadedContainer(
+                loadedContainer,
+                profile: profile
+            )
+            return LoadedGenerationModel(
+                textContainer: nil,
+                visionContainer: loadedContainer,
+                partitionSummary: partitionSummary,
+                stopStrings: resolvedConfiguration.hints.stopStrings
+            )
+        }
+        if runtimeModalities.contains(.text) {
             var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .language)
             resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
-            activeStopStrings = resolvedConfiguration.hints.stopStrings
-            textContainer = try await MLX.withError {
+            try Self.configureGlobalRuntimePolicy(profile: profile, install: install)
+            let loadedContainer = try await MLX.withError {
                 try await LLMModelFactory.shared.loadContainer(
                     from: PinesHubDownloader(),
                     using: PinesTokenizerLoader(),
                     configuration: resolvedConfiguration.configuration
                 )
             }
-            activePartitionSummary = await Self.configureLoadedContainer(
-                textContainer, profile: profile)
-            visionContainer = nil
+            let partitionSummary = await Self.configureLoadedContainer(
+                loadedContainer,
+                profile: profile
+            )
+            return LoadedGenerationModel(
+                textContainer: loadedContainer,
+                visionContainer: nil,
+                partitionSummary: partitionSummary,
+                stopStrings: resolvedConfiguration.hints.stopStrings
+            )
         }
-        #else
-        throw InferenceError.providerUnavailable("mlx-local")
+        throw InferenceError.unsupportedCapability(
+            "The selected local model does not expose a generation modality."
+        )
+    }
+
+    private func commitLoadedGenerationModel(
+        _ loadedModel: LoadedGenerationModel,
+        install: ModelInstall,
+        profile: RuntimeProfile
+    ) {
+        textContainer = loadedModel.textContainer
+        visionContainer = loadedModel.visionContainer
+        activePartitionSummary = loadedModel.partitionSummary
+        activeStopStrings = loadedModel.stopStrings
+        activeInstall = install
+        activeProfile = profile
+        residency.setLoadedInstall(install)
+    }
+    #endif
+
+    func loadedModelID() -> ModelID? {
+        activeInstall?.modelID
+    }
+
+    private func releaseLoadedGenerationModel(reason: String) async {
+        activeInstall = nil
+        activeProfile = RuntimeProfile()
+        activePartitionSummary = nil
+        activeStopStrings = []
+        residency.clear()
+        #if canImport(MLXLMCommon)
+        await promptKVCacheStore.evictAll(reason: reason)
+        textContainer = nil
+        visionContainer = nil
+        ExpertStreamingConfig.shared.deactivate()
+        MTPConfig.retainMTPWeights = false
+        #endif
+        #if canImport(MLX)
+        Self.clearCachedMLXBuffers()
+        Self.resetMLXPeakMemory()
         #endif
     }
 
@@ -3392,23 +3580,10 @@ private actor MLXRuntimeState {
     }
 
     func unload() async {
-        activeInstall = nil
         activeGenerationSoftMemoryWarningCount = 0
-        #if canImport(MLXLMCommon)
-        await promptKVCacheStore.evictAll(reason: "model_unload")
-        textContainer = nil
-        visionContainer = nil
-        activePartitionSummary = nil
-        activeStopStrings = []
-        ExpertStreamingConfig.shared.deactivate()
-        MTPConfig.retainMTPWeights = false
-        #endif
+        await releaseLoadedGenerationModel(reason: "model_unload")
         #if canImport(MLXEmbedders) && canImport(MLXLMCommon) && canImport(MLX) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await embeddingRuntime.unload()
-        #endif
-        #if canImport(MLX)
-        Self.clearCachedMLXBuffers()
-        Self.resetMLXPeakMemory()
         #endif
     }
 

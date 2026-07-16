@@ -157,9 +157,15 @@ struct TurboQuantPinDriftTests {
         #expect(projectYML.contains("PinesPerformance:"))
         #expect(rootView.contains("runLaunchTurboQuantBenchIfNeeded"))
         #expect(rootView.contains("runLaunchRealModelTurboQuantBenchIfNeeded"))
-        #expect(syntheticDiagnostics.contains("#if DEBUG && canImport(TurboQuantBench)"))
-        #expect(syntheticDiagnostics.contains("#if canImport(TurboQuantBench)"))
-        #expect(realModelDiagnostics.contains("canImport(IntegrationTestHelpers)"))
+        #expect(syntheticDiagnostics.contains(
+            "#if DEBUG && PINES_ENABLE_IN_APP_TURBOQUANT_BENCH && canImport(TurboQuantBench)"
+        ))
+        #expect(syntheticDiagnostics.contains(
+            "#if PINES_ENABLE_IN_APP_TURBOQUANT_BENCH && canImport(TurboQuantBench)"
+        ))
+        #expect(realModelDiagnostics.contains(
+            "#if DEBUG && PINES_ENABLE_IN_APP_TURBOQUANT_BENCH && canImport(IntegrationTestHelpers)"
+        ))
         #expect(realModelDiagnostics.contains("#elseif DEBUG"))
         #expect(realModelDiagnostics.contains("standalone SwiftPM diagnostics"))
         #expect(captureScript.contains("swift build --product TurboQuantBenchmark -c release"))

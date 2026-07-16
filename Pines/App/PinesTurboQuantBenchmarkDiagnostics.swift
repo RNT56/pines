@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 import PinesCore
 
-#if DEBUG && canImport(TurboQuantBench) && canImport(MLXLMCommon)
+#if DEBUG && PINES_ENABLE_IN_APP_TURBOQUANT_BENCH && canImport(TurboQuantBench) && canImport(MLXLMCommon)
 import MLXLMCommon
 import TurboQuantBench
 
@@ -349,7 +349,7 @@ private enum PinesTurboQuantBenchError: Error, LocalizedError {
 #if DEBUG
 extension PinesAppModel {
     func runLaunchTurboQuantBenchIfNeeded() async {
-        #if canImport(TurboQuantBench) && canImport(MLXLMCommon)
+        #if PINES_ENABLE_IN_APP_TURBOQUANT_BENCH && canImport(TurboQuantBench) && canImport(MLXLMCommon)
         guard let configuration = PinesTurboQuantBenchConfiguration.current() else { return }
         await PinesTurboQuantBenchStatusWriter.shared.write(
             PinesTurboQuantBenchStatus(

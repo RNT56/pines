@@ -455,6 +455,23 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(runtime.contains("ModelLifecycleService.installedModelDirectory(for: install)"))
     }
 
+    func testFailedLocalModelReplacementRestoresPreviousRuntime() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let runtime = try String(
+            contentsOf: repoRoot.appendingPathComponent("Pines/Runtime/MLXRuntimeBridge.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(runtime.contains("LocalModelReplacementTransaction.perform"))
+        XCTAssertTrue(runtime.contains("cleanupFailedReplacement:"))
+        XCTAssertTrue(runtime.contains("restoreCurrent:"))
+        XCTAssertTrue(runtime.contains("commitLoadedGenerationModel(restoredModel"))
+        XCTAssertTrue(runtime.contains("let restoredModelID = await state.loadedModelID()"))
+        XCTAssertTrue(runtime.contains("await supervisor.markReady(modelID: restoredModelID)"))
+    }
+
     func testTurboQuantProfileLookupCarriesModelMetadataAndUsesConservativeFallback() throws {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
