@@ -1,7 +1,5 @@
 <p align="center">
-  <a href="https://pines-ios-ai.netlify.app/">
-    <img src="site/public/og-image.svg" alt="Pines — The AI workbench you own" width="100%">
-  </a>
+  <img src="assets/pines_logo_light-Photoroom.png" alt="Pines logo" width="144" height="144">
 </p>
 
 <h1 align="center">Pines</h1>
