@@ -129,6 +129,122 @@ struct LocalModelRuntimePolicyTests {
         ) == 2_048)
     }
 
+    @Test("Replacement transaction commits without restoration on success")
+    func replacementTransactionSuccess() async throws {
+        let probe = ReplacementTransactionProbe()
+
+        let loaded: String = try await LocalModelReplacementTransaction.perform(
+            hasCurrentModel: true,
+            releaseCurrent: {
+                await probe.record("release")
+            },
+            loadReplacement: {
+                await probe.record("load-replacement")
+                return "replacement"
+            },
+            cleanupFailedReplacement: {
+                await probe.record("cleanup")
+            },
+            restoreCurrent: {
+                await probe.record("restore")
+            }
+        )
+
+        #expect(loaded == "replacement")
+        #expect(await probe.events == ["release", "load-replacement"])
+    }
+
+    @Test("Failed replacement cleans partial state and restores the current model")
+    func replacementTransactionRestoresCurrentModel() async {
+        let probe = ReplacementTransactionProbe()
+
+        do {
+            let _: String = try await LocalModelReplacementTransaction.perform(
+                hasCurrentModel: true,
+                releaseCurrent: {
+                    await probe.record("release")
+                },
+                loadReplacement: {
+                    await probe.record("load-replacement")
+                    throw ReplacementTransactionTestError.replacement
+                },
+                cleanupFailedReplacement: {
+                    await probe.record("cleanup")
+                },
+                restoreCurrent: {
+                    await probe.record("restore")
+                }
+            )
+            Issue.record("Expected the replacement load to fail")
+        } catch {
+            #expect(error as? ReplacementTransactionTestError == .replacement)
+        }
+
+        #expect(await probe.events == ["release", "load-replacement", "cleanup", "restore"])
+    }
+
+    @Test("Cold-load failure skips restoration")
+    func replacementTransactionSkipsRestoreWithoutCurrentModel() async {
+        let probe = ReplacementTransactionProbe()
+
+        do {
+            let _: String = try await LocalModelReplacementTransaction.perform(
+                hasCurrentModel: false,
+                releaseCurrent: {
+                    await probe.record("release")
+                },
+                loadReplacement: {
+                    await probe.record("load-replacement")
+                    throw ReplacementTransactionTestError.replacement
+                },
+                cleanupFailedReplacement: {
+                    await probe.record("cleanup")
+                },
+                restoreCurrent: {
+                    await probe.record("restore")
+                }
+            )
+            Issue.record("Expected the cold load to fail")
+        } catch {
+            #expect(error as? ReplacementTransactionTestError == .replacement)
+        }
+
+        #expect(await probe.events == ["release", "load-replacement", "cleanup"])
+    }
+
+    @Test("Restoration failure reports both errors")
+    func replacementTransactionReportsRestorationFailure() async {
+        let probe = ReplacementTransactionProbe()
+
+        do {
+            let _: String = try await LocalModelReplacementTransaction.perform(
+                hasCurrentModel: true,
+                releaseCurrent: {
+                    await probe.record("release")
+                },
+                loadReplacement: {
+                    await probe.record("load-replacement")
+                    throw ReplacementTransactionTestError.replacement
+                },
+                cleanupFailedReplacement: {
+                    await probe.record("cleanup")
+                },
+                restoreCurrent: {
+                    await probe.record("restore")
+                    throw ReplacementTransactionTestError.restoration
+                }
+            )
+            Issue.record("Expected replacement recovery to fail")
+        } catch let error as LocalModelReplacementRecoveryError {
+            #expect(error.replacementFailure.contains("replacement"))
+            #expect(error.restorationFailure.contains("restoration"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        #expect(await probe.events == ["release", "load-replacement", "cleanup", "restore"])
+    }
+
     private static func install(repository: String, bytes: Int64, parameters: Int64) -> ModelInstall {
         ModelInstall(
             modelID: ModelID(rawValue: repository),
@@ -141,5 +257,21 @@ struct LocalModelRuntimePolicyTests {
             estimatedBytes: bytes,
             modelType: "test"
         )
+    }
+}
+
+private enum ReplacementTransactionTestError: String, Error, CustomStringConvertible, LocalizedError {
+    case replacement
+    case restoration
+
+    var description: String { rawValue }
+    var errorDescription: String? { rawValue }
+}
+
+private actor ReplacementTransactionProbe {
+    private(set) var events: [String] = []
+
+    func record(_ event: String) {
+        events.append(event)
     }
 }

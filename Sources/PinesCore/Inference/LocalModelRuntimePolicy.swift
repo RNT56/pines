@@ -142,3 +142,54 @@ public enum LocalModelRuntimePolicy {
         return cap
     }
 }
+
+public struct LocalModelReplacementRecoveryError: Error, Equatable, LocalizedError, Sendable {
+    public let replacementFailure: String
+    public let restorationFailure: String
+
+    public init(replacementFailure: String, restorationFailure: String) {
+        self.replacementFailure = replacementFailure
+        self.restorationFailure = restorationFailure
+    }
+
+    public var errorDescription: String? {
+        "The replacement model failed to load (\(replacementFailure)), and Pines could not restore the previous model (\(restorationFailure))."
+    }
+}
+
+/// Coordinates a memory-constrained model replacement with compensating rollback.
+///
+/// The current model is released before the replacement is loaded so its measured
+/// resident bytes can safely be credited by admission. If loading fails, partial
+/// replacement state is cleared and the previous model is restored before the
+/// original replacement error is returned to the caller.
+public enum LocalModelReplacementTransaction {
+    public static func perform<LoadedModel>(
+        isolation: isolated (any Actor)? = #isolation,
+        hasCurrentModel: Bool,
+        releaseCurrent: () async -> Void,
+        loadReplacement: () async throws -> LoadedModel,
+        cleanupFailedReplacement: () async -> Void,
+        restoreCurrent: () async throws -> Void
+    ) async throws -> LoadedModel {
+        await releaseCurrent()
+        do {
+            return try await loadReplacement()
+        } catch {
+            let replacementError = error
+            await cleanupFailedReplacement()
+            guard hasCurrentModel else {
+                throw replacementError
+            }
+            do {
+                try await restoreCurrent()
+            } catch {
+                throw LocalModelReplacementRecoveryError(
+                    replacementFailure: replacementError.localizedDescription,
+                    restorationFailure: error.localizedDescription
+                )
+            }
+            throw replacementError
+        }
+    }
+}

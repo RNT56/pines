@@ -2737,12 +2737,23 @@ struct MLXRuntimeBridge: Sendable {
             )
             #endif
         } catch {
-            await supervisor.block(reason: error.localizedDescription, modelID: install.modelID)
+            let restoredModelID = await state.loadedModelID()
+            if let restoredModelID {
+                await supervisor.markReady(modelID: restoredModelID)
+            } else {
+                await supervisor.block(reason: error.localizedDescription, modelID: install.modelID)
+            }
             #if DEBUG
+            var failureMetadata = runtimeMemoryMetadata(merging: [
+                "model_id": install.modelID.rawValue,
+            ])
+            if let restoredModelID {
+                failureMetadata["restored_model_id"] = restoredModelID.rawValue
+            }
             await FreezeBreadcrumbJournal.shared.record(
                 stage: "mlx.load.failed",
                 detail: error.localizedDescription,
-                metadata: runtimeMemoryMetadata(merging: ["model_id": install.modelID.rawValue])
+                metadata: failureMetadata
             )
             #endif
             throw error
@@ -3140,10 +3151,61 @@ private actor MLXRuntimeState {
 
         #if canImport(MLX) && canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
         await registerModelAliasesIfNeeded()
+        let hasLoadedGenerationContainer = textContainer != nil || visionContainer != nil
+        let previousRuntime = hasLoadedGenerationContainer
+            ? activeInstall.map { PreviousGenerationRuntime(install: $0, profile: activeProfile) }
+            : nil
+        let loadedModel = try await LocalModelReplacementTransaction.perform(
+            hasCurrentModel: previousRuntime != nil,
+            releaseCurrent: {
+                await self.releaseLoadedGenerationModel(reason: "model_transition")
+            },
+            loadReplacement: {
+                try await self.loadGenerationModel(install, profile: profile)
+            },
+            cleanupFailedReplacement: {
+                await self.releaseLoadedGenerationModel(reason: "failed_model_transition")
+            },
+            restoreCurrent: {
+                guard let previousRuntime else { return }
+                let restoredModel = try await self.loadGenerationModel(
+                    previousRuntime.install,
+                    profile: previousRuntime.profile
+                )
+                self.commitLoadedGenerationModel(
+                    restoredModel,
+                    install: previousRuntime.install,
+                    profile: previousRuntime.profile
+                )
+            }
+        )
+        commitLoadedGenerationModel(loadedModel, install: install, profile: profile)
+        #else
+        throw InferenceError.providerUnavailable("mlx-local")
+        #endif
+    }
+
+    private struct PreviousGenerationRuntime {
+        var install: ModelInstall
+        var profile: RuntimeProfile
+    }
+
+    #if canImport(MLX) && canImport(MLXLLM) && canImport(MLXVLM) && canImport(MLXLMCommon) && canImport(PinesHubXetSupport) && canImport(Tokenizers)
+    private struct LoadedGenerationModel {
+        var textContainer: MLXLMCommon.ModelContainer?
+        var visionContainer: MLXLMCommon.ModelContainer?
+        var partitionSummary: String?
+        var stopStrings: Set<String>
+    }
+
+    private func loadGenerationModel(
+        _ install: ModelInstall,
+        profile: RuntimeProfile
+    ) async throws -> LoadedGenerationModel {
+        let runtimeModalities = install.effectiveTurboQuantModalities
         if runtimeModalities.contains(.vision) || runtimeModalities.contains(.audio) {
             var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .visionLanguage)
             resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
-            await releaseLoadedGenerationModel(reason: "model_transition")
             try Self.configureGlobalRuntimePolicy(profile: profile, install: install)
             let loadedContainer = try await MLX.withError {
                 try await VLMModelFactory.shared.loadContainer(
@@ -3153,15 +3215,19 @@ private actor MLXRuntimeState {
                 )
             }
             let partitionSummary = await Self.configureLoadedContainer(
-                loadedContainer, profile: profile)
-            visionContainer = loadedContainer
-            textContainer = nil
-            activePartitionSummary = partitionSummary
-            activeStopStrings = resolvedConfiguration.hints.stopStrings
-        } else if runtimeModalities.contains(.text) {
+                loadedContainer,
+                profile: profile
+            )
+            return LoadedGenerationModel(
+                textContainer: nil,
+                visionContainer: loadedContainer,
+                partitionSummary: partitionSummary,
+                stopStrings: resolvedConfiguration.hints.stopStrings
+            )
+        }
+        if runtimeModalities.contains(.text) {
             var resolvedConfiguration = try Self.lmConfiguration(for: install, kind: .language)
             resolvedConfiguration.configuration.lazyLoad = profile.streamExperts
-            await releaseLoadedGenerationModel(reason: "model_transition")
             try Self.configureGlobalRuntimePolicy(profile: profile, install: install)
             let loadedContainer = try await MLX.withError {
                 try await LLMModelFactory.shared.loadContainer(
@@ -3171,22 +3237,38 @@ private actor MLXRuntimeState {
                 )
             }
             let partitionSummary = await Self.configureLoadedContainer(
-                loadedContainer, profile: profile)
-            textContainer = loadedContainer
-            visionContainer = nil
-            activePartitionSummary = partitionSummary
-            activeStopStrings = resolvedConfiguration.hints.stopStrings
-        } else {
-            throw InferenceError.unsupportedCapability(
-                "The selected local model does not expose a generation modality."
+                loadedContainer,
+                profile: profile
+            )
+            return LoadedGenerationModel(
+                textContainer: loadedContainer,
+                visionContainer: nil,
+                partitionSummary: partitionSummary,
+                stopStrings: resolvedConfiguration.hints.stopStrings
             )
         }
+        throw InferenceError.unsupportedCapability(
+            "The selected local model does not expose a generation modality."
+        )
+    }
+
+    private func commitLoadedGenerationModel(
+        _ loadedModel: LoadedGenerationModel,
+        install: ModelInstall,
+        profile: RuntimeProfile
+    ) {
+        textContainer = loadedModel.textContainer
+        visionContainer = loadedModel.visionContainer
+        activePartitionSummary = loadedModel.partitionSummary
+        activeStopStrings = loadedModel.stopStrings
         activeInstall = install
         activeProfile = profile
         residency.setLoadedInstall(install)
-        #else
-        throw InferenceError.providerUnavailable("mlx-local")
-        #endif
+    }
+    #endif
+
+    func loadedModelID() -> ModelID? {
+        activeInstall?.modelID
     }
 
     private func releaseLoadedGenerationModel(reason: String) async {
