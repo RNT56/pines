@@ -13,7 +13,7 @@ import PinesCore
 // arm's median decode tok/s AND on the compressed/FP16 ratio, and multi-model support
 // (`PINES_TQ_REAL_MODELS` csv) so a smaller fallback model can cover long contexts the primary
 // model's weights+KV won't fit.
-#if DEBUG && canImport(IntegrationTestHelpers) && canImport(MLXLMCommon)
+#if DEBUG && PINES_ENABLE_IN_APP_TURBOQUANT_BENCH && canImport(IntegrationTestHelpers) && canImport(MLXLMCommon)
     import IntegrationTestHelpers
     import MLXLMCommon
     import MLXLLM
@@ -366,9 +366,10 @@ import PinesCore
         }
     }
 #elseif DEBUG
-    // App release/profile builds intentionally do not link IntegrationTestHelpers.
-    // Keep the Debug launch hook compile-safe; real-model benchmarks run through
-    // the standalone SwiftPM diagnostics when the helper product is unavailable.
+    // The app target intentionally does not link IntegrationTestHelpers. `canImport`
+    // can still see transitive package modules, so the explicit build flag above is
+    // required before any helper symbols are referenced. Normal Debug builds keep
+    // this launch hook inert; benchmarks run through standalone SwiftPM diagnostics.
     extension PinesAppModel {
         func runLaunchRealModelTurboQuantBenchIfNeeded(services: PinesAppServices) async {
             _ = services
