@@ -131,6 +131,7 @@ final class ArtifactActivityPollingSchedulerTests: XCTestCase {
 
     func testSchedulerCancellationStopsPendingLoop() async {
         let attempts = PollAttemptCounter()
+        let firstPoll = expectation(description: "scheduler performs its first poll")
         let operation = makeOperation()
         let scheduler = ArtifactActivityPollingScheduler(
             configuration: .init(
@@ -147,16 +148,12 @@ final class ArtifactActivityPollingSchedulerTests: XCTestCase {
         let task = Task {
             await scheduler.run(operations: [operation]) { _ in
                 _ = await attempts.increment(for: operation.id)
+                firstPoll.fulfill()
                 return .active
             }
         }
 
-        for _ in 0 ..< 1_000 {
-            if await attempts.count(for: operation.id) > 0 {
-                break
-            }
-            await Task.yield()
-        }
+        await fulfillment(of: [firstPoll], timeout: 5)
         task.cancel()
         await task.value
 
