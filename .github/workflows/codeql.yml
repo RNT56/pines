@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - name: Checkout
-        # actions/checkout v6.0.2
+        # actions/checkout v7.0.0
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
       - name: Select Xcode and Metal toolchain
@@ -49,7 +49,7 @@ jobs:
         run: bash scripts/ci/prepare-codeql-metal-tools.sh
 
       - name: Initialize CodeQL
-        # github/codeql-action v4.35.5
+        # github/codeql-action v4.36.2
         uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba
         with:
           languages: swift
@@ -60,7 +60,7 @@ jobs:
         run: bash scripts/ci/run-xcode-validation.sh build-app
 
       - name: Analyze
-        # github/codeql-action v4.35.5
+        # github/codeql-action v4.36.2
         uses: github/codeql-action/analyze@9e0d7b8d25671d64c341c19c0152d693099fb5ba
 
   javascript-typescript:
@@ -70,16 +70,16 @@ jobs:
 
     steps:
       - name: Checkout
-        # actions/checkout v6.0.2
+        # actions/checkout v7.0.0
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
       - name: Initialize CodeQL
-        # github/codeql-action v4.35.5
+        # github/codeql-action v4.36.2
         uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba
         with:
           languages: javascript-typescript
           queries: security-and-quality
 
       - name: Analyze
-        # github/codeql-action v4.35.5
+        # github/codeql-action v4.36.2
         uses: github/codeql-action/analyze@9e0d7b8d25671d64c341c19c0152d693099fb5ba
