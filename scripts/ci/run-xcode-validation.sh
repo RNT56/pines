@@ -253,7 +253,11 @@ run_ui_tests() {
         "PinesUITests/PinesUITests/testAccessibilityTextSizeKeepsPrimarySurfacesReachable"
         "PinesUITests/PinesUITests/testArtifactsLibraryAndImageStudio"
         "PinesUITests/PinesUITests/testArtifactsVideoAndSpeechConfiguration"
-        "PinesUITests/PinesUITests/testArtifactsResearchComposerAndRunningWork"
+        # Keep the research journey split: accessibility snapshot latency can
+        # accumulate inside one long UI-test process even on a fresh clone.
+        "PinesUITests/PinesUITests/testArtifactsResearchConfiguration"
+        "PinesUITests/PinesUITests/testArtifactsResearchComposerFlow"
+        "PinesUITests/PinesUITests/testArtifactsRunningResearch"
       )
       if [ "${CI:-}" = "true" ]; then
         prepare_ui_test_simulator_base "$simulator_id"
