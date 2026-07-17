@@ -284,12 +284,52 @@ public protocol HTTPClient: Sendable {
 
 extension URLSession: HTTPClient {
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await data(for: request, delegate: nil)
+        guard let originURL = request.url else { throw URLError(.badURL) }
+        let redirectPolicy = ModelCatalogRedirectPolicy(originURL: originURL)
+        let (bytes, response) = try await bytes(for: request, delegate: redirectPolicy)
         guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
+        guard let finalURL = http.url, EndpointSecurityPolicy.isSameOrigin(originURL, finalURL) else {
+            throw URLError(.redirectToNonExistentLocation)
+        }
+        let maxBytes = 16 * 1024 * 1024
+        guard http.expectedContentLength <= Int64(maxBytes) else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        var data = Data()
+        if http.expectedContentLength > 0 {
+            data.reserveCapacity(min(maxBytes, Int(http.expectedContentLength)))
+        }
+        for try await byte in bytes {
+            guard data.count < maxBytes else { throw URLError(.dataLengthExceedsMaximum) }
+            data.append(byte)
+        }
         return (data, http)
     }
+}
+
+private final class ModelCatalogRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let originURL: URL
+
+    init(originURL: URL) {
+        self.originURL = originURL
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        guard let target = request.url, EndpointSecurityPolicy.isSameOrigin(originURL, target) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
+    }
+
 }
 
 public struct HuggingFaceModelCatalogService: Sendable {

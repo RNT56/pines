@@ -1,23 +1,38 @@
 {
   "schemaVersion": 1,
-  "status": "pending",
+  "status": "failed",
   "pines": {
     "repo": "pines",
-    "branch": "codex/local-runtime-hardening",
-    "commit": "78b210f5389e17479ecab2d2a0fbf161f5447b04",
+    "branch": "tq/real-device-evidence-acceptance",
+    "commit": "ebc1d80aba9466da5e72690b26d9155aec72836d",
     "dirtyAtValidation": true
   },
   "mlxSwift": {
     "repo": "mlx-swift",
-    "branch": "codex/turboquant-core-completion",
-    "commit": "a90b1097df45e4e70b6e0bb367624f8f5857970b",
-    "dirtyAtValidation": true
+    "branch": "tq/layout-v5-default-device-tests",
+    "commit": "bcf93af23f11428f6f01efb0bb4b9020cd2eb383",
+    "dirtyAtValidation": false
   },
   "mlxSwiftLM": {
     "repo": "mlx-swift-lm",
-    "branch": "codex/turboquant-completion-hardening",
-    "commit": "af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c",
+    "branch": "tq/lm-layout-v5-default-device-tests",
+    "commit": "aeaa8e3024a82b25969741b53c749b28ddc64d1a",
     "dirtyAtValidation": false
+  },
+  "wave0Baseline": {
+    "runID": "turboquant-wave0-20260531T024557Z",
+    "createdAt": "2026-05-31T03:12:04.443060+00:00",
+    "mlxArtifactsPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z",
+    "pinesArtifactsPath": "/Users/mt/Programming/Schtack/pines/artifacts/turboquant-wave0-20260531T024557Z",
+    "repoStatePath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/repo-state.json",
+    "validationEventsPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/validation-events.jsonl",
+    "summaryPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/wave0-summary.json",
+    "benchmarkCSVPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/wave0-benchmarks.csv",
+    "performanceParity": false,
+    "stabilityParity": "partial",
+    "supportParity": "partial",
+    "deviceSmokeResult": "failed_environmental",
+    "notes": "Wave 0 is intentionally non-green: Mac benchmark matrix completed, mlx-swift full TurboQuant tests currently fail lower-bit QK reference checks, and the physical-device app-host smoke was interrupted in code signing before install/launch."
   },
   "schemaSet": {
     "AdmissionPlan": 1,
@@ -31,89 +46,1275 @@
     "KVSnapshotManifest": 1,
     "SnapshotSecurityPolicy": 1,
     "ModelProfile": 2,
-    "TurboQuantLayout": 4,
-    "TurboQuantLayoutNext": 5,
-    "AdaptivePrecisionPolicy": 1
+    "TurboQuantLayout": 6,
+    "TurboQuantLayoutNext": 6,
+    "AdaptivePrecisionPolicy": 1,
+    "SpeculativeDecode": 1,
+    "PlatformFeatureGate": 1,
+    "PlatformUnlockPolicy": 1,
+    "OpenKVFormat": 1,
+    "PlatformEvidenceDimensions": 1
   },
-  "validatedAt": null,
+  "validatedAt": "2026-07-12T15:37:54Z",
   "validationCommands": [
     {
-      "repo": "pines",
-      "command": "swift build --disable-automatic-resolution",
-      "result": "pending",
-      "notes": ""
-    },
-    {
-      "repo": "pines",
-      "command": "swift test --disable-automatic-resolution",
+      "repo": "mlx-swift-lm",
+      "command": "swift package resolve && swift test --filter TurboQuantBenchTests",
       "result": "passed",
-      "notes": ""
+      "runID": "swiftpm-62-pin-refresh-20260712",
+      "startedAt": "2026-07-12T15:30:20Z",
+      "finishedAt": "2026-07-12T15:30:50Z",
+      "notes": "The LM fork resolved the SwiftPM 6.2-compatible core revision and all 12 focused TurboQuant benchmark tests passed. This is build and contract evidence, not physical-device or product-claim evidence."
     },
     {
       "repo": "pines",
-      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "command": "xcodebuild -resolvePackageDependencies -project Pines.xcodeproj -scheme Pines && bash scripts/ci/check-mlx-package-pins.sh",
       "result": "passed",
-      "notes": ""
-    },
-    {
-      "repo": "pines",
-      "command": "bash scripts/ci/xcodegen.sh generate",
-      "result": "pending",
-      "notes": ""
-    },
-    {
-      "repo": "pines",
-      "command": "bash scripts/ci/run-xcode-validation.sh",
-      "result": "pending",
-      "notes": ""
+      "runID": "swiftpm-62-pin-refresh-20260712",
+      "startedAt": "2026-07-12T15:31:20Z",
+      "finishedAt": "2026-07-12T15:37:54Z",
+      "notes": "The generated Xcode graph resolved the exact final fork pair and the pin-alignment guard passed. Signing authorization prevented refreshing exact-pair device evidence in this run; immediately-prior-pair device evidence remains historical only."
     },
     {
       "repo": "mlx-swift",
-      "command": "swift build",
-      "result": "pending",
-      "notes": ""
+      "command": "swift build --product TurboQuantBenchmark -c release",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-completion-20260531T125806Z/logs/mlx-swift-build-turboquantbenchmark.log",
+      "runID": "turboquant-completion-20260531T125806Z",
+      "startedAt": "2026-05-31T13:01:00Z",
+      "finishedAt": "2026-05-31T13:01:44Z",
+      "notes": "Release TurboQuantBenchmark product built for the pinned segmented-surface core."
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift build --product TurboQuantBench -c release",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-completion-20260531T125806Z/logs/mlx-swift-lm-build-turboquantbench.log",
+      "runID": "turboquant-completion-20260531T125806Z",
+      "startedAt": "2026-05-31T13:01:00Z",
+      "finishedAt": "2026-05-31T13:01:24Z",
+      "notes": "Release TurboQuantBench product built for the pinned LM package. SwiftPM warns this automatic product is built via the default target."
+    },
+    {
+      "repo": "pines",
+      "command": "python3 -m json.tool docs/turboquant-implementation/compatibility-pair.json && python3 -m json.tool docs/turboquant-implementation/compatibility-pair.schema.json && git diff --check",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/artifacts/turboquant-completion-20260531T125806Z/logs/pines-json-diff-check.log",
+      "runID": "turboquant-completion-20260531T125806Z",
+      "startedAt": "2026-05-31T13:00:52Z",
+      "finishedAt": "2026-05-31T13:00:52Z",
+      "notes": "Compatibility manifest JSON, schema JSON, and whitespace diff checks passed."
     },
     {
       "repo": "mlx-swift",
-      "command": "swift test",
-      "result": "pending",
-      "notes": ""
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-completion-20260531T125806Z/logs/mlx-swift-test-turboquant.log",
+      "runID": "turboquant-completion-20260531T125806Z",
+      "startedAt": "2026-05-31T12:58:06Z",
+      "notes": "Post-Wave0 stabilization gate passed on the pinned mlx-swift segmented-surface commit. This resolves the earlier Wave 0 lower-bit QK test blocker but does not prove compressed-vs-FP16 performance parity.",
+      "finishedAt": "2026-05-31T13:00:16Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "MLX_TURBOQUANT_NATIVE_ATTENTION=1 swift test --filter TurboQuantNativeAttentionTests",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-completion-20260531T125806Z/logs/mlx-swift-test-native-attention.log",
+      "runID": "turboquant-completion-20260531T125806Z",
+      "startedAt": "2026-05-31T12:58:06Z",
+      "notes": "Native segmented attention surface tests passed with the rollout gate enabled. The production static MLX fused compressed-attention backend remains unavailable by default; this validates API/fallback contracts, not native performance parity.",
+      "finishedAt": "2026-05-31T13:00:19Z"
     },
     {
       "repo": "mlx-swift-lm",
-      "command": "swift build",
-      "result": "pending",
-      "notes": ""
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-completion-20260531T125806Z/logs/mlx-swift-lm-test-turboquant.log",
+      "runID": "turboquant-completion-20260531T125806Z",
+      "startedAt": "2026-05-31T12:58:06Z",
+      "notes": "Post-Wave0 LM TurboQuant gate passed after admission-policy and hybrid-cache stabilization.",
+      "finishedAt": "2026-05-31T13:00:04Z"
     },
     {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/artifacts/turboquant-completion-20260531T125806Z/logs/pines-check-mlx-package-pins.log",
+      "runID": "turboquant-completion-20260531T125806Z",
+      "startedAt": "2026-05-31T12:58:06Z",
+      "notes": "Pin guard passed for project.yml, generated Xcode project, Xcode Package.resolved, docs, compatibility-pair.json, and MLXRuntimeBridge on the current segmented-surface pair.",
+      "finishedAt": "2026-05-31T13:00:35Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/artifacts/turboquant-completion-20260531T125806Z/logs/pines-test-turboquant.log",
+      "runID": "turboquant-completion-20260531T125806Z",
+      "startedAt": "2026-05-31T12:58:06Z",
+      "notes": "Historical validation entry from the prior pair. Current-pair package and pin-drift gates are recorded separately and do not include physical-device evidence.",
+      "finishedAt": "2026-05-31T13:00:52Z"
+    },
+    {
+      "repo": "pines",
+      "command": "PINES_TQ_BENCH_CONTEXTS=8192 PINES_TQ_BENCH_SCHEMES=turbo4v2 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 PINES_TQ_BENCH_TIMEOUT_SECONDS=900 PINES_TQ_BENCH_BUILD_TIMEOUT_SECONDS=900 bash scripts/diagnostics/run-ios-turboquant-bench.sh",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T132622Z/summary.json",
+      "runID": "ios-turboquant-bench-20260531T132622Z",
+      "startedAt": "2026-05-31T13:26:22Z",
+      "finishedAt": "2026-05-31T13:31:09Z",
+      "notes": "Historical prior-pair app-hosted physical-device smoke on iPhone16,2 / iPhone 15 Pro Max running iOS 26.5. Artifact: /Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T132622Z. This is not exact-current-pair evidence and cannot promote the current tuple."
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/logs/mlx-swift-build-turboquantbenchmark.log",
+      "command": "swift build --product TurboQuantBenchmark -c release",
+      "finishedAt": "2026-05-31T02:46:31Z",
+      "notes": "Command completed.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:45:58Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo8-8192.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 8192 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:46:36Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:46:31Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo8-8192.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 8192 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:46:38Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:46:36Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo8-16384.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 16384 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:46:43Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:46:38Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo8-16384.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 16384 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:46:48Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:46:43Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo8-32768.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 32768 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:46:56Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:46:48Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo8-32768.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 32768 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:47:04Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:46:56Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo8-65536.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 65536 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:47:20Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:47:04Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo8-65536.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 65536 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:47:36Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:47:20Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo8-131072.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 131072 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:48:07Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:47:36Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo8-131072.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 131072 --preset turbo8 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:48:38Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:48:07Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo4v2-8192.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 8192 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:48:40Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:48:38Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo4v2-8192.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 8192 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:48:43Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:48:40Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo4v2-16384.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 16384 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:48:47Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:48:43Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo4v2-16384.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 16384 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:48:51Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:48:47Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo4v2-32768.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 32768 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:48:59Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:48:51Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo4v2-32768.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 32768 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:49:07Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:48:59Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo4v2-65536.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 65536 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:49:21Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:49:07Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo4v2-65536.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 65536 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:49:35Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:49:21Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo4v2-131072.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 131072 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:50:03Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:49:35Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo4v2-131072.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 131072 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:50:31Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:50:03Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo3_5-8192.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 8192 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:50:34Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:50:31Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo3_5-8192.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 8192 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:50:36Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:50:34Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo3_5-16384.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 16384 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:50:40Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:50:36Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo3_5-16384.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 16384 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:50:44Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:50:40Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo3_5-32768.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 32768 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:50:52Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:50:44Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo3_5-32768.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 32768 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:50:59Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:50:52Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo3_5-65536.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 65536 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:51:14Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:50:59Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo3_5-65536.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 65536 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:51:28Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:51:14Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/default/core-turbo3_5-131072.json",
+      "command": "/Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 131072 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:51:56Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:51:28Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/coop/core-turbo3_5-131072.json",
+      "command": "TQ_COOP=1 /Users/mt/Programming/Schtack/mlx-forks/mlx-swift/.build/release/TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 131072 --preset turbo3_5 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "finishedAt": "2026-05-31T02:52:24Z",
+      "notes": "Benchmark emitted valid JSON.",
+      "repo": "mlx-swift",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:51:56Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/logs/mlx-swift-test-turboquant.log",
+      "command": "swift test --filter TurboQuant",
+      "finishedAt": "2026-05-31T02:52:46Z",
+      "notes": "Command exited with status 1.",
+      "repo": "mlx-swift",
+      "result": "failed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:52:24Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/logs/mlx-swift-lm-test-turboquant.log",
+      "command": "swift test --filter TurboQuant",
+      "finishedAt": "2026-05-31T02:53:01Z",
+      "notes": "Command completed.",
       "repo": "mlx-swift-lm",
-      "command": "swift test",
-      "result": "pending",
-      "notes": ""
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:52:46Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/logs/mlx-swift-lm-build-turboquantbench.log",
+      "command": "swift build --product TurboQuantBench -c release",
+      "finishedAt": "2026-05-31T02:56:35Z",
+      "notes": "Command completed.",
+      "repo": "mlx-swift-lm",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:53:01Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/logs/mlx-swift-lm-test-turboquantbench.log",
+      "command": "swift test --filter TurboQuantBench",
+      "finishedAt": "2026-05-31T02:56:41Z",
+      "notes": "Command completed.",
+      "repo": "mlx-swift-lm",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:56:36Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/logs/pines-pin-drift.log",
+      "command": "swift test --filter TurboQuantPinDriftTests",
+      "finishedAt": "2026-05-31T02:56:55Z",
+      "notes": "Command completed.",
+      "repo": "pines",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:56:41Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/logs/pines-check-mlx-package-pins.log",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "finishedAt": "2026-05-31T02:56:58Z",
+      "notes": "Command completed.",
+      "repo": "pines",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:56:55Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/logs/pines-xcodebuild-generic-ios.log",
+      "command": "xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform=iOS' -skipMacroValidation -skipPackagePluginValidation -onlyUsePackageVersionsFromResolvedFile -disableAutomaticPackageResolution -scmProvider system CODE_SIGNING_ALLOWED=NO build",
+      "finishedAt": "2026-05-31T02:58:49Z",
+      "notes": "Command completed.",
+      "repo": "pines",
+      "result": "passed",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:56:58Z"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/artifacts/turboquant-wave0-20260531T024557Z/logs/ios-smoke.log",
+      "command": "PINES_TQ_BENCH_CONTEXTS=8192 PINES_TQ_BENCH_SCHEMES=turbo4v2 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 bash scripts/diagnostics/run-ios-turboquant-bench.sh",
+      "finishedAt": "2026-05-31T03:04:33Z",
+      "notes": "iOS smoke exited with status 241.",
+      "repo": "pines",
+      "result": "failed_environmental",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:58:50Z"
     }
   ],
   "signoffs": {
     "mlxCoreContracts": {
       "required": true,
-      "approvedBy": null,
-      "approvedAt": null,
-      "notes": ""
+      "approvedBy": "Codex",
+      "approvedAt": "2026-05-25T06:14:08Z",
+      "notes": "Explicit TurboQuantContracts.swift, TurboQuantStorageEstimate.swift, Codable tests, and compatibility aliases are present."
     },
     "lmTypedErrors": {
       "required": true,
-      "approvedBy": null,
-      "approvedAt": null,
-      "notes": ""
+      "approvedBy": "Codex",
+      "approvedAt": "2026-05-25T06:14:02Z",
+      "notes": "TurboQuantRuntimeFailure is present and product TurboQuant generation rejects non-throwing models before runtime attention."
     },
     "pinesBridgeIntegration": {
       "required": true,
-      "approvedBy": null,
-      "approvedAt": null,
-      "notes": ""
+      "approvedBy": "Codex",
+      "approvedAt": "2026-05-25T08:59:32Z",
+      "notes": "INT-1 bridge implementation adds request-scoped admission, final admission recheck after completion-token fitting, minimal ContextAssemblyPlan metadata, RunDecision metadata, calibration sample metadata, typed failure event metadata, and explicit no-cloud fallback markers. Full SwiftPM and Xcode validation pass on the final production pin pair."
     }
   },
   "notes": [
-    "Pending validation. Do not use this file as production evidence until status is green.",
-    "Pines project pins and docs/TURBOQUANT.md name the same MLX pair on the compatibility branch."
+    "Current integration pins mlx-swift bcf93af23f11428f6f01efb0bb4b9020cd2eb383, which includes the quantized SDPA Swift APIs, a warning-free SwiftPM Metal plugin that targets the active Apple SDK, an Apple-mobile-safe nested CPU JIT gate, and a SwiftPM 6.2-compatible manifest.",
+    "Current integration pins mlx-swift-lm aeaa8e3024a82b25969741b53c749b28ddc64d1a, which includes long-context prompt-lookup self-speculation, subsequent model/runtime hardening, and the exact iOS-compatible core dependency.",
+    "The current continuation pair has exact-pair physical app-host synthetic smoke and a focused 4K Qwen3.5 0.8B real-model smoke, but remains failed/non-green until native-performance, the full real-model-inference benchmark matrix, performance-parity, quality-memory, and fallback evidence pass; historical app-host smoke from earlier pins is retained only as prior evidence.",
+    "Post-Wave0 stabilization produced passing dependency tests and app-hosted physical-device smoke for a prior pin pair. Those results are historical and are not exact-current-pair evidence.",
+    "The historical physical-device smoke artifact is /Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T132622Z. It reports 8K qwen3.5-2b turbo4v2 synthetic attention-shape smoke and remains unverified prior-pair evidence only.",
+    "Historical Mac real-model Qwen3.5-2B K8/Vx evidence is documented at /Users/mt/Programming/Schtack/pines/docs/turboquant-implementation/baselines/20260601T144308Z-k8vx-realmodel-quality-speed.md and raw artifact /Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-k8vx-realmodel-20260601T144308Z/k8vx-quality-speed-summary.md. It belongs to a prior tuple and cannot promote the current pins.",
+    "Native Sparse-V threshold, top-k, cumulative-mass, and hybrid cumulative-plus-top-k diagnostics are wired, but Sparse-V remains disabled by default and non-promoted until real-model speed, memory, quality, task, fallback, and iOS physical-device evidence passes.",
+    "The pair remains failed/non-green because exact-pair physical-device evidence is limited to synthetic app-host smoke plus one small real-model comparison, while the release benchmark matrix, stable native-path performance, quality, memory, and fallback evidence is incomplete. TurboQuant remains an unverified capacity route until later evidence proves the tuple.",
+    "Authoritative current-pair status is failed/non-green. Historical pass, smoke, simulator, and Mac proof evidence remains retained below but is superseded by the Wave 0 baseline and cannot green the current pair.",
+    "Pins alone establish only an unverified compatibility identity. Verified and Certified product labels require accepted real-device evidence for the exact model/device/mode tuple plus passing quality, memory, throughput, and fallback gates.",
+    "Wave 2 INT-2A updated project.yml, generated Xcode project pins, Xcode Package.resolved, and docs/TURBOQUANT.md to the validated Wave 1 MLX pair.",
+    "The Pines commit recorded here is the committed production pin and runtime-bridge integration commit validated before this metadata-only manifest update.",
+    "Wave 0 blockers resolved: core contracts are in explicit files, LM typed errors are present, product TurboQuant generation requires throwing models, Pines reuses existing TurboQuant DTOs, and fallback-contract hashes are implemented.",
+    "Wave 1 prerequisites validated: core contracts/router, LM runtime failures/cache snapshots/admission planner, and PinesCore control-plane tests passed.",
+    "Earlier full Xcode validation was green on a prior production pin pair. The previous xcodebuild package-resolution stall was resolved by removing ignored generated build artifacts and using locked package-resolution flags, but that historical result does not make the current pair green.",
+    "Layout V5 is now the default MLX layout on the device-test pair while Layout V4 remains supported for legacy/comparison runs.",
+    "A targeted on-device MLXTurboQuantRuntimeSmokeTests run passed on GBU-12, an iPhone16,2 running iOS 26.5. Real-device benchmark/profile evidence remains pending and product compatibility claims must stay evidence-gated.",
+    "The Pines commit recorded here is the Layout V5 device-test branch point; this manifest update is metadata-only.",
+    "mlx-swift e60a719ea85c4284c2619ba0523b21956f70a0f0 keeps the Mac-gated Qwen GQA fused optimizations and adds a measured block-parallel token-block tuning surface to the core attention API and benchmark reports. The forced 256-token block shape helps some 32K/64K p95 cases but remains an explicit tuning option, not the default, because it falls back at 128K.",
+    "mlx-swift-lm 6ef60007409b316cefbc7760cb500f40ffb127c1 pins the tunable grouped-query fused core, removes duplicate decode canonicalization/redundant steady-state compressed validation, and records block-size overrides in TurboQuantQwenProof schema v4.",
+    "TurboQuantQwenProof strict Mac release proof passed locally with fp16 Qwen3.5 2B shape, 16 query heads, 4 KV heads, 32K production context, 128K reserved capacity, query length 1, and Turbo8/Turbo4V2/Turbo3.5: 3/3 ok. Reserved-capacity p95 rates at 32K were Turbo8 28.89 tok/s, Turbo4V2 30.84 tok/s, and Turbo3.5 31.44 tok/s. All 64K and 128K rows passed quality but remain experiment-only below the 20 tok/s p95 production floor in this run.",
+    "mlx-swift 776aaf9520ae4b506781d32b674b56f8a18dc165 promotes Layout V6 with fixed-tail split-magnitude key storage for Turbo3.5/Turbo2.5, derived high-lane membership, compact key high/residual masks, and no variable prefix-scan in the fused attention read path.",
+    "mlx-swift-lm fbaf2df6218acf2b6a21f69ae49d28ed87a301b6 pins the Layout V6 core and adds direct initial compressed cache commits, lightweight compressed update checkpoints, compact v6 append/expand/snapshot restore handling, and packed-fallback guards for invalid group-size dimensions.",
+    "TurboQuantQwenProof strict Mac release proof passed locally for Qwen3.5 2B, Qwen3.6 27B, and Qwen3.6 35B-A3B representative shapes with fp16, 16 query heads, 4 KV heads, 32K production context, 128K reserved capacity, query length 1, and Turbo8/Turbo4V2/Turbo3.5: 9/9 production ok. 32K p95 rates were Turbo8 43.53-44.61 tok/s, Turbo4V2 46.97-47.41 tok/s, and Turbo3.5 46.87-47.31 tok/s. 64K experiment p95 rates were 25.25-28.01 tok/s; 128K experiment p95 rates were 13.55-15.04 tok/s.",
+    "mlx-swift 425d765aa7fa2b2cf111b9c43430054d82d02d07 adds automatic block-parallel token planning and stores block-parallel fused value partials in fp16/bf16 for non-float32 decode while preserving float32 stats and final reduction accumulation.",
+    "mlx-swift-lm d1465b7e7156355acda6fd063e5a5b93f9efb903 pins the fused-partial core and promotes TurboQuantQwenProof schema v5 with recommended/effective block-token planning metadata.",
+    "TurboQuantQwenProof strict Mac release proof passed locally for Qwen3.5 2B, Qwen3.6 27B, and Qwen3.6 35B-A3B representative shapes with fp16, 16 query heads, 4 KV heads, 32K production context, 128K reserved capacity, query length 1, automatic 512-token block planning, and Turbo8/Turbo4V2/Turbo3.5: 9/9 production ok. 32K p95 rates were Turbo8 44.43-44.64 tok/s, Turbo4V2 46.63-47.32 tok/s, and Turbo3.5 46.98-47.28 tok/s. 64K experiment p95 rates were 25.38-27.80 tok/s; 128K experiment p95 rates were 13.61-15.07 tok/s.",
+    "Pines pins the fused-partial compatibility pair mlx-swift 425d765aa7fa2b2cf111b9c43430054d82d02d07 plus mlx-swift-lm d1465b7e7156355acda6fd063e5a5b93f9efb903 after local pin guard, focused TurboQuant tests, core runner, and locked Xcode package resolution passed.",
+    "mlx-swift-lm 6335ec8a2e25cff94c93992cb921d7a0345b4a22 adds KVCacheStrategy.adaptiveTurboQuant, raw SDPA memory admission, 16K raw-first Qwen routing, compressed fallback when raw does not fit, and TurboQuantQwenProof schema v6 production-route reporting.",
+    "Schema-v6 adaptive Qwen proof reports 8K/16K production routes as rawSDPA with plainRawSDPA throughput, and 32K/64K routes as turboQuantCompressed with fused compressed throughput.",
+    "Pines pins the adaptive raw-first compatibility pair mlx-swift 425d765aa7fa2b2cf111b9c43430054d82d02d07 plus mlx-swift-lm 6335ec8a2e25cff94c93992cb921d7a0345b4a22; short local TurboQuant requests now preserve TurboQuant admission instead of disabling it, so MLX can choose compressed TurboQuant when raw SDPA is not admitted.",
+    "mlx-swift b187523536c6923562e3a81613e169da9321f812 adds the opt-in cooperative coalesced QK decode path behind TQ_COOP=1 for long-context A-series validation.",
+    "mlx-swift-lm 1bf1cc246e17c48527a32c99fffcde41b84cd725 removes the legacy turbo3 bit-metadata alias as a distinct advertised profile and adds the TurboQuantBench library/test harness for physical-device attention sweeps.",
+    "Pines pins mlx-swift b187523536c6923562e3a81613e169da9321f812 plus mlx-swift-lm 1bf1cc246e17c48527a32c99fffcde41b84cd725 and exposes a Debug app-hosted TurboQuant benchmark launch mode so real iPhone runs no longer depend on tool-hosted Swift package tests.",
+    "The 2026-05-31 app-hosted smoke run on iPhone16,2 / iPhone 15 Pro Max completed inside the Pines app host for a prior pair. It confirms the historical device execution path and artifact capture but is not evidence for the current tuple.",
+    "Wave 0 baseline capture turboquant-wave0-20260531T024557Z recorded repo state for mlx, mlx-c, mlx-swift, mlx-swift-lm, and pines plus benchmark/test/build artifacts under /Users/mt/Programming/Schtack/mlx-forks/artifacts and /Users/mt/Programming/Schtack/pines/artifacts.",
+    "Wave 0 Mac TurboQuantBenchmark completed the 8K/16K/32K/64K/128K matrix for turbo8, turbo4v2, and turbo3_5 in default and TQ_COOP=1 modes. The capture harness now preserves route/backend/kernel flags and plain-vs-compressed speed ratio fields for reruns.",
+    "Wave 0 local release status is non-green: mlx-swift swift test --filter TurboQuant failed in testTurboQuantMetalLowerBitQKMatchesProductReferenceWhenAvailable with 144 lower-bit QK reference failures; mlx-swift-lm TurboQuant tests/builds, Pines pin drift, package-pin checks, and generic iOS build passed.",
+    "Wave 0 iOS app-host smoke was attempted on physical device 7BFB7B72-C40C-58A7-B2C6-F075BDE21116 but did not reach install/launch; xcodebuild was interrupted after the code-sign step stalled. The run is recorded as failed_environmental, not as real-device benchmark evidence.",
+    "Wave 0 parity verdict is performanceParity=false, stabilityParity=partial, supportParity=partial. Compressed equal-context throughput is not on parity with raw FP16, and TurboQuant remains a capacity route until later waves prove otherwise."
+  ],
+  "productionPinPromotion": {
+    "branch": "tq/real-device-evidence-acceptance",
+    "pinnedMLXSwift": "bcf93af23f11428f6f01efb0bb4b9020cd2eb383",
+    "pinnedMLXSwiftLM": "aeaa8e3024a82b25969741b53c749b28ddc64d1a",
+    "compatibilityPairID": "mlx-swift-bcf93af23f11428f6f01efb0bb4b9020cd2eb383+mlx-swift-lm-aeaa8e3024a82b25969741b53c749b28ddc64d1a",
+    "releaseGate": "non-green after the SwiftPM 6.2-compatible MLX integration pin move: Pines pins mlx-swift bcf93af23f11428f6f01efb0bb4b9020cd2eb383 plus mlx-swift-lm aeaa8e3024a82b25969741b53c749b28ddc64d1a. Exact-pair physical-device validation must be refreshed for this manifest-only core revision; native-path performance confidence, broader quality, memory, fallback, imported-product-evidence, and benchmark-matrix gates remain required before any Verified or Certified claim."
+  },
+  "statusReason": "Authoritative current-pair status is failed/non-green. The integration pair pins SwiftPM 6.2-compatible, platform-aware, Apple-mobile-compatible mlx-swift bcf93af23f11428f6f01efb0bb4b9020cd2eb383 and mlx-swift-lm aeaa8e3024a82b25969741b53c749b28ddc64d1a, retaining the Swift quantized-SDPA surface, model/runtime hardening, and long-context self-speculation integration. Exact-pair signed physical-device validation must be refreshed for this manifest-only core revision. Release comparisons require real-model inference across the full acceptance matrix; prior-pair smoke and Mac evidence are historical only, performance parity is not established for this pair, and the broader release benchmark, quality, memory, and fallback evidence remains incomplete.",
+  "compatibilityPairID": "mlx-swift-bcf93af23f11428f6f01efb0bb4b9020cd2eb383+mlx-swift-lm-aeaa8e3024a82b25969741b53c749b28ddc64d1a",
+  "claimPolicy": {
+    "pinsOnlyEvidenceLevel": "unverified",
+    "verifiedOrCertifiedProductClaimsAllowed": false,
+    "requiresRealDeviceEvidence": true,
+    "notes": "Exact MLX pins are necessary for reproducibility, but pins, smoke tests, simulator builds, and historical pass evidence are not sufficient for Verified or Certified product claims."
+  },
+  "releaseReadiness": {
+    "greenAllowed": false,
+    "requiredEvidenceForGreen": [
+      "native_backend_performance",
+      "performance_parity",
+      "real_model_inference",
+      "real_device_app_host",
+      "benchmark_matrix",
+      "quality_memory_fallback"
+    ],
+    "nativeBackendEvidence": "api_contract_only",
+    "performanceParityEvidence": "failed",
+    "appHostHybridNativeDiagnosticsRequired": true,
+    "currentBlockers": [
+      "Native backend capability identity is now pinned through mlx-swift, but native segmented performance parity is not proven by a current benchmark matrix.",
+      "Release comparison evidence must use real model inference; synthetic attention-shape smoke is not accepted for parity, Verified, or Certified claims.",
+      "Full release benchmark-matrix plus quality, memory, and fallback evidence is still incomplete for the current pair.",
+      "Compressed equal-context throughput remains far below raw FP16 in exact-pin app-host evidence, so TurboQuant remains a capacity route."
+    ],
+    "notes": "Status cannot become green until current-pair evidence explicitly passes native backend performance, compressed-vs-plain performance parity, full benchmark-matrix, and real-device app-host gates. App-host benchmark artifacts must carry hybrid/native cache diagnostics."
+  },
+  "historicalValidationCommands": [
+    {
+      "repo": "pines",
+      "command": "PINES_TQ_REAL_BENCH=1 PINES_TQ_REAL_MODEL=mlx-community/Qwen3.5-0.8B-MLX-4bit PINES_TQ_REAL_CONTEXTS=4096 PINES_TQ_REAL_GEN_TOKENS=8 PINES_TQ_REAL_REPEATS=2 PINES_TQ_REAL_BOOTSTRAP=200",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/docs/turboquant-implementation/baselines/20260712T151432Z-ios-qwen35-08b-realmodel-smoke.md",
+      "runID": "device-rm-08b-current-20260712T151100Z",
+      "startedAt": "2026-07-12T15:11:00Z",
+      "finishedAt": "2026-07-12T15:14:32Z",
+      "notes": "Immediately-prior-pair physical-device real-model smoke passed for the installed Qwen3.5 0.8B MLX 4-bit model at 4K. FP16-referenced quality passed and no raw fallback was allocated; only two throughput repeats were requested, the ratio CI is wide, and selected-path diagnostics were empty. A manifest-only SwiftPM compatibility revision now changes the exact pair, so this remains historical evidence and does not establish final-pair native-backend performance parity or complete the release matrix.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "swiftpm-62-pin-refresh-20260712"
+    },
+    {
+      "repo": "pines",
+      "command": "PINES_DEVICE_ID=7BFB7B72-C40C-58A7-B2C6-F075BDE21116 PINES_TQ_BENCH_SKIP_INSTALL=1 PINES_TQ_BENCH_CONTEXTS=8192 PINES_TQ_BENCH_SCHEMES=turbo4v2 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 bash scripts/diagnostics/run-ios-turboquant-bench.sh",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/docs/turboquant-implementation/baselines/20260712T150706Z-ios-exact-pair-smoke.md",
+      "runID": "turboquant-bench-20260712T150706Z",
+      "startedAt": "2026-07-12T15:07:06Z",
+      "finishedAt": "2026-07-12T15:07:15Z",
+      "notes": "Immediately-prior-pair signed app-host smoke passed on iPhone16,2 with the native MLX compressed path active. The row is synthetic attention-shape evidence with realModel=false. A manifest-only SwiftPM compatibility revision now changes the exact pair, so this remains historical Unverified evidence and does not establish final-pair real-model quality or performance parity.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "swiftpm-62-pin-refresh-20260712"
+    },
+    {
+      "artifactPath": "/Users/mt/Programming/Schtack/pines/artifacts/turboquant-wave0-20260531T024557Z/logs/ios-smoke.log",
+      "command": "PINES_TQ_BENCH_CONTEXTS=8192 PINES_TQ_BENCH_SCHEMES=turbo4v2 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 bash scripts/diagnostics/run-ios-turboquant-bench.sh",
+      "finishedAt": "2026-05-31T03:04:33Z",
+      "notes": "iOS smoke exited with status 241. Historical Wave 0 evidence only; it is superseded by the current post-Wave0 app-hosted smoke and cannot make the current pair green.",
+      "repo": "pines",
+      "result": "failed_environmental",
+      "runID": "turboquant-wave0-20260531T024557Z",
+      "startedAt": "2026-05-31T02:58:50Z",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-completion-20260531T125806Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter 'turboQuant|localInference|versionedEnvelope'",
+      "result": "passed",
+      "notes": "Wave 0 targeted schema/failure tests passed after blocker-resolution docs. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuantFallbackContractTests",
+      "result": "passed",
+      "notes": "Wave 0 targeted fallback-contract tests passed after blocker-resolution docs. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift test --filter TurboQuantContractsTests",
+      "result": "passed",
+      "notes": "Wave 0 targeted contract tests passed after explicit TurboQuantContracts.swift split. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuantRuntimeFailureTests",
+      "result": "passed",
+      "notes": "Wave 0 targeted runtime-failure tests passed, including non-throwing model rejection before runtime attention. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift build --product TurboQuantBenchmark -c release",
+      "result": "passed",
+      "notes": "Release benchmark runner built after the fixed-tail layout redesign. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift build --product TurboQuantBenchmark -c release",
+      "result": "passed",
+      "notes": "Release benchmark runner built after fused-partial block-planning changes. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift test --filter TurboQuantBenchmarkReportTests",
+      "result": "passed",
+      "notes": "Focused Wave 0 benchmark schema round-trip tests passed after adding raw/plain SDPA comparison fields. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuantBenchTests",
+      "result": "passed",
+      "notes": "TurboQuantBench smoke and legacy-result JSON compatibility tests passed after adding Wave 0 app-host fields. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift build --product TurboQuantBench -c release",
+      "result": "passed",
+      "notes": "Release TurboQuantBench build passed after adding legacy JSON defaults for Wave 0 app-host fields. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Full focused TurboQuant filter passed after adding Wave 0 app-host schema compatibility defaults. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift build --disable-automatic-resolution",
+      "result": "passed",
+      "notes": "Wave 2 PinesCore build passed after INT-1 metadata and schema additions. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --disable-automatic-resolution",
+      "result": "passed",
+      "notes": "Wave 2 full PinesCore package tests passed: 142 Swift Testing tests. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": "Wave 2 PinesCoreTestRunner passed. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/xcodegen.sh generate",
+      "result": "passed",
+      "notes": "Wave 2 regenerated Pines.xcodeproj after exact MLX pin update. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh prepare && bash scripts/ci/run-xcode-validation.sh generate && bash scripts/ci/run-xcode-validation.sh finalize",
+      "result": "passed",
+      "notes": "Generated project and package-lock drift checks passed. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh all",
+      "result": "passed",
+      "notes": "Full Xcode validation passed on the final production pin pair: locked package resolution, unsigned iOS app build, build-for-testing, PinesTests unit smoke, PinesUITests UI smoke, and final generated-project/package drift checks. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "xcrun swiftc -parse -I .build/debug/Modules Pines/Runtime/MLXRuntimeBridge.swift",
+      "result": "passed",
+      "notes": "Syntax parse of the INT-1 bridge file passed outside Xcode, including the post-audit final admission recheck. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuantWave1ControlPlaneTests",
+      "result": "passed",
+      "notes": "Focused Wave 2 control-plane metadata tests passed after the post-audit bridge tightening. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Exact MLX fork pins are synchronized across project.yml and generated Xcode project and are above known-good minimum revisions. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "git diff --check",
+      "result": "passed",
+      "notes": "Final Wave 2 closeout diff check passed. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "node -e \"JSON.parse(require('fs').readFileSync('docs/turboquant-implementation/compatibility-pair.json','utf8'))\"",
+      "result": "passed",
+      "notes": "Machine-readable compatibility manifest parses as valid JSON after Wave 2 updates. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift build",
+      "result": "passed",
+      "notes": "Wave 2 sidecar validation; existing unhandled Source/Examples warnings only. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift test --filter TurboQuantContractsTests && swift test --filter TurboQuantValidationTests && swift test --filter TurboQuantAttentionRouterTests",
+      "result": "passed",
+      "notes": "Wave 2 sidecar validation passed 14 focused Wave 1 prerequisite tests. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift build --target MLXLMCommon",
+      "result": "passed",
+      "notes": "Wave 2 sidecar validation passed. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuantRuntimeFailureTests && swift test --filter TurboQuantCacheRuntimeSnapshotTests && swift test --filter TurboQuantAdmissionPlannerTests",
+      "result": "passed",
+      "notes": "Wave 2 sidecar validation passed 17 focused Wave 1 prerequisite tests. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift build --disable-automatic-resolution",
+      "result": "passed",
+      "notes": "Wave 3.5 production pin branch builds after promoting project.yml and generated Xcode package references to the final Wave 7 MLX pair. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --disable-automatic-resolution",
+      "result": "passed",
+      "notes": "Full SwiftPM test suite passed with 189 tests on the production pin branch. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": "PinesCoreTestRunner passed after pin promotion. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Pin guard now verifies project.yml, generated Xcode package references, Xcode Package.resolved, docs/TURBOQUANT.md, compatibility-pair.json, and MLXRuntimeBridge compatibility pair ID. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "python3 -m json.tool docs/turboquant-implementation/compatibility-pair.json && jsonschema.validate(...)",
+      "result": "passed",
+      "notes": "Compatibility pair JSON parses and validates against the local schema after adding productionPinPromotion metadata. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/xcodegen.sh generate && bash scripts/ci/run-xcode-validation.sh prepare/generate/finalize",
+      "result": "passed",
+      "notes": "Generated project and package-lock drift checks pass after normalizing the pre-existing scheme drift. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh all",
+      "result": "passed",
+      "notes": "The prior xcodebuild package-resolution stall is resolved after removing ignored generated build artifacts and using locked Xcode package resolution flags. The final run checked out mlx-swift 260c8fb and mlx-swift-lm e432935 and completed all Xcode gates. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --disable-automatic-resolution",
+      "result": "passed",
+      "notes": "Full MLX-LM package suite passed after screenshot-model regressions: 116 XCTest tests and 194 Swift Testing tests. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift build --disable-automatic-resolution",
+      "result": "passed",
+      "notes": "PinesCore package build passed after pinning mlx-swift-lm e432935. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --disable-automatic-resolution",
+      "result": "passed",
+      "notes": "Full PinesCore package suite passed after screenshot-model regressions: 195 Swift Testing tests. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": "PinesCoreTestRunner passed after pinning mlx-swift-lm e432935. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Pin guard passed after project.yml, generated Xcode project, Xcode Package.resolved, docs/TURBOQUANT.md, compatibility-pair.json, and MLXRuntimeBridge compatibility pair ID moved to mlx-swift-lm e432935. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh all",
+      "result": "passed",
+      "notes": "Full Xcode validation passed against mlx-swift-lm e432935: locked package resolution, unsigned iOS app build, build-for-testing, PinesTests unit smoke, PinesUITests UI smoke, and final generated-project/package drift checks. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "xcrun xctrace list devices",
+      "result": "skipped",
+      "notes": "No online iPhone-class device was available. The only iPhone-class physical device was listed offline, so the required real-device verified tuple could not be produced in this workspace. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Pin guard passed after promoting Pines to mlx-swift e60a719ea85c4284c2619ba0523b21956f70a0f0 and mlx-swift-lm 6ef60007409b316cefbc7760cb500f40ffb127c1. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Focused Pines TurboQuant suite passed 69 Swift Testing cases on the promoted fused compatibility pair. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": "PinesCoreTestRunner passed on the promoted fused compatibility pair. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh prepare && bash scripts/ci/run-xcode-validation.sh resolve",
+      "result": "passed",
+      "notes": "Locked Xcode package resolution checked out mlx-swift e60a719 and mlx-swift-lm 6ef6000 with no package-lock drift. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Block-parallel fused partial/reduce kernels, Mac Apple silicon profile selection, grouped-query block fused decode optimizations, active-block dispatch, p50/p95 benchmark reporting, and cross-scheme long-context fused correctness passed locally. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Qwen throughput-policy routing, production/large-context proof accounting, profile metadata, and TurboQuant cache/profile tests passed locally. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift run -c release TurboQuantQwenProof --profiles qwen3.5-2b --schemes turbo8,turbo4v2,turbo3_5 --contexts 32768 --experimental-contexts 65536,131072 --query-lengths 1 --iterations 20 --warmup 4 --dtype float16 --min-extended-tokens-per-second 20 --reserved-capacity 131072 --strict",
+      "result": "passed",
+      "notes": "Strict Mac proof passed 3/3 32K production Qwen-shaped fused cases with 128K reserved capacity. Reserved-capacity p95 rates at 32K were Turbo8 28.89 tok/s, Turbo4V2 30.84 tok/s, and Turbo3.5 31.44 tok/s. All 64K and 128K rows passed quality but remain experiment-only below the 20 tok/s p95 production floor in this run. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "TurboQuantQwenProof --path-compare --profiles qwen3.5-2b --contexts 8192,16384,32768 --query-lengths 1 --iterations 20 --dtype float16 --schemes turbo8,turbo4v2,turbo3_5 --attention-paths two-stage,fused --min-extended-tokens-per-second 20 --cooldown-ms 500",
+      "result": "passed",
+      "notes": "Forced path comparison showed fused beating two-stage at p50/p95 through 32K on the local Mac proof machine for Turbo8, Turbo4V2, and Turbo3.5. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Layout V6 fixed-tail split-magnitude storage, compact derived high masks, storage estimates, validation, and TurboQuant attention tests passed locally: 86 Swift Testing tests. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "TurboQuant cache/profile/runtime tests passed locally after direct initial compressed commits, lightweight update checkpoints, compact v6 snapshot restore, and packed-fallback group-size guards: 109 Swift Testing/XCTest cases. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift build -c release --product TurboQuantQwenProof",
+      "result": "passed",
+      "notes": "Release Qwen proof runner built against mlx-swift 776aaf9 and mlx-swift-lm fbaf2df. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "TurboQuantQwenProof --profiles qwen3.5-2b,qwen3.6-27b,qwen3.6-35b-a3b --schemes turbo8,turbo4v2,turbo3_5 --contexts 32768 --experimental-contexts 65536,131072 --query-lengths 1 --iterations 8 --warmup 2 --strict --reserved-capacity 131072 --min-extended-tokens-per-second 20",
+      "result": "passed",
+      "notes": "Strict Mac proof passed 9/9 32K production Qwen-shaped fused cases across representative Qwen3.5/Qwen3.6 profiles. 64K experiment rows passed the 20 tok/s floor; 128K rows kept valid quality and online fused routing but remained below the 20 tok/s production floor on this Mac. Artifact: /Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-v6-fixedtail-mac-20260527T0150Z/qwen-proof-32k-64k-128k.json. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Pin guard passed for project.yml, generated Xcode package references, Xcode Package.resolved, docs/TURBOQUANT.md, compatibility-pair.json, and MLXRuntimeBridge on mlx-swift 776aaf9 plus mlx-swift-lm fbaf2df. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Focused Pines TurboQuant control-plane suite passed 69 Swift Testing cases on the Layout V6 compatibility pair. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": "PinesCoreTestRunner passed on the Layout V6 compatibility pair. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh prepare && bash scripts/ci/run-xcode-validation.sh resolve",
+      "result": "passed",
+      "notes": "Locked Xcode package resolution checked out mlx-swift 776aaf9 and mlx-swift-lm fbaf2df with no package-lock drift. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "python3 -m json.tool docs/turboquant-implementation/compatibility-pair.json && git diff --check -- project.yml Pines.xcodeproj/project.pbxproj Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved Pines/Runtime/MLXRuntimeBridge.swift docs/TURBOQUANT.md docs/turboquant-implementation/compatibility-pair.json",
+      "result": "passed",
+      "notes": "Compatibility manifest parses and edited files pass whitespace checks. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Focused TurboQuant suite passed 87 XCTest cases after automatic block-token planning and fp16/bf16 block-partial value storage. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": "TurboQuantBenchmark --json --iterations 12 --warmup 3 --context 65536,131072 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1 --preset turbo8,turbo4v2,turbo3_5",
+      "result": "passed",
+      "notes": "Mac core sweep kept online fused routing and quality-compatible execution. 64K p95 was Turbo8 25.39, Turbo4V2 27.78, Turbo3.5 28.05 tok/s; 128K p95 was Turbo8 13.77, Turbo4V2 15.00, Turbo3.5 14.93 tok/s. Artifact: /Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-fused-partials-mac-20260527T085819Z. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "TurboQuant cache/profile/runtime tests passed locally against mlx-swift 425d765: 109 Swift Testing/XCTest cases. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift build -c release --product TurboQuantQwenProof",
+      "result": "passed",
+      "notes": "Release Qwen proof runner built against mlx-swift 425d765 and mlx-swift-lm d1465b7. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "TurboQuantQwenProof --profiles qwen3.5-2b,qwen3.6-27b,qwen3.6-35b-a3b --schemes turbo8,turbo4v2,turbo3_5 --contexts 32768 --experimental-contexts 65536,131072 --query-lengths 1 --iterations 8 --warmup 2 --strict --reserved-capacity 131072 --min-extended-tokens-per-second 20",
+      "result": "passed",
+      "notes": "Schema-v5 strict Mac proof passed 9/9 32K production rows with automatic 512-token block planning. 64K experiment rows passed the 20 tok/s p95 floor; 128K rows kept valid quality and online fused routing but remained below the 20 tok/s production floor. Artifact: /Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-fused-partials-mac-20260527T085819Z/qwen-proof-32k-64k-128k.json. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Pin guard passed for project.yml, generated Xcode package references, Xcode Package.resolved, docs/TURBOQUANT.md, compatibility-pair.json, and MLXRuntimeBridge on mlx-swift 425d765 plus mlx-swift-lm d1465b7. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Focused Pines TurboQuant control-plane suite passed 69 Swift Testing cases on the fused-partial compatibility pair. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": "PinesCoreTestRunner passed on the fused-partial compatibility pair. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh prepare && bash scripts/ci/run-xcode-validation.sh resolve",
+      "result": "passed",
+      "notes": "Locked Xcode package resolution checked out mlx-swift 425d765 and mlx-swift-lm d1465b7 with no package-lock drift. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "TurboQuant cache/profile/runtime tests passed locally after adaptive raw-first routing: 115 Swift Testing/XCTest cases. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "swift build -c release --product TurboQuantQwenProof",
+      "result": "passed",
+      "notes": "Release Qwen proof runner built against mlx-swift 425d765 and mlx-swift-lm 6335ec8. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift-lm",
+      "command": "TurboQuantQwenProof --profiles qwen3.5-2b,qwen3.6-27b,qwen3.6-35b-a3b --schemes turbo8,turbo4v2,turbo3_5 --contexts 8192,16384 --experimental-contexts 32768,65536 --query-lengths 1 --iterations 12 --warmup 3 --strict --plain-route-threshold 16384 --reserved-capacity 65536 --min-extended-tokens-per-second 20",
+      "result": "passed",
+      "notes": "Schema-v6 strict Mac proof passed 18/18 8K/16K production rows with rawSDPA production routing. Production p95: 8K 529.65-1280.31 tok/s, 16K 393.55-963.43 tok/s. 32K TurboQuant compressed experiment rows passed at 29.90-43.20 tok/s p95. 64K Turbo4V2/Turbo3.5 passed at 24.96-26.55 tok/s p95, while 64K Turbo8 stayed experiment-only at 18.30-19.43 tok/s p95. Artifact: /Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-adaptive-route-mac-20260527T094606Z/qwen-proof-adaptive-8k-16k-32k-64k.json. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Pin guard passed after updating project.yml, generated Xcode project, Xcode Package.resolved, docs, compatibility-pair.json, and MLXRuntimeBridge to mlx-swift-lm 6335ec8. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuant",
+      "result": "passed",
+      "notes": "Focused Pines TurboQuant control-plane suite passed 69 Swift Testing cases on the adaptive raw-first compatibility pair. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift run --disable-automatic-resolution PinesCoreTestRunner",
+      "result": "passed",
+      "notes": "PinesCoreTestRunner passed on the adaptive raw-first compatibility pair. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/run-xcode-validation.sh prepare && bash scripts/ci/run-xcode-validation.sh resolve",
+      "result": "passed",
+      "notes": "Locked Xcode package resolution checked out mlx-swift 425d765 and mlx-swift-lm 6335ec8 with no package-lock drift. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "python3 -m json.tool docs/turboquant-implementation/compatibility-pair.json && git diff --check",
+      "result": "passed",
+      "notes": "Compatibility manifest JSON parsed and staged TurboQuant pin/docs/runtime diffs passed whitespace checks. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "swift test --filter TurboQuantPinDriftTests",
+      "result": "passed",
+      "notes": "Pin drift and app-hosted benchmark wiring tests passed for project.yml, Xcode project, Package.resolved, docs, compatibility manifest, MLXRuntimeBridge, PinesRootView, and the diagnostics script. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "bash scripts/ci/check-mlx-package-pins.sh",
+      "result": "passed",
+      "notes": "Pin guard passed for the b187523536c6923562e3a81613e169da9321f812 plus 1bf1cc246e17c48527a32c99fffcde41b84cd725 compatibility pair and rejects drift back to older known-bad revisions. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "xcodebuild -project Pines.xcodeproj -scheme Pines -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO -skipMacroValidation -skipPackagePluginValidation -onlyUsePackageVersionsFromResolvedFile -disableAutomaticPackageResolution -scmProvider system",
+      "result": "passed",
+      "notes": "Generic iOS build passed and compile-validated the app target plus TurboQuantBench product linkage without device signing. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "pines",
+      "command": "PINES_DEVICE_ID=7BFB7B72-C40C-58A7-B2C6-F075BDE21116 PINES_TQ_BENCH_FULL=0 PINES_TQ_BENCH_ITERATIONS=3 PINES_TQ_BENCH_WARMUP=1 PINES_TQ_BENCH_TIMEOUT_SECONDS=900 scripts/diagnostics/run-ios-turboquant-bench.sh",
+      "result": "passed",
+      "notes": "App-hosted physical-device smoke completed on iPhone16,2 / iPhone 15 Pro Max. Artifact: /Users/mt/Programming/Schtack/pines/artifacts/ios-turboquant-bench-20260531T020455Z. 8K qwen3.5-2b turbo4v2 result: compressed 22.22 tok/s, plain 634.54 tok/s, speed ratio 0.0350, cosine 0.999824, memory reduction 3.05x. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    },
+    {
+      "repo": "mlx-swift",
+      "command": ".build/release/TurboQuantBenchmark --json --iterations 2 --warmup 1 --context 8192 --preset turbo4v2 --head-dim 256 --query-heads 16 --kv-heads 4 --query-length 1",
+      "result": "passed",
+      "artifactPath": "/Users/mt/Programming/Schtack/mlx-forks/artifacts/turboquant-wave0-20260531T024557Z/benchmarks/smoke/core-turbo4v2-8192-with-plain-smoke.json",
+      "notes": "Post-capture schema smoke emitted compressed p50, plain p50, speed ratio, and memory reduction fields. Historical evidence only; it is superseded by the current failed Wave 0 status and cannot make the current pair green.",
+      "historicalStatus": "superseded",
+      "supersededByRunID": "turboquant-wave0-20260531T024557Z"
+    }
   ]
 }

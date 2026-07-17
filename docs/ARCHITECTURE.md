@@ -11,6 +11,8 @@
 - `Sources/PinesCoreTestRunner/`: framework-free verification runner for environments where Command Line Tools do not expose XCTest or Swift Testing.
 - `project.yml`: XcodeGen source of truth for the Xcode project.
 
+Performance-sensitive boundaries and measurement requirements are specified in [`docs/performance/`](performance/README.md). Lists retain summaries, detail state is evictable, image and render work is off-main and cost-bounded, operation polling uses stable identities, provider lifecycle publication is atomic, and acceptance is based on a Release/Profile device trace rather than Debug timings.
+
 ## Composition Root
 
 `PinesAppServices` owns service construction for the app layer. The default SwiftUI environment creates a no-store instance for previews and early view construction; `PinesRootView` creates live services only after the boot mark has reached the first frame.
@@ -66,7 +68,7 @@ Repository protocols separate UI from storage:
 - `ModelDownloadRepository`
 - `AuditEventRepository`
 
-The production local store is GRDB on SQLCipher with optional E2E-encrypted CloudKit private-database sync for user-enabled settings, conversations, messages, vault metadata, and vault chunks. API keys, model binaries, prompt caches, browser state, chat attachment files, and transient tool state do not sync. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
+The production local store is GRDB on SQLCipher with optional E2E-encrypted CloudKit private-database sync for user-enabled settings, Project Spaces, conversations, messages, vault metadata, and vault chunks. Project identifiers are preserved across chat and Vault records, and project tombstones unlink child records on every device. API keys, model binaries, prompt caches, browser state, chat attachment files, transient tool state, and provider model-catalog snapshots do not sync. Model catalogs are bounded, encrypted locally, tied to their provider row, and expire before they can drive hard capability rejection. Generated embeddings and compressed vault vector codes sync only when both private iCloud sync and embedding sync are enabled.
 
 `SecureKeyStore` owns data keys for the encrypted database, encrypted blob store, and CloudKit sync. Device-local keys are non-migrating Keychain items; the CloudKit content key is synchronizable through iCloud Keychain. `SecurityResetCoordinator` runs before normal repository use and clears sensitive configuration from previous versions while preserving user content.
 
@@ -76,11 +78,13 @@ Vault source files are copied only long enough for extraction, then encrypted th
 
 Provider-hosted files and artifacts are tracked separately from local Vault documents. OpenAI Files/vector stores, Anthropic Files, Gemini Files/context caches, provider batches, generated media, generated files, realtime/live sessions, and Deep Research runs all map into generic provider lifecycle records before the UI renders them. Provider raw IDs remain strings at the persistence boundary; typed wrappers are used at API edges so provider-specific IDs do not leak into shared storage. Importing a provider artifact into Vault is an explicit workflow and does not imply provider-side deletion.
 
+The user-facing Artifacts root projects those generic records into a zero-navigation gallery. One stable canvas shows completed output, while active work collapses into one slim transient summary line; type, provider, and sort are filters rather than page navigation. New chooses an outcome directly and opens a focused creation or research sheet. Image creation is canvas-first, with a safe-area floating prompt dock and visual session grid. Research is conversation-first, with a safe-area floating composer, optional brief clarification, flat run progress, expandable evidence, and saved-report preview. Artifact detail always uses a Quick Look sheet—including at regular width—so iPad never gains an Artifact inspector, second sidebar, or nested route hierarchy. Provider-file and vector-store administration stays with Vault, and provider configuration stays in Settings.
+
 The GRDB implementation is split by repository concern: encrypted local-store opening, plaintext-to-SQLCipher migration, and base repository operations remain in `GRDBPinesStore.swift`, while CloudKit snapshot/apply/delete merge support lives in `GRDBPinesStore+CloudKit.swift`.
 
 ## Security Model
 
-`EndpointSecurityPolicy` is the shared network gate for BYOK providers, MCP servers, OAuth authorization and token exchange, model catalog calls, and web fetch. Remote URLs must be HTTPS. HTTP is permitted only for `localhost`, `127.0.0.1`, and `[::1]` when the integration explicitly opts into local development; LAN/private HTTP remains blocked.
+`EndpointSecurityPolicy` is the shared network gate for BYOK providers, MCP servers, OAuth authorization and token exchange, model catalog calls, web fetch, and in-app browser top-level navigation. Remote URLs must use HTTPS. HTTP is permitted only for `localhost`, `127.0.0.1`, and `[::1]` when the integration explicitly opts into local development; LAN/private HTTP remains blocked. Arbitrary web tools additionally reject local/private/link-local/special-use hosts, validate resolved addresses immediately before requests, and revalidate redirects and final URLs.
 
 `CloudProviderHeader` replaces raw custom header JSON. Plaintext header values are rejected for secret-like names, while secret headers must reference Keychain items. `Redactor` is applied before audit persistence and covers provider keys, bearer/OAuth/JWT/cookie values, private keys, and generic long credential shapes.
 
@@ -99,14 +103,18 @@ The router must never silently fall back to cloud. If local capability is missin
 
 `DeviceRuntimeMonitor` adapts local runtime defaults from physical memory, available process memory, and thermal state. Compact 6 GB devices use lower prefill, embedding batch, vector scan, and pressure-aware completion limits. iOS memory warnings soft-recover during active generation while emergency headroom remains; otherwise they stop the active run and unload transient MLX containers.
 
+The local TurboQuant path is controlled by a Pines-owned admission and evidence layer before MLX generation starts. That layer computes the admitted context, memory zones, fallback contract, selected user mode, context assembly plan, and downgrade/rejection reason. The bridge passes the admitted context and fallback policy into MLXLM generation parameters, records a RunDecision and calibration sample, and maps TurboQuant failures into typed stream failures rather than fatal termination or cloud retry.
+
+Evidence is tuple-scoped. A model detail surface may show a green compatibility pair for the pinned runtime while still showing a model/device/mode as unverified until benchmark evidence matches the active compatibility pair, model revision, tokenizer/profile/fallback hashes, device class, layout version, quality gate, and memory behavior.
+
 Vault retrieval stores both FP16 embeddings and compressed TurboQuant vector codes. Search first uses the compressed code path, filters by embedding model where possible, reranks with FP16 cosine, and falls back to SQLite FTS when embeddings are missing.
 
 The app links MLX through exact fork pins in `project.yml`:
 
-- `https://github.com/RNT56/mlx-swift` at `a90b1097df45e4e70b6e0bb367624f8f5857970b`
-- `https://github.com/RNT56/mlx-swift-lm` at `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c`
-- Nested `mlx` inside `RNT56/mlx-swift` at `3eb8ef074b911b00ecdbeb47f7bdafd91a123ad0`
-- Nested `mlx-c` inside `RNT56/mlx-swift` at `2abc34daff6ded246054d9e15b98870b5cd08b97`
+- `https://github.com/RNT56/mlx-swift` at `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`
+- `https://github.com/RNT56/mlx-swift-lm` at `aeaa8e3024a82b25969741b53c749b28ddc64d1a`
+- Nested `mlx` inside `RNT56/mlx-swift` at `e230d124a1fdcb5f4b3daab6321744a7a8b6a9f2`
+- Nested `mlx-c` inside `RNT56/mlx-swift` at `2fbeccd5a6ec6f7aadedaf1d3dfb2894ef44fbc1`
 
 Compatibility implementations for model families not yet present in linked MLX packages are split into `MLXCompatibleModels+Llama4.swift` and `MLXCompatibleModels+DeepseekV4.swift`.
 
@@ -155,7 +163,7 @@ The agent replacement seam has three contracts:
 - `AgentToolCatalog` supplies the Agent-mode tool inventory independently from chat orchestration.
 - `AgentRuntimeCallbacks` carries human-in-the-loop approval and activity/progress reporting, keeping UI concerns out of agent execution.
 
-MCP sampling can forward server-supplied tool definitions to the selected local or BYOK provider while the MCP server owns its tool loop.
+MCP sampling can forward server-supplied tool definitions to the selected local or BYOK provider while the MCP server owns its tool loop. Discovered MCP tool annotations are persisted and mapped to Pines side-effect levels; missing annotations default to `changesRemoteState`, read-only hints map to external reads, and destructive hints map to sensitive actions.
 
 ## Source Organization Notes
 
@@ -167,5 +175,5 @@ Large app files are intentionally split by responsibility:
 - BYOK provider request/stream handling: `BYOKCloudInferenceProvider.swift`; provider stream metadata parsing: `CloudProviderStreamParser.swift`.
 - Startup boot and lazy service creation: `PinesRootView.swift`; live service composition: `PinesAppServices.swift`.
 - Model installer orchestration: `ModelLifecycleService.swift`; background download coordination and install-mode support: `ModelDownloadSupport.swift`.
-- Settings and Models screen shells remain small; their detail/component surfaces live in `SettingsDetailView.swift` and `ModelsViewComponents.swift`.
+- Settings uses typed destinations and focused pages under `Pines/Views/Settings/`; `SettingsDetailView.swift` is only the dispatcher. The Models shell remains small, with its detail/component surfaces in `ModelsViewComponents.swift`.
 - Provider lifecycle coordinators and record mappers live under `Pines/Cloud/` and `Sources/PinesCore/Cloud/`; shared previews are assembled by `PinesAppModel` for Settings, Vault, lifecycle dashboard, artifact, batch, realtime, and research surfaces.

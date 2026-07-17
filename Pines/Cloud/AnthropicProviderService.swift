@@ -32,7 +32,8 @@ struct AnthropicProviderService: Sendable {
         path: String,
         queryItems: [URLQueryItem] = [],
         multipart: OpenAIMultipartForm,
-        betaHeaders: [String] = []
+        betaHeaders: [String] = [],
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> AnthropicProviderResponse {
         let boundary = "PinesAnthropic-\(UUID().uuidString)"
         return try await send(
@@ -42,16 +43,83 @@ struct AnthropicProviderService: Sendable {
             body: multipart.encoded(boundary: boundary),
             contentType: "multipart/form-data; boundary=\(boundary)",
             accept: "application/json",
-            betaHeaders: betaHeaders
+            betaHeaders: betaHeaders,
+            uploadProgress: uploadProgress
         )
+    }
+
+    func rawMultipartFile(
+        method: AnthropicHTTPMethod = .post,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        fields: [String: String] = [:],
+        fileFieldName: String = "file",
+        fileName: String,
+        contentType: String,
+        fileURL: URL,
+        betaHeaders: [String] = [],
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> AnthropicProviderResponse {
+        let boundary = "PinesAnthropic-\(UUID().uuidString)"
+        let body = try await ProviderMultipartBodyFileBuilder.shared.build(
+            boundary: boundary,
+            fields: fields,
+            fileFieldName: fileFieldName,
+            fileName: fileName,
+            contentType: contentType,
+            sourceURL: fileURL
+        )
+        do {
+            let response = try await send(
+                method: method,
+                path: path,
+                queryItems: queryItems,
+                bodyFile: body,
+                contentType: "multipart/form-data; boundary=\(boundary)",
+                accept: "application/json",
+                betaHeaders: betaHeaders,
+                uploadProgress: uploadProgress
+            )
+            await ProviderMultipartBodyFileBuilder.shared.remove(body)
+            return response
+        } catch {
+            await ProviderMultipartBodyFileBuilder.shared.remove(body)
+            throw error
+        }
     }
 
     func listFiles(_ request: AnthropicListRequest = AnthropicListRequest(limit: 100)) async throws -> AnthropicProviderResponse {
         try await rawJSON(method: .get, path: "files", queryItems: request.queryItems, betaHeaders: [Self.filesAPIBeta])
     }
 
-    func uploadFile(_ request: AnthropicFileUploadRequest) async throws -> AnthropicProviderResponse {
-        try await rawMultipart(path: "files", multipart: request.multipart, betaHeaders: [Self.filesAPIBeta])
+    func uploadFile(
+        _ request: AnthropicFileUploadRequest,
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> AnthropicProviderResponse {
+        try await rawMultipart(
+            path: "files",
+            multipart: request.multipart,
+            betaHeaders: [Self.filesAPIBeta],
+            uploadProgress: uploadProgress
+        )
+    }
+
+    func uploadFile(
+        fromFile fileURL: URL,
+        fileName: String,
+        contentType: String,
+        fields: [String: String] = [:],
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> AnthropicProviderResponse {
+        try await rawMultipartFile(
+            path: "files",
+            fields: fields,
+            fileName: fileName,
+            contentType: contentType,
+            fileURL: fileURL,
+            betaHeaders: [Self.filesAPIBeta],
+            uploadProgress: uploadProgress
+        )
     }
 
     func retrieveFile(_ fileID: String) async throws -> AnthropicProviderResponse {
@@ -63,7 +131,8 @@ struct AnthropicProviderService: Sendable {
             method: .get,
             path: "files/\(fileID)/content",
             accept: "application/octet-stream",
-            betaHeaders: [Self.filesAPIBeta]
+            betaHeaders: [Self.filesAPIBeta],
+            maxResponseBytes: BoundedHTTPResponse.fileLimit
         )
     }
 
@@ -99,7 +168,8 @@ struct AnthropicProviderService: Sendable {
         try await send(
             method: .get,
             path: "messages/batches/\(batchID)/results",
-            accept: "application/x-jsonlines"
+            accept: "application/x-jsonlines",
+            maxResponseBytes: BoundedHTTPResponse.fileLimit
         )
     }
 
@@ -126,9 +196,12 @@ struct AnthropicProviderService: Sendable {
         path: String,
         queryItems: [URLQueryItem] = [],
         body: Data? = nil,
+        bodyFile: ProviderPreparedUploadBody? = nil,
         contentType: String? = nil,
         accept: String? = nil,
-        betaHeaders: [String] = []
+        betaHeaders: [String] = [],
+        maxResponseBytes: Int = BoundedHTTPResponse.jsonLimit,
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> AnthropicProviderResponse {
         guard let apiKey = try await readAPIKey() else {
             throw CloudProviderError.missingAPIKey
@@ -136,6 +209,9 @@ struct AnthropicProviderService: Sendable {
 
         var request = URLRequest(url: try url(path: path, queryItems: queryItems))
         request.httpMethod = method.rawValue
+        guard body == nil || bodyFile == nil else {
+            throw CloudProviderError.invalidResponse
+        }
         request.httpBody = body
         request.addValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.addValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
@@ -156,7 +232,24 @@ struct AnthropicProviderService: Sendable {
 
         var lastRetryableResponse: AnthropicProviderResponse?
         for attempt in 0..<3 {
-            let (data, http) = try await urlSession.data(for: request)
+            let (data, http): (Data, HTTPURLResponse)
+            if let bodyFile {
+                (data, http) = try await BoundedHTTPResponse.uploadFile(
+                    for: request,
+                    bodyFileURL: bodyFile.url,
+                    bodyByteCount: bodyFile.byteCount,
+                    session: urlSession,
+                    maxBytes: maxResponseBytes,
+                    uploadProgress: uploadProgress
+                )
+            } else {
+                (data, http) = try await BoundedHTTPResponse.data(
+                    for: request,
+                    session: urlSession,
+                    maxBytes: maxResponseBytes,
+                    uploadProgress: uploadProgress
+                )
+            }
             let providerResponse = AnthropicProviderResponse(data: data, httpResponse: http)
             if (200..<300).contains(http.statusCode) {
                 return providerResponse

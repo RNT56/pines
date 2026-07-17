@@ -25,7 +25,8 @@ struct OpenAIProviderService {
         method: OpenAIHTTPMethod = .post,
         path: String,
         queryItems: [URLQueryItem] = [],
-        multipart: OpenAIMultipartForm
+        multipart: OpenAIMultipartForm,
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> OpenAIProviderResponse {
         let boundary = "PinesOpenAI-\(UUID().uuidString)"
         return try await send(
@@ -33,16 +34,79 @@ struct OpenAIProviderService {
             path: path,
             queryItems: queryItems,
             body: multipart.encoded(boundary: boundary),
-            contentType: "multipart/form-data; boundary=\(boundary)"
+            contentType: "multipart/form-data; boundary=\(boundary)",
+            uploadProgress: uploadProgress
         )
+    }
+
+    func rawMultipartFile(
+        method: OpenAIHTTPMethod = .post,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        fields: [String: String] = [:],
+        fileFieldName: String = "file",
+        fileName: String,
+        contentType: String,
+        fileURL: URL,
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> OpenAIProviderResponse {
+        let boundary = "PinesOpenAI-\(UUID().uuidString)"
+        let body = try await ProviderMultipartBodyFileBuilder.shared.build(
+            boundary: boundary,
+            fields: fields,
+            fileFieldName: fileFieldName,
+            fileName: fileName,
+            contentType: contentType,
+            sourceURL: fileURL
+        )
+        do {
+            let response = try await send(
+                method: method,
+                path: path,
+                queryItems: queryItems,
+                bodyFile: body,
+                contentType: "multipart/form-data; boundary=\(boundary)",
+                uploadProgress: uploadProgress
+            )
+            await ProviderMultipartBodyFileBuilder.shared.remove(body)
+            return response
+        } catch {
+            await ProviderMultipartBodyFileBuilder.shared.remove(body)
+            throw error
+        }
     }
 
     func listFiles(_ request: OpenAIFileListRequest = OpenAIFileListRequest()) async throws -> OpenAIProviderResponse {
         try await rawJSON(method: .get, path: "files", queryItems: request.queryItems)
     }
 
-    func uploadFile(_ request: OpenAIFileUploadRequest) async throws -> OpenAIProviderResponse {
-        try await rawMultipart(path: "files", multipart: request.multipart)
+    func uploadFile(
+        _ request: OpenAIFileUploadRequest,
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> OpenAIProviderResponse {
+        try await rawMultipart(path: "files", multipart: request.multipart, uploadProgress: uploadProgress)
+    }
+
+    func uploadFile(
+        fromFile fileURL: URL,
+        fileName: String,
+        contentType: String,
+        purpose: String?,
+        fields: [String: String] = [:],
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> OpenAIProviderResponse {
+        var resolvedFields = fields
+        if let purpose {
+            resolvedFields["purpose"] = purpose
+        }
+        return try await rawMultipartFile(
+            path: "files",
+            fields: resolvedFields,
+            fileName: fileName,
+            contentType: contentType,
+            fileURL: fileURL,
+            uploadProgress: uploadProgress
+        )
     }
 
     func retrieveFile(_ fileID: String) async throws -> OpenAIProviderResponse {
@@ -50,7 +114,12 @@ struct OpenAIProviderService {
     }
 
     func retrieveFileContent(_ fileID: String) async throws -> OpenAIProviderResponse {
-        try await rawJSON(method: .get, path: "files/\(fileID)/content")
+        try await send(
+            method: .get,
+            path: "files/\(fileID)/content",
+            accept: "application/octet-stream",
+            maxResponseBytes: BoundedHTTPResponse.fileLimit
+        )
     }
 
     func deleteFile(_ fileID: String) async throws -> OpenAIProviderResponse {
@@ -194,7 +263,12 @@ struct OpenAIProviderService {
     }
 
     func retrieveVideoContent(_ videoID: String) async throws -> OpenAIProviderResponse {
-        try await rawJSON(method: .get, path: "videos/\(videoID)/content")
+        try await send(
+            method: .get,
+            path: "videos/\(videoID)/content",
+            accept: "video/*",
+            maxResponseBytes: BoundedHTTPResponse.videoLimit
+        )
     }
 
     func listBatches(_ request: OpenAIBatchListRequest = OpenAIBatchListRequest()) async throws -> OpenAIProviderResponse {
@@ -214,7 +288,14 @@ struct OpenAIProviderService {
     }
 
     func createSpeech(body: JSONValue) async throws -> OpenAIProviderResponse {
-        try await rawJSON(method: .post, path: "audio/speech", body: body)
+        try await send(
+            method: .post,
+            path: "audio/speech",
+            body: try JSONEncoder().encode(body),
+            contentType: "application/json",
+            accept: "audio/*",
+            maxResponseBytes: BoundedHTTPResponse.fileLimit
+        )
     }
 
     func createTranscription(multipart: OpenAIMultipartForm) async throws -> OpenAIProviderResponse {
@@ -287,7 +368,11 @@ struct OpenAIProviderService {
         path: String,
         queryItems: [URLQueryItem] = [],
         body: Data? = nil,
-        contentType: String? = nil
+        bodyFile: ProviderPreparedUploadBody? = nil,
+        contentType: String? = nil,
+        accept: String = "application/json",
+        maxResponseBytes: Int = BoundedHTTPResponse.jsonLimit,
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> OpenAIProviderResponse {
         guard let apiKey = try await readAPIKey() else {
             throw CloudProviderError.missingAPIKey
@@ -295,16 +380,36 @@ struct OpenAIProviderService {
 
         var request = URLRequest(url: try url(path: path, queryItems: queryItems))
         request.httpMethod = method.rawValue
+        guard body == nil || bodyFile == nil else {
+            throw CloudProviderError.invalidResponse
+        }
         request.httpBody = body
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.addValue("application/json", forHTTPHeaderField: "Accept")
+        request.addValue(accept, forHTTPHeaderField: "Accept")
         if let contentType {
             request.addValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         addOpenAIClientRequestID(to: &request)
         try await applyExtraHeaders(to: &request)
 
-        let (data, http) = try await urlSession.data(for: request)
+        let (data, http): (Data, HTTPURLResponse)
+        if let bodyFile {
+            (data, http) = try await BoundedHTTPResponse.uploadFile(
+                for: request,
+                bodyFileURL: bodyFile.url,
+                bodyByteCount: bodyFile.byteCount,
+                session: urlSession,
+                maxBytes: maxResponseBytes,
+                uploadProgress: uploadProgress
+            )
+        } else {
+            (data, http) = try await BoundedHTTPResponse.data(
+                for: request,
+                session: urlSession,
+                maxBytes: maxResponseBytes,
+                uploadProgress: uploadProgress
+            )
+        }
         let providerResponse = OpenAIProviderResponse(data: data, httpResponse: http)
         guard (200..<300).contains(http.statusCode) else {
             throw CloudProviderError.providerRejectedRequest(

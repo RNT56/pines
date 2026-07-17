@@ -210,7 +210,8 @@ Use a tabbed or segmented showcase with screenshots.
 Tabs:
 
 - Chats: model picker, streaming, attachments, cloud-context consent.
-- Models: Hugging Face discovery, verified local model installs, runtime diagnostics.
+- Models: Hugging Face discovery, evidence-backed local compatibility states,
+  runtime admission, and diagnostics.
 - Vault: document import, OCR, chunking, embeddings, semantic search.
 - Agents: tool approval, Brave Search, browser actions, local data tools.
 - Settings: providers, MCP servers, privacy, CloudKit, themes.
@@ -222,7 +223,7 @@ Explain local inference as a daily workflow, not just a privacy claim.
 
 Draft copy:
 
-> Install verified MLX models, keep small and capable assistants on device, and use runtime guardrails that adapt to memory and thermal pressure. Pines is designed to make mobile local AI feel like an instrument, not a benchmark.
+> Install MLX models with evidence-backed compatibility states, keep small and capable assistants on device, and use runtime guardrails that adapt to memory and thermal pressure. Pines is designed to make mobile local AI feel like an instrument, not a benchmark.
 
 Include:
 

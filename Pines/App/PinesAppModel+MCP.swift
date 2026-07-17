@@ -3,6 +3,54 @@ import PinesCore
 
 @MainActor
 extension PinesAppModel {
+    func requestHostedToolApproval(
+        _ request: HostedToolApprovalRequest,
+        services: PinesAppServices
+    ) async -> Bool {
+        hostedToolApprovalContinuation?.resume(returning: false)
+        hostedToolApprovalContinuation = nil
+        pendingHostedToolApproval = nil
+        await appendAuditEvent(
+            AuditEvent(
+                category: .consent,
+                summary: "Requested approval for provider-hosted tools: \(request.descriptors.map(\.displayName).joined(separator: ", ")).",
+                redactedPayload: "Environment and data-egress details were presented before execution.",
+                providerID: request.providerID,
+                modelID: request.modelID,
+                networkDomains: request.descriptors.flatMap(\.networkDestinations)
+            ),
+            services: services,
+            component: "hosted_tool_approval_requested"
+        )
+        return await withCheckedContinuation { continuation in
+            hostedToolApprovalContinuation = continuation
+            pendingHostedToolApproval = request
+            emitHaptic(.toolApprovalNeeded)
+        }
+    }
+
+    func resolvePendingHostedToolApproval(_ approved: Bool, services: PinesAppServices?) {
+        guard let request = pendingHostedToolApproval else { return }
+        pendingHostedToolApproval = nil
+        emitHaptic(approved ? .primaryAction : .runCancelled)
+        hostedToolApprovalContinuation?.resume(returning: approved)
+        hostedToolApprovalContinuation = nil
+        guard let services else { return }
+        Task {
+            await appendAuditEvent(
+                AuditEvent(
+                    category: .consent,
+                    summary: approved ? "Approved provider-hosted tool execution." : "Denied provider-hosted tool execution.",
+                    providerID: request.providerID,
+                    modelID: request.modelID,
+                    networkDomains: request.descriptors.flatMap(\.networkDestinations)
+                ),
+                services: services,
+                component: approved ? "hosted_tool_approval_granted" : "hosted_tool_approval_denied"
+            )
+        }
+    }
+
     func requestToolApproval(_ request: ToolApprovalRequest) async -> ToolApprovalStatus {
         pendingToolApproval = request
         emitHaptic(.toolApprovalNeeded)
@@ -204,6 +252,12 @@ extension PinesAppModel {
             availableTools: tools,
             anthropicOptions: anthropicRequestOptions(for: cloudProvider.id, settings: settings, services: services)
         )
+        if let eligibilityFailure = openRouterModelEligibilityFailure(
+            providerID: cloudProvider.id,
+            request: cloudChatRequest
+        ) {
+            throw InferenceError.unsupportedCapability(eligibilityFailure)
+        }
         let provider = BYOKCloudInferenceProvider(configuration: cloudProvider, secretStore: services.secretStore)
         let result = try await runMCPSampling(
             cloudChatRequest,
@@ -325,7 +379,7 @@ extension PinesAppModel {
     }
 
     func localModelScore(_ install: ModelInstall) -> Double {
-        let parameterScale = min(Double(install.parameterCount ?? 0) / 10_000_000_000, 10)
+        let parameterScale = min(Double(install.resolvedParameterCount ?? 0) / 10_000_000_000, 10)
         let byteScale = min(Double(install.estimatedBytes ?? 0) / 10_000_000_000, 10)
         return parameterScale * 10 + byteScale
     }
@@ -364,7 +418,7 @@ extension PinesAppModel {
         if install.modelID == defaultModelID {
             score += 12
         }
-        let parameterScale = min(Double(install.parameterCount ?? 0) / 10_000_000_000, 1)
+        let parameterScale = min(Double(install.resolvedParameterCount ?? 0) / 10_000_000_000, 1)
         let byteScale = min(Double(install.estimatedBytes ?? 0) / 10_000_000_000, 1)
         score += preference.intelligencePriority * parameterScale * 24
         score += preference.speedPriority * (1 - max(parameterScale, byteScale)) * 18

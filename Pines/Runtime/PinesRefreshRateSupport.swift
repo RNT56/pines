@@ -6,6 +6,7 @@ import UIKit
 
 enum PinesRefreshRatePolicy {
     static let baselineFramesPerSecond = 60
+    static let highMotionMinimumFramesPerSecond = 80
 
     static func supportsHighRefresh(maximumFramesPerSecond: Int) -> Bool {
         maximumFramesPerSecond > baselineFramesPerSecond
@@ -18,7 +19,7 @@ enum PinesRefreshRatePolicy {
 
         let maximum = Float(maximumFramesPerSecond)
         return CAFrameRateRange(
-            minimum: Float(baselineFramesPerSecond),
+            minimum: min(Float(highMotionMinimumFramesPerSecond), maximum),
             maximum: maximum,
             preferred: maximum
         )

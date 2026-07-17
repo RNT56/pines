@@ -143,6 +143,7 @@ final class PinesModelState: ObservableObject {
 @MainActor
 final class PinesVaultState: ObservableObject {
     @Published var vaultItems: [PinesVaultItemPreview]
+    @Published var selectedItemDetail: PinesVaultItemDetail?
     @Published var vaultEmbeddingProfiles: [VaultEmbeddingProfile]
     @Published var vaultEmbeddingJobs: [VaultEmbeddingJob]
     @Published var vaultRetrievalEvents: [VaultRetrievalEvent]
@@ -152,6 +153,7 @@ final class PinesVaultState: ObservableObject {
 
     init(
         vaultItems: [PinesVaultItemPreview] = [],
+        selectedItemDetail: PinesVaultItemDetail? = nil,
         vaultEmbeddingProfiles: [VaultEmbeddingProfile] = [],
         vaultEmbeddingJobs: [VaultEmbeddingJob] = [],
         vaultRetrievalEvents: [VaultRetrievalEvent] = [],
@@ -160,6 +162,7 @@ final class PinesVaultState: ObservableObject {
         isVaultReindexing: Bool = false
     ) {
         self.vaultItems = vaultItems
+        self.selectedItemDetail = selectedItemDetail
         self.vaultEmbeddingProfiles = vaultEmbeddingProfiles
         self.vaultEmbeddingJobs = vaultEmbeddingJobs
         self.vaultRetrievalEvents = vaultRetrievalEvents
@@ -167,6 +170,21 @@ final class PinesVaultState: ObservableObject {
         self.isVaultSearchPresented = isVaultSearchPresented
         self.isVaultReindexing = isVaultReindexing
     }
+}
+
+enum PinesCloudKitSyncPhase: Equatable {
+    case idle
+    case syncing
+    case succeeded
+    case failed
+}
+
+struct PinesCloudKitSyncStatus: Equatable {
+    var phase: PinesCloudKitSyncPhase = .idle
+    var lastAttemptAt: Date?
+    var lastSuccessAt: Date?
+    var lastError: String?
+    var trigger: String?
 }
 
 @MainActor
@@ -202,10 +220,14 @@ final class PinesSettingsState: ObservableObject {
     @Published var anthropicTokenCountPreflightEnabled: Bool
     @Published var geminiThinkingLevel: GeminiThinkingLevel
     @Published var cloudWebSearchMode: CloudWebSearchMode
+    @Published var openRouterProviderPreferences: OpenRouterProviderPreferences
     @Published var cloudModelCatalog: [ProviderID: [CloudProviderModel]]
     @Published var isRefreshingCloudModels: Bool
     @Published var isSavingCloudProvider: Bool
     @Published var validatingCloudProviderIDs: Set<ProviderID>
+    @Published var cloudKitSyncStatus: PinesCloudKitSyncStatus
+    @Published var cloudKitConflicts: [CloudKitConflictRecord]
+    @Published var openRouterSpendReport: OpenRouterSpendReport
     @Published var huggingFaceCredentialStatus: String
     @Published var braveSearchCredentialStatus: String
 
@@ -241,10 +263,14 @@ final class PinesSettingsState: ObservableObject {
         anthropicTokenCountPreflightEnabled: Bool = false,
         geminiThinkingLevel: GeminiThinkingLevel = AppSettingsSnapshot.defaultGeminiThinkingLevel,
         cloudWebSearchMode: CloudWebSearchMode = AppSettingsSnapshot.defaultCloudWebSearchMode,
+        openRouterProviderPreferences: OpenRouterProviderPreferences = AppSettingsSnapshot.defaultOpenRouterProviderPreferences,
         cloudModelCatalog: [ProviderID: [CloudProviderModel]] = [:],
         isRefreshingCloudModels: Bool = false,
         isSavingCloudProvider: Bool = false,
         validatingCloudProviderIDs: Set<ProviderID> = [],
+        cloudKitSyncStatus: PinesCloudKitSyncStatus = .init(),
+        cloudKitConflicts: [CloudKitConflictRecord] = [],
+        openRouterSpendReport: OpenRouterSpendReport = .init(window: .month),
         huggingFaceCredentialStatus: String = "Not configured",
         braveSearchCredentialStatus: String = "Not configured"
     ) {
@@ -279,39 +305,136 @@ final class PinesSettingsState: ObservableObject {
         self.anthropicTokenCountPreflightEnabled = anthropicTokenCountPreflightEnabled
         self.geminiThinkingLevel = geminiThinkingLevel
         self.cloudWebSearchMode = cloudWebSearchMode
+        self.openRouterProviderPreferences = openRouterProviderPreferences
         self.cloudModelCatalog = cloudModelCatalog
         self.isRefreshingCloudModels = isRefreshingCloudModels
         self.isSavingCloudProvider = isSavingCloudProvider
         self.validatingCloudProviderIDs = validatingCloudProviderIDs
+        self.cloudKitSyncStatus = cloudKitSyncStatus
+        self.cloudKitConflicts = cloudKitConflicts
+        self.openRouterSpendReport = openRouterSpendReport
         self.huggingFaceCredentialStatus = huggingFaceCredentialStatus
         self.braveSearchCredentialStatus = braveSearchCredentialStatus
     }
 }
 
+struct PinesProviderLifecycleSnapshot: Equatable {
+    var artifactLibraryRevision: UInt64 = 0
+    var providerTransfers: [ProviderTransferRecord] = []
+    var providerFiles: [ProviderFileRecord] = []
+    var providerFilePreviews: [PinesProviderFilePreview] = []
+    var providerArtifacts: [ProviderArtifactRecord] = []
+    var providerArtifactPreviews: [PinesProviderArtifactPreview] = []
+    var providerCaches: [ProviderCacheRecord] = []
+    var providerCachePreviews: [PinesProviderCachePreview] = []
+    var providerVectorStores: [ProviderCacheRecord] = []
+    var providerVectorStorePreviews: [PinesProviderCachePreview] = []
+    var providerBatches: [ProviderBatchRecord] = []
+    var providerBatchPreviews: [PinesProviderBatchPreview] = []
+    var providerLiveSessions: [ProviderLiveSessionRecord] = []
+    var providerLiveSessionPreviews: [PinesProviderLiveSessionPreview] = []
+    var providerStructuredOutputs: [ProviderStructuredOutputRecord] = []
+    var providerStructuredOutputPreviews: [PinesProviderStructuredOutputPreview] = []
+    var providerModelCapabilities: [ProviderModelCapabilityRecord] = []
+    var providerModelCapabilityPreviews: [PinesProviderModelCapabilityPreview] = []
+    var providerResearchRuns: [ProviderResearchRunRecord] = []
+    var providerResearchRunPreviews: [PinesProviderResearchRunPreview] = []
+    var isRefreshing: Bool = false
+    var error: String?
+}
+
 @MainActor
 final class PinesProviderLifecycleState: ObservableObject {
-    @Published var providerFiles: [ProviderFileRecord]
-    @Published var providerFilePreviews: [PinesProviderFilePreview]
-    @Published var providerArtifacts: [ProviderArtifactRecord]
-    @Published var providerArtifactPreviews: [PinesProviderArtifactPreview]
-    @Published var providerCaches: [ProviderCacheRecord]
-    @Published var providerCachePreviews: [PinesProviderCachePreview]
-    @Published var providerVectorStores: [ProviderCacheRecord]
-    @Published var providerVectorStorePreviews: [PinesProviderCachePreview]
-    @Published var providerBatches: [ProviderBatchRecord]
-    @Published var providerBatchPreviews: [PinesProviderBatchPreview]
-    @Published var providerLiveSessions: [ProviderLiveSessionRecord]
-    @Published var providerLiveSessionPreviews: [PinesProviderLiveSessionPreview]
-    @Published var providerStructuredOutputs: [ProviderStructuredOutputRecord]
-    @Published var providerStructuredOutputPreviews: [PinesProviderStructuredOutputPreview]
-    @Published var providerModelCapabilities: [ProviderModelCapabilityRecord]
-    @Published var providerModelCapabilityPreviews: [PinesProviderModelCapabilityPreview]
-    @Published var providerResearchRuns: [ProviderResearchRunRecord]
-    @Published var providerResearchRunPreviews: [PinesProviderResearchRunPreview]
-    @Published var isRefreshingProviderLifecycle: Bool
-    @Published var providerLifecycleError: String?
+    @Published private(set) var snapshot: PinesProviderLifecycleSnapshot
+    private var refreshGeneration: UInt64 = 0
+
+    var providerTransfers: [ProviderTransferRecord] {
+        get { snapshot.providerTransfers }
+        set { update(\.providerTransfers, to: newValue) }
+    }
+    var providerFiles: [ProviderFileRecord] {
+        get { snapshot.providerFiles }
+        set { update(\.providerFiles, to: newValue) }
+    }
+    var providerFilePreviews: [PinesProviderFilePreview] {
+        get { snapshot.providerFilePreviews }
+        set { update(\.providerFilePreviews, to: newValue) }
+    }
+    var providerArtifacts: [ProviderArtifactRecord] {
+        get { snapshot.providerArtifacts }
+        set { update(\.providerArtifacts, to: newValue) }
+    }
+    var providerArtifactPreviews: [PinesProviderArtifactPreview] {
+        get { snapshot.providerArtifactPreviews }
+        set { update(\.providerArtifactPreviews, to: newValue) }
+    }
+    var providerCaches: [ProviderCacheRecord] {
+        get { snapshot.providerCaches }
+        set { update(\.providerCaches, to: newValue) }
+    }
+    var providerCachePreviews: [PinesProviderCachePreview] {
+        get { snapshot.providerCachePreviews }
+        set { update(\.providerCachePreviews, to: newValue) }
+    }
+    var providerVectorStores: [ProviderCacheRecord] {
+        get { snapshot.providerVectorStores }
+        set { update(\.providerVectorStores, to: newValue) }
+    }
+    var providerVectorStorePreviews: [PinesProviderCachePreview] {
+        get { snapshot.providerVectorStorePreviews }
+        set { update(\.providerVectorStorePreviews, to: newValue) }
+    }
+    var providerBatches: [ProviderBatchRecord] {
+        get { snapshot.providerBatches }
+        set { update(\.providerBatches, to: newValue) }
+    }
+    var providerBatchPreviews: [PinesProviderBatchPreview] {
+        get { snapshot.providerBatchPreviews }
+        set { update(\.providerBatchPreviews, to: newValue) }
+    }
+    var providerLiveSessions: [ProviderLiveSessionRecord] {
+        get { snapshot.providerLiveSessions }
+        set { update(\.providerLiveSessions, to: newValue) }
+    }
+    var providerLiveSessionPreviews: [PinesProviderLiveSessionPreview] {
+        get { snapshot.providerLiveSessionPreviews }
+        set { update(\.providerLiveSessionPreviews, to: newValue) }
+    }
+    var providerStructuredOutputs: [ProviderStructuredOutputRecord] {
+        get { snapshot.providerStructuredOutputs }
+        set { update(\.providerStructuredOutputs, to: newValue) }
+    }
+    var providerStructuredOutputPreviews: [PinesProviderStructuredOutputPreview] {
+        get { snapshot.providerStructuredOutputPreviews }
+        set { update(\.providerStructuredOutputPreviews, to: newValue) }
+    }
+    var providerModelCapabilities: [ProviderModelCapabilityRecord] {
+        get { snapshot.providerModelCapabilities }
+        set { update(\.providerModelCapabilities, to: newValue) }
+    }
+    var providerModelCapabilityPreviews: [PinesProviderModelCapabilityPreview] {
+        get { snapshot.providerModelCapabilityPreviews }
+        set { update(\.providerModelCapabilityPreviews, to: newValue) }
+    }
+    var providerResearchRuns: [ProviderResearchRunRecord] {
+        get { snapshot.providerResearchRuns }
+        set { update(\.providerResearchRuns, to: newValue) }
+    }
+    var providerResearchRunPreviews: [PinesProviderResearchRunPreview] {
+        get { snapshot.providerResearchRunPreviews }
+        set { update(\.providerResearchRunPreviews, to: newValue) }
+    }
+    var isRefreshingProviderLifecycle: Bool {
+        get { snapshot.isRefreshing }
+        set { update(\.isRefreshing, to: newValue, invalidatesRefresh: false) }
+    }
+    var providerLifecycleError: String? {
+        get { snapshot.error }
+        set { update(\.error, to: newValue, invalidatesRefresh: false) }
+    }
 
     init(
+        providerTransfers: [ProviderTransferRecord] = [],
         providerFiles: [ProviderFileRecord] = [],
         providerFilePreviews: [PinesProviderFilePreview] = [],
         providerArtifacts: [ProviderArtifactRecord] = [],
@@ -333,26 +456,108 @@ final class PinesProviderLifecycleState: ObservableObject {
         isRefreshingProviderLifecycle: Bool = false,
         providerLifecycleError: String? = nil
     ) {
-        self.providerFiles = providerFiles
-        self.providerFilePreviews = providerFilePreviews
-        self.providerArtifacts = providerArtifacts
-        self.providerArtifactPreviews = providerArtifactPreviews
-        self.providerCaches = providerCaches
-        self.providerCachePreviews = providerCachePreviews
-        self.providerVectorStores = providerVectorStores
-        self.providerVectorStorePreviews = providerVectorStorePreviews
-        self.providerBatches = providerBatches
-        self.providerBatchPreviews = providerBatchPreviews
-        self.providerLiveSessions = providerLiveSessions
-        self.providerLiveSessionPreviews = providerLiveSessionPreviews
-        self.providerStructuredOutputs = providerStructuredOutputs
-        self.providerStructuredOutputPreviews = providerStructuredOutputPreviews
-        self.providerModelCapabilities = providerModelCapabilities
-        self.providerModelCapabilityPreviews = providerModelCapabilityPreviews
-        self.providerResearchRuns = providerResearchRuns
-        self.providerResearchRunPreviews = providerResearchRunPreviews
-        self.isRefreshingProviderLifecycle = isRefreshingProviderLifecycle
-        self.providerLifecycleError = providerLifecycleError
+        snapshot = PinesProviderLifecycleSnapshot(
+            providerTransfers: providerTransfers,
+            providerFiles: providerFiles,
+            providerFilePreviews: providerFilePreviews,
+            providerArtifacts: providerArtifacts,
+            providerArtifactPreviews: providerArtifactPreviews,
+            providerCaches: providerCaches,
+            providerCachePreviews: providerCachePreviews,
+            providerVectorStores: providerVectorStores,
+            providerVectorStorePreviews: providerVectorStorePreviews,
+            providerBatches: providerBatches,
+            providerBatchPreviews: providerBatchPreviews,
+            providerLiveSessions: providerLiveSessions,
+            providerLiveSessionPreviews: providerLiveSessionPreviews,
+            providerStructuredOutputs: providerStructuredOutputs,
+            providerStructuredOutputPreviews: providerStructuredOutputPreviews,
+            providerModelCapabilities: providerModelCapabilities,
+            providerModelCapabilityPreviews: providerModelCapabilityPreviews,
+            providerResearchRuns: providerResearchRuns,
+            providerResearchRunPreviews: providerResearchRunPreviews,
+            isRefreshing: isRefreshingProviderLifecycle,
+            error: providerLifecycleError
+        )
+    }
+
+    func apply(_ newSnapshot: PinesProviderLifecycleSnapshot) {
+        var updatedSnapshot = newSnapshot
+        if snapshot.providerArtifacts != newSnapshot.providerArtifacts
+            || snapshot.providerResearchRuns != newSnapshot.providerResearchRuns {
+            updatedSnapshot.artifactLibraryRevision = snapshot.artifactLibraryRevision &+ 1
+        } else {
+            updatedSnapshot.artifactLibraryRevision = snapshot.artifactLibraryRevision
+        }
+        guard snapshot != updatedSnapshot else { return }
+        snapshot = updatedSnapshot
+    }
+
+    /// Starts a repository-wide refresh and returns the generation that is
+    /// allowed to publish its result. Any later targeted mutation invalidates
+    /// this generation so stale repository reads cannot replace newer state.
+    @discardableResult
+    func beginRefresh() -> UInt64 {
+        refreshGeneration &+= 1
+        var loadingSnapshot = snapshot
+        loadingSnapshot.isRefreshing = true
+        loadingSnapshot.error = nil
+        apply(loadingSnapshot)
+        return refreshGeneration
+    }
+
+    /// Publishes a repository-wide refresh only when no newer refresh or
+    /// targeted mutation has superseded it.
+    @discardableResult
+    func completeRefresh(
+        _ refreshedSnapshot: PinesProviderLifecycleSnapshot,
+        generation: UInt64
+    ) -> Bool {
+        guard refreshGeneration == generation else { return false }
+        var completedSnapshot = refreshedSnapshot
+        completedSnapshot.isRefreshing = false
+        completedSnapshot.error = nil
+        apply(completedSnapshot)
+        return true
+    }
+
+    /// Publishes a refresh failure only while that refresh is still current.
+    @discardableResult
+    func failRefresh(_ error: String, generation: UInt64) -> Bool {
+        guard refreshGeneration == generation else { return false }
+        var failedSnapshot = snapshot
+        failedSnapshot.isRefreshing = false
+        failedSnapshot.error = error
+        apply(failedSnapshot)
+        return true
+    }
+
+    /// Applies a focused lifecycle mutation in one publication. Incrementing
+    /// the generation first also prevents an older full refresh from restoring
+    /// the pre-mutation value after this method returns.
+    func updateIncrementally(
+        _ mutation: (inout PinesProviderLifecycleSnapshot) -> Void
+    ) {
+        refreshGeneration &+= 1
+        var updatedSnapshot = snapshot
+        updatedSnapshot.isRefreshing = false
+        updatedSnapshot.error = nil
+        mutation(&updatedSnapshot)
+        apply(updatedSnapshot)
+    }
+
+    private func update<Value: Equatable>(
+        _ keyPath: WritableKeyPath<PinesProviderLifecycleSnapshot, Value>,
+        to value: Value,
+        invalidatesRefresh: Bool = true
+    ) {
+        guard snapshot[keyPath: keyPath] != value else { return }
+        if invalidatesRefresh {
+            refreshGeneration &+= 1
+        }
+        var updated = snapshot
+        updated[keyPath: keyPath] = value
+        apply(updated)
     }
 }
 
@@ -360,6 +565,7 @@ final class PinesProviderLifecycleState: ObservableObject {
 final class PinesWorkflowState: ObservableObject {
     @Published var serviceError: String?
     @Published var pendingToolApproval: ToolApprovalRequest?
+    @Published var pendingHostedToolApproval: HostedToolApprovalRequest?
     @Published var pendingCloudContextApproval: CloudContextApprovalRequest?
     @Published var pendingCloudVaultEmbeddingApproval: CloudVaultEmbeddingApprovalRequest?
     @Published var pendingMCPSamplingRequest: MCPSamplingRequest?
@@ -371,6 +577,7 @@ final class PinesWorkflowState: ObservableObject {
     init(
         serviceError: String? = nil,
         pendingToolApproval: ToolApprovalRequest? = nil,
+        pendingHostedToolApproval: HostedToolApprovalRequest? = nil,
         pendingCloudContextApproval: CloudContextApprovalRequest? = nil,
         pendingCloudVaultEmbeddingApproval: CloudVaultEmbeddingApprovalRequest? = nil,
         pendingMCPSamplingRequest: MCPSamplingRequest? = nil,
@@ -381,6 +588,7 @@ final class PinesWorkflowState: ObservableObject {
     ) {
         self.serviceError = serviceError
         self.pendingToolApproval = pendingToolApproval
+        self.pendingHostedToolApproval = pendingHostedToolApproval
         self.pendingCloudContextApproval = pendingCloudContextApproval
         self.pendingCloudVaultEmbeddingApproval = pendingCloudVaultEmbeddingApproval
         self.pendingMCPSamplingRequest = pendingMCPSamplingRequest

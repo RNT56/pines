@@ -1,5 +1,7 @@
 # iOS Freeze Stress Diagnostics
 
+This harness validates long-running local-generation safety. It complements, but does not replace, the launch/scroll/memory measurement workflow in [`docs/performance/RUNBOOK.md`](performance/RUNBOOK.md).
+
 Pines has a debug-only stress harness for the hard failure mode where local MLX generation stalls, the app stops producing output, or the device becomes unresponsive enough that normal UI controls cannot recover it.
 
 ## Customer Build Isolation

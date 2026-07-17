@@ -128,7 +128,7 @@ Todos:
 - Add retention, billing, and provider-storage warnings.
 - Add cleanup UX for orphaned hosted files.
 - Build themed file/vector store management screens and source chips for File Search results.
-- Add durable upload progress, retry, cancellation, and background-safe transfer state.
+- [x] Add durable upload progress, retry, cancellation, relaunch recovery, retained staged sources, and provider-copy verification. In-flight continuation after iOS suspension is not claimed.
 
 Possible hiccups:
 
@@ -153,8 +153,8 @@ Todos:
 - Remote MCP: store server label, URL, auth, approval policy, allowlist, and data disclosure.
 - Tool Search: register tool catalogs and parse dynamic tool loading events.
 - Add per-tool availability checks from model capabilities.
-- Add audit events for every hosted tool call.
-- Add approval sheets and timeline rows for each hosted tool class.
+- [x] Add consent audit events for approval-gated hosted-tool requests.
+- [x] Add approval sheets that disclose provider environment, egress, side effects, destinations, and retention, plus existing hosted-tool timeline rows.
 
 Possible hiccups:
 

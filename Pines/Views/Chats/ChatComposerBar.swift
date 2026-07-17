@@ -4,6 +4,8 @@ import PinesCore
 import UniformTypeIdentifiers
 
 struct ChatComposerBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
@@ -121,10 +123,10 @@ struct ChatComposerBar: View {
                 allowsMultipleSelection: true,
                 onCompletion: importAttachments
             )
-            .animation(theme.motion.fast, value: draft.isEmpty)
-            .animation(theme.motion.fast, value: attachments)
-            .animation(theme.motion.fast, value: attachmentError)
-            .animation(theme.motion.fast, value: quickSettingsAvailability)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: draft.isEmpty)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: attachments)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: attachmentError)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: quickSettingsAvailability)
     }
 
     private var composerSurface: some View {
@@ -203,13 +205,8 @@ struct ChatComposerBar: View {
             HStack(spacing: theme.spacing.small) {
                 modePicker
                 attachButton
-                if !activeMCPPrompts.isEmpty {
-                    promptButton
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                }
-                if runMode == .agent {
-                    agentToolsButton
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                if showsCompactOptionsMenu {
+                    compactOptionsMenu
                 }
                 if let quickSettingsAvailability {
                     ChatQuickSettingsButton(availability: quickSettingsAvailability)
@@ -219,6 +216,58 @@ struct ChatComposerBar: View {
                 sendButton
             }
         }
+    }
+
+    private var showsCompactOptionsMenu: Bool {
+        !activeMCPPrompts.isEmpty || runMode == .agent
+    }
+
+    private var compactOptionsMenu: some View {
+        Menu {
+            if !activeMCPPrompts.isEmpty {
+                Section("MCP Prompts") {
+                    ForEach(activeMCPPrompts) { prompt in
+                        Button(prompt.title ?? prompt.name) {
+                            haptics.play(.primaryAction)
+                            selectedMCPPrompt = prompt
+                            seedPromptArguments(prompt)
+                        }
+                    }
+                }
+            }
+
+            if runMode == .agent {
+                Section("Agent Tools") {
+                    if isRefreshingAgentTools {
+                        Label("Loading tools", systemImage: "hourglass")
+                    } else if agentToolSpecs.isEmpty {
+                        Label("No tools available", systemImage: "wrench.and.screwdriver")
+                    } else {
+                        ForEach(agentToolSpecs, id: \.name) { spec in
+                            Button {
+                                toggleAgentTool(spec.name)
+                            } label: {
+                                Label(
+                                    agentToolTitle(spec),
+                                    systemImage: disabledAgentToolNames.contains(spec.name) ? "circle" : "checkmark.circle.fill"
+                                )
+                            }
+                        }
+
+                        if !disabledAgentToolNames.isEmpty {
+                            Button("Enable all") {
+                                disabledAgentToolNames.removeAll()
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: runMode == .agent ? "wrench.and.screwdriver" : "ellipsis.circle")
+        }
+        .accessibilityLabel("Chat options")
+        .accessibilityIdentifier("pines.chat.composer.options")
+        .pinesButtonStyle(.icon)
     }
 
     private var layoutSpacing: CGFloat {
@@ -281,16 +330,31 @@ struct ChatComposerBar: View {
             }
     }
 
+    @ViewBuilder
     private var modePicker: some View {
-        Picker("Mode", selection: $runMode) {
-            Text("Chat").tag(PinesRunMode.chat)
-            Text("Agent").tag(PinesRunMode.agent)
+        if dynamicTypeSize.isAccessibilitySize {
+            Menu {
+                Button("Chat") { runMode = .chat }
+                Button("Agent") { runMode = .agent }
+            } label: {
+                Label(runMode == .chat ? "Chat" : "Agent", systemImage: "chevron.up.chevron.down")
+            }
+            .pinesButtonStyle(.secondary)
+            .disabled(chatState.activeRunID != nil)
+            .accessibilityLabel("Run mode")
+            .accessibilityValue(runMode == .chat ? "Chat" : "Agent")
+            .accessibilityIdentifier("pines.chat.composer.run-mode")
+        } else {
+            Picker("Mode", selection: $runMode) {
+                Text("Chat").tag(PinesRunMode.chat)
+                Text("Agent").tag(PinesRunMode.agent)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: horizontalSizeClass == .compact ? 132 : 150)
+            .disabled(chatState.activeRunID != nil)
+            .accessibilityLabel("Run mode")
+            .accessibilityIdentifier("pines.chat.composer.run-mode")
         }
-        .pickerStyle(.segmented)
-        .frame(width: horizontalSizeClass == .compact ? 132 : 150)
-        .disabled(chatState.activeRunID != nil)
-        .accessibilityLabel("Run mode")
-        .accessibilityIdentifier("pines.chat.composer.run-mode")
     }
 
     private var attachButton: some View {
@@ -440,7 +504,7 @@ struct ChatComposerBar: View {
         attachments = []
         attachmentError = nil
         setFocus(false)
-        withAnimation(theme.motion.copySuccess) {
+        withAnimation(reduceMotion ? nil : theme.motion.copySuccess) {
             didCommitSend.toggle()
         }
         let enabledToolNames = runMode == .agent ? Set(agentToolSpecs.map(\.name)).subtracting(disabledAgentToolNames) : nil
@@ -1083,8 +1147,9 @@ private struct MCPPromptInvocationSheet: View {
                         }
                     }
                 }
-            }
-            .pinesExpressiveScrollHaptics()
+        }
+        .pinesThemedForm()
+        .pinesExpressiveScrollHaptics()
             .navigationTitle("Use MCP Prompt")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

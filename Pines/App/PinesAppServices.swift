@@ -22,9 +22,13 @@ typealias PinesLiveStore = any ConversationRepository
     & ProviderStructuredOutputRepository
     & ProviderModelCapabilityRepository
     & ProviderResearchRunRepository
+    & ProviderTransferRepository
+    & CloudKitConflictRepository
+    & CloudSpendRepository
     & MCPServerRepository
     & ModelDownloadRepository
     & AuditEventRepository
+    & TurboQuantEvidenceRepository
     & AppDataResetRepository
 
 final class PinesAppServices: @unchecked Sendable {
@@ -56,7 +60,7 @@ final class PinesAppServices: @unchecked Sendable {
         secretStore: any SecretStore = KeychainSecretStore(),
         secureKeyStore: SecureKeyStore = SecureKeyStore(),
         modelCatalog: HuggingFaceModelCatalogService = HuggingFaceModelCatalogService(),
-        preflightClassifier: ModelPreflightClassifier = ModelPreflightClassifier(),
+        preflightClassifier: ModelPreflightClassifier? = nil,
         executionRouter: ExecutionRouter = ExecutionRouter(),
         toolRegistry: ToolRegistry = ToolRegistry(),
         toolPolicyGate: ToolPolicyGate = ToolPolicyGate(),
@@ -86,6 +90,9 @@ final class PinesAppServices: @unchecked Sendable {
         self.secureKeyStore = secureKeyStore
         self.modelCatalog = modelCatalog
         self.preflightClassifier = preflightClassifier
+            ?? ModelPreflightClassifier(
+                turboQuantRuntimeCapabilities: MLXRuntimeBridge.turboQuantRuntimeCapabilities
+            )
         self.executionRouter = executionRouter
         self.toolRegistry = toolRegistry
         self.toolPolicyGate = toolPolicyGate
@@ -124,9 +131,13 @@ final class PinesAppServices: @unchecked Sendable {
     var providerStructuredOutputRepository: (any ProviderStructuredOutputRepository)? { liveStore }
     var providerModelCapabilityRepository: (any ProviderModelCapabilityRepository)? { liveStore }
     var providerResearchRunRepository: (any ProviderResearchRunRepository)? { liveStore }
+    var providerTransferRepository: (any ProviderTransferRepository)? { liveStore }
+    var cloudKitConflictRepository: (any CloudKitConflictRepository)? { liveStore }
+    var cloudSpendRepository: (any CloudSpendRepository)? { liveStore }
     var mcpServerRepository: (any MCPServerRepository)? { liveStore }
     var modelDownloadRepository: (any ModelDownloadRepository)? { liveStore }
     var auditRepository: (any AuditEventRepository)? { liveStore }
+    var turboQuantEvidenceRepository: (any TurboQuantEvidenceRepository)? { liveStore }
 
     var agentRuntimeFactory: any AgentRuntimeFactory {
         explicitAgentRuntimeFactory ?? DefaultAgentRuntimeFactory(
@@ -491,14 +502,13 @@ final class PinesAppServices: @unchecked Sendable {
         guard
             CloudKitSyncService.hasRequiredEntitlements(),
             let conversationRepository,
-            let vaultRepository,
-            let settingsRepository
+            let settingsRepository,
+            let syncRepository = conversationRepository as? any CloudKitSyncRepository
         else {
             return nil
         }
         return CloudKitSyncService(
-            conversationRepository: conversationRepository,
-            vaultRepository: vaultRepository,
+            syncRepository: syncRepository,
             settingsRepository: settingsRepository,
             secureKeyStore: secureKeyStore,
             auditRepository: auditRepository

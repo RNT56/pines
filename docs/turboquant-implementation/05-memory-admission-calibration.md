@@ -66,13 +66,13 @@ public struct LocalRuntimeAdmissionRequest: Codable, Sendable {
     public var parameterCount: Int64?
     public var requestedContextTokens: Int
     public var reservedCompletionTokens: Int
-    public var userMode: LocalAIUserMode
-    public var fallbackContract: LocalFallbackContract
+    public var userMode: TurboQuantUserMode
+    public var fallbackContract: TurboQuantFallbackContract
     public var deviceClass: DevicePerformanceClass
     public var hardwareModel: String?
     public var osBuild: String
     public var memoryCounters: RuntimeMemoryCounters
-    public var turboQuantCapabilities: LocalTurboQuantCapabilities?
+    public var quantizationDiagnostics: RuntimeQuantizationDiagnostics?
     public var profileEvidence: RuntimeProfileEvidence?
     public var calibration: RuntimeMemoryCalibration?
     public var contextAssemblyPlan: ContextAssemblyPlan?
@@ -88,10 +88,10 @@ public struct LocalRuntimeAdmissionPlan: Codable, Sendable {
     public var requestedContextTokens: Int
     public var admittedContextTokens: Int
     public var reservedCompletionTokens: Int
-    public var selectedMode: LocalAIUserMode
+    public var selectedMode: TurboQuantUserMode
     public var selectedKVStrategy: KVCacheStrategy
-    public var selectedAttentionPath: LocalTurboQuantAttentionPath?
-    public var fallbackContract: LocalFallbackContract
+    public var selectedAttentionPath: TurboQuantAttentionPath?
+    public var fallbackContract: TurboQuantFallbackContract
     public var memoryZones: RuntimeMemoryZones
     public var memoryCushionBytes: Int64
     public var calibrationApplied: RuntimeMemoryCalibrationSummary?
@@ -139,8 +139,8 @@ public struct RuntimeMemoryCalibrationSample: Codable, Sendable {
     public var modelID: String
     public var modelRevision: String?
     public var deviceClass: DevicePerformanceClass
-    public var userMode: LocalAIUserMode
-    public var attentionPath: LocalTurboQuantAttentionPath?
+    public var userMode: TurboQuantUserMode
+    public var attentionPath: TurboQuantAttentionPath?
     public var requestedContextTokens: Int
     public var admittedContextTokens: Int
     public var estimatedCompressedKVBytes: Int64
@@ -177,7 +177,7 @@ public struct RuntimeMemoryCalibration: Codable, Sendable {
     public var schemaVersion: Int
     public var deviceClass: DevicePerformanceClass
     public var modelFamily: String
-    public var attentionPath: LocalTurboQuantAttentionPath
+    public var attentionPath: TurboQuantAttentionPath
     public var sampleCount: Int
     public var estimatedToActualPeakRatioP95: Double
     public var scratchMultiplier: Double

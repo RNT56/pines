@@ -2,7 +2,7 @@
 
 This is the technical handbook for Pines. The main [README](README.md) is user-facing; this file is for people building, auditing, extending, or performance-tuning the app.
 
-Pines is a source-available iOS 26 AI workbench built around local MLX Swift inference, BYOK cloud routing, private vault context, MCP Streamable HTTP, policy-gated tools, GRDB persistence, optional CloudKit sync, Watch support, and pinned Schtack-maintained MLX forks.
+Pines is a source-available iOS 17+ AI workbench built around local MLX Swift inference, BYOK cloud routing, private vault context, MCP Streamable HTTP, policy-gated tools, GRDB persistence, optional CloudKit sync, Watch support, and pinned Schtack-maintained MLX forks.
 
 ## Fast Path
 
@@ -21,6 +21,15 @@ Full iOS validation requires a full Xcode install selected with `xcode-select`:
 bash scripts/ci/run-xcode-validation.sh
 ```
 
+For Release/Profile performance validation and the retained-evidence workflow:
+
+```sh
+bash scripts/ci/check-release-build-hygiene.sh
+bash scripts/diagnostics/run-ios-ui-performance.sh
+```
+
+The performance architecture, acceptance budgets, trace journeys, and baseline template live in [`docs/performance/`](docs/performance/README.md).
+
 For a direct generic iOS build:
 
 ```sh
@@ -31,8 +40,8 @@ Project generation is pinned through `scripts/ci/xcodegen.sh` to XcodeGen `2.45.
 
 ## Platform And Toolchain
 
-- App deployment target: iOS `26.0`.
-- Watch target deployment: watchOS `26.0`.
+- App deployment target: iOS `17.0`.
+- Watch target deployment: watchOS `10.0`.
 - Xcode project source of truth: `project.yml`.
 - Generated project: `Pines.xcodeproj`, committed and drift-checked.
 - Swift package tools version: Swift `6.2`.
@@ -115,7 +124,7 @@ Provider lifecycle records are generic on purpose. OpenAI Files/vector stores, A
 
 ## Persistence And Sync
 
-The local store is GRDB/SQLite. Schema source of truth is `Sources/PinesCore/Persistence/DatabaseSchema.swift`; the current schema version is `12`.
+The local store is GRDB/SQLite. Schema source of truth is `Sources/PinesCore/Persistence/DatabaseSchema.swift`; the current schema version is `31`.
 
 When changing persistence:
 
@@ -128,7 +137,9 @@ When changing persistence:
 - Add indexes for list, sync, search, and vector-scan paths before the UI depends on them.
 - Update core tests or `PinesCoreTestRunner` for schema contract changes.
 
-CloudKit is optional and private-database scoped. Do not sync API keys, model binaries, prompt caches, generated embeddings/vector codes by default, transient browser/tool state, or local chat attachment files. Generated embeddings and compressed vector codes sync only when private iCloud sync and the separate embedding sync toggle are both enabled.
+CloudKit is optional and private-database scoped. It synchronizes settings, Project Spaces, conversations/messages, and enabled Vault metadata/chunks through encrypted payload records; project tombstones unlink child chat and Vault records on peers. Do not sync API keys, model binaries, prompt caches, TurboQuant KV snapshots, generated embeddings/vector codes by default, transient browser/tool state, or local chat attachment files. Generated embeddings and compressed vector codes sync only when private iCloud sync and the separate embedding sync toggle are both enabled.
+
+The app model owns one observable CloudKit sync status with the current phase, last attempt, last success, redacted error, and trigger. Settings exposes that state and a bounded manual retry. A successful transport/merge run is not evidence that user-visible conflict resolution is complete; conflict persistence and resolution UI remain separate product work.
 
 Personal Apple Developer accounts are safe by default. `PINES_CODE_SIGN_ENTITLEMENTS` and `PINES_ICLOUD_SWIFT_FLAGS` are empty in `project.yml`, so Xcode does not request iCloud provisioning. Paid-team CloudKit builds must override both:
 
@@ -157,6 +168,8 @@ Hard requirements:
 - Local vault and MCP resource context must require per-turn approval before entering a cloud request.
 - Provider-hosted files, caches, vector stores, batches, generated artifacts, live/realtime sessions, research runs, token counting, and hosted tools must be labeled as cloud/provider resources and kept distinct from local Vault data.
 - Browser, web, and MCP outputs are untrusted model context.
+- Arbitrary web fetch/browser top-level URLs must pass the public-host gate; web fetch also validates resolved addresses, redirects, and final URLs.
+- Finite provider, MCP, OAuth, Brave Search, and credential-validation response bodies must use `BoundedHTTPResponse` limits rather than unbounded `URLSession.data(for:)` ingestion.
 - Browser automation must require visible approval for login, checkout, posting, upload, credential-adjacent, and remote-state-changing actions.
 - Tool execution is deny-by-default and must pass `ToolPolicyGate`.
 
@@ -174,6 +187,8 @@ If cloud is required but not configured, fail into a consent/configuration path 
 Performance-sensitive work must respect iOS memory pressure, thermal state, Low Power Mode, and the device profile returned by `DeviceRuntimeMonitor`.
 
 TurboQuant is the requested default local KV-cache strategy. Pines requests the `metalPolarQJL` backend by default, reports requested/active backend and attention path diagnostics, and falls back to MLX packed attention when required by device capability or shape.
+
+The production bridge performs request-scoped local admission before generation. It records the admitted context, memory zones, fallback contract, context assembly plan, RunDecision, calibration sample, and explicit no-cloud-fallback metadata. `compatibility-pair.json` may be green for the pinned runtime pair while model/device/mode compatibility remains unverified; product `Verified` and `Certified` labels require matching real-device evidence.
 
 Device profile defaults from `DeviceProfile`:
 
@@ -203,6 +218,10 @@ Runtime development rules:
 - Keep runtime diagnostics read-only and visible in Models/Settings where relevant.
 - Log startup phases, generation throughput, vault retrieval latency, memory-pressure events, and MetricKit availability through `PinesRuntimeMetrics`.
 - Treat device model names as hints; verified MLX capabilities decide whether compressed Metal attention is active.
+- Keep SwiftUI list state summary-only; load large bytes, chunks, embeddings, and provider objects through targeted, cancellable detail APIs.
+- Use stable operation identities for polling and `.task(id:)`; mutable status, timestamps, and search text must not restart unrelated network loops.
+- Downsample images to their presentation size off-main and use cost-bounded caches that purge on memory, thermal, and lifecycle pressure.
+- Profile with the Release-configured `PinesPerformance` scheme. Debug coverage builds are not performance evidence.
 
 Current app-level limits and defaults:
 
@@ -213,6 +232,7 @@ Current app-level limits and defaults:
 - Chat attachments are capped at eight files per draft.
 - MCP decoded blob previews are capped at `10 MB`.
 - MCP text output passed back to model context is capped in service code.
+- Provider JSON responses are capped at `32 MB`, ordinary file/audio/batch downloads at `64 MB`, and generated video at `512 MB`.
 - Default agent policy: `8` steps, `6` tool calls, `120` seconds wall time.
 - Normal chat does not advertise every registered tool; Agent mode and MCP sampling have separate policy gates.
 
@@ -220,12 +240,14 @@ Current app-level limits and defaults:
 
 The iOS app links exact maintained MLX fork revisions through `project.yml` and the generated Xcode project:
 
-- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `a90b1097df45e4e70b6e0bb367624f8f5857970b`
-- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `af28d8a0e28a5f7d8a012ed66a1470ac00c6f20c`
-- Nested `mlx` inside `MLXSwift`: `3eb8ef074b911b00ecdbeb47f7bdafd91a123ad0`
-- Nested `mlx-c` inside `MLXSwift`: `2abc34daff6ded246054d9e15b98870b5cd08b97`
+- `MLXSwift`: `https://github.com/RNT56/mlx-swift` at `bcf93af23f11428f6f01efb0bb4b9020cd2eb383`
+- `MLXSwiftLM`: `https://github.com/RNT56/mlx-swift-lm` at `aeaa8e3024a82b25969741b53c749b28ddc64d1a`
+- Nested `mlx` inside `MLXSwift`: `e230d124a1fdcb5f4b3daab6321744a7a8b6a9f2`
+- Nested `mlx-c` inside `MLXSwift`: `2fbeccd5a6ec6f7aadedaf1d3dfb2894ef44fbc1`
 
 These pins are intentional because Pines consumes additive TurboQuant and compatibility APIs not assumed to exist in upstream package releases yet.
+
+The active TurboQuant compatibility pair is recorded in `docs/turboquant-implementation/compatibility-pair.json`. A `green` pair means the pinned runtime pair passed local release gates; it is not a substitute for real-device profile evidence.
 
 Use the helper to move pins:
 
@@ -233,7 +255,7 @@ Use the helper to move pins:
 tools/update-mlx-pins.sh
 ```
 
-CI checks that `project.yml` and `Pines.xcodeproj` agree, that pins are not below known-good minimums, that obsolete revisions are absent, and that nested `mlx`/`mlx-c` revisions match expectations. Do not edit Xcode DerivedData package checkouts.
+CI checks that `project.yml`, `Pines.xcodeproj`, the Xcode package lockfile, `docs/TURBOQUANT.md`, `compatibility-pair.json`, and `MLXRuntimeBridge.turboQuantCompatibilityPairID` agree; that pins are not below known-good minimums; that obsolete revisions are absent; and that nested `mlx`/`mlx-c` revisions match expectations. Do not edit Xcode DerivedData package checkouts.
 
 ## Model Discovery And Downloads
 
@@ -347,6 +369,9 @@ When adding or changing a provider:
 - Parse provider metadata without leaking keys or raw sensitive payloads into logs.
 - Add tests for stream parser edge cases.
 - Keep cloud route selection explicit through `ExecutionRouter`.
+- Preserve provider identity and Keychain account when editing display names or endpoints; blank replacement credentials must retain the existing secret.
+- Keep OpenRouter routing policy typed and normalized. Schema/tool-critical requests must set `require_parameters`, and privacy restrictions must never be silently relaxed.
+- Finalize streamed provider metadata only after the terminal accounting chunk. Persist only the OpenRouter receipt allowlist (route/provider/model/status, usage, and cost), never arbitrary router pipeline/plugin payloads.
 
 ## Vault And Retrieval
 
@@ -399,6 +424,7 @@ MCP rules:
 - Binary resource MIME types must be allowlisted.
 - Sampling runs only when enabled for the server and approved by the user.
 - MCP sampling may use BYOK only when BYOK sampling is enabled for that server.
+- Persist MCP tool safety annotations and treat unannotated tools as remote-state-changing.
 - Global chat execution mode is not implicitly reused for sampling.
 - Pines does not currently advertise MCP roots.
 
@@ -490,6 +516,20 @@ Run Xcode validation for app-facing, project-generation, or dependency graph cha
 ```sh
 bash scripts/ci/run-xcode-validation.sh
 ```
+
+The default local run executes the complete `PinesUITests` target. Required CI uses
+five independently bounded critical-journey shards so a slow hosted simulator cannot
+consume one shared watchdog for the whole suite. Reproduce that exact CI selection with:
+
+```sh
+PINES_XCODE_UI_TEST_MODE=smoke bash scripts/ci/run-xcode-validation.sh
+```
+
+The smoke selection covers launch/navigation/chat composition, accessibility-sized
+primary surfaces, and separately isolated Artifact library/Image Studio,
+video/speech configuration, and research/running-work journeys. Keep the default
+`full` mode for exhaustive UI regression work, including the light/dark theme matrix;
+`PINES_XCODE_UI_TEST_MODE` accepts only `smoke` or `full`.
 
 Useful targeted scripts:
 

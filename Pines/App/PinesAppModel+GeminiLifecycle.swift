@@ -66,7 +66,11 @@ extension PinesAppModel {
                 cachedContents: caches,
                 modelCapabilities: capabilities
             )
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderStorageRecords(
+                files: files,
+                caches: caches,
+                capabilities: capabilities
+            )
             providerLifecycleError = nil
             return result
         } catch {
@@ -82,36 +86,34 @@ extension PinesAppModel {
         contentType: String? = nil,
         consent: PinesGeminiProviderStorageConsent,
         poll: GeminiFilePolling? = GeminiFilePolling(),
+        uploadProgress: ProviderUploadProgress? = nil,
         services: PinesAppServices
     ) async throws -> PinesGeminiProviderUploadResult {
         do {
             try validateGeminiProviderStorageConsent(consent)
             let coordinator = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
-            let hasSecurityScope = fileURL.startAccessingSecurityScopedResource()
-            defer {
-                if hasSecurityScope {
-                    fileURL.stopAccessingSecurityScopedResource()
-                }
-            }
-
-            let data = try Data(contentsOf: fileURL)
-            guard !data.isEmpty else {
+            let source = try await ProviderTransferFileService.shared.inspect(fileURL)
+            guard source.byteCount > 0 else {
                 throw InferenceError.invalidRequest("Gemini file upload \(fileURL.lastPathComponent) is empty.")
             }
-            let resolvedContentType = contentType ?? Self.geminiContentType(for: fileURL)
+            let resolvedContentType = contentType
+                ?? source.contentType
+                ?? Self.geminiContentType(for: fileURL)
             let disposition = PinesGeminiMediaDisposition.decision(
                 contentType: resolvedContentType,
-                byteCount: Int64(data.count)
+                byteCount: source.byteCount
             )
             let file = try await coordinator.uploadFile(
                 fileName: fileURL.lastPathComponent,
                 contentType: resolvedContentType,
-                data: data,
+                fileURL: fileURL,
+                byteCount: source.byteCount,
                 localURL: fileURL,
-                poll: poll
+                poll: poll,
+                uploadProgress: uploadProgress
             )
             try await auditGeminiProviderStorageConsent(consent, providerID: coordinator.providerID, services: services)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderFileRecords([file])
             providerLifecycleError = nil
             return PinesGeminiProviderUploadResult(
                 file: file,
@@ -138,7 +140,7 @@ extension PinesAppModel {
         do {
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .createCachedContent(body: body)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderCacheRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -159,7 +161,7 @@ extension PinesAppModel {
         do {
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .updateCachedContent(name: name, body: body, updateMask: updateMask)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderCacheRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -177,7 +179,7 @@ extension PinesAppModel {
         do {
             try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .deleteCachedContent(name: name)
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderCacheRecords(services: services)
             providerLifecycleError = nil
         } catch {
             providerLifecycleError = error.localizedDescription
@@ -272,7 +274,7 @@ extension PinesAppModel {
         do {
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .refreshFile(name: fileID)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderFileRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -289,7 +291,7 @@ extension PinesAppModel {
         do {
             try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .deleteFile(name: fileID)
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderFileRecords(services: services)
             providerLifecycleError = nil
         } catch {
             providerLifecycleError = error.localizedDescription
@@ -324,7 +326,7 @@ extension PinesAppModel {
             }
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .createCachedContent(body: .object(body))
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderCacheRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -342,7 +344,7 @@ extension PinesAppModel {
         do {
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .refreshCachedContent(name: cacheID)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderCacheRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -359,7 +361,7 @@ extension PinesAppModel {
         do {
             try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .deleteCachedContent(name: cacheID)
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderCacheRecords(services: services)
             providerLifecycleError = nil
         } catch {
             providerLifecycleError = error.localizedDescription
@@ -423,7 +425,7 @@ extension PinesAppModel {
             guard pollUntilTerminal else { return run }
             let completed = try await pollGeminiResearchRun(run, coordinator: coordinator)
             applyGeminiResearchRun(completed)
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderArtifactRecords(services: services)
             return completed
         } catch {
             providerLifecycleError = error.localizedDescription
@@ -482,7 +484,7 @@ extension PinesAppModel {
             let refreshed = try await coordinator.refreshDeepResearchRun(run)
             applyGeminiResearchRun(refreshed)
             if refreshed.geminiBackgroundStatusIsTerminal {
-                await refreshProviderLifecycleState(services: services)
+                await refreshProviderArtifactRecords(services: services)
             }
             return refreshed
         } catch {
@@ -538,7 +540,7 @@ extension PinesAppModel {
             }
         }
         if pollUntilTerminal || refreshedRuns.contains(where: \.geminiBackgroundStatusIsTerminal) {
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderArtifactRecords(services: services)
         }
         return GeminiDeepResearchResumeResult(refreshedRuns: refreshedRuns, failedRuns: failedRuns, errors: errors)
     }
@@ -574,7 +576,7 @@ extension PinesAppModel {
                     networkDomains: ["generativelanguage.googleapis.com"]
                 )
             )
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderLiveSessionRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -624,7 +626,7 @@ extension PinesAppModel {
                     method: .generateContent
                 )
             }
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderArtifactRecords(records)
             providerLifecycleError = nil
             return records
         } catch {
@@ -662,7 +664,7 @@ extension PinesAppModel {
             for record in annotatedRecords {
                 try await services.providerArtifactRepository?.upsertProviderArtifact(record)
             }
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderArtifactRecords(annotatedRecords)
             providerLifecycleError = nil
             return annotatedRecords
         } catch {
@@ -682,7 +684,7 @@ extension PinesAppModel {
         do {
             let records = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .createGeneratedMediaArtifacts(modelID: modelID, body: body, method: method)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderArtifactRecords(records)
             providerLifecycleError = nil
             return records
         } catch {
@@ -700,9 +702,9 @@ extension PinesAppModel {
         do {
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .refreshGeneratedMediaOperation(operationName: id)
-            await refreshProviderLifecycleState(services: services)
+            let preserved = try await preserveProviderArtifactCreationMetadata(in: record, services: services)
             providerLifecycleError = nil
-            return record
+            return preserved
         } catch {
             providerLifecycleError = error.localizedDescription
             throw error
@@ -718,7 +720,7 @@ extension PinesAppModel {
         do {
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .cancelGeneratedMediaOperation(operationName: id)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderArtifactRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -736,7 +738,7 @@ extension PinesAppModel {
         do {
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .refreshBatch(operationName: id)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderBatchRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -754,7 +756,7 @@ extension PinesAppModel {
         do {
             let record = try await geminiLifecycleCoordinator(providerID: providerID, services: services)
                 .cancelBatch(operationName: id)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderBatchRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -861,16 +863,7 @@ extension PinesAppModel {
     }
 
     private func applyGeminiResearchRun(_ run: ProviderResearchRunRecord) {
-        var runs = providerResearchRuns
-        if let index = runs.firstIndex(where: { $0.id == run.id }) {
-            runs[index] = run
-        } else {
-            runs.append(run)
-        }
-        runs.sort { $0.updatedAt > $1.updatedAt }
-        providerResearchRuns = runs
-        providerResearchRunPreviews = runs.map(Self.geminiResearchRunPreview)
-        providerLifecycleError = nil
+        upsertProviderResearchRunRecords([run], preview: Self.geminiResearchRunPreview)
     }
 
     private static func geminiResearchRunPreview(from record: ProviderResearchRunRecord) -> PinesProviderResearchRunPreview {
@@ -907,8 +900,8 @@ extension PinesAppModel {
     private static func geminiImageReferencePart(from artifact: ProviderArtifactRecord) async throws -> JSONValue {
         if let localURL = artifact.localURL,
            localURL.isFileURL,
-           FileManager.default.fileExists(atPath: localURL.path) {
-            let data = try Data(contentsOf: localURL)
+           await ProviderTransferFileService.shared.fileExists(at: localURL) {
+            let data = try await ProviderTransferFileService.shared.readData(from: localURL)
             guard !data.isEmpty else {
                 throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) is empty.")
             }
@@ -926,7 +919,14 @@ extension PinesAppModel {
         }
 
         if let remoteURL = artifact.remoteURL {
-            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+            try EndpointSecurityPolicy().validate(remoteURL, useCase: .webTool)
+            try EndpointSecurityPolicy.validateResolvedPublicAddresses(for: remoteURL)
+            let (data, response) = try await BoundedHTTPResponse.data(
+                for: URLRequest(url: remoteURL),
+                session: .shared,
+                maxBytes: BoundedHTTPResponse.fileLimit,
+                redirectScope: .publicHTTPS
+            )
             guard !data.isEmpty else {
                 throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) could not be downloaded.")
             }

@@ -61,7 +61,8 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         data: Data,
         purpose: String,
         localURL: URL? = nil,
-        fields: [String: String] = [:]
+        fields: [String: String] = [:],
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> ProviderFileRecord {
         let response = try await service.uploadFile(
             OpenAIFileUploadRequest(
@@ -70,7 +71,8 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
                 data: data,
                 purpose: purpose,
                 fields: fields
-            )
+            ),
+            uploadProgress: uploadProgress
         )
         guard var record = response.json.flatMap({ OpenAIProviderRecordMapper.providerFile(from: $0, providerID: providerID) }) else {
             throw CloudProviderError.invalidResponse
@@ -78,6 +80,35 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         record.localURL = localURL
         record.contentType = record.contentType ?? contentType
         record.byteCount = record.byteCount == 0 ? Int64(data.count) : record.byteCount
+        try await repositories.files?.upsertProviderFile(record)
+        try await audit("Uploaded OpenAI provider file \(record.fileName)")
+        return record
+    }
+
+    func uploadFile(
+        fileName: String,
+        contentType: String,
+        fileURL: URL,
+        byteCount: Int64,
+        purpose: String,
+        localURL: URL? = nil,
+        fields: [String: String] = [:],
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> ProviderFileRecord {
+        let response = try await service.uploadFile(
+            fromFile: fileURL,
+            fileName: fileName,
+            contentType: contentType,
+            purpose: purpose,
+            fields: fields,
+            uploadProgress: uploadProgress
+        )
+        guard var record = response.json.flatMap({ OpenAIProviderRecordMapper.providerFile(from: $0, providerID: providerID) }) else {
+            throw CloudProviderError.invalidResponse
+        }
+        record.localURL = localURL
+        record.contentType = record.contentType ?? contentType
+        record.byteCount = record.byteCount == 0 ? byteCount : record.byteCount
         try await repositories.files?.upsertProviderFile(record)
         try await audit("Uploaded OpenAI provider file \(record.fileName)")
         return record
@@ -419,7 +450,13 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         if let localURL = artifact.localURL,
            localURL.isFileURL,
            FileManager.default.fileExists(atPath: localURL.path) {
-            let data = try Data(contentsOf: localURL)
+            if let fileSize = try? localURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+               fileSize > BoundedHTTPResponse.fileLimit {
+                throw InferenceError.invalidRequest(
+                    "Reference image \(artifact.fileName ?? artifact.id) exceeds the provider upload limit."
+                )
+            }
+            let data = try Data(contentsOf: localURL, options: [.mappedIfSafe])
             guard !data.isEmpty else {
                 throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) is empty.")
             }
@@ -441,7 +478,14 @@ struct OpenAIProviderLifecycleCoordinator: Sendable {
         }
 
         if let remoteURL = artifact.remoteURL {
-            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+            try EndpointSecurityPolicy().validate(remoteURL, useCase: .webTool)
+            try EndpointSecurityPolicy.validateResolvedPublicAddresses(for: remoteURL)
+            let (data, response) = try await BoundedHTTPResponse.data(
+                for: URLRequest(url: remoteURL),
+                session: .shared,
+                maxBytes: BoundedHTTPResponse.fileLimit,
+                redirectScope: .publicHTTPS
+            )
             guard !data.isEmpty else {
                 throw InferenceError.invalidRequest("Reference image \(artifact.fileName ?? artifact.id) could not be downloaded.")
             }

@@ -9,7 +9,6 @@ import UIKit
 #endif
 
 struct MarkdownMessageView: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.pinesTheme) private var theme
 
     let messageID: UUID
@@ -17,15 +16,12 @@ struct MarkdownMessageView: View {
     let isStreaming: Bool
 
     @State private var parsedMessage: ParsedMarkdownMessage?
+    @State private var renderRevision: UInt64 = 0
 
     private var renderTaskID: MarkdownRenderTaskID {
         MarkdownRenderTaskID(
             messageID: messageID,
-            contentDigest: stableMarkdownDigest(content),
-            contentLength: content.count,
-            themeKey: theme.template.rawValue,
-            colorSchemeKey: theme.colorScheme == .dark ? "dark" : "light",
-            dynamicTypeKey: String(describing: dynamicTypeSize),
+            revision: renderRevision,
             isStreaming: isStreaming
         )
     }
@@ -59,16 +55,15 @@ struct MarkdownMessageView: View {
                 return
             }
             let parsed = await MarkdownRenderCache.shared.parsedMessage(
-                messageID: messageID,
-                content: content,
-                themeKey: theme.template.rawValue,
-                colorSchemeKey: theme.colorScheme == .dark ? "dark" : "light",
-                dynamicTypeKey: String(describing: dynamicTypeSize)
+                content: content
             )
             guard !Task.isCancelled else {
                 return
             }
             parsedMessage = parsed
+        }
+        .onChange(of: content) { _, _ in
+            renderRevision &+= 1
         }
     }
 
@@ -379,11 +374,11 @@ private struct MarkdownCodeBlockView: View {
     @State private var isSoftWrapped = false
     @State private var didCopy = false
     @State private var highlightedCode: HighlightedCode?
+    @State private var highlightRevision: UInt64 = 0
 
     private var taskID: SyntaxHighlightTaskID {
         SyntaxHighlightTaskID(
-            codeDigest: stableMarkdownDigest(code),
-            codeLength: code.count,
+            revision: highlightRevision,
             language: language?.lowercased() ?? "",
             themeKey: theme.template.rawValue,
             colorSchemeKey: theme.colorScheme == .dark ? "dark" : "light"
@@ -512,6 +507,9 @@ private struct MarkdownCodeBlockView: View {
             }
             highlightedCode = highlighted
         }
+        .onChange(of: code) { _, _ in
+            highlightRevision &+= 1
+        }
     }
 }
 
@@ -520,18 +518,20 @@ private struct MarkdownIconButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(theme.typography.caption.weight(.semibold))
-            .foregroundStyle(configuration.isPressed ? theme.colors.primaryText : theme.colors.secondaryText)
-            .frame(width: 32, height: 32)
-            .background(
-                configuration.isPressed ? theme.colors.controlPressed : theme.colors.controlFill,
-                in: RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
-                    .strokeBorder(configuration.isPressed ? theme.colors.focusRing.opacity(0.45) : theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
-            }
+        ZStack {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .fill(configuration.isPressed ? theme.colors.controlPressed : theme.colors.controlFill)
+                .frame(width: 32, height: 32)
+                .overlay {
+                    RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                        .strokeBorder(configuration.isPressed ? theme.colors.focusRing.opacity(0.45) : theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+                }
+
+            configuration.label
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(configuration.isPressed ? theme.colors.primaryText : theme.colors.secondaryText)
+        }
+            .frame(width: 44, height: 44)
             .contentShape(RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.94 : 1)
             .animation(reduceMotion ? nil : theme.motion.fast, value: configuration.isPressed)
@@ -555,23 +555,28 @@ private actor MarkdownRenderCache {
     private init() {
         cache = NSCache<NSString, Box>()
         cache.countLimit = 240
+        cache.totalCostLimit = 12 * 1_024 * 1_024
     }
 
     func parsedMessage(
-        messageID: UUID,
-        content: String,
-        themeKey: String,
-        colorSchemeKey: String,
-        dynamicTypeKey: String
+        content: String
     ) -> ParsedMarkdownMessage {
-        let key = "\(messageID.uuidString)|\(stableMarkdownDigest(content))|\(content.count)|\(themeKey)|\(colorSchemeKey)|\(dynamicTypeKey)" as NSString
+        let key = "\(stableMarkdownDigest(content))|\(content.utf8.count)" as NSString
         if let cached = cache.object(forKey: key) {
             return cached.parsedMessage
         }
 
         let parsed = parser.parse(content)
-        cache.setObject(Box(parsed), forKey: key)
+        cache.setObject(
+            Box(parsed),
+            forKey: key,
+            cost: max(1, content.utf8.count * 2)
+        )
         return parsed
+    }
+
+    func purge() {
+        cache.removeAllObjects()
     }
 }
 
@@ -580,8 +585,11 @@ private actor SyntaxHighlightingService {
 
     private let maxHighlightedBytes = 200_000
     private let timeoutNanoseconds: UInt64 = 750_000_000
-    private var cache = [SyntaxHighlightTaskID: HighlightedCode]()
-    private var insertionOrder = [SyntaxHighlightTaskID]()
+    private let totalCostLimit = 16 * 1_024 * 1_024
+    private var cache = [SyntaxHighlightCacheKey: HighlightedCode]()
+    private var costByKey = [SyntaxHighlightCacheKey: Int]()
+    private var insertionOrder = [SyntaxHighlightCacheKey]()
+    private var totalCost = 0
 
     func highlight(
         code: String,
@@ -590,7 +598,7 @@ private actor SyntaxHighlightingService {
         colorSchemeKey: String,
         fallbackLabel: String
     ) async -> HighlightedCode {
-        let key = SyntaxHighlightTaskID(
+        let key = SyntaxHighlightCacheKey(
             codeDigest: stableMarkdownDigest(code),
             codeLength: code.count,
             language: language?.lowercased() ?? "",
@@ -610,12 +618,25 @@ private actor SyntaxHighlightingService {
             fallbackLabel: fallbackLabel
         )
         cache[key] = highlighted
+        let cost = max(1, code.utf8.count * 4)
+        if let previousCost = costByKey.updateValue(cost, forKey: key) {
+            totalCost -= previousCost
+        }
+        totalCost += cost
         insertionOrder.append(key)
-        while insertionOrder.count > 160, let oldest = insertionOrder.first {
+        while (insertionOrder.count > 160 || totalCost > totalCostLimit), let oldest = insertionOrder.first {
             insertionOrder.removeFirst()
             cache.removeValue(forKey: oldest)
+            totalCost -= costByKey.removeValue(forKey: oldest) ?? 0
         }
         return highlighted
+    }
+
+    func purge() {
+        cache.removeAll(keepingCapacity: false)
+        costByKey.removeAll(keepingCapacity: false)
+        insertionOrder.removeAll(keepingCapacity: false)
+        totalCost = 0
     }
 
     private func computeHighlight(
@@ -743,20 +764,31 @@ private struct HighlightedCode: Sendable {
 
 private struct MarkdownRenderTaskID: Hashable {
     var messageID: UUID
-    var contentDigest: String
-    var contentLength: Int
-    var themeKey: String
-    var colorSchemeKey: String
-    var dynamicTypeKey: String
+    var revision: UInt64
     var isStreaming: Bool
 }
 
 private struct SyntaxHighlightTaskID: Hashable, Sendable {
+    var revision: UInt64
+    var language: String
+    var themeKey: String
+    var colorSchemeKey: String
+}
+
+private struct SyntaxHighlightCacheKey: Hashable, Sendable {
     var codeDigest: String
     var codeLength: Int
     var language: String
     var themeKey: String
     var colorSchemeKey: String
+}
+
+enum PinesChatRenderCaches {
+    static func purge() async {
+        await MarkdownRenderCache.shared.purge()
+        await SyntaxHighlightingService.shared.purge()
+        await PinesChatMetadataCache.shared.purge()
+    }
 }
 
 private func stableMarkdownDigest(_ text: String) -> String {

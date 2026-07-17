@@ -43,7 +43,11 @@ enum BraveSearchTool {
             request.addValue(apiKey, forHTTPHeaderField: "X-Subscription-Token")
             request.addValue("application/json", forHTTPHeaderField: "Accept")
 
-            let (data, http) = try await URLSession.shared.data(for: request)
+            let (data, http) = try await BoundedHTTPResponse.data(
+                for: request,
+                session: .shared,
+                maxBytes: 2 * 1024 * 1024
+            )
             guard (200..<300).contains(http.statusCode) else {
                 throw AgentError.permissionDenied("Brave Search request failed.")
             }

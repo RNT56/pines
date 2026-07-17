@@ -8,6 +8,7 @@ import WatchConnectivity
 #endif
 
 struct PinesRootView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appModel: PinesAppModel
@@ -21,6 +22,7 @@ struct PinesRootView: View {
     @State private var services: PinesAppServices?
     @State private var watchSessionService: PhoneWatchSessionService?
     @State private var selectedTab: PinesTab = .chats
+    @State private var requestedSettingsSectionID: UUID?
     @State private var isMainUIReady = false
     @State private var showsBootMark = true
     @State private var didStartBootstrap = false
@@ -32,6 +34,9 @@ struct PinesRootView: View {
     @State private var isPrivacyLocked = false
     @State private var appUnlockError: String?
     @State private var isUITestBootstrapReady = false
+    @State private var launchToInteractiveInterval: PinesPerformanceInterval?
+    @State private var thermalState = ProcessInfo.processInfo.thermalState
+    @State private var lowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     init() {
         let chatState = PinesChatState()
@@ -70,6 +75,14 @@ struct PinesRootView: View {
         !PinesUITestLaunchConfiguration.isEnabled
     }
 
+    private var performancePolicy: PinesPerformancePolicy {
+        .resolve(
+            lowPowerModeEnabled: lowPowerModeEnabled,
+            thermalState: thermalState,
+            reduceMotion: reduceMotion
+        )
+    }
+
     var body: some View {
         ZStack {
             if isMainUIReady, let services {
@@ -86,8 +99,23 @@ struct PinesRootView: View {
                     .environment(\.openPinesModelsPage, PinesOpenModelsPageAction {
                         selectedTab = .models
                     })
+                    .environment(\.openPinesProviderSettings, PinesOpenProviderSettingsAction {
+                        requestedSettingsSectionID = UUID(uuidString: "9DAB62A0-A69B-4630-9291-D0C0C0A20001")
+                        selectedTab = .settings
+                    })
                     .pinesTheme(theme)
                     .transition(.opacity)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if let serviceError = appModel.serviceError {
+                            PinesGlobalErrorBanner(
+                                message: serviceError,
+                                dismiss: { appModel.serviceError = nil }
+                            )
+                            .padding(.horizontal, theme.spacing.medium)
+                            .padding(.top, theme.spacing.xsmall)
+                            .pinesTheme(theme)
+                        }
+                    }
             }
 
             if showsBootMark {
@@ -115,8 +143,14 @@ struct PinesRootView: View {
             }
             #endif
         }
+        .environment(\.pinesPerformancePolicy, performancePolicy)
         .pinesHighRefreshRate()
-        .preferredColorScheme(settingsState.interfaceMode.colorScheme)
+        .pinesUITestAccessibilityTextIfRequested()
+        .preferredColorScheme(
+            PinesUITestLaunchConfiguration.usesDarkAppearance
+                ? .dark
+                : settingsState.interfaceMode.colorScheme
+        )
         .task {
             guard !didStartBootstrap, !isBootstrapping else { return }
             didStartBootstrap = true
@@ -124,6 +158,7 @@ struct PinesRootView: View {
 
             let totalStartedAt = Date()
             PinesRuntimeMetrics.shared.start()
+            launchToInteractiveInterval = PinesRuntimeMetrics.shared.begin(.launchToInteractive)
             PinesRuntimeMetrics.shared.recordStartupPhase("root_task_visible", elapsedSeconds: Date().timeIntervalSince(rootCreatedAt))
             await Task.yield()
             PinesRuntimeMetrics.shared.recordStartupPhase("boot_first_frame_yield", elapsedSeconds: Date().timeIntervalSince(totalStartedAt))
@@ -148,7 +183,11 @@ struct PinesRootView: View {
             #endif
 
             isMainUIReady = true
-            withAnimation(theme.motion.emphasized) {
+            if let launchToInteractiveInterval {
+                PinesRuntimeMetrics.shared.end(launchToInteractiveInterval)
+                self.launchToInteractiveInterval = nil
+            }
+            withAnimation(reduceMotion ? nil : theme.motion.emphasized) {
                 showsBootMark = false
             }
             haptics.play(.appReady)
@@ -178,6 +217,8 @@ struct PinesRootView: View {
                 }
                 #endif
                 #if DEBUG
+                await appModel.runLaunchTurboQuantBenchIfNeeded()
+                await appModel.runLaunchRealModelTurboQuantBenchIfNeeded(services: services)
                 await appModel.runLaunchStressModeIfNeeded(services: services)
                 #endif
                 haptics.prepare()
@@ -203,19 +244,31 @@ struct PinesRootView: View {
             Task { await authenticateAppUnlock() }
         }
         .onPinesMemoryWarning {
+            appModel.handleUIPerformancePressure()
             if let services {
                 Task {
+                    await PinesImagePipeline.shared.purge()
+                    await PinesChatRenderCaches.purge()
                     await services.handleMemoryPressure()
                 }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
-            guard ProcessInfo.processInfo.thermalState == .critical else { return }
+            let newThermalState = ProcessInfo.processInfo.thermalState
+            thermalState = newThermalState
+            guard newThermalState == .serious || newThermalState == .critical else { return }
+            appModel.handleUIPerformancePressure()
             if let services {
                 Task {
-                    await services.handleThermalPressure()
+                    await purgeUIPerformanceCaches()
+                    if ProcessInfo.processInfo.thermalState == .critical {
+                        await services.handleThermalPressure()
+                    }
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+            lowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
         .onReceive(NotificationCenter.default.publisher(for: .pinesRecoveredModelDownloadDidFinish)) { _ in
             guard let services else { return }
@@ -238,6 +291,26 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: Binding(
+            get: { workflowState.pendingHostedToolApproval },
+            set: { request in
+                if request == nil {
+                    appModel.resolvePendingHostedToolApproval(false, services: services)
+                }
+            }
+        )) { request in
+            HostedToolApprovalSheet(
+                request: request,
+                deny: { appModel.resolvePendingHostedToolApproval(false, services: services) },
+                approve: { appModel.resolvePendingHostedToolApproval(true, services: services) }
+            )
+            .environmentObject(haptics)
+            .pinesTheme(theme)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
             get: { workflowState.pendingCloudContextApproval },
@@ -255,6 +328,8 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
             get: { workflowState.pendingCloudVaultEmbeddingApproval },
@@ -271,6 +346,8 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
             get: { workflowState.pendingMCPSamplingRequest },
@@ -288,6 +365,8 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(
             get: { workflowState.pendingMCPSamplingResultReview },
@@ -304,6 +383,8 @@ struct PinesRootView: View {
             )
             .environmentObject(haptics)
             .pinesTheme(theme)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -344,6 +425,11 @@ struct PinesRootView: View {
             if let services {
                 Task {
                     await services.mlxRuntime.setForegroundActive(true)
+                    appModel.scheduleCloudKitSync(
+                        services: services,
+                        reason: "foreground_active",
+                        delaySeconds: 3
+                    )
                 }
             }
             if appLockEnabled, isPrivacyLocked {
@@ -355,8 +441,11 @@ struct PinesRootView: View {
             }
         case .inactive, .background:
             isPrivacyCoverVisible = canShowPrivacyLock
+            appModel.handleUIPerformancePressure()
             if let services {
                 Task {
+                    await PinesImagePipeline.shared.purge()
+                    await PinesChatRenderCaches.purge()
                     await appModel.stopLocalRuntimeForBackground(services: services)
                 }
             }
@@ -369,6 +458,11 @@ struct PinesRootView: View {
         @unknown default:
             isPrivacyCoverVisible = canShowPrivacyLock
         }
+    }
+
+    private func purgeUIPerformanceCaches() async {
+        await PinesImagePipeline.shared.purge()
+        await PinesChatRenderCaches.purge()
     }
 
     @MainActor
@@ -422,13 +516,13 @@ struct PinesRootView: View {
                 .tag(PinesTab.artifacts)
                 .accessibilityIdentifier("pines.tab.artifacts")
 
-            SettingsView()
+            SettingsView(requestedSectionID: $requestedSettingsSectionID)
                 .tabItem { Label(PinesTab.settings.title, systemImage: PinesTab.settings.systemImage) }
                 .tag(PinesTab.settings)
                 .accessibilityIdentifier("pines.tab.settings")
         }
         .accessibilityIdentifier("pines.root.tabs")
-        .pinesAdaptiveTabViewStyle()
+        .pinesFixedTabBarStyle()
         .tint(theme.colors.accent)
         .background {
             Rectangle()
@@ -445,7 +539,32 @@ struct PinesRootView: View {
         }
     }
 }
+
+private extension View {
+    @ViewBuilder
+    func pinesUITestAccessibilityTextIfRequested() -> some View {
+        #if DEBUG
+        if PinesUITestLaunchConfiguration.usesAccessibilityTextSize {
+            dynamicTypeSize(.accessibility5)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
 struct PinesOpenModelsPageAction: Sendable {
+    var action: @MainActor @Sendable () -> Void
+
+    @MainActor
+    func callAsFunction() {
+        action()
+    }
+}
+
+struct PinesOpenProviderSettingsAction: Sendable {
     var action: @MainActor @Sendable () -> Void
 
     @MainActor
@@ -456,15 +575,12 @@ struct PinesOpenModelsPageAction: Sendable {
 
 private extension View {
     @ViewBuilder
-    func pinesAdaptiveTabViewStyle() -> some View {
-        if PinesUITestLaunchConfiguration.isEnabled {
-            if #available(iOS 18.0, *) {
-                tabViewStyle(.tabBarOnly)
-            } else {
-                self
-            }
-        } else if #available(iOS 18.0, *) {
-            tabViewStyle(.sidebarAdaptable)
+    func pinesFixedTabBarStyle() -> some View {
+        if #available(iOS 18.0, *) {
+            // Pines already provides purpose-built sidebars inside its workspaces.
+            // Keep the app-level destinations in the system tab bar so iPad does
+            // not offer a second, user-movable navigation sidebar.
+            tabViewStyle(.tabBarOnly)
         } else {
             self
         }
@@ -475,10 +591,19 @@ private struct PinesOpenModelsPageKey: EnvironmentKey {
     static let defaultValue = PinesOpenModelsPageAction {}
 }
 
+private struct PinesOpenProviderSettingsKey: EnvironmentKey {
+    static let defaultValue = PinesOpenProviderSettingsAction {}
+}
+
 extension EnvironmentValues {
     var openPinesModelsPage: PinesOpenModelsPageAction {
         get { self[PinesOpenModelsPageKey.self] }
         set { self[PinesOpenModelsPageKey.self] = newValue }
+    }
+
+    var openPinesProviderSettings: PinesOpenProviderSettingsAction {
+        get { self[PinesOpenProviderSettingsKey.self] }
+        set { self[PinesOpenProviderSettingsKey.self] = newValue }
     }
 }
 
@@ -516,6 +641,7 @@ private struct ToolApprovalSheet: View {
                     }
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("Approve Tool")
             .toolbar {
@@ -545,6 +671,71 @@ private struct ToolApprovalSheet: View {
             return raw
         }
         return String(decoding: pretty, as: UTF8.self)
+    }
+}
+
+private struct HostedToolApprovalSheet: View {
+    @Environment(\.pinesTheme) private var theme
+    @EnvironmentObject private var haptics: PinesHaptics
+    let request: HostedToolApprovalRequest
+    let deny: () -> Void
+    let approve: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Provider Environment") {
+                    LabeledContent("Provider", value: request.providerName)
+                    LabeledContent("Model", value: request.modelID.rawValue)
+                    Text("These tools run outside this iPhone. Review what leaves the device and what each hosted environment can change.")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+
+                ForEach(request.descriptors) { descriptor in
+                    Section(descriptor.displayName) {
+                        LabeledContent("Runs in", value: descriptor.environment)
+                        hostedApprovalList("Data leaving this device", values: descriptor.dataLeavingDevice)
+                        hostedApprovalList("Possible side effects", values: descriptor.sideEffects)
+                        hostedApprovalList("Network destinations", values: descriptor.networkDestinations)
+                        Text(descriptor.retentionNotice)
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.secondaryText)
+                    }
+                }
+            }
+            .pinesThemedForm()
+            .navigationTitle("Approve Hosted Tools")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Deny", role: .cancel) {
+                        haptics.play(.primaryAction)
+                        deny()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Approve Once") {
+                        haptics.play(.primaryAction)
+                        approve()
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func hostedApprovalList(_ title: String, values: [String]) -> some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+            Text(title)
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.primaryText)
+            ForEach(values, id: \.self) { value in
+                Label(value, systemImage: "circle.fill")
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .labelStyle(.titleAndIcon)
+            }
+        }
     }
 }
 
@@ -578,6 +769,7 @@ private struct CloudContextApprovalSheet: View {
                         .foregroundStyle(theme.colors.secondaryText)
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("Send Local Context?")
             .toolbar {
@@ -619,6 +811,7 @@ private struct CloudVaultEmbeddingApprovalSheet: View {
                         .foregroundStyle(theme.colors.tertiaryText)
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("Enable Cloud Embeddings?")
             .toolbar {
@@ -666,6 +859,7 @@ private struct MCPSamplingApprovalSheet: View {
                     }
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("MCP Sampling")
             .toolbar {
@@ -701,6 +895,7 @@ private struct MCPSamplingResultReviewSheet: View {
                         .textSelection(.enabled)
                 }
             }
+            .pinesThemedForm()
             .pinesExpressiveScrollHaptics()
             .navigationTitle("Return Sampling Result")
             .toolbar {

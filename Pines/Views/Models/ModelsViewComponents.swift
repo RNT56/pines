@@ -88,49 +88,69 @@ private struct ModelRows: View {
     let models: [PinesModelPreview]
     let defaultModelID: ModelID?
     let selectedModelKey: String?
+    @State private var modelPendingDeletion: PinesModelPreview?
 
     var body: some View {
-        ForEach(models) { model in
-            ModelRow(
-                model: model,
-                isDefault: defaultModelID == model.install.modelID,
-                isSelected: selectedModelKey == model.selectionKey
-            )
-            .tag(model.selectionKey)
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                if model.canStartDownload {
-                    Button {
-                        haptics.play(.primaryAction)
-                        Task {
-                            await appModel.installModel(repository: model.install.repository, services: services)
+        Group {
+            ForEach(models) { model in
+                ModelRow(
+                    model: model,
+                    isDefault: defaultModelID == model.install.modelID,
+                    isSelected: selectedModelKey == model.selectionKey
+                )
+                .tag(model.selectionKey)
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    if model.canStartDownload {
+                        Button {
+                            haptics.play(.primaryAction)
+                            Task {
+                                await appModel.installModel(repository: model.install.repository, services: services)
+                            }
+                        } label: {
+                            Label(model.downloadProgress?.canResume == true ? "Resume" : "Download", systemImage: "arrow.down.circle")
                         }
-                    } label: {
-                        Label(model.downloadProgress?.canResume == true ? "Resume" : "Download", systemImage: "arrow.down.circle")
-                    }
-                    .tint(theme.colors.accent)
-                }
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                if model.hasActiveDownload {
-                    Button(role: .destructive) {
-                        haptics.play(.destructiveAction)
-                        Task {
-                            await appModel.cancelModelDownload(repository: model.install.repository, services: services)
-                        }
-                    } label: {
-                        Label("Cancel", systemImage: "stop.circle")
-                    }
-                } else if model.canDeleteModel {
-                    Button(role: .destructive) {
-                        haptics.play(.destructiveAction)
-                        Task {
-                            await appModel.deleteModel(repository: model.install.repository, services: services)
-                        }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+                        .tint(theme.colors.accent)
                     }
                 }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if model.hasActiveDownload {
+                        Button(role: .destructive) {
+                            haptics.play(.destructiveAction)
+                            Task {
+                                await appModel.cancelModelDownload(repository: model.install.repository, services: services)
+                            }
+                        } label: {
+                            Label("Cancel", systemImage: "stop.circle")
+                        }
+                    } else if model.canDeleteModel {
+                        Button(role: .destructive) {
+                            haptics.play(.destructiveAction)
+                            modelPendingDeletion = model
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
             }
+        }
+        .confirmationDialog(
+            "Delete this model?",
+            isPresented: Binding(
+                get: { modelPendingDeletion != nil },
+                set: { if !$0 { modelPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: modelPendingDeletion
+        ) { model in
+            Button("Delete downloaded model", role: .destructive) {
+                modelPendingDeletion = nil
+                Task {
+                    await appModel.deleteModel(repository: model.install.repository, services: services)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { model in
+            Text("This removes the local files for \(model.name). You can download the model again later.")
         }
     }
 }
@@ -423,6 +443,8 @@ private struct ModelActionLabel: View {
 }
 
 struct ModelDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.pinesTheme) private var theme
     @Environment(\.pinesServices) private var services
     @EnvironmentObject private var appModel: PinesAppModel
@@ -430,6 +452,7 @@ struct ModelDetailView: View {
     @EnvironmentObject private var haptics: PinesHaptics
     let model: PinesModelPreview
     @State private var pendingAction: ModelDetailAction?
+    @State private var showsDeleteConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -442,9 +465,7 @@ struct ModelDetailView: View {
                 repositoryCard
                 capabilitiesCard
 
-                if !model.compatibilityWarnings.isEmpty {
-                    compatibilityCard
-                }
+                compatibilityCard
             }
             .padding(theme.spacing.large)
             .frame(maxWidth: theme.spacing.contentMaxWidth, alignment: .leading)
@@ -468,6 +489,20 @@ struct ModelDetailView: View {
                 pendingAction = nil
             }
         }
+        .confirmationDialog(
+            "Delete this model?",
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete downloaded model", role: .destructive) {
+                runAction(.delete) {
+                    await appModel.deleteModel(repository: model.install.repository, services: services)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the local files for \(model.name). You can download the model again later.")
+        }
     }
 
     private var gridColumns: [GridItem] {
@@ -476,16 +511,15 @@ struct ModelDetailView: View {
 
     private var headerCard: some View {
         PinesCardSection(model.name, subtitle: "\(model.family) model for \(model.runtime)", systemImage: model.status.systemImage, kind: .glass) {
-            HStack(alignment: .center, spacing: theme.spacing.large) {
-                PinesReadinessRing(value: model.readiness, title: "Ready", subtitle: model.status.title)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: theme.spacing.large) {
+                    readinessRing
+                    modelSummaryGrid
+                }
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.dashboard.compactGridMinWidth), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
-                    PinesInfoTile(title: "Status", value: model.status.title, systemImage: model.status.systemImage, tint: model.status.tint(in: theme))
-                    PinesInfoTile(title: "Footprint", value: model.footprint, systemImage: "externaldrive")
-                    PinesInfoTile(title: "Context", value: model.contextWindow, systemImage: "text.word.spacing")
-                    if modelState.defaultModelID == model.install.modelID {
-                        PinesInfoTile(title: "Default", value: "Selected", systemImage: "checkmark.circle", tint: theme.colors.success)
-                    }
+                VStack(alignment: .leading, spacing: theme.spacing.medium) {
+                    readinessRing
+                    modelSummaryGrid
                 }
             }
         }
@@ -494,6 +528,24 @@ struct ModelDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: theme.radius.sheet, style: .continuous))
                 .opacity(0.42)
         }
+    }
+
+    private var readinessRing: some View {
+        PinesReadinessRing(value: model.readiness, title: "Ready", subtitle: model.status.title)
+            .fixedSize(horizontal: true, vertical: true)
+            .frame(maxWidth: horizontalSizeClass == .compact ? .infinity : nil, alignment: .center)
+    }
+
+    private var modelSummaryGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.dashboard.compactGridMinWidth), spacing: theme.spacing.small)], spacing: theme.spacing.small) {
+            PinesInfoTile(title: "Status", value: model.status.title, systemImage: model.status.systemImage, tint: model.status.tint(in: theme))
+            PinesInfoTile(title: "Footprint", value: model.footprint, systemImage: "externaldrive")
+            PinesInfoTile(title: "Context", value: model.contextWindow, systemImage: "text.word.spacing")
+            if modelState.defaultModelID == model.install.modelID {
+                PinesInfoTile(title: "Default", value: "Selected", systemImage: "checkmark.circle", tint: theme.colors.success)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var actionsCard: some View {
@@ -558,7 +610,7 @@ struct ModelDetailView: View {
                     .pinesButtonStyle(.destructive, fillWidth: true)
                     .disabled(pendingAction != nil)
                 } else {
-                    HStack(spacing: theme.spacing.small) {
+                    PinesAdaptiveButtonRow {
                         if model.canChooseInstallMode {
                             Menu {
                                 Button("Text only", systemImage: "text.bubble") {
@@ -621,9 +673,7 @@ struct ModelDetailView: View {
                 }
 
                 Button(role: .destructive) {
-                    runAction(.delete) {
-                        await appModel.deleteModel(repository: model.install.repository, services: services)
-                    }
+                    showsDeleteConfirmation = true
                 } label: {
                     ModelActionLabel(
                         title: pendingAction == .delete ? "Deleting" : (model.hasActiveDownload ? "Remove download" : "Delete model"),
@@ -634,7 +684,7 @@ struct ModelDetailView: View {
                 .pinesButtonStyle(.destructive, fillWidth: true)
                 .disabled(!model.canDeleteModel || pendingAction != nil)
             }
-            .animation(theme.motion.fast, value: pendingAction)
+            .animation(reduceMotion ? nil : theme.motion.fast, value: pendingAction)
         }
     }
 
@@ -772,8 +822,37 @@ struct ModelDetailView: View {
         if let requestedBackend = quantization.requestedBackend { items.append(.init("Requested backend", requestedBackend.displayName)) }
         if let activeBackend = quantization.activeBackend { items.append(.init("Active backend", activeBackend.displayName)) }
         if let attentionPath = quantization.activeAttentionPath { items.append(.init("Attention path", attentionPath.displayName)) }
+        if let layoutVersion = quantization.turboQuantLayoutVersion { items.append(.init("Layout", "v\(layoutVersion)")) }
+        if model.runtimeProfile.speculativeDecodingEnabled
+            || quantization.turboQuantSpeculativeSettings?.enabled == true
+            || quantization.turboQuantSpeculativeTelemetry != nil {
+            let telemetry = quantization.turboQuantSpeculativeTelemetry
+            let state = telemetry?.state.displayName
+                ?? (model.runtimeProfile.speculativeDecodingEnabled ? "Eligible" : "Disabled")
+            items.append(.init("Speculative decode", state, systemImage: "bolt.badge.clock"))
+            if let draft = model.runtimeProfile.speculativeDraftModelID?.rawValue
+                ?? quantization.turboQuantSpeculativeSettings?.draftModelID {
+                items.append(.init("Draft model", draft, systemImage: "rectangle.stack.badge.play", copyable: true))
+            }
+            if let acceptanceRate = telemetry?.acceptanceRate {
+                items.append(.init("Acceptance", acceptanceRate.formatted(.percent.precision(.fractionLength(1))), systemImage: "checkmark.circle"))
+            }
+            if let decision = quantization.turboQuantSpeculativeAutoDisableDecision,
+               decision.shouldDisable {
+                items.append(.init("Speculative policy", decision.reason.displayName, systemImage: "pause.circle", copyable: true))
+            }
+        }
+        let designOnlyGates = quantization.turboQuantPlatformFeatureGates.filter { !$0.isProductActive }
+        if !designOnlyGates.isEmpty {
+            items.append(.init("Platform gates", "\(designOnlyGates.count) disabled", systemImage: "lock.shield"))
+        }
         if let kernelProfile = quantization.metalKernelProfile { items.append(.init("Kernel", kernelProfile.displayName)) }
         if let selfTest = quantization.metalSelfTestStatus { items.append(.init("MLX self-test", selfTest.displayName)) }
+        if let evidence = model.runtimeProfileEvidence {
+            items.append(.init("Evidence", evidence.evidenceLevel.displayTitle, systemImage: "checkmark.seal"))
+            items.append(.init("Evidence tuple", evidence.tupleSummary, systemImage: "number", copyable: true))
+            items.append(.init("Evidence fallback hash", evidence.fallbackContractHash, systemImage: "number", copyable: true))
+        }
         if let rawFallbackAllocated = quantization.rawFallbackAllocated { items.append(.init("Raw KV fallback", rawFallbackAllocated ? "Allocated" : "Not allocated")) }
         if quantization.runtimePressureReason != .none {
             items.append(.init("Pressure reason", quantization.runtimePressureReason.displayName))
@@ -836,15 +915,103 @@ struct ModelDetailView: View {
     }
 
     private var compatibilityCard: some View {
-        PinesCardSection("Compatibility", subtitle: "Warnings surfaced before install or execution.", systemImage: "exclamationmark.triangle") {
+        PinesCardSection("Compatibility", subtitle: "Exact runtime claim, evidence tuple, admission, and fallback behavior.", systemImage: "checkmark.shield") {
+            Label(model.runtimeCompatibilityState.title, systemImage: model.runtimeCompatibilityState.systemImage)
+                .font(theme.typography.callout.weight(.semibold))
+                .foregroundStyle(model.runtimeCompatibilityState.tint(in: theme))
+                .lineLimit(2)
+                .minimumScaleFactor(0.86)
+                .pinesSurface(.inset, padding: theme.spacing.small)
+
+            VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+                Text(model.compatibilityExplanation.headline)
+                    .font(theme.typography.callout.weight(.semibold))
+                    .foregroundStyle(theme.colors.primaryText)
+                Text(model.compatibilityExplanation.summary)
+                    .font(theme.typography.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(model.compatibilityExplanation.claimBasis)
+                    .font(theme.typography.caption.weight(.semibold))
+                    .foregroundStyle(model.runtimeCompatibilityState.allowsProductClaim ? theme.colors.success : theme.colors.warning)
+            }
+            .pinesSurface(.inset, padding: theme.spacing.small)
+
+            PinesKeyValueGrid(items: model.compatibilityExplanation.facts.map { fact in
+                .init(fact.label, fact.value, copyable: fact.label == "Compatibility pair" || fact.label == "Fallback contract")
+            })
+
             ForEach(model.compatibilityWarnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                     .font(theme.typography.callout)
-                    .foregroundStyle(model.install.verification == .unsupported ? theme.colors.danger : theme.colors.warning)
+                    .foregroundStyle(model.runtimeCompatibilityState == .unsupported ? theme.colors.danger : theme.colors.warning)
                     .lineLimit(3)
                     .minimumScaleFactor(0.86)
                     .pinesSurface(.inset, padding: theme.spacing.small)
             }
+
+            if let nextAction = model.compatibilityExplanation.nextAction {
+                Label(nextAction, systemImage: "arrow.forward.circle")
+                    .font(theme.typography.callout)
+                    .foregroundStyle(theme.colors.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .pinesSurface(.inset, padding: theme.spacing.small)
+            }
+        }
+    }
+}
+
+private extension RuntimeCompatibilityState {
+    var title: String {
+        switch self {
+        case .verified:
+            "Verified by benchmark evidence"
+        case .conservative:
+            "Conservative"
+        case .unverified:
+            "Unverified"
+        case .unsupported:
+            "Unsupported"
+        case .degraded:
+            "Degraded"
+        case .benchmarkRequired:
+            "Benchmark required"
+        case .revoked:
+            "Revoked"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .verified:
+            "checkmark.seal.fill"
+        case .conservative:
+            "shield"
+        case .unverified:
+            "questionmark.circle"
+        case .unsupported:
+            "xmark.octagon"
+        case .degraded:
+            "arrow.down.forward.circle"
+        case .benchmarkRequired:
+            "speedometer"
+        case .revoked:
+            "exclamationmark.octagon"
+        }
+    }
+
+    func tint(in theme: PinesTheme) -> Color {
+        switch self {
+        case .verified:
+            theme.colors.success
+        case .conservative:
+            theme.colors.accent
+        case .unverified:
+            theme.colors.secondaryText
+        case .unsupported, .revoked:
+            theme.colors.danger
+        case .degraded, .benchmarkRequired:
+            theme.colors.warning
         }
     }
 }
@@ -974,6 +1141,45 @@ private extension PinesModelStatus {
         case .unsupported:
             theme.colors.tertiaryText
         }
+    }
+}
+
+private extension RuntimeEvidenceLevel {
+    var displayTitle: String {
+        switch self {
+        case .unverified:
+            "Unverified"
+        case .smokeTested:
+            "Smoke tested"
+        case .verified:
+            "Verified"
+        case .certified:
+            "Certified"
+        case .revoked:
+            "Revoked"
+        }
+    }
+}
+
+private extension RuntimeProfileEvidence {
+    var tupleSummary: String {
+        [
+            turboQuantPreset.map { "preset=\($0)" },
+            valueBits.map { "bits=\($0)" },
+            groupSize.map { "group=\($0)" },
+            layoutVersion.map { "layout=v\($0)" },
+            activeAttentionPath.map { "path=\($0.rawValue)" },
+            resolvedRuntimeMode.map { "runtime=\($0.rawValue)" },
+            keyPrecision.map { "K=\($0.rawValue)" },
+            valuePrecision.map { "V=\($0.rawValue)" },
+            effectiveBackend.map { "backend=\($0.rawValue)" },
+            sparseValuePolicy?.threshold.map { "sparseV=\($0)" },
+            speculativeDimensions?.tupleSummaryParts.joined(separator: " "),
+            "mode=\(userMode.rawValue)",
+            "context=\(admittedContextTokens)",
+        ]
+        .compactMap(\.self)
+        .joined(separator: " ")
     }
 }
 

@@ -227,6 +227,11 @@ command = [
     "-configuration", configuration,
     "-destination", f"platform=iOS,id={device_id}",
     "-derivedDataPath", derived_data_path,
+    "-skipMacroValidation",
+    "-skipPackagePluginValidation",
+    "-onlyUsePackageVersionsFromResolvedFile",
+    "-disableAutomaticPackageResolution",
+    "-scmProvider", "system",
     "-allowProvisioningUpdates",
     "build",
 ]

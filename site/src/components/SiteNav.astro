@@ -1,20 +1,69 @@
 ---
 const navItems = [
-  { href: "/#previews", label: "Previews" },
-  { href: "/#tour", label: "Tour" },
+  { href: "/#tour", label: "Product" },
+  { href: "/#privacy", label: "Privacy" },
   { href: "/#onboarding", label: "Setup" },
   { href: "/#builders", label: "Builders" },
   { href: "/status/", label: "Status" },
 ];
+
+const currentPath = Astro.url.pathname;
 ---
 
-<header class="site-header">
+<a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header" data-site-header>
   <a class="brand-lockup" href="/" aria-label="Pines home">
     <img src="/brand/pines-mark.svg" alt="" class="brand-mark" />
     <span>Pines</span>
   </a>
-  <nav class="site-nav" aria-label="Primary navigation">
-    {navItems.map((item) => <a href={item.href}>{item.label}</a>)}
+  <nav class="site-nav" id="primary-navigation" aria-label="Primary navigation" data-site-nav>
+    {navItems.map((item) => (
+      <a href={item.href} aria-current={currentPath === item.href ? "page" : undefined}>{item.label}</a>
+    ))}
+    <a class="nav-mobile-source" href="https://github.com/RNT56/pines">Source</a>
   </nav>
-  <a class="nav-cta" href="https://github.com/RNT56/pines">GitHub</a>
+  <a class="nav-cta" href="https://github.com/RNT56/pines">View source</a>
+  <button
+    class="nav-menu-button"
+    type="button"
+    aria-label="Open navigation"
+    aria-expanded="false"
+    aria-controls="primary-navigation"
+    data-menu-button
+  >
+    <span class="nav-menu-label">Menu</span>
+    <span class="nav-menu-icon" aria-hidden="true"><i></i><i></i></span>
+  </button>
 </header>
+
+<script>
+  const header = document.querySelector("[data-site-header]");
+  const menuButton = header?.querySelector("[data-menu-button]");
+  const navigation = header?.querySelector("[data-site-nav]");
+
+  if (header && menuButton && navigation) {
+    header.classList.add("nav-enhanced");
+
+    const setOpen = (open) => {
+      header.dataset.menuOpen = String(open);
+      menuButton.setAttribute("aria-expanded", String(open));
+      menuButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+    };
+
+    setOpen(false);
+    menuButton.addEventListener("click", () => {
+      setOpen(menuButton.getAttribute("aria-expanded") !== "true");
+    });
+
+    navigation.addEventListener("click", (event) => {
+      if (event.target instanceof HTMLAnchorElement) setOpen(false);
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        menuButton.focus();
+      }
+    });
+  }
+</script>

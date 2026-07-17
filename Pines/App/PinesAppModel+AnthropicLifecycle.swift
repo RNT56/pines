@@ -53,7 +53,11 @@ extension PinesAppModel {
             let batches = try await coordinator.refreshBatches(limit: limit)
             let capabilities = try await coordinator.refreshModelCapabilities(limit: limit)
             let result = AnthropicProviderStorageRefreshResult(files: files, batches: batches, modelCapabilities: capabilities)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderStorageRecords(
+                files: files,
+                batches: batches,
+                capabilities: capabilities
+            )
             providerLifecycleError = nil
             return result
         } catch {
@@ -69,30 +73,28 @@ extension PinesAppModel {
         fileURL: URL,
         contentType: String? = nil,
         consent: PinesAnthropicProviderStorageConsent,
+        uploadProgress: ProviderUploadProgress? = nil,
         services: PinesAppServices
     ) async throws -> PinesAnthropicProviderUploadResult {
         do {
             try validateAnthropicProviderStorageConsent(consent)
             let coordinator = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
-            let hasSecurityScope = fileURL.startAccessingSecurityScopedResource()
-            defer {
-                if hasSecurityScope {
-                    fileURL.stopAccessingSecurityScopedResource()
-                }
-            }
-
-            let data = try Data(contentsOf: fileURL)
-            guard !data.isEmpty else {
+            let source = try await ProviderTransferFileService.shared.inspect(fileURL)
+            guard source.byteCount > 0 else {
                 throw InferenceError.invalidRequest("Anthropic file upload \(fileURL.lastPathComponent) is empty.")
             }
             let file = try await coordinator.uploadFile(
                 fileName: fileURL.lastPathComponent,
-                contentType: contentType ?? Self.providerStorageContentType(for: fileURL),
-                data: data,
-                localURL: fileURL
+                contentType: contentType
+                    ?? source.contentType
+                    ?? Self.providerStorageContentType(for: fileURL),
+                fileURL: fileURL,
+                byteCount: source.byteCount,
+                localURL: fileURL,
+                uploadProgress: uploadProgress
             )
             try await auditAnthropicProviderStorageConsent(consent, providerID: coordinator.providerID, services: services)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderFileRecords([file])
             providerLifecycleError = nil
             return PinesAnthropicProviderUploadResult(file: file)
         } catch {
@@ -107,36 +109,30 @@ extension PinesAppModel {
         providerID: ProviderID,
         documentID: UUID,
         consent: PinesAnthropicProviderStorageConsent,
+        uploadProgress: ProviderUploadProgress? = nil,
         services: PinesAppServices
     ) async throws -> PinesAnthropicProviderUploadResult {
         do {
             try validateAnthropicProviderStorageConsent(consent)
-            guard let vaultRepository = services.vaultRepository else {
-                throw InferenceError.invalidRequest("Vault storage is unavailable.")
-            }
             let coordinator = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
-            let documents = try await vaultRepository.listDocuments()
-            guard let document = documents.first(where: { $0.id == documentID }) else {
-                throw InferenceError.invalidRequest("Vault document \(documentID.uuidString) was not found.")
+            let staged = try await stageVaultDocumentForProviderUpload(documentID: documentID, services: services)
+            let file: ProviderFileRecord
+            do {
+                file = try await coordinator.uploadFile(
+                    fileName: staged.file.url.lastPathComponent,
+                    contentType: staged.file.contentType ?? "text/plain; charset=utf-8",
+                    fileURL: staged.file.url,
+                    byteCount: staged.file.byteCount,
+                    localURL: nil,
+                    uploadProgress: uploadProgress
+                )
+                try? await ProviderTransferFileService.shared.removeStagedTransfer(containing: staged.file.url)
+            } catch {
+                try? await ProviderTransferFileService.shared.removeStagedTransfer(containing: staged.file.url)
+                throw error
             }
-            let chunks = try await vaultRepository.chunks(documentID: documentID)
-            let text = chunks
-                .sorted { $0.ordinal < $1.ordinal }
-                .map(\.text)
-                .joined(separator: "\n\n")
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw InferenceError.invalidRequest("Vault document \(document.title) has no text to upload.")
-            }
-
-            let data = Data(text.utf8)
-            let file = try await coordinator.uploadFile(
-                fileName: Self.providerStorageSafeFileName(document.title, fallbackExtension: "txt"),
-                contentType: "text/plain; charset=utf-8",
-                data: data,
-                localURL: nil
-            )
             try await auditAnthropicProviderStorageConsent(consent, providerID: coordinator.providerID, services: services)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderFileRecords([file])
             providerLifecycleError = nil
             return PinesAnthropicProviderUploadResult(file: file)
         } catch {
@@ -155,7 +151,7 @@ extension PinesAppModel {
         do {
             let record = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
                 .refreshFile(id: fileID)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderFileRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -172,7 +168,7 @@ extension PinesAppModel {
         do {
             try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
                 .deleteFile(id: fileID)
-            await refreshProviderLifecycleState(services: services)
+            await refreshProviderFileRecords(services: services)
             providerLifecycleError = nil
         } catch {
             providerLifecycleError = error.localizedDescription
@@ -191,7 +187,7 @@ extension PinesAppModel {
         do {
             let record = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
                 .downloadFileContent(id: fileID, fileName: fileName, contentType: contentType)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderArtifactRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -210,7 +206,7 @@ extension PinesAppModel {
         do {
             let record = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
                 .createBatch(body: body)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderBatchRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -280,7 +276,7 @@ extension PinesAppModel {
         do {
             let record = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
                 .refreshBatch(id: id)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderBatchRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -298,7 +294,7 @@ extension PinesAppModel {
         do {
             let record = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
                 .cancelBatch(id: id)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderBatchRecords([record])
             providerLifecycleError = nil
             return record
         } catch {
@@ -316,7 +312,7 @@ extension PinesAppModel {
         do {
             let records = try await anthropicLifecycleCoordinator(providerID: providerID, services: services)
                 .importBatchResults(id: id)
-            await refreshProviderLifecycleState(services: services)
+            upsertProviderArtifactRecords(records)
             providerLifecycleError = nil
             return records
         } catch {

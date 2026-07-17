@@ -239,7 +239,11 @@ struct PinesManagedCloudService: Sendable {
         }
         var request = try await authenticatedRequest(url: url)
         request.httpMethod = "GET"
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: urlSession,
+            maxBytes: BoundedHTTPResponse.jsonLimit
+        )
         try Self.validateHTTPResponse(response, data: data)
         return try JSONDecoder().decode(Response.self, from: data)
     }
@@ -251,7 +255,11 @@ struct PinesManagedCloudService: Sendable {
         var request = try await authenticatedRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = try JSONEncoder().encode(body)
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: urlSession,
+            maxBytes: BoundedHTTPResponse.jsonLimit
+        )
         try Self.validateHTTPResponse(response, data: data)
         return try JSONDecoder().decode(Response.self, from: data)
     }
@@ -262,7 +270,11 @@ struct PinesManagedCloudService: Sendable {
         }
         var request = try await authenticatedRequest(url: url)
         request.httpMethod = method
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await BoundedHTTPResponse.data(
+            for: request,
+            session: urlSession,
+            maxBytes: 1024 * 1024
+        )
         try Self.validateHTTPResponse(response, data: data)
     }
 

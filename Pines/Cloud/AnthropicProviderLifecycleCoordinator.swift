@@ -28,14 +28,15 @@ struct AnthropicProviderLifecycleCoordinator: Sendable {
         contentType: String,
         data: Data,
         localURL: URL? = nil,
-        fields: [String: String] = [:]
+        fields: [String: String] = [:],
+        uploadProgress: ProviderUploadProgress? = nil
     ) async throws -> ProviderFileRecord {
         let response = try await service.uploadFile(AnthropicFileUploadRequest(
             fileName: fileName,
             contentType: contentType,
             data: data,
             fields: fields
-        ))
+        ), uploadProgress: uploadProgress)
         guard var record = response.json.flatMap({ AnthropicProviderRecordMapper.providerFile(from: $0, providerID: providerID) }) else {
             throw CloudProviderError.invalidResponse
         }
@@ -44,6 +45,33 @@ struct AnthropicProviderLifecycleCoordinator: Sendable {
         if record.byteCount == 0 {
             record.byteCount = Int64(data.count)
         }
+        try await repositories.files?.upsertProviderFile(record)
+        try await audit("Uploaded Anthropic provider file \(record.fileName)")
+        return record
+    }
+
+    func uploadFile(
+        fileName: String,
+        contentType: String,
+        fileURL: URL,
+        byteCount: Int64,
+        localURL: URL? = nil,
+        fields: [String: String] = [:],
+        uploadProgress: ProviderUploadProgress? = nil
+    ) async throws -> ProviderFileRecord {
+        let response = try await service.uploadFile(
+            fromFile: fileURL,
+            fileName: fileName,
+            contentType: contentType,
+            fields: fields,
+            uploadProgress: uploadProgress
+        )
+        guard var record = response.json.flatMap({ AnthropicProviderRecordMapper.providerFile(from: $0, providerID: providerID) }) else {
+            throw CloudProviderError.invalidResponse
+        }
+        record.localURL = localURL
+        record.contentType = record.contentType ?? contentType
+        record.byteCount = record.byteCount == 0 ? byteCount : record.byteCount
         try await repositories.files?.upsertProviderFile(record)
         try await audit("Uploaded Anthropic provider file \(record.fileName)")
         return record

@@ -79,6 +79,27 @@ enum PinesHapticEvent: Hashable {
             true
         }
     }
+
+    var preparesFollowingPlayback: Bool {
+        switch self {
+        case .firstToken, .streamPulse, .streamMilestone, .scrollUp, .scrollDown:
+            false
+        case .appReady,
+             .tabChanged,
+             .navigationSelected,
+             .primaryAction,
+             .destructiveAction,
+             .sendCommitted,
+             .runAccepted,
+             .scrollBoundaryTop,
+             .scrollBoundaryBottom,
+             .toolApprovalNeeded,
+             .runCompleted,
+             .runCancelled,
+             .runFailed:
+            true
+        }
+    }
 }
 
 struct PinesHapticSignal: Identifiable, Equatable {
@@ -245,8 +266,12 @@ final class PinesHaptics: ObservableObject {
         #else
         guard mode != .off else { return }
         guard event.allowsLowPowerPlayback || !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        let performancePolicy = PinesPerformancePolicy.current()
+        let playbackMode: PinesHapticMode = mode == .expressive && !performancePolicy.allowsExpressiveHaptics
+            ? .standard
+            : mode
 
-        switch mode {
+        switch playbackMode {
         case .off:
             break
         case .standard:
@@ -255,7 +280,9 @@ final class PinesHaptics: ObservableObject {
             playExpressive(event)
         }
 
-        prepare()
+        if event.preparesFollowingPlayback {
+            prepare()
+        }
         #endif
     }
 
@@ -591,7 +618,7 @@ private struct PinesExpressiveScrollGeometryHapticsModifier: ViewModifier {
     }
 
     private func quantizedScrollOffset(_ value: CGFloat) -> CGFloat {
-        let step: CGFloat = 24
+        let step: CGFloat = 48
         return (value / step).rounded() * step
     }
 

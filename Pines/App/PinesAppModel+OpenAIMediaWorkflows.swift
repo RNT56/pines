@@ -10,7 +10,7 @@ extension PinesAppModel {
     ) async throws -> ProviderArtifactRecord {
         let artifact = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .createSpeechArtifact(request)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords([artifact])
         return artifact
     }
 
@@ -22,7 +22,7 @@ extension PinesAppModel {
     ) async throws -> ProviderArtifactRecord {
         let artifact = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .createTranscriptionArtifact(request)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords([artifact])
         return artifact
     }
 
@@ -34,7 +34,7 @@ extension PinesAppModel {
     ) async throws -> ProviderArtifactRecord {
         let artifact = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .createTranslationArtifact(request)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords([artifact])
         return artifact
     }
 
@@ -46,7 +46,7 @@ extension PinesAppModel {
     ) async throws -> ProviderLiveSessionRecord {
         let session = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .createRealtimeSessionRecord(request)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderLiveSessionRecords([session])
         return session
     }
 
@@ -58,7 +58,7 @@ extension PinesAppModel {
     ) async throws -> ProviderArtifactRecord {
         let artifact = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .createVideoArtifact(request)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords([artifact])
         return artifact
     }
 
@@ -70,8 +70,8 @@ extension PinesAppModel {
     ) async throws -> ProviderArtifactRecord {
         let artifact = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .refreshVideoJob(id: id)
-        await refreshProviderLifecycleState(services: services)
-        return artifact
+        let preserved = try await preserveProviderArtifactCreationMetadata(in: artifact, services: services)
+        return preserved
     }
 
     @discardableResult
@@ -82,7 +82,7 @@ extension PinesAppModel {
     ) async throws -> ProviderArtifactRecord {
         let artifact = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .cancelVideoArtifact(id: id)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords([artifact])
         return artifact
     }
 
@@ -93,7 +93,7 @@ extension PinesAppModel {
     ) async throws {
         try await openAIMediaLifecycle(providerID: providerID, services: services)
             .deleteVideoArtifact(id: id)
-        await refreshProviderLifecycleState(services: services)
+        removeProviderArtifactRecords(ids: [id, "video-content-\(id)-content"])
     }
 
     @discardableResult
@@ -106,7 +106,7 @@ extension PinesAppModel {
     ) async throws -> ProviderArtifactRecord {
         let artifact = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .downloadVideoContent(videoID: id, variant: variant, contentType: contentType)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords([artifact])
         return artifact
     }
 
@@ -128,7 +128,8 @@ extension PinesAppModel {
                 completionWindow: completionWindow,
                 metadata: metadata
             )
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderBatchRecords([batch])
+        await refreshProviderFileRecords(services: services)
         return batch
     }
 
@@ -148,7 +149,7 @@ extension PinesAppModel {
                 completionWindow: completionWindow,
                 metadata: metadata
             )
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderBatchRecords([batch])
         return batch
     }
 
@@ -161,10 +162,12 @@ extension PinesAppModel {
     ) async throws -> ProviderBatchRecord {
         let lifecycle = try await openAIMediaLifecycle(providerID: providerID, services: services)
         let batch = try await lifecycle.refreshBatch(id: id)
+        var importedArtifacts: [ProviderArtifactRecord] = []
         if importsResults {
-            _ = try await lifecycle.importBatchResultArtifacts(id: id)
+            importedArtifacts = try await lifecycle.importBatchResultArtifacts(id: id)
         }
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderBatchRecords([batch])
+        upsertProviderArtifactRecords(importedArtifacts)
         return batch
     }
 
@@ -176,7 +179,7 @@ extension PinesAppModel {
     ) async throws -> ProviderBatchRecord {
         let batch = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .cancelBatch(id: id)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderBatchRecords([batch])
         return batch
     }
 
@@ -188,7 +191,7 @@ extension PinesAppModel {
     ) async throws -> [ProviderArtifactRecord] {
         let artifacts = try await openAIMediaLifecycle(providerID: providerID, services: services)
             .importBatchResultArtifacts(id: id)
-        await refreshProviderLifecycleState(services: services)
+        upsertProviderArtifactRecords(artifacts)
         return artifacts
     }
 

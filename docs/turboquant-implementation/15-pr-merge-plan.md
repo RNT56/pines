@@ -310,6 +310,29 @@ Merge gate:
 - poor acceptance disables speculation;
 - Fast mode improvement is evidence-backed.
 
+## Wave 7 PR plan
+
+Purpose:
+
+Finish W29+/MVP 6 platform-unlock contracts without activating product claims.
+
+Worker PRs:
+
+| Repo | Branch | Target | Merge gate |
+| --- | --- | --- | --- |
+| `mlx-swift` | `tq/wave7-core-platform` | `codex/turboquant-core-completion` | adaptive/open-KV capability contracts compile and fail closed |
+| `mlx-swift-lm` | `tq/wave7-lm-platform` | `codex/turboquant-completion-hardening` | LM platform policy/open-KV identity contracts compile and fail closed |
+| `pines` | `tq/wave7-platform-unlocks` | `codex/local-runtime-hardening` | platform gates, admission reserves, evidence dimensions, persistence, and tests |
+
+Merge gate:
+
+- all Wave 7 contracts are Codable/Sendable and disabled by default;
+- active platform states require evidence and clear kill switches;
+- Pines evidence tuple matching includes platform dimensions;
+- no production pin update or generated-project ownership change;
+- compatibility-pair remains pending unless a separate release-train owner
+  validates and promotes it.
+
 ## Hard merge gates
 
 No worker PR merges unless:

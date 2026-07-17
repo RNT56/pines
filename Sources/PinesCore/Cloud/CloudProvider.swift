@@ -10,6 +10,167 @@ public enum CloudProviderKind: String, Codable, Sendable, CaseIterable {
     case custom
 }
 
+public struct CloudProviderModelPricing: Hashable, Codable, Sendable {
+    public var prompt: Decimal?
+    public var completion: Decimal?
+    public var request: Decimal?
+    public var image: Decimal?
+    public var webSearch: Decimal?
+    public var internalReasoning: Decimal?
+    public var inputCacheRead: Decimal?
+    public var inputCacheWrite: Decimal?
+
+    public init(
+        prompt: Decimal? = nil,
+        completion: Decimal? = nil,
+        request: Decimal? = nil,
+        image: Decimal? = nil,
+        webSearch: Decimal? = nil,
+        internalReasoning: Decimal? = nil,
+        inputCacheRead: Decimal? = nil,
+        inputCacheWrite: Decimal? = nil
+    ) {
+        self.prompt = prompt
+        self.completion = completion
+        self.request = request
+        self.image = image
+        self.webSearch = webSearch
+        self.internalReasoning = internalReasoning
+        self.inputCacheRead = inputCacheRead
+        self.inputCacheWrite = inputCacheWrite
+    }
+
+    public var isEmpty: Bool {
+        prompt == nil
+            && completion == nil
+            && request == nil
+            && image == nil
+            && webSearch == nil
+            && internalReasoning == nil
+            && inputCacheRead == nil
+            && inputCacheWrite == nil
+    }
+
+    public func tokenPricePerMillion(_ price: Decimal?) -> Decimal? {
+        price.map { $0 * 1_000_000 }
+    }
+}
+
+public struct CloudProviderModelMetadata: Hashable, Codable, Sendable {
+    public var canonicalSlug: String?
+    public var summary: String?
+    public var inputModalities: [String]
+    public var outputModalities: [String]
+    public var tokenizer: String?
+    public var instructType: String?
+    public var contextLength: Int?
+    public var maxCompletionTokens: Int?
+    public var isModerated: Bool?
+    public var expirationDate: String?
+    public var knowledgeCutoff: String?
+    public var pricing: CloudProviderModelPricing?
+
+    public init(
+        canonicalSlug: String? = nil,
+        summary: String? = nil,
+        inputModalities: [String] = [],
+        outputModalities: [String] = [],
+        tokenizer: String? = nil,
+        instructType: String? = nil,
+        contextLength: Int? = nil,
+        maxCompletionTokens: Int? = nil,
+        isModerated: Bool? = nil,
+        expirationDate: String? = nil,
+        knowledgeCutoff: String? = nil,
+        pricing: CloudProviderModelPricing? = nil
+    ) {
+        self.canonicalSlug = canonicalSlug
+        self.summary = summary
+        self.inputModalities = inputModalities
+        self.outputModalities = outputModalities
+        self.tokenizer = tokenizer
+        self.instructType = instructType
+        self.contextLength = contextLength
+        self.maxCompletionTokens = maxCompletionTokens
+        self.isModerated = isModerated
+        self.expirationDate = expirationDate
+        self.knowledgeCutoff = knowledgeCutoff
+        self.pricing = pricing?.isEmpty == true ? nil : pricing
+    }
+}
+
+public struct CloudProviderModelEligibilityReport: Hashable, Codable, Sendable {
+    public var isEligible: Bool
+    public var reasons: [String]
+
+    public init(isEligible: Bool, reasons: [String] = []) {
+        self.isEligible = isEligible
+        self.reasons = reasons
+    }
+
+    public var explanation: String? {
+        reasons.isEmpty ? nil : reasons.joined(separator: " ")
+    }
+}
+
+public struct CloudProviderModelCatalogSnapshot: Hashable, Codable, Sendable {
+    public static let schemaVersion = 1
+    public static let maximumModelCount = 128
+    public static let defaultTimeToLive: TimeInterval = 6 * 60 * 60
+
+    public var providerID: ProviderID
+    public private(set) var models: [CloudProviderModel]
+    public var fetchedAt: Date
+    public var expiresAt: Date
+    public var version: Int
+
+    public init(
+        providerID: ProviderID,
+        models: [CloudProviderModel],
+        fetchedAt: Date = Date(),
+        expiresAt: Date? = nil,
+        version: Int = Self.schemaVersion
+    ) {
+        self.providerID = providerID
+        self.models = Array(models.prefix(Self.maximumModelCount))
+        self.fetchedAt = fetchedAt
+        let maximumExpiry = fetchedAt.addingTimeInterval(Self.defaultTimeToLive)
+        self.expiresAt = min(expiresAt ?? maximumExpiry, maximumExpiry)
+        self.version = version
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case providerID
+        case models
+        case fetchedAt
+        case expiresAt
+        case version
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            providerID: try container.decode(ProviderID.self, forKey: .providerID),
+            models: try container.decode([CloudProviderModel].self, forKey: .models),
+            fetchedAt: try container.decode(Date.self, forKey: .fetchedAt),
+            expiresAt: try container.decode(Date.self, forKey: .expiresAt),
+            version: try container.decode(Int.self, forKey: .version)
+        )
+    }
+
+    public func isFresh(at date: Date = Date()) -> Bool {
+        version == Self.schemaVersion
+            && !models.isEmpty
+            && fetchedAt <= date.addingTimeInterval(5 * 60)
+            && expiresAt > date
+    }
+
+    public func model(id: ModelID, at date: Date = Date()) -> CloudProviderModel? {
+        guard isFresh(at: date) else { return nil }
+        return models.first { $0.id == id }
+    }
+}
+
 public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
     public var id: ModelID
     public var displayName: String
@@ -18,6 +179,7 @@ public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
     public var capabilities: ProviderCapabilities?
     public var supportedParameters: [String]
     public var supportedGenerationMethods: [String]
+    public var metadata: CloudProviderModelMetadata?
 
     public init(
         id: ModelID,
@@ -26,7 +188,8 @@ public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
         rank: Double = 0,
         capabilities: ProviderCapabilities? = nil,
         supportedParameters: [String] = [],
-        supportedGenerationMethods: [String] = []
+        supportedGenerationMethods: [String] = [],
+        metadata: CloudProviderModelMetadata? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -35,6 +198,7 @@ public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
         self.capabilities = capabilities
         self.supportedParameters = supportedParameters
         self.supportedGenerationMethods = supportedGenerationMethods
+        self.metadata = metadata
     }
 
     enum CodingKeys: String, CodingKey {
@@ -45,6 +209,7 @@ public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
         case capabilities
         case supportedParameters
         case supportedGenerationMethods
+        case metadata
     }
 
     public init(from decoder: Decoder) throws {
@@ -56,6 +221,53 @@ public struct CloudProviderModel: Identifiable, Hashable, Codable, Sendable {
         capabilities = try container.decodeIfPresent(ProviderCapabilities.self, forKey: .capabilities)
         supportedParameters = try container.decodeIfPresent([String].self, forKey: .supportedParameters) ?? []
         supportedGenerationMethods = try container.decodeIfPresent([String].self, forKey: .supportedGenerationMethods) ?? []
+        metadata = try container.decodeIfPresent(CloudProviderModelMetadata.self, forKey: .metadata)
+    }
+
+    public func eligibility(
+        requiredInputs: ProviderInputRequirements = .init(),
+        requiresTools: Bool = false,
+        structuredOutput: StructuredOutputFormat = .text
+    ) -> CloudProviderModelEligibilityReport {
+        guard let capabilities else {
+            return CloudProviderModelEligibilityReport(isEligible: true)
+        }
+
+        var reasons = [String]()
+        if !capabilities.textGeneration {
+            reasons.append("This model does not advertise text output.")
+        }
+        if requiredInputs.requiresImages && !(capabilities.imageInputs || capabilities.vision) {
+            reasons.append("This model does not advertise image input.")
+        }
+        if requiredInputs.requiresAudio && !capabilities.audioInputs {
+            reasons.append("This model does not advertise audio input.")
+        }
+        if requiredInputs.requiresVideo && !capabilities.videoInputs {
+            reasons.append("This model does not advertise video input.")
+        }
+        if requiredInputs.requiresPDFs && !capabilities.pdfInputs {
+            reasons.append("This model does not advertise PDF or file input.")
+        }
+        if requiredInputs.requiresTextDocuments && !capabilities.textDocumentInputs {
+            reasons.append("This model does not advertise text-file input.")
+        }
+        if requiresTools && !capabilities.toolCalling {
+            reasons.append("This model does not advertise tool calling.")
+        }
+        switch structuredOutput {
+        case .text:
+            break
+        case .jsonObject:
+            if !(capabilities.jsonMode || capabilities.structuredOutputs) {
+                reasons.append("This model does not advertise JSON response formatting.")
+            }
+        case .jsonSchema:
+            if !capabilities.structuredOutputs {
+                reasons.append("This model does not advertise strict structured outputs.")
+            }
+        }
+        return CloudProviderModelEligibilityReport(isEligible: reasons.isEmpty, reasons: reasons)
     }
 }
 
@@ -580,6 +792,7 @@ public enum CloudProviderError: Error, Equatable, Sendable {
     case missingAPIKey
     case disabledForAgents
     case invalidResponse
+    case responseTooLarge(maxBytes: Int)
     case providerRejectedRequest(statusCode: Int, message: String)
 }
 
@@ -1020,6 +1233,8 @@ extension CloudProviderError: LocalizedError {
             "This cloud provider is disabled for agent execution."
         case .invalidResponse:
             "The cloud provider returned an invalid response."
+        case let .responseTooLarge(maxBytes):
+            "The cloud provider response exceeded the \(maxBytes)-byte safety limit."
         case let .providerRejectedRequest(statusCode, message):
             "The cloud provider rejected the request with HTTP \(statusCode): \(message)"
         }

@@ -151,6 +151,7 @@ extension PinesAppModel {
         from install: ModelInstall,
         runtime: MLXRuntimeBridge,
         download: ModelDownloadProgress? = nil,
+        profileEvidence: [RuntimeProfileEvidence] = [],
         enrichRuntime: Bool = true
     ) -> PinesModelPreview {
         let status: PinesModelStatus
@@ -189,7 +190,7 @@ extension PinesAppModel {
             readiness = install.state == .installed ? 1 : (install.state == .downloading ? 0.5 : 0)
         }
 
-        let compatibilityWarnings: [String]
+        var compatibilityWarnings: [String]
         switch install.verification {
         case .unsupported:
             compatibilityWarnings = ["This repository is not compatible with the current MLX runtime profile."]
@@ -216,6 +217,41 @@ extension PinesAppModel {
                 ),
                 promptCacheIdentifier: install.repository
             )
+        let matchingProfileEvidence = matchingTurboQuantProfileEvidence(
+            from: profileEvidence,
+            install: install,
+            runtimeProfile: runtimeProfile
+        )
+        let runtimeCompatibilityState = RuntimeCompatibilityState.resolve(
+            installVerification: install.verification,
+            evidence: matchingProfileEvidence,
+            admission: runtimeProfile.quantization.turboQuantAdmission,
+            requestedContextTokens: runtimeProfile.quantization.turboQuantAdmission?.requestedContextLength
+        )
+        switch runtimeCompatibilityState {
+        case .verified:
+            break
+        case .conservative:
+            compatibilityWarnings.append("Runs with conservative defaults until matching benchmark evidence is imported.")
+        case .unverified:
+            compatibilityWarnings.append("No trusted local benchmark evidence is available for this model/device/mode tuple.")
+        case .unsupported:
+            if compatibilityWarnings.isEmpty {
+                compatibilityWarnings.append("This tuple is unsupported by the current runtime profile.")
+            }
+        case .degraded:
+            compatibilityWarnings.append("Runtime will use a reduced context or fallback path for this tuple.")
+        case .benchmarkRequired:
+            compatibilityWarnings.append("Benchmark evidence is required before this tuple can make a support claim.")
+        case .revoked:
+            compatibilityWarnings.append("Previous benchmark evidence was revoked and cannot support this tuple.")
+        }
+        let compatibilityExplanation = runtimeCompatibilityExplanation(
+            state: runtimeCompatibilityState,
+            install: install,
+            profile: runtimeProfile,
+            evidence: matchingProfileEvidence
+        )
         let contextWindow: String
         if enrichRuntime,
            let admittedContext = runtimeProfile.quantization.turboQuantAdmission?.admittedContextLength,
@@ -239,7 +275,93 @@ extension PinesAppModel {
             capabilities: install.modalities.map(\.rawValue).sorted(),
             readiness: readiness,
             downloadProgress: download,
-            compatibilityWarnings: compatibilityWarnings
+            compatibilityWarnings: compatibilityWarnings,
+            runtimeProfileEvidence: matchingProfileEvidence,
+            runtimeCompatibilityState: runtimeCompatibilityState,
+            compatibilityExplanation: compatibilityExplanation
+        )
+    }
+
+    nonisolated private static func runtimeCompatibilityExplanation(
+        state: RuntimeCompatibilityState,
+        install: ModelInstall,
+        profile: RuntimeProfile,
+        evidence: RuntimeProfileEvidence?
+    ) -> PinesRuntimeCompatibilityExplanation {
+        let admission = profile.quantization.turboQuantAdmission
+        let headline: String
+        let summary: String
+        let nextAction: String?
+        switch state {
+        case .verified:
+            headline = "Verified for this exact runtime tuple"
+            summary = "Trusted benchmark evidence matches the model, runtime pair, device class, mode, backend, and fallback contract shown below."
+            nextAction = nil
+        case .conservative:
+            headline = "Installable; running conservatively"
+            summary = "The model is supported by the installer, but no matching benchmark may be used as a product-level performance claim. Pines keeps conservative defaults."
+            nextAction = "Import or run a matching trusted device benchmark to verify this tuple."
+        case .unverified:
+            headline = "Installable metadata, unverified runtime tuple"
+            summary = "Repository metadata passed basic checks. That is not proof for this device, context, runtime pair, or backend."
+            nextAction = install.state == .remote ? "Run preflight, install the model, then capture device evidence." : "Capture matching on-device evidence before relying on performance claims."
+        case .degraded:
+            headline = "Supported with a runtime downgrade"
+            summary = admission?.userMessage ?? "Pines reduced context or selected a fallback path to stay within the current device budget."
+            nextAction = "Use the admitted context below or choose a smaller model/profile."
+        case .unsupported:
+            headline = "Unsupported by the current runtime profile"
+            summary = admission?.userMessage ?? "This model or requested tuple cannot be admitted safely on the current runtime profile."
+            nextAction = "Choose a supported model, reduce context, or change the runtime mode."
+        case .benchmarkRequired:
+            headline = "Benchmark required before support can be claimed"
+            summary = "The repository is experimental and needs a trusted benchmark for the exact tuple shown below."
+            nextAction = "Run and import the required on-device benchmark."
+        case .revoked:
+            headline = "Previous evidence was revoked"
+            summary = evidence?.revokedReason ?? "The prior evidence no longer supports this runtime tuple. Pines will not use it for a compatibility claim."
+            nextAction = "Capture replacement evidence with the current runtime and fallback contract."
+        }
+
+        var facts = [PinesRuntimeCompatibilityExplanation.Fact]()
+        facts.append(.init(label: "Install check", value: install.verification.rawValue))
+        facts.append(.init(label: "Profile", value: profile.name))
+        if let evidence {
+            facts.append(.init(label: "Evidence", value: "\(evidence.evidenceLevel.rawValue) - \(evidence.createdAt.formatted(date: .abbreviated, time: .omitted))"))
+            facts.append(.init(label: "Compatibility pair", value: evidence.compatibilityPairID))
+            facts.append(.init(label: "Device class", value: evidence.deviceClass.rawValue))
+            facts.append(.init(label: "Mode", value: evidence.userMode.rawValue))
+            if let mode = evidence.resolvedRuntimeMode { facts.append(.init(label: "Runtime mode", value: mode.rawValue)) }
+            if let backend = evidence.effectiveBackend { facts.append(.init(label: "Backend", value: backend.rawValue)) }
+            facts.append(.init(label: "Fallback contract", value: String(evidence.fallbackContractHash.prefix(16))))
+        } else {
+            facts.append(.init(label: "Evidence", value: "No matching trusted evidence"))
+            if let deviceClass = profile.quantization.devicePerformanceClass {
+                facts.append(.init(label: "Device class", value: deviceClass.rawValue))
+            }
+            facts.append(.init(label: "Mode", value: profile.quantization.turboQuantUserMode.rawValue))
+            if let mode = profile.quantization.turboQuantResolvedRuntimeMode {
+                facts.append(.init(label: "Runtime mode", value: mode.rawValue))
+            }
+            if let backend = profile.quantization.turboQuantEffectiveBackend {
+                facts.append(.init(label: "Backend", value: backend.rawValue))
+            }
+        }
+        if let admission {
+            facts.append(.init(
+                label: "Context admission",
+                value: "\(admission.requestedContextLength.formatted()) requested -> \(admission.admittedContextLength.formatted()) admitted"
+            ))
+        }
+        if let fallback = profile.quantization.activeFallbackReason, !fallback.isEmpty {
+            facts.append(.init(label: "Fallback", value: fallback))
+        }
+        return PinesRuntimeCompatibilityExplanation(
+            headline: headline,
+            summary: summary,
+            claimBasis: state.allowsProductClaim ? "Exact-tuple claim backed by trusted evidence" : "No verified product claim for this exact tuple",
+            facts: facts,
+            nextAction: nextAction
         )
     }
 
@@ -253,6 +375,7 @@ extension PinesAppModel {
         installs: [ModelInstall],
         downloads: [ModelDownloadProgress],
         runtime: MLXRuntimeBridge,
+        profileEvidenceByModelID: [String: [RuntimeProfileEvidence]] = [:],
         enrichRuntime: Bool = true
     ) -> [PinesModelPreview] {
         let downloadByRepository = latestDownloadByRepository(downloads)
@@ -262,6 +385,7 @@ extension PinesAppModel {
                 from: install,
                 runtime: runtime,
                 download: downloadByRepository[install.repository.lowercased()],
+                profileEvidence: profileEvidenceByModelID[profileEvidenceKey(for: install)] ?? [],
                 enrichRuntime: enrichRuntime
             )
         }
@@ -276,11 +400,159 @@ extension PinesAppModel {
                     from: recoverableInstall(from: download),
                     runtime: runtime,
                     download: download,
+                    profileEvidence: [],
                     enrichRuntime: enrichRuntime
                 )
             }
         previews.append(contentsOf: orphanPreviews)
         return downloadingFirst(previews)
+    }
+
+    nonisolated static func profileEvidenceKey(for install: ModelInstall) -> String {
+        install.modelID.rawValue.lowercased()
+    }
+
+    nonisolated static func matchingTurboQuantProfileEvidence(
+        from records: [RuntimeProfileEvidence]?,
+        install: ModelInstall,
+        runtimeProfile: RuntimeProfile
+    ) -> RuntimeProfileEvidence? {
+        let records = records ?? []
+        let quantization = runtimeProfile.quantization
+        let admission = quantization.turboQuantAdmission
+        let mode = admission?.selectedMode ?? quantization.turboQuantUserMode
+        let requiredContext = admission?.admittedContextLength ?? quantization.maxKVSize ?? 0
+        let requestedSpeculativeDimensions = speculativeEvidenceDimensions(for: runtimeProfile)
+        let acceptedCompatibilityPairIDs = Set([MLXRuntimeBridge.turboQuantCompatibilityPairID])
+
+        return records
+            .filter { evidence in
+                guard evidence.modelID.lowercased() == install.modelID.rawValue.lowercased() else {
+                    return false
+                }
+                if evidence.evidenceLevel.canMakeProductCompatibilityClaim {
+                    guard acceptedCompatibilityPairIDs.contains(evidence.compatibilityPairID) else {
+                        return false
+                    }
+                    guard let evidenceRevision = evidence.modelRevision,
+                          let installRevision = install.revision,
+                          evidenceRevision == installRevision else {
+                        return false
+                    }
+                    guard let deviceClass = quantization.devicePerformanceClass,
+                          evidence.deviceClass == deviceClass else {
+                        return false
+                    }
+                    guard let runtimeLayoutVersion = quantization.turboQuantLayoutVersion,
+                          evidence.layoutVersion == runtimeLayoutVersion else {
+                        return false
+                    }
+                    guard let admission else {
+                        return false
+                    }
+                    let fallbackReserve = Int64(
+                        admission.memoryPlan?.runtimeZones.fallbackReserveBytes
+                            ?? Int(TurboQuantFallbackContract.defaultReserveBytes(for: mode))
+                    )
+                    let fallbackHash = TurboQuantFallbackContract.productDefault(
+                        for: mode,
+                        allowCloudRetry: false,
+                        reserveBytes: fallbackReserve
+                    ).contractHash
+                    guard evidence.fallbackContractHash == fallbackHash else {
+                        return false
+                    }
+                    if let attentionPath = quantization.activeAttentionPath,
+                       evidence.activeAttentionPath != attentionPath {
+                        return false
+                    }
+                    if let preset = quantization.preset,
+                       evidence.turboQuantPreset != preset.rawValue {
+                        return false
+                    }
+                    if let valueBits = quantization.turboQuantValueBits,
+                       evidence.valueBits != valueBits {
+                        return false
+                    }
+                    guard let resolvedRuntimeMode = quantization.turboQuantResolvedRuntimeMode,
+                          evidence.resolvedRuntimeMode == resolvedRuntimeMode else {
+                        return false
+                    }
+                    guard evidence.requestedRuntimeMode == quantization.turboQuantRuntimeMode else {
+                        return false
+                    }
+                    if let precisionPolicy = quantization.turboQuantPrecisionPolicy,
+                       evidence.precisionPolicy != precisionPolicy {
+                        return false
+                    }
+                    if let keyPrecision = quantization.turboQuantKeyPrecision,
+                       evidence.keyPrecision != keyPrecision {
+                        return false
+                    }
+                    if let valuePrecision = quantization.turboQuantValuePrecision,
+                       evidence.valuePrecision != valuePrecision {
+                        return false
+                    }
+                    let sparseValuePolicy = quantization.turboQuantSparseValuePolicy ?? .off
+                    guard (evidence.sparseValuePolicy ?? .off) == sparseValuePolicy else {
+                        return false
+                    }
+                    guard let effectiveBackend = quantization.turboQuantEffectiveBackend,
+                          evidence.effectiveBackend == effectiveBackend else {
+                        return false
+                    }
+                    if effectiveBackend == .nativeMLX,
+                       evidence.nativeBackendVersion != quantization.turboQuantNativeBackendVersion {
+                        return false
+                    }
+                    if evidence.groupSize != quantization.kvGroupSize {
+                        return false
+                    }
+                } else if let evidenceRevision = evidence.modelRevision,
+                          let installRevision = install.revision,
+                          evidenceRevision != installRevision {
+                    return false
+                }
+                if let deviceClass = quantization.devicePerformanceClass,
+                   evidence.deviceClass != deviceClass {
+                    return false
+                }
+                guard evidence.userMode == mode else {
+                    return false
+                }
+                guard (evidence.speculativeDimensions ?? .disabled).matches(requestedSpeculativeDimensions) else {
+                    return false
+                }
+                guard evidence.admittedContextTokens >= requiredContext else {
+                    return false
+                }
+                return true
+            }
+            .sorted { $0.createdAt > $1.createdAt }
+            .first
+    }
+
+    nonisolated static func speculativeEvidenceDimensions(for runtimeProfile: RuntimeProfile) -> TurboQuantSpeculativeEvidenceDimensions {
+        let quantization = runtimeProfile.quantization
+        if let telemetry = quantization.turboQuantSpeculativeTelemetry {
+            return telemetry.dimensions
+        }
+        if let settings = runtimeProfile.speculativeSettings ?? quantization.turboQuantSpeculativeSettings,
+           settings.enabled {
+            return TurboQuantSpeculativeEvidenceDimensions(
+                enabled: true,
+                draftModelID: settings.draftModelID ?? runtimeProfile.speculativeDraftModelID?.rawValue,
+                draftModelRevision: settings.draftModelRevision,
+                maxDraftTokens: settings.maxDraftTokens
+            )
+        }
+        if runtimeProfile.speculativeDecodingEnabled {
+            return TurboQuantSpeculativeEvidenceDimensions(
+                enabled: true,
+                draftModelID: runtimeProfile.speculativeDraftModelID?.rawValue
+            )
+        }
+        return .disabled
     }
 
     nonisolated static func downloadingFirst(_ previews: [PinesModelPreview]) -> [PinesModelPreview] {
@@ -342,14 +614,13 @@ extension PinesAppModel {
             title: record.title,
             kind: kind,
             detail: "\(record.chunkCount) indexed chunks",
-            chunks: [],
             updatedLabel: RelativeDateTimeFormatter.shortLabel(for: record.updatedAt),
             sensitivity: .local,
             linkedThreads: 0,
             activeProfileEmbeddedChunks: 0,
             activeProfileTotalChunks: record.chunkCount,
             sourceContentType: record.sourceType,
-            sourceData: nil
+            sourceRevision: record.checksum ?? String(record.updatedAt.timeIntervalSinceReferenceDate)
         )
     }
 

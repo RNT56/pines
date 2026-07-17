@@ -67,6 +67,9 @@ public struct SchemaCompatibility: Codable, Sendable {
 | `TurboQuantLayout` | 4 | MLX Swift | current compressed layout |
 | `TurboQuantLayoutNext` | 5 | MLX Swift | gated future layout |
 | `AdaptivePrecisionPolicy` | 1 | all | future adaptive precision |
+| `PlatformUnlockPolicy` | 1 | Pines | W29+ platform gates and release kill switches |
+| `OpenKVFormat` | 1 | all | open KV format descriptors and export/import metadata |
+| `PlatformEvidenceDimensions` | 1 | Pines | evidence tuple matching for W29+ platform features |
 
 ## Schema rules
 
@@ -98,10 +101,10 @@ public struct LocalRuntimeAdmissionPlan: Codable, Sendable {
     public var requestedContextTokens: Int
     public var admittedContextTokens: Int
     public var reservedCompletionTokens: Int
-    public var selectedMode: LocalAIUserMode
+    public var selectedMode: TurboQuantUserMode
     public var selectedKVStrategy: KVCacheStrategy
-    public var selectedAttentionPath: LocalTurboQuantAttentionPath?
-    public var fallbackContract: LocalFallbackContract
+    public var selectedAttentionPath: TurboQuantAttentionPath?
+    public var fallbackContract: TurboQuantFallbackContract
     public var memoryZones: RuntimeMemoryZones
     public var memoryCushionBytes: Int64
     public var calibrationApplied: RuntimeMemoryCalibrationSummary?
@@ -155,8 +158,8 @@ public struct TurboQuantRunDecision: Codable, Sendable {
     public var schemaVersion: Int
     public var compatibilityPairID: String?
     public var admission: LocalRuntimeAdmissionPlan?
-    public var selectedAttentionPath: LocalTurboQuantAttentionPath?
-    public var rejectedPaths: [LocalRejectedTurboQuantPath]
+    public var selectedAttentionPath: TurboQuantAttentionPath?
+    public var rejectedPaths: [String]
     public var cacheLifecycle: String?
     public var actualKeyBitsPerValue: Double?
     public var actualValueBitsPerValue: Double?
@@ -211,9 +214,14 @@ public enum LocalInferenceFailureKind: String, Codable, Sendable {
     case modelProfileUnverified
     case modelProfileMismatch
     case unsupportedAttentionShape
+    case unsupportedAttentionMask
+    case unsupportedTensorDType
+    case cacheLayoutInvalid
+    case cacheLifecycleInvalid
     case contextWindowExceeded
     case snapshotInvalid
     case snapshotCorrupt
+    case schemaIncompatible
     case mlxRuntimeFailure
     case cloudRouteDisallowed
 }
@@ -277,12 +285,12 @@ public struct RuntimeProfileEvidence: Codable, Sendable, Identifiable {
     public var deviceClass: DevicePerformanceClass
     public var hardwareModel: String?
     public var osBuild: String
-    public var userMode: LocalAIUserMode
+    public var userMode: TurboQuantUserMode
     public var turboQuantPreset: String?
     public var valueBits: Int?
     public var groupSize: Int?
     public var layoutVersion: Int?
-    public var activeAttentionPath: LocalTurboQuantAttentionPath?
+    public var activeAttentionPath: TurboQuantAttentionPath?
     public var admittedContextTokens: Int
     public var peakMemoryBytes: Int64
     public var promptTokensPerSecond: Double?
@@ -329,6 +337,25 @@ Defined in [Context Memory Planner](10-context-memory-planner.md).
 ## KVSnapshotManifest.v1
 
 Defined in [KV Snapshot Security](11-kv-snapshot-security.md).
+
+## Wave 7 platform schemas
+
+Wave 7 adds W29+/MVP 6 platform-unlock schemas. They are contract and evidence
+surfaces only by default. Product activation remains disabled unless the
+feature-specific policy is active, kill switches are clear, a green
+compatibility pair is present, and verified evidence explicitly allows the
+feature tuple.
+
+Required fail-closed defaults:
+
+- `AdaptivePrecisionPolicy.v1` defaults disabled, kill-switched, and
+  evidence-required;
+- `PlatformUnlockPolicy.v1` aggregates adaptive precision, memory-plane,
+  open-KV, device-mesh, personalization, and feature-gate state;
+- `OpenKVFormat.v1` requires exact identity, local-only defaults, encryption,
+  and support-export blob exclusion;
+- `PlatformEvidenceDimensions.v1` is part of benchmark/evidence tuple matching
+  and must match exactly for product claims.
 
 ## ModelProfile.v2
 

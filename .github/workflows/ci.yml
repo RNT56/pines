@@ -108,6 +108,9 @@ jobs:
       - name: Validate CI shell scripts
         run: bash -n scripts/ci/*.sh
 
+      - name: Test release build hygiene guard
+        run: bash scripts/ci/test-release-build-hygiene.sh
+
       - name: Public repo hygiene
         run: bash scripts/ci/check-public-hygiene.sh
 
@@ -131,6 +134,9 @@ jobs:
 
       - name: Install site dependencies
         run: npm --prefix site ci
+
+      - name: Audit site dependencies
+        run: npm --prefix site audit --audit-level=low
 
       - name: Build site
         run: npm --prefix site run build
@@ -198,7 +204,12 @@ jobs:
   xcode-project:
     name: Xcode project build
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 90
+    env:
+      PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS: 180
+      PINES_XCODE_TEST_TIMEOUT_SECONDS: 720
+      PINES_XCODE_TEST_ATTEMPTS: 1
+      PINES_XCODE_UI_TEST_MODE: smoke
 
     steps:
       - name: Checkout
@@ -220,8 +231,14 @@ jobs:
       - name: Generate project and verify drift
         run: bash scripts/ci/run-xcode-validation.sh generate
 
+      - name: Validate release project hygiene
+        run: bash scripts/ci/check-release-build-hygiene.sh project
+
       - name: Resolve Xcode package dependencies
         run: bash scripts/ci/run-xcode-validation.sh resolve
+
+      - name: Validate release build settings
+        run: bash scripts/ci/check-release-build-hygiene.sh settings
 
       - name: Build unsigned iOS app
         run: bash scripts/ci/run-xcode-validation.sh build-app

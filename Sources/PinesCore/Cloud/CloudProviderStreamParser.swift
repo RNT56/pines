@@ -19,6 +19,29 @@ public enum CloudProviderMetadataKeys {
     public static let openAIHostedToolCallsJSON = "openai.hosted_tool_calls_json"
     public static let openAIFileSearchResultsJSON = "openai.file_search.results_json"
     public static let openAIArtifactsJSON = "openai.artifacts_json"
+    public static let openRouterGenerationID = "openrouter.generation_id"
+    public static let openRouterProvider = "openrouter.provider"
+    public static let openRouterRequestedModel = "openrouter.requested_model"
+    public static let openRouterResolvedModel = "openrouter.resolved_model"
+    public static let openRouterNativeFinishReason = "openrouter.native_finish_reason"
+    public static let openRouterServiceTier = "openrouter.service_tier"
+    public static let openRouterStrategy = "openrouter.strategy"
+    public static let openRouterRegion = "openrouter.region"
+    public static let openRouterSummary = "openrouter.summary"
+    public static let openRouterAttempt = "openrouter.attempt"
+    public static let openRouterAttemptCount = "openrouter.attempt_count"
+    public static let openRouterIsBYOK = "openrouter.is_byok"
+    public static let openRouterSelectedProvider = "openrouter.selected_provider"
+    public static let openRouterSelectedModel = "openrouter.selected_model"
+    public static let openRouterMetadataJSON = "openrouter.metadata_json"
+    public static let openRouterAttemptsJSON = "openrouter.attempts_json"
+    public static let openRouterUsageJSON = "openrouter.usage_json"
+    public static let openRouterPromptTokens = "openrouter.usage.prompt_tokens"
+    public static let openRouterCompletionTokens = "openrouter.usage.completion_tokens"
+    public static let openRouterTotalTokens = "openrouter.usage.total_tokens"
+    public static let openRouterCostCredits = "openrouter.usage.cost_credits"
+    public static let openRouterUpstreamInferenceCost = "openrouter.usage.upstream_inference_cost"
+    public static let openRouterWebSearchRequests = "openrouter.usage.web_search_requests"
     public static let webSearchCitationsJSON = "pines.web_search.citations_json"
     public static let webSearchQueriesJSON = "pines.web_search.queries_json"
     public static let webSearchSuggestionsHTML = "pines.web_search.suggestions_html"
@@ -89,8 +112,36 @@ public struct CloudProviderStreamParser {
         case .geminiInteractions:
             return extractGeminiInteractionEvents(json)
         case .chatCompletions:
-            return extractChatCompletionEvents(json)
+            return extractChatCompletionEvents(json, providerKind: providerKind)
         }
+    }
+
+    public func finalizedFinish(
+        _ pendingFinish: InferenceFinish?,
+        format: CloudProviderStreamFormat,
+        providerKind: CloudProviderKind,
+        modelID: ModelID,
+        usesOfficialOpenAIReasoningChat: Bool
+    ) -> InferenceFinish {
+        var finish = pendingFinish ?? fallbackFinish(
+            format: format,
+            providerKind: providerKind,
+            modelID: modelID,
+            usesOfficialOpenAIReasoningChat: usesOfficialOpenAIReasoningChat
+        )
+        let latestMetadata: [String: String]
+        switch format {
+        case .chatCompletions, .openAIResponses:
+            latestMetadata = state.openAIProviderMetadata
+        case .anthropicMessages:
+            latestMetadata = state.anthropicProviderMetadata
+        case .geminiGenerateContent:
+            latestMetadata = state.geminiProviderMetadata
+        case .geminiInteractions:
+            latestMetadata = state.geminiInteractionProviderMetadata
+        }
+        finish.providerMetadata.merge(latestMetadata) { _, latest in latest }
+        return finish
     }
 
     public func fallbackFinish(format: CloudProviderStreamFormat, providerKind: CloudProviderKind, modelID: ModelID, usesOfficialOpenAIReasoningChat: Bool) -> InferenceFinish {
@@ -396,10 +447,16 @@ public struct CloudProviderStreamParser {
         return CloudProviderStreamParseOutput(events: events, finish: finish)
     }
 
-    private mutating func extractChatCompletionEvents(_ json: [String: Any]) -> CloudProviderStreamParseOutput {
+    private mutating func extractChatCompletionEvents(
+        _ json: [String: Any],
+        providerKind: CloudProviderKind
+    ) -> CloudProviderStreamParseOutput {
         var events = [InferenceStreamEvent]()
         var finish: InferenceFinish?
         state.recordOpenAIChatCompletionChunk(json)
+        if providerKind == .openRouter {
+            state.recordOpenRouterChatCompletionChunk(json)
+        }
 
         if let usage = json["usage"] as? [String: Any],
            let metrics = Self.openAIChatCompletionMetrics(from: usage) {
@@ -976,6 +1033,16 @@ public struct CloudProviderStreamState {
         metadata[CloudProviderMetadataKeys.webSearchCitationsJSON] = String(decoding: data, as: UTF8.self)
     }
 
+    private static func recordProviderCitations(_ citations: [ProviderCitation], into metadata: inout [String: String]) {
+        guard !citations.isEmpty else { return }
+        var combined = existingProviderCitations(from: metadata)
+        for citation in citations where !combined.contains(where: { $0.id == citation.id }) {
+            combined.append(citation)
+        }
+        guard let data = try? JSONEncoder().encode(Array(combined.prefix(64))) else { return }
+        metadata[CloudProviderMetadataKeys.providerCitationsJSON] = String(decoding: data, as: UTF8.self)
+    }
+
     private static func recordSearchQueries(_ queries: [String], into metadata: inout [String: String]) {
         let cleanQueries = queries
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1049,6 +1116,87 @@ public struct CloudProviderStreamState {
                 source: "OpenAI"
             )
         }
+    }
+
+    private static func openRouterAnnotationObjects(from chunk: [String: Any]) -> [[String: Any]] {
+        var annotations = chunk["annotations"] as? [[String: Any]] ?? []
+        for choice in chunk["choices"] as? [[String: Any]] ?? [] {
+            annotations.append(contentsOf: choice["annotations"] as? [[String: Any]] ?? [])
+            for key in ["delta", "message"] {
+                let message = choice[key] as? [String: Any]
+                annotations.append(contentsOf: message?["annotations"] as? [[String: Any]] ?? [])
+            }
+        }
+        return Array(annotations.prefix(64))
+    }
+
+    private static func openRouterWebSearchCitations(from chunk: [String: Any]) -> [WebSearchCitation] {
+        openRouterAnnotationObjects(from: chunk).compactMap { annotation in
+            guard let citation = openRouterURLCitation(from: annotation) else { return nil }
+            return WebSearchCitation(title: citation.title, url: citation.url, source: "OpenRouter")
+        }
+    }
+
+    private static func openRouterProviderCitations(from chunk: [String: Any]) -> [ProviderCitation] {
+        openRouterAnnotationObjects(from: chunk).compactMap { annotation in
+            guard let citation = openRouterURLCitation(from: annotation) else { return nil }
+            var id = "openrouter#\(citation.url)"
+            if let startOffset = citation.startOffset { id += "#\(startOffset)" }
+            if let endOffset = citation.endOffset { id += "#\(endOffset)" }
+            return ProviderCitation(
+                id: id,
+                providerKind: .openRouter,
+                sourceType: .web,
+                title: citation.title,
+                url: citation.url,
+                startOffset: citation.startOffset,
+                endOffset: citation.endOffset,
+                citedText: citation.content,
+                source: "OpenRouter",
+                raw: citation.raw
+            )
+        }
+    }
+
+    private static func openRouterURLCitation(
+        from annotation: [String: Any]
+    ) -> (url: String, title: String, content: String?, startOffset: Int?, endOffset: Int?, raw: JSONValue)? {
+        guard annotation["type"] as? String == "url_citation" else { return nil }
+        let value = annotation["url_citation"] as? [String: Any] ?? annotation
+        guard let rawURL = boundedNonEmptyString(value["url"], maximumLength: 2_048),
+              var components = URLComponents(string: rawURL),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              EndpointSecurityPolicy.isPublicWebHost(components.host)
+        else { return nil }
+        components.user = nil
+        components.password = nil
+        guard let url = components.url?.absoluteString else { return nil }
+
+        let title = boundedNonEmptyString(value["title"], maximumLength: 512) ?? url
+        let content = boundedNonEmptyString(value["content"], maximumLength: 4_096)
+        let startOffset = boundedNonnegativeInt(value["start_index"])
+        let endOffset = boundedNonnegativeInt(value["end_index"])
+        var raw: [String: JSONValue] = [
+            "type": .string("url_citation"),
+            "url": .string(url),
+            "title": .string(title),
+        ]
+        if let content { raw["content"] = .string(content) }
+        if let startOffset { raw["start_index"] = .number(Double(startOffset)) }
+        if let endOffset { raw["end_index"] = .number(Double(endOffset)) }
+        return (url, title, content, startOffset, endOffset, .object(raw))
+    }
+
+    private static func boundedNonEmptyString(_ value: Any?, maximumLength: Int) -> String? {
+        guard let value = value as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(maximumLength))
+    }
+
+    private static func boundedNonnegativeInt(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber else { return nil }
+        return min(max(number.intValue, 0), 10_000_000)
     }
 
     private static func openAIWebSearchQueries(from response: [String: Any]) -> [String] {
@@ -1817,6 +1965,236 @@ public struct CloudProviderStreamState {
         }
     }
 
+    public mutating func recordOpenRouterChatCompletionChunk(_ chunk: [String: Any]) {
+        if let generationID = Self.nonEmptyString(chunk["id"]) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterGenerationID] = generationID
+        }
+        if let provider = Self.nonEmptyString(chunk["provider"]) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterProvider] = provider
+        }
+        if let model = Self.nonEmptyString(chunk["model"]) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterResolvedModel] = model
+        }
+        if let serviceTier = Self.nonEmptyString(chunk["service_tier"]) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterServiceTier] = serviceTier
+        }
+        if let choice = (chunk["choices"] as? [[String: Any]])?.first,
+           let nativeFinishReason = Self.nonEmptyString(choice["native_finish_reason"]) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterNativeFinishReason] = nativeFinishReason
+        }
+        Self.recordSearchCitations(
+            Self.openRouterWebSearchCitations(from: chunk),
+            into: &openAIProviderMetadata
+        )
+        Self.recordProviderCitations(
+            Self.openRouterProviderCitations(from: chunk),
+            into: &openAIProviderMetadata
+        )
+
+        if let usage = chunk["usage"] as? [String: Any] {
+            Self.recordJSON(
+                Self.privacyMinimizedOpenRouterUsage(usage),
+                key: CloudProviderMetadataKeys.openRouterUsageJSON,
+                into: &openAIProviderMetadata
+            )
+            Self.recordInteger(usage["prompt_tokens"], key: CloudProviderMetadataKeys.openRouterPromptTokens, into: &openAIProviderMetadata)
+            Self.recordInteger(usage["completion_tokens"], key: CloudProviderMetadataKeys.openRouterCompletionTokens, into: &openAIProviderMetadata)
+            Self.recordInteger(usage["total_tokens"], key: CloudProviderMetadataKeys.openRouterTotalTokens, into: &openAIProviderMetadata)
+            Self.recordNumber(usage["cost"], key: CloudProviderMetadataKeys.openRouterCostCredits, into: &openAIProviderMetadata)
+            if let costDetails = usage["cost_details"] as? [String: Any] {
+                Self.recordNumber(
+                    costDetails["upstream_inference_cost"],
+                    key: CloudProviderMetadataKeys.openRouterUpstreamInferenceCost,
+                    into: &openAIProviderMetadata
+                )
+            }
+            if let isBYOK = usage["is_byok"] as? Bool {
+                openAIProviderMetadata[CloudProviderMetadataKeys.openRouterIsBYOK] = String(isBYOK)
+            }
+            if let serverToolUse = usage["server_tool_use"] as? [String: Any] {
+                let webSearchRequests = min(
+                    max(Self.intValue(serverToolUse["web_search_requests"]), 0),
+                    10_000
+                )
+                openAIProviderMetadata[CloudProviderMetadataKeys.openRouterWebSearchRequests] = String(webSearchRequests)
+                if webSearchRequests > 0 {
+                    recordOpenRouterWebSearchUsage(requestCount: webSearchRequests)
+                }
+            }
+        }
+
+        guard let routerMetadata = chunk["openrouter_metadata"] as? [String: Any] else { return }
+        Self.recordJSON(
+            Self.privacyMinimizedOpenRouterMetadata(routerMetadata),
+            key: CloudProviderMetadataKeys.openRouterMetadataJSON,
+            into: &openAIProviderMetadata
+        )
+        if let requestedModel = Self.nonEmptyString(routerMetadata["requested"]) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterRequestedModel] = requestedModel
+        }
+        if let strategy = Self.nonEmptyString(routerMetadata["strategy"]) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterStrategy] = strategy
+        }
+        if let region = Self.nonEmptyString(routerMetadata["region"]) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterRegion] = region
+        }
+        if let summary = Self.nonEmptyString(routerMetadata["summary"]) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterSummary] = summary
+        }
+        Self.recordInteger(routerMetadata["attempt"], key: CloudProviderMetadataKeys.openRouterAttempt, into: &openAIProviderMetadata)
+        if let isBYOK = routerMetadata["is_byok"] as? Bool {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterIsBYOK] = String(isBYOK)
+        }
+        if let attempts = routerMetadata["attempts"] as? [[String: Any]] {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openRouterAttemptCount] = String(attempts.count)
+            let safeAttempts = attempts.compactMap(Self.privacyMinimizedOpenRouterAttempt)
+            if !safeAttempts.isEmpty {
+                Self.recordJSON(
+                    safeAttempts,
+                    key: CloudProviderMetadataKeys.openRouterAttemptsJSON,
+                    into: &openAIProviderMetadata
+                )
+            }
+        }
+        if let endpoints = routerMetadata["endpoints"] as? [String: Any],
+           let available = endpoints["available"] as? [[String: Any]],
+           let selected = available.first(where: { $0["selected"] as? Bool == true }) {
+            if let provider = Self.nonEmptyString(selected["provider"]) {
+                openAIProviderMetadata[CloudProviderMetadataKeys.openRouterSelectedProvider] = provider
+            }
+            if let model = Self.nonEmptyString(selected["model"]) {
+                openAIProviderMetadata[CloudProviderMetadataKeys.openRouterSelectedModel] = model
+            }
+        }
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let value = value as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(512))
+    }
+
+    private static func recordInteger(_ value: Any?, key: String, into metadata: inout [String: String]) {
+        guard let number = value as? NSNumber else { return }
+        metadata[key] = String(number.intValue)
+    }
+
+    private static func recordNumber(_ value: Any?, key: String, into metadata: inout [String: String]) {
+        guard let number = value as? NSNumber, number.doubleValue.isFinite, number.doubleValue >= 0 else { return }
+        metadata[key] = number.stringValue
+    }
+
+    private static func recordJSON(_ value: Any, key: String, into metadata: inout [String: String]) {
+        guard let json = CloudProviderStreamParser.jsonString(from: value) else { return }
+        metadata[key] = json
+    }
+
+    private static func privacyMinimizedOpenRouterMetadata(_ metadata: [String: Any]) -> [String: Any] {
+        var safe = [String: Any]()
+        for key in ["requested", "strategy", "region", "summary"] {
+            if let value = nonEmptyString(metadata[key]) {
+                safe[key] = value
+            }
+        }
+        if let attempt = metadata["attempt"] as? NSNumber {
+            safe["attempt"] = attempt
+        }
+        if let isBYOK = metadata["is_byok"] as? Bool {
+            safe["is_byok"] = isBYOK
+        }
+        if let endpoints = metadata["endpoints"] as? [String: Any],
+           let available = endpoints["available"] as? [[String: Any]] {
+            var safeEndpoints: [String: Any] = [
+                "available": available.prefix(32).map { endpoint in
+                    var safeEndpoint = [String: Any]()
+                    for key in ["provider", "model"] {
+                        if let value = nonEmptyString(endpoint[key]) {
+                            safeEndpoint[key] = value
+                        }
+                    }
+                    if let selected = endpoint["selected"] as? Bool {
+                        safeEndpoint["selected"] = selected
+                    }
+                    return safeEndpoint
+                }
+            ]
+            if let total = endpoints["total"] as? NSNumber {
+                safeEndpoints["total"] = total
+            }
+            safe["endpoints"] = safeEndpoints
+        }
+        if let attempts = metadata["attempts"] as? [[String: Any]] {
+            safe["attempts"] = attempts.prefix(32).compactMap(privacyMinimizedOpenRouterAttempt)
+        }
+        return safe
+    }
+
+    private static func privacyMinimizedOpenRouterAttempt(_ attempt: [String: Any]) -> [String: Any]? {
+        var safe = [String: Any]()
+        for key in ["provider", "model"] {
+            if let value = nonEmptyString(attempt[key]) {
+                safe[key] = value
+            }
+        }
+        if let status = attempt["status"] as? NSNumber {
+            safe["status"] = status
+        }
+        return safe.isEmpty ? nil : safe
+    }
+
+    private static func privacyMinimizedOpenRouterUsage(_ usage: [String: Any]) -> [String: Any] {
+        var safe = [String: Any]()
+        for key in ["prompt_tokens", "completion_tokens", "total_tokens", "cost"] {
+            if let value = usage[key] as? NSNumber {
+                safe[key] = value
+            }
+        }
+        if let isBYOK = usage["is_byok"] as? Bool {
+            safe["is_byok"] = isBYOK
+        }
+        Self.copyNumericFields(
+            ["cached_tokens", "cache_write_tokens", "audio_tokens", "video_tokens"],
+            from: usage["prompt_tokens_details"],
+            to: "prompt_tokens_details",
+            in: &safe
+        )
+        Self.copyNumericFields(
+            ["reasoning_tokens", "audio_tokens", "image_tokens"],
+            from: usage["completion_tokens_details"],
+            to: "completion_tokens_details",
+            in: &safe
+        )
+        Self.copyNumericFields(
+            ["upstream_inference_cost", "upstream_inference_prompt_cost", "upstream_inference_completions_cost"],
+            from: usage["cost_details"],
+            to: "cost_details",
+            in: &safe
+        )
+        Self.copyNumericFields(
+            ["web_search_requests"],
+            from: usage["server_tool_use"],
+            to: "server_tool_use",
+            in: &safe
+        )
+        return safe
+    }
+
+    private static func copyNumericFields(
+        _ keys: [String],
+        from value: Any?,
+        to destinationKey: String,
+        in destination: inout [String: Any]
+    ) {
+        guard let source = value as? [String: Any] else { return }
+        var safe = [String: Any]()
+        for key in keys where source[key] is NSNumber {
+            safe[key] = source[key]
+        }
+        if !safe.isEmpty {
+            destination[destinationKey] = safe
+        }
+    }
+
     public mutating func recordOpenAIResponseEvent(_ event: [String: Any], eventType: String) {
         if let item = event["item"] as? [String: Any] {
             recordOpenAIHostedToolCalls([Self.openAIHostedToolCallSummary(from: item)].compactMap { $0 })
@@ -1903,6 +2281,33 @@ public struct CloudProviderStreamState {
 
     public mutating func recordOpenAIHostedToolCalls(_ calls: [[String: Any]]) {
         openAIHostedToolCalls = Self.appendingJSONObjectSummaries(calls, to: openAIHostedToolCalls)
+        if let json = Self.jsonString(fromJSONObjectSummaries: openAIHostedToolCalls) {
+            openAIProviderMetadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON] = json
+        }
+    }
+
+    private mutating func recordOpenRouterWebSearchUsage(requestCount: Int) {
+        let generationID = openAIProviderMetadata[CloudProviderMetadataKeys.openRouterGenerationID]
+            ?? openAIProviderMetadata[CloudProviderMetadataKeys.openAIChatCompletionID]
+            ?? "request"
+        let id = "openrouter-web-search-\(generationID)"
+        let summary: [String: Any] = [
+            "id": id,
+            "type": "web_search_call",
+            "status": "completed",
+            "name": requestCount == 1
+                ? "OpenRouter web search (1 request)"
+                : "OpenRouter web search (\(requestCount) requests)",
+            "action": [
+                "type": "search",
+                "request_count": requestCount,
+            ],
+        ]
+        if let index = openAIHostedToolCalls.firstIndex(where: { ($0["id"] as? String) == id }) {
+            openAIHostedToolCalls[index] = summary
+        } else {
+            openAIHostedToolCalls = Array((openAIHostedToolCalls + [summary]).prefix(64))
+        }
         if let json = Self.jsonString(fromJSONObjectSummaries: openAIHostedToolCalls) {
             openAIProviderMetadata[CloudProviderMetadataKeys.openAIHostedToolCallsJSON] = json
         }
@@ -2057,13 +2462,7 @@ public struct CloudProviderStreamState {
     }
 
     public mutating func recordAnthropicCitations(from citations: [ProviderCitation]) {
-        guard !citations.isEmpty else { return }
-        var combined = Self.existingProviderCitations(from: anthropicProviderMetadata)
-        for citation in citations where !combined.contains(where: { $0.id == citation.id }) {
-            combined.append(citation)
-        }
-        guard let data = try? JSONEncoder().encode(Array(combined.prefix(64))) else { return }
-        anthropicProviderMetadata[CloudProviderMetadataKeys.providerCitationsJSON] = String(decoding: data, as: UTF8.self)
+        Self.recordProviderCitations(citations, into: &anthropicProviderMetadata)
     }
 
     public mutating func recordAnthropicCitationObjects(_ citations: [[String: Any]]) {

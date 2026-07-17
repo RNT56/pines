@@ -1,9 +1,6 @@
 import SwiftUI
 import PinesCore
 import AVKit
-#if canImport(UIKit)
-import UIKit
-#endif
 
 struct ArtifactsResourceDescriptor: Identifiable, Hashable {
     let id: String
@@ -112,15 +109,10 @@ struct ArtifactsResourceRow: View {
 }
 
 struct ArtifactsResourceActionBar: View {
-    @Environment(\.pinesTheme) private var theme
     let actions: [ArtifactsResourceAction]
 
-    private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 128), spacing: theme.spacing.xsmall)]
-    }
-
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: theme.spacing.xsmall) {
+        PinesActionBar {
             ForEach(actions) { action in
                 Button(action: action.perform) {
                     Label(action.title, systemImage: action.systemImage)
@@ -131,7 +123,6 @@ struct ArtifactsResourceActionBar: View {
                 .pinesButtonStyle(action.kind, fillWidth: true)
             }
         }
-        .pinesSurface(.inset, padding: theme.spacing.xsmall)
     }
 }
 
@@ -157,7 +148,7 @@ struct ArtifactsResourceList: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .pinesBareButtonStyle()
                         .overlay {
                             RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
                                 .strokeBorder(
@@ -218,9 +209,13 @@ private struct ArtifactsGalleryCard: View {
     let select: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.spacing.small) {
+        PinesArtifactCard(
+            isSelected: isSelected,
+            minHeight: 260,
+            select: select,
+            preview: {
             ArtifactsArtifactPreviewSurface(artifact: artifact, maxHeight: 170)
-
+        }, details: {
             VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
                 Text(summary.title)
                     .font(theme.typography.callout.weight(.semibold))
@@ -233,33 +228,17 @@ private struct ArtifactsGalleryCard: View {
                     .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(1)
             }
-
+        }, actions: {
             HStack(spacing: theme.spacing.xsmall) {
                 PinesStatusChip(status: summary.status, compact: true)
                 Spacer(minLength: 0)
                 if let url = artifact.galleryURL {
-                    Button {
+                    PinesCompactIconButton(title: "Open artifact", systemImage: "arrow.up.forward.app") {
                         openURL(url)
-                    } label: {
-                        Label("Open", systemImage: "arrow.up.forward.app")
-                            .labelStyle(.iconOnly)
                     }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Open artifact")
                 }
             }
-        }
-        .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
-        .padding(theme.spacing.small)
-        .background(theme.colors.elevatedSurface, in: RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
-                .strokeBorder(isSelected ? theme.colors.accent.opacity(0.46) : theme.colors.controlBorder, lineWidth: isSelected ? theme.stroke.selected : theme.stroke.hairline)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: select)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        })
     }
 }
 
@@ -275,13 +254,13 @@ struct ArtifactsArtifactPreviewSurface: View {
                 imagePreview
             case .video:
                 if let url = artifact.galleryURL {
-                    VideoPlayer(player: AVPlayer(url: url))
+                    ArtifactsMediaPlayer(url: url, accessibilityLabel: "Artifact video")
                 } else {
                     placeholder(title: "Video", systemImage: "film")
                 }
             case .audio:
                 if let url = artifact.galleryURL {
-                    VideoPlayer(player: AVPlayer(url: url))
+                    ArtifactsMediaPlayer(url: url, accessibilityLabel: "Artifact audio")
                 } else {
                     placeholder(title: "Audio", systemImage: "waveform")
                 }
@@ -298,26 +277,7 @@ struct ArtifactsArtifactPreviewSurface: View {
 
     @ViewBuilder
     private var imagePreview: some View {
-        if let data = artifact.localPreviewImageData {
-            ArtifactsLocalImage(data: data) {
-                placeholder(title: "Image unavailable", systemImage: "photo")
-            }
-        } else if let url = artifact.galleryURL {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFit()
-                case .failure:
-                    placeholder(title: "Image unavailable", systemImage: "photo")
-                case .empty:
-                    ProgressView()
-                @unknown default:
-                    EmptyView()
-                }
-            }
-        } else {
+        ArtifactsPipelineImage(artifact: artifact, contentMode: .fit, priority: .userInitiated) {
             placeholder(title: "Image", systemImage: "photo")
         }
     }
@@ -325,7 +285,7 @@ struct ArtifactsArtifactPreviewSurface: View {
     private var reportPreview: some View {
         ScrollView {
             Text(reportPreviewText)
-                .font(.system(.caption, design: .default))
+                .font(theme.typography.caption)
                 .foregroundStyle(theme.colors.primaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(theme.spacing.small)
@@ -345,7 +305,7 @@ struct ArtifactsArtifactPreviewSurface: View {
     private func placeholder(title: String, systemImage: String) -> some View {
         VStack(spacing: theme.spacing.xsmall) {
             Image(systemName: systemImage)
-                .font(.system(size: 28, weight: .semibold))
+                .font(theme.typography.title.weight(.semibold))
                 .foregroundStyle(theme.colors.secondaryText)
             Text(title)
                 .font(theme.typography.caption.weight(.semibold))
@@ -356,22 +316,21 @@ struct ArtifactsArtifactPreviewSurface: View {
     }
 }
 
-private struct ArtifactsLocalImage<Placeholder: View>: View {
-    let data: Data
-    @ViewBuilder var placeholder: () -> Placeholder
+private struct ArtifactsMediaPlayer: View {
+    let accessibilityLabel: String
+    @State private var player: AVPlayer
+
+    init(url: URL, accessibilityLabel: String) {
+        self.accessibilityLabel = accessibilityLabel
+        _player = State(initialValue: AVPlayer(url: url))
+    }
 
     var body: some View {
-        #if canImport(UIKit)
-        if let image = UIImage(data: data) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-        } else {
-            placeholder()
-        }
-        #else
-        placeholder()
-        #endif
+        VideoPlayer(player: player)
+            .accessibilityLabel(accessibilityLabel)
+            .onDisappear {
+                player.pause()
+            }
     }
 }
 
@@ -497,7 +456,7 @@ struct ArtifactsDetailPanel: View {
         } else if let text = artifact.text, !text.isEmpty {
             previewSection(title: "Text Preview", systemImage: "text.alignleft") {
                 Text(text)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(theme.typography.code)
                     .foregroundStyle(theme.colors.primaryText)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -505,7 +464,7 @@ struct ArtifactsDetailPanel: View {
         } else if let content = artifact.content {
             previewSection(title: "JSON Preview", systemImage: "curlybraces.square") {
                 Text(content.prettyJSONString)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(theme.typography.code)
                     .foregroundStyle(theme.colors.primaryText)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -520,7 +479,7 @@ struct ArtifactsDetailPanel: View {
             if let content = output.content {
                 previewSection(title: "Output JSON", systemImage: "curlybraces.square") {
                     Text(content.prettyJSONString)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(theme.typography.code)
                         .foregroundStyle(theme.colors.primaryText)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -530,7 +489,7 @@ struct ArtifactsDetailPanel: View {
             if let schema = output.schema {
                 previewSection(title: "Schema", systemImage: "checklist") {
                     Text(schema.prettyJSONString)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(theme.typography.code)
                         .foregroundStyle(theme.colors.primaryText)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -806,7 +765,7 @@ private struct ArtifactsResourceFieldGrid: View {
                 HStack(alignment: .top, spacing: theme.spacing.xsmall) {
                     if let systemImage = field.systemImage {
                         Image(systemName: systemImage)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(theme.typography.caption.weight(.semibold))
                             .foregroundStyle(field.tone.color(in: theme))
                             .frame(width: 18, height: 18)
                     }
@@ -1277,7 +1236,7 @@ extension ArtifactsResourceDescriptor {
         self.init(
             id: "live-session-\(session.providerKind.rawValue)-\(session.id)",
             title: session.title,
-            detail: "Transcript placeholder - \(session.modalitySummary)",
+            detail: "Live session - \(session.modalitySummary)",
             systemImage: "dot.radiowaves.left.and.right",
             status: session.status.artifactsProviderCloudStatus,
             secondaryStatus: session.expiresLabel.map { .custom("Expires \($0)", .warning) },
@@ -1457,5 +1416,266 @@ extension JSONValue {
             return String(describing: self)
         }
         return string
+    }
+}
+
+/// A lightweight library preview. Unlike the full artifact preview, this never
+/// creates an AVPlayer and moves local file decoding off the main actor.
+struct ArtifactsArtifactThumbnail: View {
+    @Environment(\.pinesTheme) private var theme
+    let artifact: ProviderArtifactRecord
+    private let onReady: () -> Void
+
+    init(
+        artifact: ProviderArtifactRecord,
+        onReady: @escaping () -> Void = {}
+    ) {
+        self.artifact = artifact
+        self.onReady = onReady
+    }
+
+    var body: some View {
+        Group {
+            switch artifact.galleryPresentation {
+            case .image:
+                imageThumbnail
+            case .video:
+                placeholder(title: "Video", systemImage: "play.rectangle.fill")
+                    .onAppear(perform: onReady)
+            case .audio:
+                placeholder(title: "Audio", systemImage: "waveform")
+                    .onAppear(perform: onReady)
+            case .report:
+                reportThumbnail
+                    .onAppear(perform: onReady)
+            case .metadata:
+                placeholder(title: artifact.kind.readableArtifactKind, systemImage: artifact.kind.providerArtifactSystemImage)
+                    .onAppear(perform: onReady)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.colors.controlFill)
+        .clipShape(RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
+                .stroke(theme.colors.controlBorder, lineWidth: theme.stroke.hairline)
+        }
+    }
+
+    @ViewBuilder
+    private var imageThumbnail: some View {
+        ArtifactsPipelineImage(
+            artifact: artifact,
+            contentMode: .fill,
+            priority: .utility,
+            onReady: onReady
+        ) {
+            placeholder(title: "Image", systemImage: "photo")
+        }
+    }
+
+    private var reportThumbnail: some View {
+        VStack(alignment: .leading, spacing: theme.spacing.xsmall) {
+            Image(systemName: "doc.text")
+                .font(theme.typography.callout.weight(.semibold))
+                .foregroundStyle(theme.colors.accent)
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(index == 2 ? theme.colors.controlBorder.opacity(0.65) : theme.colors.controlBorder)
+                    .frame(maxWidth: index == 2 ? 72 : .infinity, minHeight: 3, maxHeight: 3)
+            }
+        }
+        .padding(theme.spacing.small)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func placeholder(title: String, systemImage: String) -> some View {
+        VStack(spacing: theme.spacing.xsmall) {
+            Image(systemName: systemImage)
+                .font(theme.typography.title.weight(.semibold))
+                .foregroundStyle(theme.colors.secondaryText)
+            Text(title)
+                .font(theme.typography.caption.weight(.semibold))
+                .foregroundStyle(theme.colors.tertiaryText)
+                .lineLimit(1)
+        }
+        .padding(theme.spacing.small)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ArtifactsPipelineImage<Placeholder: View>: View {
+    @Environment(\.displayScale) private var displayScale
+    let artifact: ProviderArtifactRecord
+    let contentMode: ContentMode
+    let priority: TaskPriority
+    let onReady: () -> Void
+    private let placeholder: () -> Placeholder
+
+    @State private var decodedImage: PinesDecodedImage?
+    @State private var loadedSourceKey: String?
+    @State private var finishedLoading = false
+    @State private var notifiedReadySourceKey: String?
+
+    init(
+        artifact: ProviderArtifactRecord,
+        contentMode: ContentMode,
+        priority: TaskPriority,
+        onReady: @escaping () -> Void = {},
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.artifact = artifact
+        self.contentMode = contentMode
+        self.priority = priority
+        self.onReady = onReady
+        self.placeholder = placeholder
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            Group {
+                if let decodedImage {
+                    Image(
+                        decodedImage.cgImage,
+                        scale: decodedImage.scale,
+                        orientation: .up,
+                        label: Text("Artifact image")
+                    )
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                } else if finishedLoading {
+                    placeholder()
+                } else {
+                    ProgressView()
+                        .pinesProgressTint()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .task(id: requestKey(for: proxy.size)) {
+                await loadImage(targetSize: proxy.size)
+            }
+        }
+    }
+
+    private var sourceKey: String {
+        [
+            artifact.id,
+            artifact.localURL?.absoluteString,
+            artifact.remoteURL?.absoluteString,
+            artifact.responseID,
+            artifact.providerFileID,
+            artifact.byteCount.map(String.init),
+            String(artifact.createdAt.timeIntervalSinceReferenceDate),
+        ]
+        .compactMap { $0 }
+        .joined(separator: "|")
+    }
+
+    private var sourceRevision: String {
+        [
+            artifact.responseID,
+            artifact.toolCallID,
+            artifact.providerFileID,
+            artifact.byteCount.map(String.init),
+            String(artifact.createdAt.timeIntervalSinceReferenceDate),
+        ]
+        .compactMap { $0 }
+        .joined(separator: "|")
+    }
+
+    private func requestKey(for size: CGSize) -> String {
+        let width = Int(ceil(max(0, size.width) * displayScale))
+        let height = Int(ceil(max(0, size.height) * displayScale))
+        return "\(sourceKey)|\(width)x\(height)@\(displayScale)"
+    }
+
+    @MainActor
+    private func loadImage(targetSize: CGSize) async {
+        guard targetSize.width > 0, targetSize.height > 0 else { return }
+        let currentSourceKey = sourceKey
+        if loadedSourceKey != currentSourceKey {
+            decodedImage = nil
+            loadedSourceKey = currentSourceKey
+        }
+        finishedLoading = false
+
+        let sources = imageSources()
+        guard !sources.isEmpty else {
+            finishedLoading = true
+            notifyReady(for: currentSourceKey)
+            return
+        }
+        for source in sources {
+            do {
+                let image = try await PinesImagePipeline.shared.image(
+                    for: source,
+                    targetSize: targetSize,
+                    scale: displayScale,
+                    resizeMode: contentMode == .fill ? .aspectFill : .aspectFit,
+                    priority: priority
+                )
+                try Task.checkCancellation()
+                decodedImage = image
+                finishedLoading = true
+                notifyReady(for: currentSourceKey)
+                return
+            } catch is CancellationError {
+                if !Task.isCancelled {
+                    finishedLoading = true
+                }
+                return
+            } catch {
+                continue
+            }
+        }
+        guard !Task.isCancelled else { return }
+        decodedImage = nil
+        finishedLoading = true
+        notifyReady(for: currentSourceKey)
+    }
+
+    @MainActor
+    private func notifyReady(for sourceKey: String) {
+        guard notifiedReadySourceKey != sourceKey else { return }
+        notifiedReadySourceKey = sourceKey
+        onReady()
+    }
+
+    private func imageSources() -> [PinesImageSource] {
+        let identity = "artifact:\(artifact.id)"
+        var sources = [PinesImageSource]()
+        if let localURL = artifact.localURL, localURL.isFileURL {
+            sources.append(
+                .file(
+                    localURL,
+                    identity: "\(identity):file:\(localURL.standardizedFileURL.path)",
+                    revision: sourceRevision
+                )
+            )
+        }
+        if artifact.content != nil {
+            let record = artifact
+            let revision = sourceRevision
+            sources.append(
+                .deferred(identity: "\(identity):embedded", revision: revision) {
+                    guard let data = record.embeddedPreviewImageData else {
+                        throw PinesImagePipelineError.invalidImageData
+                    }
+                    return data
+                }
+            )
+        }
+        if let remoteURL = artifact.remoteURL {
+            sources.append(
+                .remote(
+                    remoteURL,
+                    identity: "\(identity):remote:\(remoteURL.absoluteString)",
+                    revision: sourceRevision
+                )
+            )
+        }
+        return sources
     }
 }

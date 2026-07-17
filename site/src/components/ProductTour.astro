@@ -16,9 +16,9 @@ const tabs = [
     kicker: "MLX on device",
     title: "Install local models with practical guardrails.",
     body: "Pines helps you review compatible MLX models, staged downloads, runtime shape, and device constraints before you rely on them.",
-    facts: ["Curated verified models", "Runtime diagnostics", "TurboQuant profile defaults"],
+    facts: ["Curated model catalog", "Runtime diagnostics", "Evidence-gated TurboQuant profiles"],
     visualTitle: "Model Readiness",
-    visualItems: ["Verified MLX model", "Footprint review", "Device profile", "Download staged"],
+    visualItems: ["MLX compatibility", "Footprint review", "Device profile", "Download staged"],
   },
   {
     id: "vault",
@@ -83,6 +83,7 @@ const tabs = [
           aria-controls={`pane-${tab.id}`}
           id={`tab-${tab.id}`}
           data-tour-tab={tab.id}
+          tabindex={index === 0 ? "0" : "-1"}
         >
           {tab.label}
         </button>
@@ -138,10 +139,12 @@ const tabs = [
     const tabs = Array.from(tour.querySelectorAll("[data-tour-tab]"));
     const panes = Array.from(tour.querySelectorAll("[data-tour-pane]"));
 
-    function activate(id) {
+    function activate(id, moveFocus = false) {
       tabs.forEach((tab) => {
         const selected = tab.getAttribute("data-tour-tab") === id;
         tab.setAttribute("aria-selected", String(selected));
+        tab.setAttribute("tabindex", selected ? "0" : "-1");
+        if (selected && moveFocus) tab.focus();
       });
 
       panes.forEach((pane) => {
@@ -153,6 +156,19 @@ const tabs = [
 
     tabs.forEach((tab) => {
       tab.addEventListener("click", () => activate(tab.getAttribute("data-tour-tab")));
+      tab.addEventListener("keydown", (event) => {
+        const currentIndex = tabs.indexOf(tab);
+        let nextIndex = currentIndex;
+
+        if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (currentIndex + 1) % tabs.length;
+        else if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        else if (event.key === "Home") nextIndex = 0;
+        else if (event.key === "End") nextIndex = tabs.length - 1;
+        else return;
+
+        event.preventDefault();
+        activate(tabs[nextIndex].getAttribute("data-tour-tab"), true);
+      });
     });
   });
 </script>
