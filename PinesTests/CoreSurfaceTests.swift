@@ -467,7 +467,12 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(runtime.contains("LocalModelReplacementTransaction.perform"))
         XCTAssertTrue(runtime.contains("cleanupFailedReplacement:"))
         XCTAssertTrue(runtime.contains("restoreCurrent:"))
-        XCTAssertTrue(runtime.contains("commitLoadedGenerationModel(restoredModel"))
+        XCTAssertNotNil(
+            runtime.range(
+                of: #"commitLoadedGenerationModel\(\s*restoredModel"#,
+                options: .regularExpression
+            )
+        )
         XCTAssertTrue(runtime.contains("let restoredModelID = await state.loadedModelID()"))
         XCTAssertTrue(runtime.contains("await supervisor.markReady(modelID: restoredModelID)"))
     }

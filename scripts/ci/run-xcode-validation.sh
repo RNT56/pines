@@ -175,6 +175,7 @@ simulator_required() {
 }
 
 simulator_id_file="$log_dir/ios-smoke-simulator-id"
+ui_test_simulator_id=""
 
 build_tests() {
   echo "Building iOS runtime smoke tests..."
@@ -254,12 +255,25 @@ run_ui_tests() {
         "PinesUITests/PinesUITests/testArtifactsVideoAndSpeechConfiguration"
         "PinesUITests/PinesUITests/testArtifactsResearchComposerAndRunningWork"
       )
+      if [ "${CI:-}" = "true" ]; then
+        prepare_ui_test_simulator_base "$simulator_id"
+      fi
+
+      local index=0
       local test
       for test in "${smoke_tests[@]}"; do
-        run_xcode_test_phase \
-          "$simulator_id" \
-          "UI smoke: ${test##*/}" \
-          "-only-testing:$test"
+        index=$((index + 1))
+        if [ "${CI:-}" = "true" ]; then
+          # Xcode's accessibility snapshot service can degrade across independent
+          # UI-test invocations on one simulator. Give each shard a clone of the
+          # fully migrated base so services are fresh without another erase/boot.
+          run_ui_test_on_clone "$simulator_id" "$test" "$index"
+        else
+          run_xcode_test_phase \
+            "$simulator_id" \
+            "UI smoke: ${test##*/}" \
+            "-only-testing:$test"
+        fi
       done
       ;;
     full)
@@ -342,8 +356,65 @@ prepare_test_simulator() {
   fi
 }
 
+prepare_ui_test_simulator_base() {
+  local simulator_id="$1"
+  local timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
+
+  echo "Shutting down migrated simulator $simulator_id for UI-test cloning..."
+  if ! run_with_timeout "$timeout_seconds" xcrun simctl shutdown "$simulator_id"; then
+    echo "::error::Simulator $simulator_id did not shut down within ${timeout_seconds}s." >&2
+    return 1
+  fi
+}
+
+run_ui_test_on_clone() {
+  local base_simulator_id="$1"
+  local test="$2"
+  local index="$3"
+  local timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
+  local clone_name
+  clone_name="Pines-CI-UI-$$-$index-$(date +%s)"
+
+  echo "Cloning migrated simulator $base_simulator_id for ${test##*/}..."
+  if ! ui_test_simulator_id="$(run_with_timeout "$timeout_seconds" \
+    xcrun simctl clone "$base_simulator_id" "$clone_name")"; then
+    echo "::error::Unable to clone simulator $base_simulator_id for ${test##*/}." >&2
+    return 1
+  fi
+
+  if ! run_with_timeout "$timeout_seconds" xcrun simctl boot "$ui_test_simulator_id"; then
+    echo "::error::UI-test clone $ui_test_simulator_id did not boot within ${timeout_seconds}s." >&2
+    cleanup_ui_test_simulator
+    return 1
+  fi
+  if ! run_with_timeout "$timeout_seconds" xcrun simctl bootstatus "$ui_test_simulator_id" -b; then
+    echo "::error::UI-test clone $ui_test_simulator_id did not finish booting within ${timeout_seconds}s." >&2
+    xcrun simctl diagnose -b --no-archive || true
+    cleanup_ui_test_simulator
+    return 1
+  fi
+
+  local status=0
+  run_xcode_test_phase \
+    "$ui_test_simulator_id" \
+    "UI smoke: ${test##*/}" \
+    "-only-testing:$test" || status=$?
+  cleanup_ui_test_simulator
+  return "$status"
+}
+
+cleanup_ui_test_simulator() {
+  [ -n "$ui_test_simulator_id" ] || return 0
+  local timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
+  echo "Cleaning up UI-test simulator $ui_test_simulator_id..."
+  run_with_timeout "$timeout_seconds" xcrun simctl shutdown "$ui_test_simulator_id" >/dev/null 2>&1 || true
+  run_with_timeout "$timeout_seconds" xcrun simctl delete "$ui_test_simulator_id" >/dev/null 2>&1 || true
+  ui_test_simulator_id=""
+}
+
 cleanup_test_simulator() {
   [ "${CI:-}" = "true" ] || return 0
+  cleanup_ui_test_simulator
   [ -f "$simulator_id_file" ] || return 0
   local simulator_id
   simulator_id="$(cat "$simulator_id_file")"
