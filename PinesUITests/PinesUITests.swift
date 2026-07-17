@@ -163,7 +163,7 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
-    func testArtifactsResearchComposerAndRunningWork() throws {
+    func testArtifactsResearchConfiguration() throws {
         launchArtifactsFixture()
 
         openArtifactsDestination(menuItem: "Deep Research", destinationIdentifier: "pines.artifacts.research.prompt")
@@ -179,6 +179,12 @@ final class PinesUITests: XCTestCase {
         )
         captureScreenshot(named: "Artifacts - Research Settings")
         XCTAssertTrue(tapFirstExisting([app.buttons["Done"]], timeout: 5), "Research settings had no Done action.")
+    }
+
+    @MainActor
+    func testArtifactsResearchComposerFlow() throws {
+        launchArtifactsFixture()
+        openArtifactsDestination(menuItem: "Deep Research", destinationIdentifier: "pines.artifacts.research.prompt")
 
         let starter = app.buttons["Compare options"]
         XCTAssertTrue(starter.waitForExistence(timeout: 5), "Research starter prompts were missing.")
@@ -193,8 +199,11 @@ final class PinesUITests: XCTestCase {
             app.descendants(matching: .any)["pines.artifacts.research.prompt"].waitForExistence(timeout: 5),
             "Cancelling clarification did not return to the Research composer."
         )
-        returnToArtifactsLibrary()
+    }
 
+    @MainActor
+    func testArtifactsRunningResearch() throws {
+        launchArtifactsFixture()
         openRunningResearch()
         assertVisibleText(containing: "Researching", timeout: 10)
         captureScreenshot(named: "Artifacts - Active Research")
