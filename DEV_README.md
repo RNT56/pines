@@ -517,9 +517,13 @@ Run Xcode validation for app-facing, project-generation, or dependency graph cha
 bash scripts/ci/run-xcode-validation.sh
 ```
 
-The default local run executes the complete `PinesUITests` target. Required CI uses
-five independently bounded critical-journey shards so a slow hosted simulator cannot
-consume one shared watchdog for the whole suite. Reproduce that exact CI selection with:
+The default local run executes the complete `PinesUITests` target. Required CI and
+release validation use seven independently bounded critical-journey shards so a slow
+hosted simulator cannot consume one shared watchdog for the whole suite. Each hosted
+shard gets a fresh simulator clone and one bounded retry on another fresh clone if the
+first XCUITest process fails; deterministic failures must fail both attempts. The outer
+Xcode jobs allow enough time for that bounded recovery, while each test process keeps
+its 12-minute watchdog. Reproduce that exact test selection locally with:
 
 ```sh
 PINES_XCODE_UI_TEST_MODE=smoke bash scripts/ci/run-xcode-validation.sh
@@ -559,13 +563,17 @@ Main jobs:
 - `swift-core`: public hygiene, Swift package build, `swift test`, and `PinesCoreTestRunner` with automatic package resolution disabled.
 - `xcode-project`: XcodeGen generation, drift checks, locked package resolution, unsigned generic iOS build, simulator build-for-testing, simulator smoke tests when available, generated-project restoration, and lockfile drift checks.
 
-The iOS job uses the `macos-26` hosted runner and verifies required iOS/watchOS build destinations before validation. SDK visibility from `xcodebuild -showsdks` is not enough; the workflow installs missing platform payloads only when actual scheme destinations are unavailable.
+The iOS job uses the `macos-26` hosted runner and the image-maintained stable
+`/Applications/Xcode.app` selection, with versioned stable Xcodes as fallbacks before
+any prerelease install. It verifies required iOS/watchOS build destinations before
+validation. SDK visibility from `xcodebuild -showsdks` is not enough; the workflow
+installs missing platform payloads only when actual scheme destinations are unavailable.
 
 Release tags use semantic version format:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag -a v0.1.1 -m "pines v0.1.1 preview release"
+git push origin v0.1.1
 ```
 
 Releases currently publish source/developer-preview artifacts with SHA-256 checksums. Do not publish an unsigned `.ipa`. Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed.

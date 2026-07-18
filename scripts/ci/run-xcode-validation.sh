@@ -295,7 +295,13 @@ run_xcode_test_phase() {
   local label="$2"
   local timeout_seconds="${PINES_XCODE_TEST_TIMEOUT_SECONDS:-}"
   local attempts="${PINES_XCODE_TEST_ATTEMPTS:-}"
+  local failure_annotation="${PINES_XCODE_TEST_FAILURE_ANNOTATION:-error}"
   shift 2
+
+  if [ "$failure_annotation" != "error" ] && [ "$failure_annotation" != "warning" ]; then
+    echo "::error::PINES_XCODE_TEST_FAILURE_ANNOTATION must be 'error' or 'warning'." >&2
+    return 2
+  fi
 
   if [ -z "$timeout_seconds" ]; then
     if [ "${CI:-}" = "true" ]; then
@@ -332,7 +338,7 @@ run_xcode_test_phase() {
 
     local status="${PIPESTATUS[0]}"
     if [ "$attempt" -eq "$attempts" ]; then
-      echo "::error::$label failed after $attempt attempt(s) (status $status)." >&2
+      echo "::${failure_annotation}::$label failed after $attempt attempt(s) (status $status)." >&2
       return "$status"
     fi
 
@@ -375,31 +381,69 @@ run_ui_test_on_clone() {
   local base_simulator_id="$1"
   local test="$2"
   local index="$3"
+  local shard_attempts="${PINES_XCODE_UI_SHARD_ATTEMPTS:-}"
+
+  if [ -z "$shard_attempts" ]; then
+    if [ "${CI:-}" = "true" ]; then
+      shard_attempts=2
+    else
+      shard_attempts=1
+    fi
+  fi
+  if ! [[ "$shard_attempts" =~ ^[1-9][0-9]*$ ]]; then
+    echo "::error::PINES_XCODE_UI_SHARD_ATTEMPTS must be a positive integer." >&2
+    return 2
+  fi
+
+  local attempt
+  local status=0
+  for ((attempt = 1; attempt <= shard_attempts; attempt++)); do
+    status=0
+    run_ui_test_clone_attempt "$base_simulator_id" "$test" "$index" "$attempt" || status=$?
+    if [ "$status" -eq 0 ]; then
+      return 0
+    fi
+
+    if [ "$attempt" -lt "$shard_attempts" ]; then
+      echo "::warning::UI smoke ${test##*/} failed on clone attempt $attempt (status $status); retrying on a fresh clone." >&2
+    fi
+  done
+
+  echo "::error::UI smoke ${test##*/} failed across $shard_attempts fresh simulator clone attempt(s) (last status $status)." >&2
+  return "$status"
+}
+
+run_ui_test_clone_attempt() {
+  local base_simulator_id="$1"
+  local test="$2"
+  local index="$3"
+  local attempt="$4"
   local timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
   local clone_name
-  clone_name="Pines-CI-UI-$$-$index-$(date +%s)"
+  clone_name="Pines-CI-UI-$$-$index-$attempt-$(date +%s)"
 
-  echo "Cloning migrated simulator $base_simulator_id for ${test##*/}..."
+  echo "Cloning migrated simulator $base_simulator_id for ${test##*/} (attempt $attempt)..."
+  ui_test_simulator_id=""
   if ! ui_test_simulator_id="$(run_with_timeout "$timeout_seconds" \
     xcrun simctl clone "$base_simulator_id" "$clone_name")"; then
-    echo "::error::Unable to clone simulator $base_simulator_id for ${test##*/}." >&2
+    echo "::warning::Unable to clone simulator $base_simulator_id for ${test##*/} attempt $attempt." >&2
     return 1
   fi
 
   if ! run_with_timeout "$timeout_seconds" xcrun simctl boot "$ui_test_simulator_id"; then
-    echo "::error::UI-test clone $ui_test_simulator_id did not boot within ${timeout_seconds}s." >&2
+    echo "::warning::UI-test clone $ui_test_simulator_id did not boot within ${timeout_seconds}s." >&2
     cleanup_ui_test_simulator
     return 1
   fi
   if ! run_with_timeout "$timeout_seconds" xcrun simctl bootstatus "$ui_test_simulator_id" -b; then
-    echo "::error::UI-test clone $ui_test_simulator_id did not finish booting within ${timeout_seconds}s." >&2
+    echo "::warning::UI-test clone $ui_test_simulator_id did not finish booting within ${timeout_seconds}s." >&2
     xcrun simctl diagnose -b --no-archive || true
     cleanup_ui_test_simulator
     return 1
   fi
 
   local status=0
-  run_xcode_test_phase \
+  PINES_XCODE_TEST_FAILURE_ANNOTATION=warning run_xcode_test_phase \
     "$ui_test_simulator_id" \
     "UI smoke: ${test##*/}" \
     "-only-testing:$test" || status=$?
@@ -465,37 +509,43 @@ run_all() {
   finalize_validation
 }
 
-command="${1:-all}"
-case "$command" in
-  all)
-    run_all
-    ;;
-  prepare)
-    snapshot_generated_project
-    ;;
-  generate)
-    generate_project
-    ;;
-  resolve)
-    resolve_packages
-    ;;
-  build-app)
-    build_app
-    ;;
-  build-tests)
-    build_tests
-    ;;
-  run-tests)
-    run_tests
-    ;;
-  finalize)
-    finalize_validation
-    ;;
-  -h|--help|help)
-    usage
-    ;;
-  *)
-    usage >&2
-    exit 2
-    ;;
-esac
+main() {
+  local command="${1:-all}"
+  case "$command" in
+    all)
+      run_all
+      ;;
+    prepare)
+      snapshot_generated_project
+      ;;
+    generate)
+      generate_project
+      ;;
+    resolve)
+      resolve_packages
+      ;;
+    build-app)
+      build_app
+      ;;
+    build-tests)
+      build_tests
+      ;;
+    run-tests)
+      run_tests
+      ;;
+    finalize)
+      finalize_validation
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      usage >&2
+      return 2
+      ;;
+  esac
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi
