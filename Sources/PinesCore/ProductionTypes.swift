@@ -1408,6 +1408,10 @@ public struct CloudContextApprovalRequest: Identifiable, Hashable, Codable, Send
     public var modelID: ModelID
     public var documentIDs: [UUID]
     public var mcpResourceIDs: [String]
+    /// Legacy or explicitly local transcript rows (most commonly a prior
+    /// local agent tool exchange) that would cross the cloud boundary for this
+    /// turn. Optional preserves decoding compatibility with older requests.
+    public var localTranscriptMessageCount: Int?
     public var estimatedContextBytes: Int
     public var createdAt: Date
 
@@ -1417,6 +1421,7 @@ public struct CloudContextApprovalRequest: Identifiable, Hashable, Codable, Send
         modelID: ModelID,
         documentIDs: [UUID],
         mcpResourceIDs: [String],
+        localTranscriptMessageCount: Int? = nil,
         estimatedContextBytes: Int,
         createdAt: Date = Date()
     ) {
@@ -1425,7 +1430,8 @@ public struct CloudContextApprovalRequest: Identifiable, Hashable, Codable, Send
         self.modelID = modelID
         self.documentIDs = documentIDs
         self.mcpResourceIDs = mcpResourceIDs
-        self.estimatedContextBytes = estimatedContextBytes
+        self.localTranscriptMessageCount = localTranscriptMessageCount.map { max(0, $0) }
+        self.estimatedContextBytes = max(0, estimatedContextBytes)
         self.createdAt = createdAt
     }
 }

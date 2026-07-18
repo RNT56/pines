@@ -165,6 +165,120 @@ final class ProductionUXPersistenceTests: XCTestCase {
         XCTAssertEqual(restoredConversation?.title, "Edited after sync")
     }
 
+    func testHiddenAgentContextDoesNotLeakIntoConversationPreviewOrTokenCount() async throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let conversation = try await store.createConversation(
+            title: "Context protocol",
+            defaultModelID: nil,
+            defaultProviderID: nil
+        )
+        let base = Date(timeIntervalSinceReferenceDate: 110_000)
+        let visibleAnswer = ChatMessage(
+            role: .assistant,
+            content: "Visible answer",
+            createdAt: base.addingTimeInterval(1)
+        )
+        try await store.appendMessage(
+            ChatMessage(role: .user, content: "Question", createdAt: base),
+            status: .complete,
+            conversationID: conversation.id,
+            modelID: nil,
+            providerID: nil
+        )
+        try await store.appendMessage(
+            visibleAnswer,
+            status: .complete,
+            conversationID: conversation.id,
+            modelID: nil,
+            providerID: nil
+        )
+        try await store.appendMessage(
+            ChatMessage(
+                role: .tool,
+                content: "hidden secret output",
+                createdAt: base.addingTimeInterval(2),
+                toolCallID: "call-1",
+                toolName: "lookup"
+            ).asContextOnly(parentMessageID: visibleAnswer.id),
+            status: .complete,
+            conversationID: conversation.id,
+            modelID: nil,
+            providerID: nil
+        )
+
+        let previews = try await store.listConversationPreviews()
+        let preview = try XCTUnwrap(previews.first { $0.id == conversation.id })
+        XCTAssertEqual(preview.lastMessage, "Visible answer")
+        XCTAssertEqual(preview.tokenCount, 3)
+        let hiddenMatches = try await store.searchConversations(query: "secret", limit: 10)
+        XCTAssertTrue(hiddenMatches.isEmpty)
+    }
+
+    func testProjectScopedVaultSearchCannotReturnAnotherProjectsChunks() async throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let selectedProject = try await store.createProject(name: "Selected")
+        let otherProject = try await store.createProject(name: "Other")
+        let selectedDocument = VaultDocumentRecord(
+            title: "Selected notes",
+            sourceType: "note",
+            chunkCount: 0,
+            projectID: selectedProject.id
+        )
+        let otherDocument = VaultDocumentRecord(
+            title: "Other notes",
+            sourceType: "note",
+            chunkCount: 0,
+            projectID: otherProject.id
+        )
+        try await store.upsertDocument(selectedDocument, localURL: nil, checksum: nil)
+        try await store.upsertDocument(otherDocument, localURL: nil, checksum: nil)
+        try await store.replaceChunks(
+            [
+                VaultChunk(
+                    id: "selected-chunk",
+                    sourceID: selectedDocument.id.uuidString,
+                    ordinal: 0,
+                    text: "orchid selected evidence",
+                    startOffset: 0,
+                    endOffset: 24,
+                    checksum: "selected-checksum"
+                ),
+            ],
+            documentID: selectedDocument.id,
+            embeddingModelID: nil
+        )
+        try await store.replaceChunks(
+            [
+                VaultChunk(
+                    id: "other-chunk",
+                    sourceID: otherDocument.id.uuidString,
+                    ordinal: 0,
+                    text: "orchid other evidence",
+                    startOffset: 0,
+                    endOffset: 21,
+                    checksum: "other-checksum"
+                ),
+            ],
+            documentID: otherDocument.id,
+            embeddingModelID: nil
+        )
+
+        let results = try await store.search(
+            query: "orchid",
+            embedding: nil,
+            embeddingModelID: nil,
+            profileID: nil,
+            projectID: selectedProject.id,
+            limit: 10
+        )
+        XCTAssertEqual(results.map(\.document.id), [selectedDocument.id])
+        XCTAssertTrue(results.allSatisfy { $0.document.projectID == selectedProject.id })
+    }
+
     private func makeStore() throws -> (GRDBPinesStore, URL) {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "pines-production-ux-tests-\(UUID().uuidString)", directoryHint: .isDirectory)

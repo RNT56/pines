@@ -1421,6 +1421,11 @@ private struct ChatBubble: View {
                 } else if !message.toolCalls.isEmpty {
                     ChatToolCallList(toolCalls: message.toolCalls)
                 }
+
+                if message.role == .assistant,
+                   let receipt = ChatContextReceipt(metadata: message.providerMetadata) {
+                    ChatContextReceiptView(receipt: receipt)
+                }
             }
             .padding(theme.spacing.medium)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1489,6 +1494,119 @@ private struct ChatBubble: View {
             )
         }
         return actions
+    }
+}
+
+private struct ChatContextReceipt: Hashable {
+    let inputTokens: Int
+    let inputBudget: Int
+    let contextWindow: Int
+    let reservedCompletion: Int
+    let originalMessages: Int
+    let includedMessages: Int
+    let droppedMessages: Int
+    let clippedMessages: Int
+    let lineageOriginalMessages: Int
+    let lineageIncludedMessages: Int
+    let lineageDroppedMessages: Int
+    let lineageClippedMessages: Int
+    let lineageTranscriptDroppedMessages: Int
+    let evidenceCount: Int
+    let evidenceSources: [String]
+    let budgetSource: String
+
+    init?(metadata: [String: String]) {
+        guard let estimated = metadata[ChatContextMetadataKeys.estimatedInputTokens].flatMap(Int.init),
+              let inputBudget = metadata[ChatContextMetadataKeys.inputBudgetTokens].flatMap(Int.init),
+              let contextWindow = metadata[ChatContextMetadataKeys.contextWindowTokens].flatMap(Int.init)
+        else { return nil }
+        inputTokens = metadata[ChatContextMetadataKeys.exactInputTokens].flatMap(Int.init) ?? estimated
+        self.inputBudget = inputBudget
+        self.contextWindow = contextWindow
+        reservedCompletion = metadata[ChatContextMetadataKeys.reservedCompletionTokens].flatMap(Int.init) ?? 0
+        originalMessages = metadata[ChatContextMetadataKeys.originalMessageCount].flatMap(Int.init) ?? 0
+        includedMessages = metadata[ChatContextMetadataKeys.includedMessageCount].flatMap(Int.init) ?? 0
+        droppedMessages = metadata[ChatContextMetadataKeys.droppedMessageCount].flatMap(Int.init) ?? 0
+        clippedMessages = metadata[ChatContextMetadataKeys.clippedMessageCount].flatMap(Int.init) ?? 0
+        lineageOriginalMessages = metadata[ChatContextMetadataKeys.lineageOriginalMessageCount].flatMap(Int.init) ?? originalMessages
+        lineageIncludedMessages = metadata[ChatContextMetadataKeys.lineageIncludedMessageCount].flatMap(Int.init) ?? includedMessages
+        lineageDroppedMessages = metadata[ChatContextMetadataKeys.lineageDroppedMessageCount].flatMap(Int.init) ?? droppedMessages
+        lineageClippedMessages = metadata[ChatContextMetadataKeys.lineageClippedMessageCount].flatMap(Int.init) ?? clippedMessages
+        lineageTranscriptDroppedMessages = metadata[ChatContextMetadataKeys.lineageTranscriptDroppedMessageCount].flatMap(Int.init) ?? 0
+        evidenceCount = metadata[ChatContextMetadataKeys.lineageEvidenceCount].flatMap(Int.init)
+            ?? metadata[ChatContextEvidenceMetadataKeys.evidenceCount].flatMap(Int.init)
+            ?? 0
+        evidenceSources = (
+            metadata[ChatContextMetadataKeys.lineageEvidenceSources]
+                ?? metadata[ChatContextEvidenceMetadataKeys.evidenceSources]
+                ?? ""
+        )
+            .split(separator: ",")
+            .map(String.init)
+        budgetSource = metadata[ChatContextMetadataKeys.budgetSource] ?? "unknown"
+    }
+
+    var reduced: Bool {
+        droppedMessages > 0
+            || clippedMessages > 0
+            || lineageDroppedMessages > 0
+            || lineageClippedMessages > 0
+            || lineageTranscriptDroppedMessages > 0
+    }
+}
+
+private struct ChatContextReceiptView: View {
+    @Environment(\.pinesTheme) private var theme
+    let receipt: ChatContextReceipt
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: theme.spacing.xxsmall) {
+                LabeledContent("Model window", value: "\(receipt.contextWindow.formatted()) tokens")
+                LabeledContent("Completion reserve", value: "\(receipt.reservedCompletion.formatted()) tokens")
+                LabeledContent("Final-step messages", value: "\(receipt.includedMessages) of \(receipt.originalMessages)")
+                if receipt.lineageOriginalMessages != receipt.originalMessages
+                    || receipt.lineageIncludedMessages != receipt.includedMessages {
+                    LabeledContent(
+                        "Initial transcript assembly",
+                        value: "\(receipt.lineageIncludedMessages) of \(receipt.lineageOriginalMessages)"
+                    )
+                }
+                if receipt.droppedMessages > 0 {
+                    LabeledContent("Summarized or omitted", value: "\(receipt.droppedMessages)")
+                }
+                if receipt.clippedMessages > 0 {
+                    LabeledContent("Clipped", value: "\(receipt.clippedMessages)")
+                }
+                if receipt.lineageDroppedMessages > 0 || receipt.lineageClippedMessages > 0 {
+                    LabeledContent(
+                        "Initial context reduced",
+                        value: "\(receipt.lineageDroppedMessages) omitted, \(receipt.lineageClippedMessages) clipped"
+                    )
+                }
+                if receipt.lineageTranscriptDroppedMessages > 0 {
+                    LabeledContent("Invalid or interrupted rows removed", value: "\(receipt.lineageTranscriptDroppedMessages)")
+                }
+                if receipt.evidenceCount > 0 {
+                    LabeledContent("Reference sources", value: receipt.evidenceSources.isEmpty ? "\(receipt.evidenceCount)" : receipt.evidenceSources.joined(separator: ", "))
+                }
+                if receipt.budgetSource == "conservative-default" {
+                    Text("The provider did not report a context window, so Pines used a conservative 4,096-token fallback.")
+                        .foregroundStyle(theme.colors.tertiaryText)
+                }
+            }
+            .font(theme.typography.caption)
+            .foregroundStyle(theme.colors.secondaryText)
+            .padding(.top, theme.spacing.xxsmall)
+        } label: {
+            Label(
+                "Context \(receipt.inputTokens.formatted()) / \(receipt.inputBudget.formatted())",
+                systemImage: receipt.reduced ? "text.badge.minus" : "checkmark.circle"
+            )
+            .font(theme.typography.caption.weight(.semibold))
+            .foregroundStyle(receipt.reduced ? theme.colors.warning : theme.colors.secondaryText)
+        }
+        .accessibilityLabel("Context receipt, \(receipt.inputTokens) of \(receipt.inputBudget) input tokens")
     }
 }
 

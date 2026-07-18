@@ -5,6 +5,260 @@ import PinesCore
 @testable import pines
 
 final class CoreSurfaceTests: XCTestCase {
+    func testAgentRunnerBlocksRegisteredToolThatWasNotAdvertised() async throws {
+        let registry = ToolRegistry()
+        let invocationCounter = AgentToolInvocationCounter()
+        let advertised = try AnyToolSpec(
+            name: "advertised_tool",
+            description: "The only tool offered to the model.",
+            inputJSONSchema: .objectSchema(),
+            explanationRequired: false
+        )
+        let secret = try AnyToolSpec(
+            name: "secret_tool",
+            description: "A registered tool that is deliberately not offered.",
+            inputJSONSchema: .objectSchema(),
+            explanationRequired: false
+        )
+        try await registry.registerRaw(advertised) { _ in #"{"ok":true}"# }
+        try await registry.registerRaw(secret) { _ in
+            await invocationCounter.increment()
+            return #"{"executed":true}"#
+        }
+
+        let provider = UnadvertisedToolCallProvider()
+        let runner = AgentRunner(
+            toolRegistry: registry,
+            policyGate: ToolPolicyGate(),
+            auditRepository: nil
+        )
+        let request = ChatRequest(
+            modelID: "test-model",
+            messages: [ChatMessage(role: .user, content: "Help")],
+            sampling: ChatSampling(maxTokens: 256),
+            allowsTools: true,
+            availableTools: [advertised],
+            executionContext: .agent,
+            contextWindowTokens: 4_096
+        )
+        let session = AgentSession(
+            title: "Authorization regression",
+            policy: AgentPolicy(
+                maxSteps: 2,
+                maxToolCalls: 2,
+                requiresConsentForNetwork: false,
+                requiresConsentForBrowser: false
+            )
+        )
+
+        var text = ""
+        var finish: InferenceFinish?
+        for try await event in runner.run(session: session, request: request, provider: provider) {
+            switch event {
+            case let .token(delta):
+                text += delta.text
+            case let .finish(value):
+                finish = value
+            case .toolCall, .metrics, .failure:
+                break
+            }
+        }
+
+        let invocationCount = await invocationCounter.value()
+        let providerRequestCount = await provider.requestCount()
+        XCTAssertEqual(invocationCount, 0)
+        XCTAssertEqual(text, "Safe final response")
+        XCTAssertEqual(finish?.reason, .stop)
+        XCTAssertEqual(providerRequestCount, 2)
+    }
+
+    func testAgentRunnerCompletesPersistedParallelToolExchangeBeforeFallback() async throws {
+        let registry = ToolRegistry()
+        let localTool = try AnyToolSpec(
+            name: "local_tool",
+            description: "Returns local evidence.",
+            inputJSONSchema: .objectSchema(),
+            explanationRequired: false
+        )
+        let approvalTool = try AnyToolSpec(
+            name: "approval_tool",
+            description: "Requires approval.",
+            inputJSONSchema: .objectSchema(),
+            permissions: [.network],
+            networkPolicy: .userApproved,
+            explanationRequired: false
+        )
+        try await registry.registerRaw(localTool) { _ in #"{"fact":"kept"}"# }
+        try await registry.registerRaw(approvalTool) { _ in #"{"unexpected":true}"# }
+        let recorder = AgentTranscriptRecorder()
+        let runner = AgentRunner(
+            toolRegistry: registry,
+            policyGate: ToolPolicyGate(),
+            auditRepository: nil,
+            approvalHandler: { _ in .denied },
+            transcriptHandler: { message in await recorder.append(message) }
+        )
+        let request = ChatRequest(
+            modelID: "test-model",
+            messages: [ChatMessage(role: .user, content: "Gather both facts")],
+            sampling: ChatSampling(maxTokens: 256),
+            allowsTools: true,
+            availableTools: [localTool, approvalTool],
+            executionContext: .agent,
+            contextWindowTokens: 4_096
+        )
+        let session = AgentSession(
+            title: "Parallel persistence regression",
+            policy: AgentPolicy(
+                maxSteps: 2,
+                maxToolCalls: 2,
+                requiresConsentForNetwork: false,
+                requiresConsentForBrowser: false
+            )
+        )
+
+        for try await _ in runner.run(session: session, request: request, provider: TwoToolCallProvider()) {}
+
+        let transcript = await recorder.messages()
+        let assistant = try XCTUnwrap(transcript.first(where: { $0.role == .assistant }))
+        let results = transcript.filter { $0.role == .tool }
+        XCTAssertEqual(assistant.toolCalls.map(\.id), ["call-local", "call-approval"])
+        XCTAssertEqual(Set(results.compactMap(\.toolCallID)), ["call-local", "call-approval"])
+        XCTAssertTrue(results.first(where: { $0.toolCallID == "call-approval" })?.content.contains("stopped before this call completed") == true)
+    }
+
+    func testLocalContextAdapterPreservesToolCallAndUntrustedResultSemantics() {
+        let call = ToolCallDelta(
+            id: "call-1",
+            name: "lookup",
+            argumentsFragment: #"{"query":"pines"}"#,
+            isComplete: true
+        )
+        let assistant = ChatMessage(role: .assistant, content: "", toolCalls: [call])
+        let tool = ChatMessage(
+            role: .tool,
+            content: #"{"answer":"facts"}"#,
+            toolCallID: call.id,
+            toolName: call.name
+        )
+
+        let assistantContext = MLXRuntimeBridge.localContextContent(for: assistant)
+        let toolContext = MLXRuntimeBridge.localContextContent(for: tool)
+        XCTAssertTrue(assistantContext.hasPrefix("tool_calls="))
+        XCTAssertTrue(assistantContext.contains("lookup"))
+        XCTAssertTrue(assistantContext.contains("call-1"))
+        XCTAssertTrue(toolContext.hasPrefix("untrusted_tool_result[call-1,lookup]="))
+        XCTAssertTrue(toolContext.contains("facts"))
+    }
+
+    @MainActor
+    func testMCPAttachmentRejectsEncodedOversizeAndRemovesTemporaryFile() throws {
+        let maximumDecodedBytes = 10 * 1_024 * 1_024
+        let maximumEncodedBytes = ((maximumDecodedBytes + 2) / 3) * 4 + 8
+        let oversized = String(repeating: "A", count: maximumEncodedBytes + 1)
+        XCTAssertThrowsError(
+            try PinesAppModel.mcpAttachment(
+                fromBase64: oversized,
+                mimeType: "image/png",
+                fileNameHint: "oversized.png"
+            )
+        )
+
+        let attachment = try PinesAppModel.mcpAttachment(
+            fromBase64: Data("safe".utf8).base64EncodedString(),
+            mimeType: "image/png",
+            fileNameHint: "safe.png"
+        )
+        let localURL = try XCTUnwrap(attachment.localURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: localURL.path))
+
+        PinesAppModel.removeTemporaryMCPAttachments([attachment])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: localURL.path))
+    }
+
+    @MainActor
+    func testMCPNestedToolResultPreservesAndCleansAttachment() throws {
+        let encoded = Data("nested-image".utf8).base64EncodedString()
+        let converted = try PinesAppModel.textAndAttachments(
+            from: [
+                .toolResult(
+                    toolUseID: "call-1",
+                    content: [.image(data: encoded, mimeType: "image/png")]
+                ),
+            ]
+        )
+        let attachment = try XCTUnwrap(converted.attachments.first)
+        let localURL = try XCTUnwrap(attachment.localURL)
+        XCTAssertEqual(converted.attachments.count, 1)
+        XCTAssertTrue(converted.text.contains("Tool result call-1"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: localURL.path))
+
+        PinesAppModel.removeTemporaryMCPAttachments(converted.attachments)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: localURL.path))
+    }
+
+    @MainActor
+    func testMCPSamplingRejectsAggregateAttachmentCountBeforeMaterialization() throws {
+        let encoded = Data("tiny-image".utf8).base64EncodedString()
+        let request = MCPSamplingRequest(
+            id: "aggregate-attachment-limit",
+            serverID: "test-server",
+            messages: [
+                MCPPromptMessage(
+                    role: .user,
+                    content: (0 ..< 9).map { _ in
+                        .image(data: encoded, mimeType: "image/png")
+                    }
+                ),
+            ]
+        )
+
+        XCTAssertThrowsError(try PinesAppModel.validateMCPSamplingPayload(request)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("aggregate size or count limit"))
+        }
+    }
+
+    @MainActor
+    func testMCPSamplingRejectsExcessiveContentNesting() throws {
+        var nested: [MCPMessageContent] = [.text("leaf")]
+        for index in 0 ..< 18 {
+            nested = [.toolResult(toolUseID: "call-\(index)", content: nested)]
+        }
+        let request = MCPSamplingRequest(
+            id: "nested-content-limit",
+            serverID: "test-server",
+            messages: [MCPPromptMessage(role: .user, content: nested)]
+        )
+
+        XCTAssertThrowsError(try PinesAppModel.validateMCPSamplingPayload(request)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("nesting depth"))
+        }
+    }
+
+    @MainActor
+    func testMCPMaterializationCleansFilesWhenAggregateCountIsExceeded() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+        func mcpTemporaryFiles() throws -> Set<String> {
+            Set(
+                try FileManager.default.contentsOfDirectory(
+                    at: temporaryDirectory,
+                    includingPropertiesForKeys: nil
+                )
+                .map(\.lastPathComponent)
+                .filter { $0.hasPrefix("mcp-") }
+            )
+        }
+
+        let filesBefore = try mcpTemporaryFiles()
+        let encoded = Data("tiny-image".utf8).base64EncodedString()
+        let contents: [MCPMessageContent] = (0 ..< 9).map { _ in
+            .image(data: encoded, mimeType: "image/png")
+        }
+
+        XCTAssertThrowsError(try PinesAppModel.textAndAttachments(from: contents))
+        XCTAssertEqual(try mcpTemporaryFiles(), filesBefore)
+    }
+
     func testInferenceWatchdogGuardsStalledFirstEventStream() async throws {
         let source = AsyncThrowingStream<InferenceStreamEvent, Error> { continuation in
             let task = Task {
@@ -982,5 +1236,117 @@ final class CoreSurfaceTests: XCTestCase {
         XCTAssertTrue(settings.contains("reason: \"manual_settings\""))
         XCTAssertTrue(settings.contains("pines.settings.icloud.sync-now"))
         XCTAssertTrue(settings.contains("pines.settings.icloud.error"))
+    }
+}
+
+private actor AgentToolInvocationCounter {
+    private var count = 0
+
+    func increment() {
+        count += 1
+    }
+
+    func value() -> Int {
+        count
+    }
+}
+
+private actor AgentTranscriptRecorder {
+    private var stored = [ChatMessage]()
+
+    func append(_ message: ChatMessage) {
+        stored.append(message)
+    }
+
+    func messages() -> [ChatMessage] {
+        stored
+    }
+}
+
+private actor UnadvertisedToolCallProvider: InferenceProvider {
+    nonisolated let id: ProviderID = "unadvertised-tool-test"
+    nonisolated let capabilities = ProviderCapabilities(
+        local: true,
+        toolCalling: true,
+        maxContextTokens: 4_096,
+        maxOutputTokens: 512
+    )
+    private var requests = 0
+
+    func requestCount() -> Int {
+        requests
+    }
+
+    func streamEvents(
+        _ request: ChatRequest
+    ) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
+        requests += 1
+        let requestNumber = requests
+        return AsyncThrowingStream { continuation in
+            if requestNumber == 1 {
+                continuation.yield(
+                    .toolCall(
+                        ToolCallDelta(
+                            id: "secret-call",
+                            name: "secret_tool",
+                            argumentsFragment: "{}",
+                            isComplete: true
+                        )
+                    )
+                )
+                continuation.yield(.finish(InferenceFinish(reason: .toolCall)))
+            } else {
+                continuation.yield(.token(TokenDelta(text: "Safe final response", tokenCount: 3)))
+                continuation.yield(.finish(InferenceFinish(reason: .stop)))
+            }
+            continuation.finish()
+        }
+    }
+
+    func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
+        EmbeddingResult(modelID: request.modelID, vectors: [])
+    }
+}
+
+private struct TwoToolCallProvider: InferenceProvider {
+    let id: ProviderID = "two-tool-test"
+    let capabilities = ProviderCapabilities(
+        local: true,
+        toolCalling: true,
+        maxContextTokens: 4_096,
+        maxOutputTokens: 512
+    )
+
+    func streamEvents(
+        _ request: ChatRequest
+    ) async throws -> AsyncThrowingStream<InferenceStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(
+                .toolCall(
+                    ToolCallDelta(
+                        id: "call-local",
+                        name: "local_tool",
+                        argumentsFragment: "{}",
+                        isComplete: true
+                    )
+                )
+            )
+            continuation.yield(
+                .toolCall(
+                    ToolCallDelta(
+                        id: "call-approval",
+                        name: "approval_tool",
+                        argumentsFragment: "{}",
+                        isComplete: true
+                    )
+                )
+            )
+            continuation.yield(.finish(InferenceFinish(reason: .toolCall)))
+            continuation.finish()
+        }
+    }
+
+    func embed(_ request: EmbeddingRequest) async throws -> EmbeddingResult {
+        EmbeddingResult(modelID: request.modelID, vectors: [])
     }
 }

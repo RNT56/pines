@@ -64,6 +64,7 @@ struct PinesManagedCloudService: Sendable {
         guard availability.supports(.chat) else {
             throw InferenceError.cloudNotAllowed
         }
+        try Self.validateChatWireContract(request)
         guard let url = endpoint("/v1/chat/stream") else {
             throw InferenceError.invalidRequest("Managed Pro Cloud gateway is not configured.")
         }
@@ -121,7 +122,16 @@ struct PinesManagedCloudService: Sendable {
         guard availability.supports(.tokenPreflight) else {
             throw InferenceError.cloudNotAllowed
         }
+        try Self.validateChatWireContract(request)
         return try await postJSON(ManagedCloudChatRequest(request: request), path: "/v1/tokens/count")
+    }
+
+    private static func validateChatWireContract(_ request: ChatRequest) throws {
+        guard request.messages.allSatisfy({ $0.attachments.isEmpty }) else {
+            throw InferenceError.unsupportedCapability(
+                "Managed Pro Cloud chat attachments require an upload wire contract that is not available in this build. Use local or BYOK chat, or the dedicated cloud file-analysis workflow."
+            )
+        }
     }
 
     func capabilityManifest() async throws -> ManagedCloudCapabilityManifest {

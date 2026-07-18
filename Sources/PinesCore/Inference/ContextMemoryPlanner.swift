@@ -8,6 +8,14 @@ public struct ContextMemoryPlannerRequest: Hashable, Codable, Sendable {
     public var pinnedSegments: [ContextSegment]
     public var recentSegments: [ContextSegment]
     public var retrievedVaultSegments: [ContextSegment]
+    /// All semantically retrieved evidence. The stored `retrievedVaultSegments`
+    /// name is retained for source compatibility with earlier callers and
+    /// serialized planner requests, but the planner no longer assumes every
+    /// segment in this collection came from the Vault.
+    public var retrievedEvidenceSegments: [ContextSegment] {
+        get { retrievedVaultSegments }
+        set { retrievedVaultSegments = newValue }
+    }
     public var summarySegments: [ContextSegment]
     public var compressedKVPageSegments: [ContextSegment]
     public var liveTokenBudget: Int
@@ -29,6 +37,7 @@ public struct ContextMemoryPlannerRequest: Hashable, Codable, Sendable {
         pinnedSegments: [ContextSegment] = [],
         recentSegments: [ContextSegment] = [],
         retrievedVaultSegments: [ContextSegment] = [],
+        retrievedEvidenceSegments: [ContextSegment]? = nil,
         summarySegments: [ContextSegment] = [],
         compressedKVPageSegments: [ContextSegment] = [],
         liveTokenBudget: Int? = nil,
@@ -49,7 +58,7 @@ public struct ContextMemoryPlannerRequest: Hashable, Codable, Sendable {
         self.vaultCloudApproval = vaultCloudApproval
         self.pinnedSegments = pinnedSegments
         self.recentSegments = recentSegments
-        self.retrievedVaultSegments = retrievedVaultSegments
+        self.retrievedVaultSegments = retrievedEvidenceSegments ?? retrievedVaultSegments
         self.summarySegments = summarySegments
         self.compressedKVPageSegments = compressedKVPageSegments
         self.liveTokenBudget = max(0, liveTokenBudget ?? normalizedTokenBudget)
@@ -79,7 +88,12 @@ public struct ContextMemoryPlanner: Sendable {
         let pinnedSegments = request.pinnedSegments.map {
             normalize($0, storageState: .pinnedPrompt, canSummarize: false, canEvictKV: false)
         }
-        let pinnedTokens = pinnedSegments.reduce(0) { $0 + $1.estimatedTokens }
+        let pinnedTokens = pinnedSegments.reduce(0) {
+            Self.saturatedAdd($0, $1.estimatedTokens)
+        }
+        if pinnedTokens > request.pinnedBudget {
+            notes.append("Pinned prompt exceeds its category budget and was retained as required context.")
+        }
         if pinnedTokens > request.tokenBudget {
             notes.append("Pinned prompt exceeds token budget and was retained.")
         }
@@ -95,15 +109,16 @@ public struct ContextMemoryPlanner: Sendable {
             notes: &notes
         )
 
-        let liveRecentSegments = selectBudgeted(
-            from: request.recentSegments.map {
-                normalize($0, storageState: .liveRecent, canSummarize: true, canEvictKV: true)
-            },
-            budget: min(request.liveTokenBudget, remainingTokens(request.tokenBudget, apparentTokens)),
+        // Reserve selected evidence before filling the remaining window with
+        // ordinary recent history. Otherwise a long chat can starve the very
+        // retrieval context requested for the active turn.
+        let retrievedSegments = selectRetrievedEvidence(
+            from: request.retrievedVaultSegments,
+            request: request,
             apparentTokens: &apparentTokens,
             semanticPromptTokens: &semanticPromptTokens,
             droppedSegments: &droppedSegments,
-            exhaustedReason: "live recent budget exhausted"
+            notes: &notes
         )
 
         let summarizedSegments = selectSummaries(
@@ -114,13 +129,15 @@ public struct ContextMemoryPlanner: Sendable {
             droppedSegments: &droppedSegments
         )
 
-        let retrievedSegments = selectRetrievedVault(
-            from: request.retrievedVaultSegments,
-            request: request,
+        let liveRecentSegments = selectBudgeted(
+            from: request.recentSegments.map {
+                normalize($0, storageState: .liveRecent, canSummarize: true, canEvictKV: true)
+            },
+            budget: min(request.liveTokenBudget, remainingTokens(request.tokenBudget, apparentTokens)),
             apparentTokens: &apparentTokens,
             semanticPromptTokens: &semanticPromptTokens,
             droppedSegments: &droppedSegments,
-            notes: &notes
+            exhaustedReason: "live recent budget exhausted"
         )
 
         let selectedVaultChunks = retrievedSegments.compactMap { segment in
@@ -191,7 +208,7 @@ public struct ContextMemoryPlanner: Sendable {
                 continue
             }
             selected.append(segment)
-            apparentTokens += segment.estimatedTokens
+            apparentTokens = Self.saturatedAdd(apparentTokens, segment.estimatedTokens)
         }
         return selected
     }
@@ -213,8 +230,8 @@ public struct ContextMemoryPlanner: Sendable {
             }
             selected.append(segment)
             categoryBudget -= segment.estimatedTokens
-            apparentTokens += segment.estimatedTokens
-            semanticPromptTokens += segment.estimatedTokens
+            apparentTokens = Self.saturatedAdd(apparentTokens, segment.estimatedTokens)
+            semanticPromptTokens = Self.saturatedAdd(semanticPromptTokens, segment.estimatedTokens)
         }
         return selected
     }
@@ -241,13 +258,13 @@ public struct ContextMemoryPlanner: Sendable {
             }
             selected.append(segment)
             categoryBudget -= segment.estimatedTokens
-            apparentTokens += segment.estimatedTokens
-            semanticPromptTokens += segment.estimatedTokens
+            apparentTokens = Self.saturatedAdd(apparentTokens, segment.estimatedTokens)
+            semanticPromptTokens = Self.saturatedAdd(semanticPromptTokens, segment.estimatedTokens)
         }
         return selected
     }
 
-    private func selectRetrievedVault(
+    private func selectRetrievedEvidence(
         from segments: [ContextSegment],
         request: ContextMemoryPlannerRequest,
         apparentTokens: inout Int,
@@ -267,14 +284,22 @@ public struct ContextMemoryPlanner: Sendable {
                 continue
             }
 
-            let segment = normalize(original, storageState: .retrievedVault, canSummarize: true, canEvictKV: false)
-            if request.route == ContextPlanRoute.cloud && !request.vaultCloudApproval.allows(segment.provenance) {
+            let isVault = original.source == .vaultChunk || original.storageState == .retrievedVault
+            let segment = normalize(
+                original,
+                storageState: isVault ? .retrievedVault : .retrievedReference,
+                canSummarize: true,
+                canEvictKV: false
+            )
+            if isVault,
+               request.route == ContextPlanRoute.cloud,
+               !request.vaultCloudApproval.allows(segment.provenance) {
                 droppedSegments.append(drop(segment, reason: "vault content requires cloud approval"))
                 notes.append("Cloud route excluded unapproved vault content.")
                 continue
             }
-            guard segment.provenance.hasCitationProvenance else {
-                droppedSegments.append(drop(segment, reason: "retrieved vault segment missing source provenance"))
+            guard isVault ? segment.provenance.hasCitationProvenance : segment.provenance.hasSourceReference else {
+                droppedSegments.append(drop(segment, reason: "retrieved evidence segment missing source provenance"))
                 continue
             }
             guard citationBudget > 0 else {
@@ -288,8 +313,8 @@ public struct ContextMemoryPlanner: Sendable {
             selected.append(segment)
             citationBudget -= 1
             categoryBudget -= segment.estimatedTokens
-            apparentTokens += segment.estimatedTokens
-            semanticPromptTokens += segment.estimatedTokens
+            apparentTokens = Self.saturatedAdd(apparentTokens, segment.estimatedTokens)
+            semanticPromptTokens = Self.saturatedAdd(semanticPromptTokens, segment.estimatedTokens)
         }
         return selected
     }
@@ -301,6 +326,11 @@ public struct ContextMemoryPlanner: Sendable {
         canEvictKV: Bool
     ) -> ContextSegment {
         var normalized = segment
+        normalized.estimatedTokens = max(0, normalized.estimatedTokens)
+        normalized.priority = normalized.priority.isFinite ? normalized.priority : 0
+        normalized.recencyScore = normalized.recencyScore.isFinite ? normalized.recencyScore : 0
+        normalized.retrievalScore = normalized.retrievalScore.flatMap { $0.isFinite ? $0 : nil }
+        normalized.lastAttentionMass = normalized.lastAttentionMass.flatMap { $0.isFinite ? $0 : nil }
         normalized.storageState = storageState
         normalized.canSummarize = canSummarize
         normalized.canEvictKV = canEvictKV
@@ -316,7 +346,8 @@ public struct ContextMemoryPlanner: Sendable {
     }
 
     private func remainingTokens(_ tokenBudget: Int, _ usedTokens: Int) -> Int {
-        max(0, tokenBudget - usedTokens)
+        guard tokenBudget > 0, usedTokens < tokenBudget else { return 0 }
+        return tokenBudget - max(0, usedTokens)
     }
 
     private static func sorted(_ segments: [ContextSegment]) -> [ContextSegment] {
@@ -356,6 +387,10 @@ public struct ContextMemoryPlanner: Sendable {
             return 45
         case .vaultEvidence:
             return 40
+        case .referenceEvidence:
+            return 40
+        case .attachmentReference:
+            return 42
         case .summary:
             return 35
         case .olderChat:
@@ -371,7 +406,7 @@ public struct ContextMemoryPlanner: Sendable {
             return 1_000
         case .liveRecent:
             return 100
-        case .retrievedVault:
+        case .retrievedVault, .retrievedReference:
             return 80
         case .summary:
             return 60
@@ -438,5 +473,10 @@ public struct ContextMemoryPlanner: Sendable {
             hash &*= 0x100000001b3
         }
         return String(format: "%016llx", hash)
+    }
+
+    private static func saturatedAdd(_ lhs: Int, _ rhs: Int) -> Int {
+        let (value, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int.max : value
     }
 }

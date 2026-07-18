@@ -9,6 +9,7 @@ extension PinesAppModel {
         status: PinesThreadStatus? = nil,
         updatedAt: Date? = nil
     ) -> PinesThreadPreview {
+        let messages = messages.filter { !$0.isContextOnly }
         let lastMessage = previewText(for: messages.last)
         return PinesThreadPreview(
             id: record.id,
@@ -67,6 +68,7 @@ extension PinesAppModel {
         status: PinesThreadStatus? = nil,
         updatedAt: Date = Date()
     ) -> PinesThreadPreview {
+        let messages = messages.filter { !$0.isContextOnly }
         let lastMessage = previewText(for: messages.last)
         let resolvedStatus = existing.status == .archived ? PinesThreadStatus.archived : (status ?? existing.status)
         return PinesThreadPreview(
@@ -95,7 +97,7 @@ extension PinesAppModel {
     }
 
     static func threadTokenCount(_ messages: [ChatMessage]) -> Int {
-        messages.reduce(0) { $0 + max(1, $1.content.split(separator: " ").count) }
+        messages.lazy.filter { !$0.isContextOnly }.reduce(0) { $0 + max(1, $1.content.split(separator: " ").count) }
     }
 
     static func previewText(for message: ChatMessage?) -> String? {

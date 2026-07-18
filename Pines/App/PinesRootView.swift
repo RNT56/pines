@@ -754,6 +754,9 @@ private struct CloudContextApprovalSheet: View {
                     LabeledContent("Model", value: request.modelID.rawValue)
                     LabeledContent("Vault documents", value: "\(request.documentIDs.count)")
                     LabeledContent("MCP resources", value: "\(request.mcpResourceIDs.count)")
+                    if let count = request.localTranscriptMessageCount, count > 0 {
+                        LabeledContent("Private transcript rows", value: "\(count)")
+                    }
                     LabeledContent(
                         "Context size",
                         value: ByteCountFormatter.string(
@@ -764,7 +767,7 @@ private struct CloudContextApprovalSheet: View {
                 }
 
                 Section("Privacy") {
-                    Text("Selected local vault and MCP resource context can be sent to this cloud provider for this turn.")
+                    Text("Selected local Vault, MCP resources, and private tool or retrieved context retained from earlier runs can be sent to this cloud provider for this turn.")
                         .font(theme.typography.body)
                         .foregroundStyle(theme.colors.secondaryText)
                 }
@@ -851,6 +854,35 @@ private struct MCPSamplingApprovalSheet: View {
                         .pinesExpressiveScrollHaptics()
                 }
 
+                if let systemPrompt = request.systemPrompt,
+                   !systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Section("Server-provided reference prompt") {
+                        Text(systemPrompt)
+                            .font(theme.typography.code)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .textSelection(.enabled)
+                        Text("This text is treated as untrusted reference data, never as a Pines system instruction.")
+                            .font(theme.typography.caption)
+                            .foregroundStyle(theme.colors.tertiaryText)
+                    }
+                }
+
+                if !payloadDisclosures.isEmpty {
+                    Section("Request payloads") {
+                        ForEach(Array(payloadDisclosures.enumerated()), id: \.offset) { _, disclosure in
+                            Text(disclosure)
+                                .font(theme.typography.caption)
+                                .foregroundStyle(theme.colors.secondaryText)
+                        }
+                    }
+                }
+
+                Section("Privacy & context") {
+                    Text("Pines does not add ambient chat or Vault history to MCP sampling. It tries a compatible local model first. If local sampling is unavailable and BYOK sampling is enabled for this server, the approved prompt may be sent to your configured cloud provider.")
+                        .font(theme.typography.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+
                 if let preferences = request.modelPreferences {
                     Section("Model Preferences") {
                         Text(String(describing: preferences))
@@ -872,6 +904,57 @@ private struct MCPSamplingApprovalSheet: View {
             }
         }
         .pinesDismissKeyboardOnSwipeDown()
+    }
+
+    private var payloadDisclosures: [String] {
+        request.messages.enumerated().flatMap { index, message in
+            disclosures(
+                for: message.content,
+                prefix: "Message \(index + 1) (\(message.role.rawValue))"
+            )
+        }
+    }
+
+    private func disclosures(for contents: [MCPMessageContent], prefix: String) -> [String] {
+        disclosures(for: contents, prefix: prefix, depth: 0)
+    }
+
+    private func disclosures(
+        for contents: [MCPMessageContent],
+        prefix: String,
+        depth: Int
+    ) -> [String] {
+        guard depth <= 16 else { return ["\(prefix): nested content limit exceeded"] }
+        return contents.flatMap { content -> [String] in
+            switch content {
+            case let .image(data, mimeType):
+                return ["\(prefix): image \(mimeType), approximately \(estimatedBase64DecodedBytes(data)) bytes"]
+            case let .audio(data, mimeType):
+                return ["\(prefix): audio \(mimeType), approximately \(estimatedBase64DecodedBytes(data)) bytes"]
+            case let .resource(resource):
+                if let blob = resource.blob {
+                    return ["\(prefix): resource \(resource.uri), \(resource.mimeType ?? "unknown type"), approximately \(estimatedBase64DecodedBytes(blob)) bytes"]
+                }
+                return resource.text == nil ? ["\(prefix): resource \(resource.uri)"] : []
+            case let .toolUse(id, name, _):
+                return ["\(prefix): tool use \(id) (\(name))"]
+            case let .toolResult(toolUseID, nested):
+                return disclosures(
+                    for: nested,
+                    prefix: "\(prefix), tool result \(toolUseID)",
+                    depth: depth + 1
+                )
+            case .unknown:
+                return ["\(prefix): unsupported content"]
+            case .text:
+                return []
+            }
+        }
+    }
+
+    private func estimatedBase64DecodedBytes(_ encoded: String) -> Int {
+        let count = encoded.utf8.count
+        return (count / 4) * 3 + min(2, count % 4)
     }
 }
 

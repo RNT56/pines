@@ -3021,6 +3021,35 @@ extension MLXRuntimeBridge: InferenceProvider {
     }
 }
 
+extension MLXRuntimeBridge {
+    /// Converts canonical provider messages into the narrative form accepted by the
+    /// local MLX chat adapter without losing tool-call identity or treating tool
+    /// output as trusted instructions.
+    static func localContextContent(for message: ChatMessage) -> String {
+        let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if message.role == .tool {
+            let callID = message.toolCallID ?? "unknown"
+            let name = message.toolName ?? "unknown"
+            return "untrusted_tool_result[\(callID),\(name)]=\(content)"
+        }
+        guard message.role == .assistant, !message.toolCalls.isEmpty else {
+            if message.role == .user, content.isEmpty, !message.attachments.isEmpty {
+                return "Analyze the attached content."
+            }
+            return content
+        }
+        let encodedCalls: String
+        if let data = try? JSONEncoder().encode(message.toolCalls) {
+            encodedCalls = String(decoding: data, as: UTF8.self)
+        } else {
+            encodedCalls = message.toolCalls.map(\.name).joined(separator: ",")
+        }
+        return content.isEmpty
+            ? "tool_calls=\(encodedCalls)"
+            : "\(content)\ntool_calls=\(encodedCalls)"
+    }
+}
+
 private actor MLXRuntimeState {
     private static let pressureUnloadDrainTimeoutSeconds: TimeInterval = 5
     private static let pressureUnloadDrainPollNanoseconds: UInt64 = 100_000_000
@@ -3710,23 +3739,39 @@ private actor MLXRuntimeState {
             throw InferenceError.invalidRequest("A local chat request requires a user message.")
         }
         let latestUser = request.messages[latestUserIndex]
-        let latestPrompt = latestUser.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !latestPrompt.isEmpty else {
+        let latestPrompt = Self.localContextContent(for: latestUser)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !latestPrompt.isEmpty || !latestUser.attachments.isEmpty else {
             throw InferenceError.invalidRequest("A local chat request requires a non-empty user message.")
         }
         let instructions = request.messages
             .filter { $0.role == .system }
             .map(\.content)
             .joined(separator: "\n\n")
-        let imageURLs = latestUser.attachments.compactMap { attachment -> URL? in
-            guard attachment.kind == .image, let localURL = attachment.localURL else { return nil }
-            return localURL
+        var collectedImageURLsByMessageID = [UUID: [URL]]()
+        var collectedVideoURLsByMessageID = [UUID: [URL]]()
+        var collectedAudioURLsByMessageID = [UUID: [URL]]()
+        for message in request.messages {
+            collectedImageURLsByMessageID[message.id] = message.attachments.compactMap { attachment in
+                guard attachment.kind == .image else { return nil }
+                return attachment.localURL
+            }
+            collectedVideoURLsByMessageID[message.id] = message.attachments.compactMap { attachment in
+                guard attachment.kind == .video else { return nil }
+                return attachment.localURL
+            }
+            collectedAudioURLsByMessageID[message.id] = message.attachments.compactMap { attachment in
+                guard attachment.kind == .audio else { return nil }
+                return attachment.localURL
+            }
         }
-        let audioURLs = latestUser.attachments.compactMap { attachment -> URL? in
-            guard attachment.kind == .audio, let localURL = attachment.localURL else { return nil }
-            return localURL
-        }
-        if !audioURLs.isEmpty && !profile.audioEnabled {
+        let imageURLsByMessageID = collectedImageURLsByMessageID
+        let videoURLsByMessageID = collectedVideoURLsByMessageID
+        let audioURLsByMessageID = collectedAudioURLsByMessageID
+        let hasVisionInput = imageURLsByMessageID.values.contains(where: { !$0.isEmpty })
+            || videoURLsByMessageID.values.contains(where: { !$0.isEmpty })
+        let hasAudioInput = audioURLsByMessageID.values.contains(where: { !$0.isEmpty })
+        if hasAudioInput && !profile.audioEnabled {
             throw InferenceError.unsupportedCapability("Audio input is disabled for this local runtime profile.")
         }
         let partitionSummary = activePartitionSummary
@@ -3735,6 +3780,7 @@ private actor MLXRuntimeState {
         let install = activeInstall
         let toolSpecs = request.allowsTools ? Self.mlxToolSpecs(from: request.availableTools) : nil
         let stopStrings = activeStopStrings
+        let hasCanonicalContextReceipt = request.contextLineageMetadata[ChatContextMetadataKeys.strategy] != nil
         let generationCancellation = MLXGenerationCancellationBox()
         activeGenerationCancellation = generationCancellation
         activeGenerationSoftMemoryWarningCount = 0
@@ -3759,14 +3805,19 @@ private actor MLXRuntimeState {
 	                                finish: InferenceFinish?,
 	                                terminalFailureEmitted: Bool
 	                            ) in
-                        let images = imageURLs.map(UserInput.Image.url)
-                        let audio = audioURLs.map(UserInput.Audio.url)
+                        let imagesByMessageID = imageURLsByMessageID.mapValues { $0.map(UserInput.Image.url) }
+                        let videosByMessageID = videoURLsByMessageID.mapValues { $0.map(UserInput.Video.url) }
+                        let audioByMessageID = audioURLsByMessageID.mapValues { $0.map(UserInput.Audio.url) }
                         var tokenCount = 0
                         var finish: InferenceFinish?
                         let generationSafety = try deviceMonitor.requireLocalGenerationSafety()
-                        let initialHistoryCharacterBudget = Self.localHistoryCharacterBudget(
-                            maxContextTokens: profile.quantization.maxKVSize
-                        )
+                        // Canonical requests were already packed atomically.
+                        // Do not silently run a second, character-based
+                        // truncation pass that can change evidence or tool
+                        // protocol semantics after the receipt was issued.
+                        let initialHistoryCharacterBudget = hasCanonicalContextReceipt
+                            ? Int.max
+                            : Self.localHistoryCharacterBudget(maxContextTokens: profile.quantization.maxKVSize)
                         let initialGenerationAvailableMemoryBytes = deviceMonitor.memoryCounters().availableMemoryBytes
                         var generationPlan = LocalGenerationPipelinePlan(
                             requestedCompletionTokens: request.sampling.maxTokens,
@@ -3787,22 +3838,35 @@ private actor MLXRuntimeState {
                                     contentsOf: Self.agentChatHistory(
                                         from: historyMessages[...],
                                         latestUserID: latestUser.id,
-                                        latestUserImages: images,
-                                        latestUserAudio: audio,
+                                        imagesByMessageID: imagesByMessageID,
+                                        videosByMessageID: videosByMessageID,
+                                        audioByMessageID: audioByMessageID,
                                         maxCharacters: historyCharacterBudget,
-                                        latestUserMaxCharacters: Self.localAgentLatestUserCharacterBudget(
-                                            maxContextTokens: profile.quantization.maxKVSize
-                                        )
+                                        latestUserMaxCharacters: hasCanonicalContextReceipt
+                                            ? Int.max
+                                            : Self.localAgentLatestUserCharacterBudget(
+                                                maxContextTokens: profile.quantization.maxKVSize
+                                            )
                                     )
                                 )
                             } else {
                                 messages.append(
                                     contentsOf: Self.chatHistory(
                                         from: historyMessages[...],
-                                        maxCharacters: historyCharacterBudget
+                                        maxCharacters: historyCharacterBudget,
+                                        imagesByMessageID: imagesByMessageID,
+                                        videosByMessageID: videosByMessageID,
+                                        audioByMessageID: audioByMessageID
                                     )
                                 )
-                                messages.append(.user(latestPrompt, images: images, videos: [], audio: audio))
+                                messages.append(
+                                    .user(
+                                        latestPrompt,
+                                        images: imagesByMessageID[latestUser.id] ?? [],
+                                        videos: videosByMessageID[latestUser.id] ?? [],
+                                        audio: audioByMessageID[latestUser.id] ?? []
+                                    )
+                                )
                             }
                             return messages
                         }
@@ -3817,6 +3881,7 @@ private actor MLXRuntimeState {
                         var input = try await context.processor.prepare(input: userInput)
                         while let maxContextTokens = profile.quantization.maxKVSize,
                               input.text.tokens.size + generationPlan.reservedCompletionTokens > maxContextTokens,
+                              !hasCanonicalContextReceipt,
                               historyCharacterBudget > 0 {
                             reducedHistoryForContext = true
                             preflightAttempts += 1
@@ -4117,8 +4182,8 @@ private actor MLXRuntimeState {
                             promptTokenIDs: promptTokenIDs,
                             profile: profile,
                             hasTools: hasToolSpecs,
-                            hasVisionInput: !imageURLs.isEmpty,
-                            hasAudioInput: !audioURLs.isEmpty
+                            hasVisionInput: hasVisionInput,
+                            hasAudioInput: hasAudioInput
                         )
                         let promptCacheKey: LocalPromptKVCacheKey?
                         let promptCacheStoreEligible: Bool
@@ -5562,7 +5627,8 @@ private actor MLXRuntimeState {
 
     private static func localHistoryCharacterBudget(maxContextTokens: Int?) -> Int {
         guard let maxContextTokens else { return 24_000 }
-        return min(96_000, max(24_000, maxContextTokens * 2))
+        let (doubled, overflow) = max(0, maxContextTokens).multipliedReportingOverflow(by: 2)
+        return min(96_000, max(24_000, overflow ? Int.max : doubled))
     }
 
     private static func localAgentLatestUserCharacterBudget(maxContextTokens: Int?) -> Int {
@@ -5572,13 +5638,17 @@ private actor MLXRuntimeState {
 
     private static func chatHistory(
         from messages: ArraySlice<ChatMessage>,
-        maxCharacters: Int = 24_000
+        maxCharacters: Int = 24_000,
+        imagesByMessageID: [UUID: [UserInput.Image]] = [:],
+        videosByMessageID: [UUID: [UserInput.Video]] = [:],
+        audioByMessageID: [UUID: [UserInput.Audio]] = [:]
     ) -> [Chat.Message] {
         var selected = [Chat.Message]()
         var remaining = maxCharacters
 
         for message in messages.reversed() {
-            let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            let content = localContextContent(for: message)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !content.isEmpty, message.role != .system else { continue }
             guard remaining > 0 else { break }
 
@@ -5596,7 +5666,14 @@ private actor MLXRuntimeState {
             case .tool:
                 selected.append(.tool(clippedContent))
             case .user:
-                selected.append(.user(clippedContent))
+                selected.append(
+                    .user(
+                        clippedContent,
+                        images: imagesByMessageID[message.id] ?? [],
+                        videos: videosByMessageID[message.id] ?? [],
+                        audio: audioByMessageID[message.id] ?? []
+                    )
+                )
             case .system:
                 break
             }
@@ -5608,20 +5685,23 @@ private actor MLXRuntimeState {
     private static func agentChatHistory(
         from messages: ArraySlice<ChatMessage>,
         latestUserID: UUID,
-        latestUserImages: [UserInput.Image],
-        latestUserAudio: [UserInput.Audio],
+        imagesByMessageID: [UUID: [UserInput.Image]],
+        videosByMessageID: [UUID: [UserInput.Video]],
+        audioByMessageID: [UUID: [UserInput.Audio]],
         maxCharacters: Int = 24_000,
         latestUserMaxCharacters: Int = 8_000
     ) -> [Chat.Message] {
         let indexed = messages.enumerated().map { (offset: $0.offset, message: $0.element) }
         let latestUser = indexed.first { $0.message.id == latestUserID }
-        let latestUserContent = latestUser?.message.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let latestUserContent = (latestUser.map { localContextContent(for: $0.message) })?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var selected = [(offset: Int, message: ChatMessage)]()
         let clippedLatestUserContent = clippedAgentContent(latestUserContent, maxCharacters: latestUserMaxCharacters)
         var remaining = max(0, maxCharacters - clippedLatestUserContent.count)
 
         for item in indexed.reversed() where item.message.id != latestUserID {
-            let content = item.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            let content = localContextContent(for: item.message)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !content.isEmpty, item.message.role != .system else { continue }
             guard remaining > 0 else { break }
             var message = item.message
@@ -5651,14 +5731,20 @@ private actor MLXRuntimeState {
                 case .tool:
                     return .tool(content)
                 case .user:
-                    if item.message.id == latestUserID {
-                        return .user(content, images: latestUserImages, videos: [], audio: latestUserAudio)
-                    }
-                    return .user(content)
+                    return .user(
+                        content,
+                        images: imagesByMessageID[item.message.id] ?? [],
+                        videos: videosByMessageID[item.message.id] ?? [],
+                        audio: audioByMessageID[item.message.id] ?? []
+                    )
                 case .system:
                     return nil
                 }
             }
+    }
+
+    static func localContextContent(for message: ChatMessage) -> String {
+        MLXRuntimeBridge.localContextContent(for: message)
     }
 
     private static func clippedAgentContent(_ content: String, maxCharacters: Int) -> String {

@@ -611,7 +611,7 @@ extension PinesAppModel {
         var lastAssistant: ChatMessage?
         repeat {
             let messages = try await repository.messages(in: conversationID)
-            lastAssistant = messages.last { $0.role == .assistant }
+            lastAssistant = messages.last { $0.role == .assistant && !$0.isContextOnly }
             if lastAssistant?.persistedMessageStatus != .streaming {
                 return lastAssistant
             }

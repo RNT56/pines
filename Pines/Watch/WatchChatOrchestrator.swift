@@ -31,6 +31,7 @@ struct WatchChatOrchestrator {
         let selectedMessages: [WatchChatMessage]
         if let selectedID {
             selectedMessages = try await repository.messages(in: selectedID)
+                .filter { !$0.isContextOnly }
                 .suffix(40)
                 .map(Self.watchMessage(from:))
         } else {
@@ -131,7 +132,7 @@ struct WatchChatOrchestrator {
                     if let existingUserIndex = existingMessages.firstIndex(where: { $0.id == input.clientMessageID }) {
                         if let existingAssistant = existingMessages
                             .dropFirst(existingUserIndex + 1)
-                            .first(where: { $0.role == .assistant }) {
+                            .first(where: { $0.role == .assistant && !$0.isContextOnly }) {
                             continuation.yield(
                                 WatchChatRunUpdate(
                                     runID: runID,
@@ -190,11 +191,11 @@ struct WatchChatOrchestrator {
                         )
                     )
 
-                    var messages = try await repository.messages(in: conversationID)
+                    let messages = try await repository.messages(in: conversationID)
                     let isLocalProvider = providerSelection.providerID == services.mlxRuntime.localProviderID
-                    if isLocalProvider, let vaultContext = await vaultContextMessage(for: trimmed) {
-                        messages.insert(vaultContext.message, at: 0)
-                    }
+                    let vaultContext = isLocalProvider
+                        ? await vaultContextEvidence(for: trimmed, conversationID: conversationID)?.evidence ?? []
+                        : []
 
                     // Normal chat should not advertise globally registered agent tools unless a tool mode opts in.
                     let availableTools: [AnyToolSpec] = []
@@ -205,12 +206,43 @@ struct WatchChatOrchestrator {
                         settings = nil
                         Self.logger.error("watch_chat_settings_load_failed error=\(error.localizedDescription, privacy: .public)")
                     }
+                    let sampling = chatSampling(for: providerSelection.providerID, settings: settings)
+                    let contextWindow: Int?
+                    if isLocalProvider {
+                        let configured = AppSettingsSnapshot.normalizedLocalContextTokens(
+                            settings?.localMaxContextTokens ?? AppSettingsSnapshot.defaultLocalMaxContextTokens
+                        )
+                        contextWindow = providerSelection.provider.capabilities.maxContextTokens
+                            .map { min(configured, $0) }
+                            ?? configured
+                    } else {
+                        contextWindow = providerSelection.provider.capabilities.maxContextTokens
+                    }
+                    let contextAssembly = try ChatContextAssembler.assemble(
+                        ChatContextAssemblyInput(
+                            transcript: messages,
+                            evidence: vaultContext,
+                            anchorMessageID: input.clientMessageID,
+                            requiredUserMessageIDs: [input.clientMessageID],
+                            policy: ChatContextAssemblyPolicy(
+                                contextWindowTokens: contextWindow,
+                                reservedCompletionTokens: sampling.maxTokens ?? 1_024,
+                                route: isLocalProvider ? .local : .cloud
+                            )
+                        )
+                    )
                     let request = ChatRequest(
                         modelID: providerSelection.modelID,
-                        messages: messages,
-                        sampling: chatSampling(for: providerSelection.providerID, settings: settings),
+                        messages: contextAssembly.messages,
+                        sampling: sampling,
                         allowsTools: !availableTools.isEmpty,
-                        availableTools: availableTools
+                        availableTools: availableTools,
+                        executionContext: .chat,
+                        contextWindowTokens: contextWindow,
+                        trustedInstructionIDs: Set(
+                            contextAssembly.messages.lazy.filter { $0.role == .system }.map(\.id)
+                        ),
+                        contextLineageMetadata: contextAssembly.providerMetadata
                     )
                     let session = AgentSession(
                         title: "Watch Chat",
@@ -230,7 +262,7 @@ struct WatchChatOrchestrator {
                     let stream = runner.run(session: session, request: request, provider: providerSelection.provider)
                     var didReceiveTerminalEvent = false
                     var didFail = false
-                    var finalProviderMetadata = [String: String]()
+                    var finalProviderMetadata = contextAssembly.providerMetadata
                     var lastPersistedAt = Date.distantPast
                     var lastDeliveredAt = Date.distantPast
                     var lastPersistedTokenCount = 0
@@ -396,11 +428,13 @@ struct WatchChatOrchestrator {
                         case let .failure(failure):
                             didReceiveTerminalEvent = true
                             didFail = true
+                            finalProviderMetadata.merge(failure.providerMetadata) { _, new in new }
                             try await repository.updateMessage(
                                 id: pendingAssistant.id,
                                 content: failure.message,
                                 status: .failed,
-                                tokenCount: tokenCount
+                                tokenCount: tokenCount,
+                                providerMetadata: finalProviderMetadata
                             )
                             continuation.yield(
                                 WatchChatRunUpdate(
@@ -669,8 +703,23 @@ struct WatchChatOrchestrator {
         return "\(message)\n\nProvider diagnostics: \(diagnostics.joined(separator: ", "))"
     }
 
-    private func vaultContextMessage(for query: String) async -> (message: ChatMessage, documentIDs: [UUID])? {
-        await services.vaultRetrievalService?.contextMessage(for: query, limit: 4)
+    private func vaultContextEvidence(
+        for query: String,
+        conversationID: UUID
+    ) async -> (evidence: [ChatContextEvidence], documentIDs: [UUID])? {
+        guard let conversationRepository = services.conversationRepository,
+              let projectRepository = services.projectRepository,
+              let projectID = (try? await conversationRepository.listConversations())?
+                .first(where: { $0.id == conversationID })?.projectID,
+              let project = (try? await projectRepository.listProjects())?
+                .first(where: { $0.id == projectID }),
+              project.vaultEnabled
+        else { return nil }
+        return await services.vaultRetrievalService?.contextEvidence(
+            for: query,
+            projectID: projectID,
+            limit: 4
+        )
     }
 
     private func uniqueDocumentIDs(from results: [VaultSearchResult]) -> [UUID] {
