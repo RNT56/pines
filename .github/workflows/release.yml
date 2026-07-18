@@ -28,6 +28,11 @@ jobs:
     name: Validate release
     runs-on: macos-26
     timeout-minutes: 120
+    env:
+      PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS: 180
+      PINES_XCODE_TEST_TIMEOUT_SECONDS: 720
+      PINES_XCODE_TEST_ATTEMPTS: 1
+      PINES_XCODE_UI_TEST_MODE: smoke
 
     outputs:
       tag: ${{ steps.release-tag.outputs.tag }}

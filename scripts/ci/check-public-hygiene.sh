@@ -41,6 +41,7 @@ bash scripts/ci/check-mlx-package-pins.sh
 bash scripts/ci/check-privacy-manifest.sh
 bash scripts/ci/check-security-boundaries.sh
 bash scripts/ci/check-action-pins.sh
+bash scripts/ci/check-xcode-workflow-contracts.sh
 
 echo "Checking tracked files for common secret patterns..."
 github_oauth="gh""o_"
