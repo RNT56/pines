@@ -517,9 +517,12 @@ Run Xcode validation for app-facing, project-generation, or dependency graph cha
 bash scripts/ci/run-xcode-validation.sh
 ```
 
-The default local run executes the complete `PinesUITests` target. Required CI uses
-five independently bounded critical-journey shards so a slow hosted simulator cannot
-consume one shared watchdog for the whole suite. Reproduce that exact CI selection with:
+The default local run executes the complete `PinesUITests` target. Required CI and
+release validation use seven independently bounded critical-journey shards so a slow
+hosted simulator cannot consume one shared watchdog for the whole suite. Each hosted
+shard gets a fresh simulator clone and one bounded retry on another fresh clone if the
+first XCUITest process fails; deterministic failures must fail both attempts. Reproduce
+that exact test selection locally with:
 
 ```sh
 PINES_XCODE_UI_TEST_MODE=smoke bash scripts/ci/run-xcode-validation.sh
