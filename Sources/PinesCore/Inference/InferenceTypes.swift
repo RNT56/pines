@@ -1106,12 +1106,14 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         openAIResponseStorage: OpenAIResponseStorage = .stateful,
         cloudWebSearchMode: CloudWebSearchMode = .off
     ) {
-        self.maxTokens = maxTokens
-        self.temperature = temperature
-        self.topP = topP
-        self.topK = topK
-        self.minP = minP
-        self.repetitionPenalty = repetitionPenalty
+        self.maxTokens = maxTokens.map { max(1, $0) }
+        self.temperature = Self.normalizedFinite(temperature, default: 0.6, range: 0...2)
+        self.topP = Self.normalizedFinite(topP, default: 1, range: 0.0001...1)
+        self.topK = max(0, topK)
+        self.minP = Self.normalizedFinite(minP, default: 0, range: 0...1)
+        self.repetitionPenalty = repetitionPenalty.flatMap { value in
+            value.isFinite && value > 0 ? value : nil
+        }
         self.openAIReasoningEffort = openAIReasoningEffort
         self.openAITextVerbosity = openAITextVerbosity
         self.anthropicEffort = anthropicEffort
@@ -1136,6 +1138,23 @@ public struct ChatSampling: Hashable, Codable, Sendable {
         geminiThinkingLevel = try container.decodeIfPresent(GeminiThinkingLevel.self, forKey: .geminiThinkingLevel) ?? .medium
         openAIResponseStorage = try container.decodeIfPresent(OpenAIResponseStorage.self, forKey: .openAIResponseStorage) ?? .stateful
         cloudWebSearchMode = try container.decodeIfPresent(CloudWebSearchMode.self, forKey: .cloudWebSearchMode) ?? .off
+        maxTokens = maxTokens.map { max(1, $0) }
+        temperature = Self.normalizedFinite(temperature, default: 0.6, range: 0...2)
+        topP = Self.normalizedFinite(topP, default: 1, range: 0.0001...1)
+        topK = max(0, topK)
+        minP = Self.normalizedFinite(minP, default: 0, range: 0...1)
+        repetitionPenalty = repetitionPenalty.flatMap { value in
+            value.isFinite && value > 0 ? value : nil
+        }
+    }
+
+    private static func normalizedFinite(
+        _ value: Float,
+        default defaultValue: Float,
+        range: ClosedRange<Float>
+    ) -> Float {
+        guard value.isFinite else { return defaultValue }
+        return min(range.upperBound, max(range.lowerBound, value))
     }
 }
 
@@ -1520,6 +1539,9 @@ public struct ChatRequest: Hashable, Codable, Sendable {
     public enum ExecutionContext: String, Hashable, Codable, Sendable {
         case chat
         case agent
+        /// Protocol-initiated sampling must honor the caller's output ceiling
+        /// exactly and never inherit interactive-chat token floors.
+        case sampling
     }
 
     public var id: UUID
@@ -1534,6 +1556,19 @@ public struct ChatRequest: Hashable, Codable, Sendable {
     public var availableTools: [AnyToolSpec]
     public var vaultContextIDs: [UUID]
     public var executionContext: ExecutionContext
+    /// Resolved model input+output window used by every recursive assembly
+    /// step. Nil deliberately means "unknown" and activates the conservative
+    /// assembler fallback rather than an optimistic guessed window.
+    public var contextWindowTokens: Int?
+    /// Explicit caller-owned trust root for system messages. Provider or
+    /// persisted metadata must never promote a transcript row into this set.
+    public var trustedInstructionIDs: Set<UUID>
+    /// Receipt from the first durable-transcript assembly. Recursive agent
+    /// steps retain it as lineage while reporting their own current packing.
+    public var contextLineageMetadata: [String: String]
+    /// Current control-plane grant for private rows already admitted into this
+    /// request. Persisted message metadata cannot substitute for these IDs.
+    public var approvedPrivateMessageIDs: Set<UUID>
     public var openAIResponseOptions: OpenAIResponseRequestOptions?
     public var geminiOptions: GeminiRequestOptions?
     public var anthropicOptions: AnthropicRequestOptions?
@@ -1552,6 +1587,10 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         availableTools: [AnyToolSpec] = [],
         vaultContextIDs: [UUID] = [],
         executionContext: ExecutionContext = .chat,
+        contextWindowTokens: Int? = nil,
+        trustedInstructionIDs: Set<UUID> = [],
+        contextLineageMetadata: [String: String] = [:],
+        approvedPrivateMessageIDs: Set<UUID> = [],
         openAIResponseOptions: OpenAIResponseRequestOptions? = nil,
         geminiOptions: GeminiRequestOptions? = nil,
         anthropicOptions: AnthropicRequestOptions? = nil,
@@ -1569,6 +1608,10 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         self.availableTools = availableTools
         self.vaultContextIDs = vaultContextIDs
         self.executionContext = executionContext
+        self.contextWindowTokens = contextWindowTokens.map { max(1, $0) }
+        self.trustedInstructionIDs = trustedInstructionIDs
+        self.contextLineageMetadata = contextLineageMetadata
+        self.approvedPrivateMessageIDs = approvedPrivateMessageIDs
         self.openAIResponseOptions = openAIResponseOptions
         self.geminiOptions = geminiOptions
         self.anthropicOptions = anthropicOptions
@@ -1588,6 +1631,10 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         case availableTools
         case vaultContextIDs
         case executionContext
+        case contextWindowTokens
+        case trustedInstructionIDs
+        case contextLineageMetadata
+        case approvedPrivateMessageIDs
         case openAIResponseOptions
         case geminiOptions
         case anthropicOptions
@@ -1608,6 +1655,10 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         availableTools = try container.decodeIfPresent([AnyToolSpec].self, forKey: .availableTools) ?? []
         vaultContextIDs = try container.decodeIfPresent([UUID].self, forKey: .vaultContextIDs) ?? []
         executionContext = try container.decodeIfPresent(ExecutionContext.self, forKey: .executionContext) ?? .chat
+        contextWindowTokens = try container.decodeIfPresent(Int.self, forKey: .contextWindowTokens).map { max(1, $0) }
+        trustedInstructionIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .trustedInstructionIDs) ?? []
+        contextLineageMetadata = try container.decodeIfPresent([String: String].self, forKey: .contextLineageMetadata) ?? [:]
+        approvedPrivateMessageIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .approvedPrivateMessageIDs) ?? []
         openAIResponseOptions = try container.decodeIfPresent(OpenAIResponseRequestOptions.self, forKey: .openAIResponseOptions)
         geminiOptions = try container.decodeIfPresent(GeminiRequestOptions.self, forKey: .geminiOptions)
         anthropicOptions = try container.decodeIfPresent(AnthropicRequestOptions.self, forKey: .anthropicOptions)
@@ -1618,24 +1669,47 @@ public struct ChatRequest: Hashable, Codable, Sendable {
         messages: [ChatMessage]? = nil,
         allowsTools: Bool? = nil,
         availableTools: [AnyToolSpec]? = nil,
-        executionContext: ExecutionContext? = nil
+        executionContext: ExecutionContext? = nil,
+        trustedInstructionIDs: Set<UUID>? = nil,
+        contextLineageMetadata: [String: String]? = nil,
+        approvedPrivateMessageIDs: Set<UUID>? = nil,
+        strippingAllTooling: Bool = false
     ) -> ChatRequest {
-        ChatRequest(
+        var nextSampling = sampling
+        var nextOpenAIResponseOptions = openAIResponseOptions
+        var nextAnthropicOptions = anthropicOptions
+        if strippingAllTooling {
+            nextSampling.cloudWebSearchMode = .off
+            if var options = nextOpenAIResponseOptions {
+                options.hostedTools = []
+                options.vectorStoreIDs = []
+                nextOpenAIResponseOptions = options
+            }
+            if var options = nextAnthropicOptions {
+                options.hostedTools = []
+                nextAnthropicOptions = options
+            }
+        }
+        return ChatRequest(
             id: id,
             modelID: modelID,
             messages: messages ?? self.messages,
-            sampling: sampling,
-            webSearchOptions: webSearchOptions,
+            sampling: nextSampling,
+            webSearchOptions: strippingAllTooling ? nil : webSearchOptions,
             structuredOutput: structuredOutput,
-            hostedTools: hostedTools,
+            hostedTools: strippingAllTooling ? [] : hostedTools,
             openAIOptions: openAIOptions,
-            allowsTools: allowsTools ?? self.allowsTools,
-            availableTools: availableTools ?? self.availableTools,
+            allowsTools: strippingAllTooling ? false : (allowsTools ?? self.allowsTools),
+            availableTools: strippingAllTooling ? [] : (availableTools ?? self.availableTools),
             vaultContextIDs: vaultContextIDs,
             executionContext: executionContext ?? self.executionContext,
-            openAIResponseOptions: openAIResponseOptions,
+            contextWindowTokens: contextWindowTokens,
+            trustedInstructionIDs: trustedInstructionIDs ?? self.trustedInstructionIDs,
+            contextLineageMetadata: contextLineageMetadata ?? self.contextLineageMetadata,
+            approvedPrivateMessageIDs: approvedPrivateMessageIDs ?? self.approvedPrivateMessageIDs,
+            openAIResponseOptions: nextOpenAIResponseOptions,
             geminiOptions: geminiOptions,
-            anthropicOptions: anthropicOptions,
+            anthropicOptions: nextAnthropicOptions,
             openRouterOptions: openRouterOptions
         )
     }

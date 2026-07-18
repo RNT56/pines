@@ -1115,7 +1115,7 @@ public struct OpenAICompatibleRequestBuilder: Sendable {
         ]
         if let maxTokens = request.sampling.maxTokens {
             body[usesReasoningChatParameters ? "max_completion_tokens" : "max_tokens"] = usesReasoningChatParameters
-                ? max(maxTokens, Self.reasoningDefaultMaxCompletionTokens)
+                ? (request.executionContext == .sampling ? maxTokens : max(maxTokens, Self.reasoningDefaultMaxCompletionTokens))
                 : maxTokens
         }
         if !usesReasoningChatParameters {

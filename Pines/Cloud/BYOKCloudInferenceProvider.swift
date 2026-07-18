@@ -1099,7 +1099,7 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
         }
     }
 
-    private static func anthropicWebSearchToolObject(options: CloudWebSearchOptions?) -> [String: Any] {
+    static func anthropicWebSearchToolObject(options: CloudWebSearchOptions?) -> [String: Any] {
         let resolvedOptions = options ?? CloudWebSearchOptions()
         var tool: [String: Any] = [
             "type": "web_search_20250305",
@@ -1425,6 +1425,9 @@ struct BYOKCloudInferenceProvider: InferenceProvider {
 
     private func openAICompletionTokenLimit(for chatRequest: ChatRequest, usesReasoningParameters: Bool) -> Int {
         let requested = chatRequest.sampling.maxTokens ?? 1024
+        if chatRequest.executionContext == .sampling {
+            return requested
+        }
         guard usesReasoningParameters else { return requested }
         return max(requested, Self.openAIReasoningDefaultMaxCompletionTokens)
     }

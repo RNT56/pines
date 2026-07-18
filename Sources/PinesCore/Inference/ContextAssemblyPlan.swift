@@ -58,7 +58,9 @@ public struct ContextAssemblyPlan: Hashable, Codable, Sendable, Identifiable {
         self.schemaVersion = schemaVersion
         self.id = id
         self.strategy = strategy
-        self.tokenBudget = max(0, tokenBudget ?? exactInputTokens + reservedCompletionTokens)
+        // tokenBudget is always the input/prompt budget. Completion reserve is
+        // recorded separately so every producer reports the same unit.
+        self.tokenBudget = max(0, tokenBudget ?? exactInputTokens)
         self.plannedTokens = max(0, plannedTokens ?? exactInputTokens)
         self.pinnedPromptTokens = max(0, pinnedPromptTokens)
         self.includedRecentMessageCount = max(0, includedRecentMessageCount)
@@ -148,7 +150,7 @@ public struct ContextAssemblyPlan: Hashable, Codable, Sendable, Identifiable {
         tokenBudget = max(
             0,
             try container.decodeIfPresent(Int.self, forKey: .tokenBudget)
-                ?? decodedExactInputTokens + decodedReservedCompletionTokens
+                ?? decodedExactInputTokens
         )
         plannedTokens = max(
             0,
@@ -157,7 +159,9 @@ public struct ContextAssemblyPlan: Hashable, Codable, Sendable, Identifiable {
         pinnedPromptTokens = max(
             0,
             try container.decodeIfPresent(Int.self, forKey: .pinnedPromptTokens)
-                ?? decodedPinnedSegments.reduce(0) { $0 + $1.estimatedTokens }
+                ?? decodedPinnedSegments.reduce(0) {
+                    Self.saturatedAdd($0, max(0, $1.estimatedTokens))
+                }
         )
         includedRecentMessageCount = max(
             0,
@@ -212,6 +216,11 @@ public struct ContextAssemblyPlan: Hashable, Codable, Sendable, Identifiable {
         try container.encode(clippedMessageIDs, forKey: .clippedMessageIDs)
         try container.encode(explanation, forKey: .explanation)
     }
+
+    private static func saturatedAdd(_ lhs: Int, _ rhs: Int) -> Int {
+        let (value, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int.max : value
+    }
 }
 
 public enum ContextSegmentSource: String, Hashable, Codable, Sendable, CaseIterable {
@@ -220,6 +229,10 @@ public enum ContextSegmentSource: String, Hashable, Codable, Sendable, CaseItera
     case toolSchema
     case userPreference
     case vaultChunk
+    case mcpResource
+    case mcpServerPrompt
+    case attachmentManifest
+    case referenceData
     case summary
     case compressedKVPage
     case toolOutput
@@ -235,6 +248,8 @@ public enum ContextSegmentRole: String, Hashable, Codable, Sendable, CaseIterabl
     case recentAssistantMessage
     case olderChat
     case vaultEvidence
+    case referenceEvidence
+    case attachmentReference
     case toolOutput
     case summary
     case snapshotReference
@@ -245,6 +260,7 @@ public enum ContextStorageState: String, Hashable, Codable, Sendable, CaseIterab
     case pinnedPrompt
     case liveRecent
     case retrievedVault
+    case retrievedReference
     case summary
     case dropped
     case compressedKVPage
@@ -442,6 +458,9 @@ public struct ContextSegment: Identifiable, Hashable, Codable, Sendable {
         }
         if storageState == .retrievedVault && !provenance.hasCitationProvenance {
             errors.append("retrieved vault segment requires source provenance")
+        }
+        if storageState == .retrievedReference && !provenance.hasSourceReference {
+            errors.append("retrieved reference segment requires source provenance")
         }
         if storageState == .dropped && dropReason?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
             errors.append("dropped segment requires dropReason")

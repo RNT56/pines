@@ -256,7 +256,7 @@ struct TurboQuantWave4ContextMemoryTests {
         #expect(decoded.id == "wave2-plan")
         #expect(decoded.planID == "wave2-plan")
         #expect(decoded.strategy == "mlx-current-history-v1")
-        #expect(decoded.tokenBudget == 640)
+        #expect(decoded.tokenBudget == 512)
         #expect(decoded.plannedTokens == 512)
         #expect(decoded.pinnedSegments.isEmpty)
         #expect(decoded.liveRecentSegments.isEmpty)

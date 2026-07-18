@@ -225,7 +225,9 @@ public struct MCPClientFeaturePolicy: Hashable, Codable, Sendable {
     public var initializeCapabilities: JSONValue {
         var capabilities = [String: JSONValue]()
         if samplingEnabled {
-            capabilities["sampling"] = .object([:])
+            capabilities["sampling"] = .object([
+                "tools": .object([:]),
+            ])
         }
         return .object(capabilities)
     }

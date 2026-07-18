@@ -723,6 +723,10 @@ actor GRDBPinesStore:
                 WHERE messages_fts MATCH ?
                     AND c.deleted_at IS NULL
                     AND m.deleted_at IS NULL
+                    AND CASE
+                        WHEN m.provider_metadata_json IS NULL OR json_valid(m.provider_metadata_json) = 0 THEN 1
+                        ELSE COALESCE(json_extract(m.provider_metadata_json, '$."pines.context.only"'), 'false') != 'true'
+                    END
                     AND m.role != ?
                 ORDER BY bm25(messages_fts)
                 LIMIT ?
@@ -1955,7 +1959,11 @@ actor GRDBPinesStore:
     }
 
     func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, profileID: String?, limit: Int) async throws -> [VaultSearchResult] {
-        try await search(query: query, embedding: embedding, embeddingModelID: embeddingModelID, profileID: profileID, limit: limit, options: .default)
+        try await search(query: query, embedding: embedding, embeddingModelID: embeddingModelID, profileID: profileID, projectID: nil, limit: limit)
+    }
+
+    func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, profileID: String?, projectID: UUID?, limit: Int) async throws -> [VaultSearchResult] {
+        try await search(query: query, embedding: embedding, embeddingModelID: embeddingModelID, profileID: profileID, projectID: projectID, limit: limit, options: .default)
     }
 
     private func search(
@@ -1963,6 +1971,7 @@ actor GRDBPinesStore:
         embedding: [Float]?,
         embeddingModelID: ModelID?,
         profileID: String?,
+        projectID: UUID?,
         limit: Int,
         options: VaultSearchOptions
     ) async throws -> [VaultSearchResult] {
@@ -1972,6 +1981,7 @@ actor GRDBPinesStore:
                 embedding: embedding,
                 embeddingModelID: embeddingModelID,
                 profileID: profileID,
+                projectID: projectID,
                 limit: normalizedLimit,
                 options: options
             )
@@ -1980,13 +1990,14 @@ actor GRDBPinesStore:
             }
         }
 
-        return try await fullTextSearch(query: query, limit: normalizedLimit, options: options)
+        return try await fullTextSearch(query: query, projectID: projectID, limit: normalizedLimit, options: options)
     }
 
     private func vectorSearch(
         embedding: [Float],
         embeddingModelID: ModelID?,
         profileID: String?,
+        projectID: UUID?,
         limit: Int,
         options: VaultSearchOptions
     ) async throws -> [VaultSearchResult] {
@@ -2024,6 +2035,7 @@ actor GRDBPinesStore:
                         FROM vault_embeddings e
                         JOIN vault_documents d ON d.id = e.document_id
                         WHERE e.dimensions = ? AND e.profile_id = ? AND d.sync_state != ?
+                          AND (? IS NULL OR d.project_id = ?)
                         ORDER BY e.chunk_id ASC
                         LIMIT ? OFFSET ?
                         """,
@@ -2031,6 +2043,8 @@ actor GRDBPinesStore:
                             embedding.count,
                             profileID,
                             SyncState.deleted.rawValue,
+                            projectID?.uuidString,
+                            projectID?.uuidString,
                             batchSize,
                             offset,
                         ]
@@ -2043,6 +2057,7 @@ actor GRDBPinesStore:
                         FROM vault_embeddings e
                         JOIN vault_documents d ON d.id = e.document_id
                         WHERE e.dimensions = ? AND e.embedding_model_id = ? AND d.sync_state != ?
+                          AND (? IS NULL OR d.project_id = ?)
                         ORDER BY e.chunk_id ASC
                         LIMIT ? OFFSET ?
                         """,
@@ -2050,6 +2065,8 @@ actor GRDBPinesStore:
                             embedding.count,
                             embeddingModelID.rawValue,
                             SyncState.deleted.rawValue,
+                            projectID?.uuidString,
+                            projectID?.uuidString,
                             batchSize,
                             offset,
                         ]
@@ -2062,12 +2079,15 @@ actor GRDBPinesStore:
                         FROM vault_embeddings e
                         JOIN vault_documents d ON d.id = e.document_id
                         WHERE e.dimensions = ? AND d.sync_state != ?
+                          AND (? IS NULL OR d.project_id = ?)
                         ORDER BY e.chunk_id ASC
                         LIMIT ? OFFSET ?
                         """,
                         arguments: [
                             embedding.count,
                             SyncState.deleted.rawValue,
+                            projectID?.uuidString,
+                            projectID?.uuidString,
                             batchSize,
                             offset,
                         ]
@@ -2165,7 +2185,7 @@ actor GRDBPinesStore:
             let detailRows = try Row.fetchAll(
                 db,
                 sql: """
-                SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.text, c.token_estimate, d.title, d.source_type, d.updated_at
+                SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.text, c.token_estimate, d.title, d.source_type, d.updated_at, d.project_id
                 FROM vault_chunks c
                 JOIN vault_documents d ON d.id = c.document_id
                 WHERE c.id IN (\(placeholders)) AND d.sync_state != ?
@@ -2187,7 +2207,7 @@ actor GRDBPinesStore:
         }
     }
 
-    private func fullTextSearch(query: String, limit: Int, options: VaultSearchOptions) async throws -> [VaultSearchResult] {
+    private func fullTextSearch(query: String, projectID: UUID?, limit: Int, options: VaultSearchOptions) async throws -> [VaultSearchResult] {
         return try await database.read { db in
             let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
             let ftsQuery = Self.safeFTSQuery(from: normalizedQuery)
@@ -2197,28 +2217,29 @@ actor GRDBPinesStore:
                 rows = try Row.fetchAll(
                     db,
                     sql: """
-                    SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.text, c.token_estimate, d.title, d.source_type, d.updated_at
+                    SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.text, c.token_estimate, d.title, d.source_type, d.updated_at, d.project_id
                     FROM vault_chunks c
                     JOIN vault_documents d ON d.id = c.document_id
-                    WHERE d.sync_state != ?
+                    WHERE d.sync_state != ? AND (? IS NULL OR d.project_id = ?)
                     ORDER BY d.updated_at DESC, c.ordinal ASC
                     LIMIT ?
                     """,
-                    arguments: [SyncState.deleted.rawValue, candidateLimit]
+                    arguments: [SyncState.deleted.rawValue, projectID?.uuidString, projectID?.uuidString, candidateLimit]
                 )
             } else {
                 rows = try Row.fetchAll(
                     db,
                     sql: """
-                    SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.text, c.token_estimate, d.title, d.source_type, d.updated_at
+                    SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.text, c.token_estimate, d.title, d.source_type, d.updated_at, d.project_id
                     FROM vault_chunks_fts f
                     JOIN vault_chunks c ON c.id = f.chunk_id
                     JOIN vault_documents d ON d.id = c.document_id
                     WHERE vault_chunks_fts MATCH ? AND d.sync_state != ?
+                      AND (? IS NULL OR d.project_id = ?)
                     ORDER BY bm25(vault_chunks_fts)
                     LIMIT ?
                     """,
-                    arguments: [ftsQuery!, SyncState.deleted.rawValue, candidateLimit]
+                    arguments: [ftsQuery!, SyncState.deleted.rawValue, projectID?.uuidString, projectID?.uuidString, candidateLimit]
                 )
             }
 
@@ -3625,7 +3646,12 @@ actor GRDBPinesStore:
             LEFT JOIN messages lm ON lm.id = (
                 SELECT id
                 FROM messages
-                WHERE conversation_id = c.id AND deleted_at IS NULL
+                WHERE conversation_id = c.id
+                    AND deleted_at IS NULL
+                    AND CASE
+                        WHEN provider_metadata_json IS NULL OR json_valid(provider_metadata_json) = 0 THEN 1
+                        ELSE COALESCE(json_extract(provider_metadata_json, '$."pines.context.only"'), 'false') != 'true'
+                    END
                 ORDER BY created_at DESC
                 LIMIT 1
             )
@@ -3634,6 +3660,10 @@ actor GRDBPinesStore:
                 FROM messages
                 WHERE conversation_id = c.id
                     AND deleted_at IS NULL
+                    AND CASE
+                        WHEN provider_metadata_json IS NULL OR json_valid(provider_metadata_json) = 0 THEN 1
+                        ELSE COALESCE(json_extract(provider_metadata_json, '$."pines.context.only"'), 'false') != 'true'
+                    END
                     AND role IN ('user', 'assistant')
                     AND TRIM(content) != ''
                 ORDER BY
@@ -3653,6 +3683,10 @@ actor GRDBPinesStore:
                     ) AS token_count
                 FROM messages
                 WHERE deleted_at IS NULL
+                    AND CASE
+                        WHEN provider_metadata_json IS NULL OR json_valid(provider_metadata_json) = 0 THEN 1
+                        ELSE COALESCE(json_extract(provider_metadata_json, '$."pines.context.only"'), 'false') != 'true'
+                    END
                 GROUP BY conversation_id
             ) stats ON stats.conversation_id = c.id
             WHERE c.deleted_at IS NULL

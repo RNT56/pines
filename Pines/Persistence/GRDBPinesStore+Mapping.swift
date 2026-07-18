@@ -448,7 +448,8 @@ extension GRDBPinesStore {
             title: row["title"],
             sourceType: row["source_type"],
             updatedAt: Date(timeIntervalSinceReferenceDate: row["updated_at"]),
-            chunkCount: 0
+            chunkCount: 0,
+            projectID: (row["project_id"] as String?).flatMap(UUID.init(uuidString:))
         )
         let chunk = VaultChunk(
             id: row["chunk_id"],

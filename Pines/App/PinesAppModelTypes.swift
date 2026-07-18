@@ -150,14 +150,6 @@ struct PinesThreadPreview: Identifiable, Hashable {
     let updatedLabel: String
     let tokenCount: Int
 
-    var request: ChatRequest {
-        ChatRequest(
-            modelID: modelID,
-            messages: messages,
-            allowsTools: false,
-            vaultContextIDs: []
-        )
-    }
 }
 
 struct PinesProjectPreview: Identifiable, Hashable {

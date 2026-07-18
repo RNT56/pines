@@ -444,6 +444,7 @@ public protocol VaultRepository: Sendable {
     func search(query: String, embedding: [Float]?, limit: Int) async throws -> [VaultSearchResult]
     func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, limit: Int) async throws -> [VaultSearchResult]
     func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, profileID: String?, limit: Int) async throws -> [VaultSearchResult]
+    func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, profileID: String?, projectID: UUID?, limit: Int) async throws -> [VaultSearchResult]
 }
 
 public extension VaultRepository {
@@ -541,6 +542,56 @@ public extension VaultRepository {
 
     func search(query: String, embedding: [Float]?, embeddingModelID: ModelID?, profileID: String?, limit: Int) async throws -> [VaultSearchResult] {
         try await search(query: query, embedding: embedding, embeddingModelID: embeddingModelID, limit: limit)
+    }
+
+    func search(
+        query: String,
+        embedding: [Float]?,
+        embeddingModelID: ModelID?,
+        profileID: String?,
+        projectID: UUID?,
+        limit: Int
+    ) async throws -> [VaultSearchResult] {
+        guard limit > 0 else { return [] }
+        guard let projectID else {
+            return try await search(
+                query: query,
+                embedding: embedding,
+                embeddingModelID: embeddingModelID,
+                profileID: profileID,
+                limit: limit
+            )
+        }
+        let documents = try await listDocuments()
+        let projectDocumentIDs = Set(documents.lazy.filter { $0.projectID == projectID }.map(\.id))
+        guard !projectDocumentIDs.isEmpty else { return [] }
+
+        // A compatibility repository cannot apply the project predicate in
+        // its ranking query. Fetching an arbitrary multiple of `limit` can
+        // therefore miss every in-project result when many globally higher
+        // ranked chunks belong to other projects. Count the complete search
+        // domain and filter it instead. Production stores override this API
+        // and push the predicate into SQL, so this correctness fallback is not
+        // on the normal hot path.
+        var candidateLimit = 0
+        for document in documents {
+            let storedChunks = try await chunks(documentID: document.id)
+            let storedChunkCount = storedChunks.count
+            guard candidateLimit <= Int.max - storedChunkCount else {
+                candidateLimit = Int.max
+                break
+            }
+            candidateLimit += storedChunkCount
+        }
+        candidateLimit = max(limit, candidateLimit)
+        let candidates = try await search(
+            query: query,
+            embedding: embedding,
+            embeddingModelID: embeddingModelID,
+            profileID: profileID,
+            limit: candidateLimit
+        )
+        return Array(candidates.lazy.filter { projectDocumentIDs.contains($0.document.id) }.prefix(limit))
     }
 }
 

@@ -4,13 +4,16 @@ import PinesCore
 struct AgentRuntimeCallbacks: Sendable {
     let approvalHandler: @Sendable (ToolApprovalRequest) async -> ToolApprovalStatus
     let activityHandler: @Sendable (AgentActivityEvent) async -> Void
+    let transcriptHandler: @Sendable (ChatMessage) async throws -> Void
 
     init(
         approvalHandler: @escaping @Sendable (ToolApprovalRequest) async -> ToolApprovalStatus = { _ in .denied },
-        activityHandler: @escaping @Sendable (AgentActivityEvent) async -> Void = { _ in }
+        activityHandler: @escaping @Sendable (AgentActivityEvent) async -> Void = { _ in },
+        transcriptHandler: @escaping @Sendable (ChatMessage) async throws -> Void = { _ in }
     ) {
         self.approvalHandler = approvalHandler
         self.activityHandler = activityHandler
+        self.transcriptHandler = transcriptHandler
     }
 }
 
@@ -41,7 +44,8 @@ struct DefaultAgentRuntimeFactory: AgentRuntimeFactory {
             policyGate: policyGate,
             auditRepository: auditRepository,
             approvalHandler: callbacks.approvalHandler,
-            activityHandler: callbacks.activityHandler
+            activityHandler: callbacks.activityHandler,
+            transcriptHandler: callbacks.transcriptHandler
         )
     }
 }
@@ -127,24 +131,32 @@ struct AgentRunner: AgentRuntime {
     let auditRepository: (any AuditEventRepository)?
     let approvalHandler: @Sendable (ToolApprovalRequest) async -> ToolApprovalStatus
     let activityHandler: @Sendable (AgentActivityEvent) async -> Void
+    let transcriptHandler: @Sendable (ChatMessage) async throws -> Void
 
     init(
         toolRegistry: ToolRegistry,
         policyGate: ToolPolicyGate,
         auditRepository: (any AuditEventRepository)?,
         approvalHandler: @escaping @Sendable (ToolApprovalRequest) async -> ToolApprovalStatus = { _ in .denied },
-        activityHandler: @escaping @Sendable (AgentActivityEvent) async -> Void = { _ in }
+        activityHandler: @escaping @Sendable (AgentActivityEvent) async -> Void = { _ in },
+        transcriptHandler: @escaping @Sendable (ChatMessage) async throws -> Void = { _ in }
     ) {
         self.toolRegistry = toolRegistry
         self.policyGate = policyGate
         self.auditRepository = auditRepository
         self.approvalHandler = approvalHandler
         self.activityHandler = activityHandler
+        self.transcriptHandler = transcriptHandler
     }
 
     private struct SkippedToolCall {
         var toolCall: ToolCallDelta
         var reason: String
+    }
+
+    private struct TranscriptPersistenceFailure: LocalizedError, Sendable {
+        var detail: String
+        var errorDescription: String? { "Could not persist the agent tool transcript: \(detail)" }
     }
 
     private static func availableTools(
@@ -219,6 +231,57 @@ struct AgentRunner: AgentRuntime {
                 var messages = request.messages
                 let executionContext = request.executionContext
                 let isAgentContext = executionContext == .agent
+                var contextLineageMetadata = request.contextLineageMetadata
+                var latestContextMetadata = Self.metadataWithContextLineage(
+                    current: [:],
+                    lineage: contextLineageMetadata
+                )
+                var transcriptSequence = 0
+                var trustedInstructionIDs = request.trustedInstructionIDs
+                var approvedPrivateMessageIDs = request.approvedPrivateMessageIDs
+                let toolContextPrivacy: ContextPrivacyBoundary = provider.capabilities.local
+                    ? .localOnly
+                    : .approvedForCloud
+
+                func persistTranscript(_ message: ChatMessage) async throws {
+                    do {
+                        try await transcriptHandler(message)
+                    } catch {
+                        throw TranscriptPersistenceFailure(detail: error.localizedDescription)
+                    }
+                }
+
+                func completePendingToolExchange(reason: String) async throws {
+                    guard let assistantIndex = messages.lastIndex(where: {
+                        $0.role == .assistant && !$0.toolCalls.isEmpty
+                    }) else { return }
+                    let following = messages.index(after: assistantIndex)..<messages.endIndex
+                    guard messages[following].allSatisfy({ $0.role == .tool }) else { return }
+                    let completedIDs = Set(messages[following].compactMap(\.toolCallID))
+                    let pendingCalls = messages[assistantIndex].toolCalls.filter { !completedIDs.contains($0.id) }
+                    for toolCall in pendingCalls {
+                        var result = ChatMessage(
+                            role: .tool,
+                            content: Self.toolErrorJSON(
+                                message: "Tool execution stopped before this call completed. \(reason)"
+                            ),
+                            toolCallID: toolCall.id,
+                            toolName: toolCall.name,
+                            providerMetadata: [
+                                ChatContextEvidenceMetadataKeys.trustLevel: ChatContextTrustLevel.untrusted.rawValue,
+                                ChatContextEvidenceMetadataKeys.sourceKind: ChatContextSourceKind.toolResult.rawValue,
+                                ChatContextEvidenceMetadataKeys.privacyBoundary: toolContextPrivacy.rawValue,
+                            ]
+                        )
+                        result.providerMetadata[ChatTranscriptMetadataKeys.contextSequence] = String(transcriptSequence)
+                        transcriptSequence += 1
+                        messages.append(result)
+                        if !provider.capabilities.local {
+                            approvedPrivateMessageIDs.insert(result.id)
+                        }
+                        try await persistTranscript(result)
+                    }
+                }
 
                 do {
                     var step = 0
@@ -239,26 +302,99 @@ struct AgentRunner: AgentRuntime {
                         }
                     }
 
+                    func assembledRequest(
+                        messages sourceMessages: [ChatMessage],
+                        allowsTools: Bool,
+                        availableTools: [AnyToolSpec],
+                        includesHostedTools: Bool = true
+                    ) throws -> ChatRequest {
+                        let anchorID = request.messages.last(where: { $0.role == .user })?.id
+                        let trustedInstructions = sourceMessages.filter {
+                            $0.role == .system
+                                && trustedInstructionIDs.contains($0.id)
+                        }
+                        let currentTrustedInstructionIDs = Set(trustedInstructions.map(\.id))
+                        let assembly = try ChatContextAssembler.assemble(
+                            ChatContextAssemblyInput(
+                                transcript: sourceMessages.filter { !currentTrustedInstructionIDs.contains($0.id) },
+                                trustedInstructions: trustedInstructions,
+                                availableTools: allowsTools ? availableTools : [],
+                                hostedTools: includesHostedTools
+                                    ? ChatRequestContextAccounting.hostedTools(for: request)
+                                    : [],
+                                structuredOutput: request.structuredOutput,
+                                additionalRequestOverheadTokens: includesHostedTools
+                                    ? ChatRequestContextAccounting.additionalRequestOverheadTokens(for: request)
+                                    : 0,
+                                anchorMessageID: anchorID,
+                                requiredUserMessageIDs: anchorID.map { Set([$0]) } ?? [],
+                                policy: ChatContextAssemblyPolicy(
+                                    contextWindowTokens: request.contextWindowTokens ?? provider.capabilities.maxContextTokens,
+                                    reservedCompletionTokens: request.sampling.maxTokens ?? 1_024,
+                                    route: provider.capabilities.local ? .local : .cloud,
+                                    approvedPrivateMessageIDs: approvedPrivateMessageIDs
+                                )
+                            )
+                        )
+                        if contextLineageMetadata.isEmpty {
+                            contextLineageMetadata = assembly.providerMetadata
+                        }
+                        latestContextMetadata = Self.metadataWithContextLineage(
+                            current: assembly.providerMetadata,
+                            lineage: contextLineageMetadata
+                        )
+                        return request.replacing(
+                            messages: assembly.messages,
+                            allowsTools: allowsTools,
+                            availableTools: availableTools,
+                            executionContext: executionContext,
+                            trustedInstructionIDs: currentTrustedInstructionIDs,
+                            contextLineageMetadata: contextLineageMetadata,
+                            approvedPrivateMessageIDs: approvedPrivateMessageIDs,
+                            strippingAllTooling: !includesHostedTools
+                        )
+                    }
+
+                    func finishWithContextMetadata(_ finish: InferenceFinish) -> InferenceFinish {
+                        var metadata = latestContextMetadata
+                        metadata.merge(finish.providerMetadata) { _, new in new }
+                        return InferenceFinish(
+                            reason: finish.reason,
+                            message: finish.message,
+                            providerMetadata: metadata
+                        )
+                    }
+
+                    func failureWithContextMetadata(_ failure: InferenceStreamFailure) -> InferenceStreamFailure {
+                        var metadata = latestContextMetadata
+                        metadata.merge(failure.providerMetadata) { _, new in new }
+                        return InferenceStreamFailure(
+                            code: failure.code,
+                            message: failure.message,
+                            recoverable: failure.recoverable,
+                            providerMetadata: metadata
+                        )
+                    }
+
                     func synthesizeFinalAnswer(reason: String) async throws {
                         guard isAgentContext else {
                             throw AgentError.toolLimitExceeded
                         }
                         try enforceWallTimeLimit()
                         var synthesisMessages = messages
-                        synthesisMessages.insert(
-                            ChatMessage(
+                        let synthesisInstruction = ChatMessage(
                                 role: .system,
                                 content: """
                                 Agent final response required. Do not call tools. Answer the user's inquiry using only the gathered tool evidence in this conversation. Write a processed response, not raw tool output. Cite source URLs when available. If the evidence is incomplete, say what is known and what could not be verified. Reason: \(reason)
                                 """
-                            ),
-                            at: 0
-                        )
-                        let synthesisRequest = request.replacing(
+                            ).asTrustedContextInstruction
+                        trustedInstructionIDs.insert(synthesisInstruction.id)
+                        synthesisMessages.insert(synthesisInstruction, at: 0)
+                        let synthesisRequest = try assembledRequest(
                             messages: synthesisMessages,
                             allowsTools: false,
                             availableTools: [],
-                            executionContext: executionContext
+                            includesHostedTools: false
                         )
                         var finalText = ""
                         do {
@@ -275,7 +411,10 @@ struct AgentRunner: AgentRuntime {
                                         finalText = fallback
                                         continuation.yield(.token(TokenDelta(text: fallback, tokenCount: 1)))
                                     }
-                                    continuation.yield(.finish(finish.reason == .cancelled ? finish : InferenceFinish(reason: .stop, providerMetadata: finish.providerMetadata)))
+                                    let normalizedFinish = finish.reason == .cancelled
+                                        ? finish
+                                        : InferenceFinish(reason: .stop, providerMetadata: finish.providerMetadata)
+                                    continuation.yield(.finish(finishWithContextMetadata(normalizedFinish)))
                                     continuation.finish()
                                     return
                                 case .toolCall:
@@ -286,7 +425,7 @@ struct AgentRunner: AgentRuntime {
                                     if Self.hasToolEvidence(messages) {
                                         throw AgentError.toolLimitExceeded
                                     }
-                                    continuation.yield(.failure(failure))
+                                    continuation.yield(.failure(failureWithContextMetadata(failure)))
                                     continuation.finish()
                                     return
                                 }
@@ -301,7 +440,7 @@ struct AgentRunner: AgentRuntime {
                             }
                             let fallback = Self.fallbackAnswer(from: messages, request: request)
                             continuation.yield(.token(TokenDelta(text: fallback, tokenCount: 1)))
-                            continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                            continuation.yield(.finish(finishWithContextMetadata(InferenceFinish(reason: .stop))))
                             continuation.finish()
                             return
                         }
@@ -323,7 +462,7 @@ struct AgentRunner: AgentRuntime {
                             let fallback = Self.fallbackAnswer(from: messages, request: request)
                             continuation.yield(.token(TokenDelta(text: fallback, tokenCount: 1)))
                         }
-                        continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                        continuation.yield(.finish(finishWithContextMetadata(InferenceFinish(reason: .stop))))
                         continuation.finish()
                     }
 
@@ -351,11 +490,10 @@ struct AgentRunner: AgentRuntime {
                             try await synthesizeFinalAnswer(reason: "The agent reached the tool-call budget.")
                             return
                         }
-                        let currentRequest = request.replacing(
+                        let currentRequest = try assembledRequest(
                             messages: messages,
                             allowsTools: request.allowsTools && !availableTools.isEmpty,
-                            availableTools: availableTools,
-                            executionContext: executionContext
+                            availableTools: availableTools
                         )
                         let stream = try await provider.streamEvents(currentRequest)
 
@@ -381,7 +519,7 @@ struct AgentRunner: AgentRuntime {
                                     try await synthesizeFinalAnswer(reason: "The model stopped after gathering evidence: \(failure.message)")
                                     return
                                 }
-                                continuation.yield(.failure(failure))
+                                continuation.yield(.failure(failureWithContextMetadata(failure)))
                                 continuation.finish()
                                 return
                             default:
@@ -395,22 +533,53 @@ struct AgentRunner: AgentRuntime {
                                     continuation.yield(.token(delta))
                                 }
                             }
-                            continuation.yield(.finish(pendingFinish ?? InferenceFinish(reason: .stop)))
+                            continuation.yield(.finish(finishWithContextMetadata(pendingFinish ?? InferenceFinish(reason: .stop))))
                             continuation.finish()
                             return
                         }
 
-                        let selection: (executable: [ToolCallDelta], skipped: [SkippedToolCall])
+                        let invalidCalls = completedToolCalls
+                            .filter {
+                                $0.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    || $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            }
+                            .map {
+                                SkippedToolCall(
+                                    toolCall: $0,
+                                    reason: "Blocked a malformed tool call with a missing identifier or name."
+                                )
+                            }
+                        let structurallyValidCalls = completedToolCalls.filter {
+                            !$0.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        }
+                        let advertisedNames = request.allowsTools
+                            ? Set(availableTools.map(\.name))
+                            : []
+                        let advertisedCalls = structurallyValidCalls.filter { advertisedNames.contains($0.name) }
+                        let unadvertisedCalls = structurallyValidCalls
+                            .filter { !advertisedNames.contains($0.name) }
+                            .map {
+                                SkippedToolCall(
+                                    toolCall: $0,
+                                    reason: "Blocked \($0.name) because it was not advertised for this model step."
+                                )
+                            }
+                        let budgetedSelection: (executable: [ToolCallDelta], skipped: [SkippedToolCall])
                         if isAgentContext {
-                            selection = Self.executableToolCalls(
-                                from: completedToolCalls,
+                            budgetedSelection = Self.executableToolCalls(
+                                from: advertisedCalls,
                                 remainingToolCalls: max(0, session.policy.maxToolCalls - toolCalls),
                                 remainingSearchCalls: max(0, Self.maxSearchCalls - searchCalls),
                                 repeatedToolCalls: &repeatedToolCalls
                             )
                         } else {
-                            selection = (executable: completedToolCalls, skipped: [])
+                            budgetedSelection = (executable: advertisedCalls, skipped: [])
                         }
+                        let selection = (
+                            executable: budgetedSelection.executable,
+                            skipped: invalidCalls + unadvertisedCalls + budgetedSelection.skipped
+                        )
                         for skipped in selection.skipped {
                             await activityHandler(
                                 Self.activityEvent(
@@ -425,20 +594,43 @@ struct AgentRunner: AgentRuntime {
                             )
                         }
                         guard !selection.executable.isEmpty else {
-                            try await synthesizeFinalAnswer(reason: selection.skipped.first?.reason ?? "The agent could not run more tools.")
+                            let reason = selection.skipped.first?.reason ?? "The model did not request an executable tool."
+                            if isAgentContext {
+                                try await synthesizeFinalAnswer(reason: reason)
+                            } else {
+                                continuation.yield(
+                                    .failure(
+                                        failureWithContextMetadata(
+                                            InferenceStreamFailure(
+                                                code: "unadvertised_tool_call",
+                                                message: reason,
+                                                recoverable: false
+                                            )
+                                        )
+                                    )
+                                )
+                                continuation.finish()
+                            }
                             return
                         }
                         toolCalls += selection.executable.count
                         searchCalls += selection.executable.filter { $0.name == "web.search" }.count
 
-                        messages.append(
-                            ChatMessage(
-                                role: .assistant,
-                                content: assistantText,
-                                toolCalls: selection.executable,
-                                providerMetadata: pendingFinish?.providerMetadata ?? [:]
-                            )
+                        var assistantToolMessage = ChatMessage(
+                            role: .assistant,
+                            content: assistantText,
+                            toolCalls: selection.executable,
+                            providerMetadata: pendingFinish?.providerMetadata ?? [:]
                         )
+                        assistantToolMessage.providerMetadata[ChatTranscriptMetadataKeys.contextSequence] = String(transcriptSequence)
+                        assistantToolMessage.providerMetadata[ChatContextEvidenceMetadataKeys.privacyBoundary] =
+                            toolContextPrivacy.rawValue
+                        transcriptSequence += 1
+                        messages.append(assistantToolMessage)
+                        if !provider.capabilities.local {
+                            approvedPrivateMessageIDs.insert(assistantToolMessage.id)
+                        }
+                        try await persistTranscript(assistantToolMessage)
 
                         for toolCall in selection.executable {
                             try enforceWallTimeLimit()
@@ -534,33 +726,81 @@ struct AgentRunner: AgentRuntime {
                                     completedAt: Date()
                                 )
                             )
-                            messages.append(
-                                ChatMessage(
-                                    role: .tool,
-                                    content: outputJSON,
-                                    toolCallID: toolCall.id,
-                                    toolName: toolCall.name
-                                )
+                            var toolResultMessage = ChatMessage(
+                                role: .tool,
+                                content: outputJSON,
+                                toolCallID: toolCall.id,
+                                toolName: toolCall.name,
+                                providerMetadata: [
+                                    ChatContextEvidenceMetadataKeys.trustLevel: ChatContextTrustLevel.untrusted.rawValue,
+                                    ChatContextEvidenceMetadataKeys.sourceKind: ChatContextSourceKind.toolResult.rawValue,
+                                    ChatContextEvidenceMetadataKeys.privacyBoundary: toolContextPrivacy.rawValue,
+                                ]
                             )
+                            toolResultMessage.providerMetadata[ChatTranscriptMetadataKeys.contextSequence] = String(transcriptSequence)
+                            transcriptSequence += 1
+                            messages.append(toolResultMessage)
+                            if !provider.capabilities.local {
+                                approvedPrivateMessageIDs.insert(toolResultMessage.id)
+                            }
+                            try await persistTranscript(toolResultMessage)
                         }
                         if let skippedReason = selection.skipped.first?.reason {
-                            try await synthesizeFinalAnswer(reason: skippedReason)
+                            if isAgentContext {
+                                try await synthesizeFinalAnswer(reason: skippedReason)
+                            } else {
+                                continuation.yield(
+                                    .failure(
+                                        failureWithContextMetadata(
+                                            InferenceStreamFailure(
+                                                code: "unadvertised_tool_call",
+                                                message: skippedReason,
+                                                recoverable: false
+                                            )
+                                        )
+                                    )
+                                )
+                                continuation.finish()
+                            }
                             return
                         }
                     }
 
                     try await synthesizeFinalAnswer(reason: "The agent reached the step limit.")
                 } catch is CancellationError {
-                    continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
+                    continuation.yield(.finish(InferenceFinish(reason: .cancelled, providerMetadata: latestContextMetadata)))
                     continuation.finish()
                 } catch InferenceError.cancelled {
-                    continuation.yield(.finish(InferenceFinish(reason: .cancelled)))
+                    continuation.yield(.finish(InferenceFinish(reason: .cancelled, providerMetadata: latestContextMetadata)))
                     continuation.finish()
                 } catch {
-                    if isAgentContext, Self.hasToolEvidence(messages) {
+                    if !(error is TranscriptPersistenceFailure), isAgentContext, Self.hasToolEvidence(messages) {
+                        do {
+                            try await completePendingToolExchange(reason: error.localizedDescription)
+                        } catch {
+                            continuation.yield(
+                                .failure(
+                                    InferenceStreamFailure(
+                                        code: "agent_run_failed",
+                                        message: error.localizedDescription,
+                                        recoverable: false,
+                                        providerMetadata: latestContextMetadata
+                                    )
+                                )
+                            )
+                            continuation.finish()
+                            return
+                        }
                         let fallback = Self.fallbackAnswer(from: messages, request: request)
                         continuation.yield(.token(TokenDelta(text: fallback, tokenCount: 1)))
-                        continuation.yield(.finish(InferenceFinish(reason: .stop)))
+                        continuation.yield(
+                            .finish(
+                                InferenceFinish(
+                                    reason: .stop,
+                                    providerMetadata: latestContextMetadata
+                                )
+                            )
+                        )
                         continuation.finish()
                         return
                     }
@@ -569,7 +809,8 @@ struct AgentRunner: AgentRuntime {
                             InferenceStreamFailure(
                                 code: "agent_run_failed",
                                 message: error.localizedDescription,
-                                recoverable: false
+                                recoverable: false,
+                                providerMetadata: latestContextMetadata
                             )
                         )
                     )
@@ -581,6 +822,26 @@ struct AgentRunner: AgentRuntime {
                 task.cancel()
             }
         }
+    }
+
+    private static func metadataWithContextLineage(
+        current: [String: String],
+        lineage: [String: String]
+    ) -> [String: String] {
+        var metadata = current
+        let mappings = [
+            (ChatContextMetadataKeys.originalMessageCount, ChatContextMetadataKeys.lineageOriginalMessageCount),
+            (ChatContextMetadataKeys.includedMessageCount, ChatContextMetadataKeys.lineageIncludedMessageCount),
+            (ChatContextMetadataKeys.droppedMessageCount, ChatContextMetadataKeys.lineageDroppedMessageCount),
+            (ChatContextMetadataKeys.clippedMessageCount, ChatContextMetadataKeys.lineageClippedMessageCount),
+            (ChatTranscriptMetadataKeys.droppedMessageCount, ChatContextMetadataKeys.lineageTranscriptDroppedMessageCount),
+            (ChatContextEvidenceMetadataKeys.evidenceCount, ChatContextMetadataKeys.lineageEvidenceCount),
+            (ChatContextEvidenceMetadataKeys.evidenceSources, ChatContextMetadataKeys.lineageEvidenceSources),
+        ]
+        for (source, destination) in mappings {
+            metadata[destination] = lineage[source]
+        }
+        return metadata
     }
 
     private static func activityEvent(
@@ -786,10 +1047,6 @@ struct AgentRunner: AgentRuntime {
                 rawOutputJSON: rawOutputJSON
             )
         }
-        let untrusted = spec.permissions.contains(.network) || spec.permissions.contains(.browser) || spec.name.hasPrefix("mcp.")
-        guard untrusted else {
-            return rawOutputJSON
-        }
         let envelope = ToolResultEnvelope(
             invocationID: invocation.id,
             toolName: invocation.toolName,
@@ -816,9 +1073,13 @@ struct AgentRunner: AgentRuntime {
     }
 
     private static func toolErrorJSON(_ error: any Error) -> String {
+        toolErrorJSON(message: error.localizedDescription)
+    }
+
+    private static func toolErrorJSON(message: String) -> String {
         let payload: [String: Any] = [
             "error": true,
-            "message": error.localizedDescription,
+            "message": message,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else {
             return #"{"error":true,"message":"Tool failed."}"#
@@ -834,4 +1095,5 @@ struct AgentRunner: AgentRuntime {
             []
         }
     }
+
 }

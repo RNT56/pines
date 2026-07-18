@@ -113,14 +113,19 @@ public enum ManagedCloudPolicy {
         local: false,
         streaming: true,
         textGeneration: true,
-        vision: true,
-        imageInputs: true,
-        audioInputs: true,
+        // Ordinary managed-cloud chat currently serializes `ChatRequest`
+        // directly and has no attachment upload/inline-data wire contract.
+        // Advertising these inputs would route local file URLs to a remote
+        // gateway that cannot read them. Dedicated file/media endpoints remain
+        // available through their separately gated features.
+        vision: false,
+        imageInputs: false,
+        audioInputs: false,
         audioOutputs: true,
-        videoInputs: true,
-        pdfInputs: true,
-        textDocumentInputs: true,
-        files: true,
+        videoInputs: false,
+        pdfInputs: false,
+        textDocumentInputs: false,
+        files: false,
         embeddings: true,
         toolCalling: true,
         hostedTools: true,
