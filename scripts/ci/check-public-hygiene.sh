@@ -43,6 +43,7 @@ bash scripts/ci/check-security-boundaries.sh
 bash scripts/ci/check-action-pins.sh
 bash scripts/ci/check-xcode-workflow-contracts.sh
 bash scripts/ci/test-xcode-ui-shard-retry.sh
+bash scripts/ci/test-select-xcode.sh
 
 echo "Checking tracked files for common secret patterns..."
 github_oauth="gh""o_"

@@ -19,7 +19,7 @@ Jobs:
 - `core-verification`: `PinesCoreTestRunner` with automatic resolution disabled.
 - `xcode-project`: XcodeGen project snapshotting, generated-project drift check, locked package resolution from `Pines.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`, unsigned generic iOS build, simulator build-for-testing, simulator runtime smoke tests, generated-project restoration, and final package lockfile drift checks.
 
-The Xcode job uses the `macos-26` GitHub-hosted runner and verifies the full iOS and watchOS build destinations needed by the `Pines` and `PinesWatch` schemes before running project validation. SDK visibility from `xcodebuild -showsdks` is not sufficient for the generic device builds on hosted runners, so the workflow installs missing platform payloads only when the actual scheme destinations are unavailable. CI requires an available iPhone simulator for runtime smoke tests; local runs can still skip simulator execution with `PINES_SKIP_SIMULATOR_TEST_RUN=1`. Regenerate `Pines.xcodeproj` with `bash scripts/ci/xcodegen.sh generate`; the wrapper pins XcodeGen `2.45.4` and verifies the release checksum so local and CI scheme output stay aligned.
+The Xcode job uses the `macos-26` GitHub-hosted runner and prefers the image-maintained stable `/Applications/Xcode.app`; versioned stable installs are fallbacks and prerelease installs are last. This avoids silently selecting the oldest versioned Xcode from the runner image. The job verifies the full iOS and watchOS build destinations needed by the `Pines` and `PinesWatch` schemes before running project validation. SDK visibility from `xcodebuild -showsdks` is not sufficient for the generic device builds on hosted runners, so the workflow installs missing platform payloads only when the actual scheme destinations are unavailable. CI requires an available iPhone simulator for runtime smoke tests; local runs can still skip simulator execution with `PINES_SKIP_SIMULATOR_TEST_RUN=1`. Regenerate `Pines.xcodeproj` with `bash scripts/ci/xcodegen.sh generate`; the wrapper pins XcodeGen `2.45.4` and verifies the release checksum so local and CI scheme output stay aligned.
 
 The CodeQL workflow runs separately from the main CI gate on pull requests, pushes to `main`, a weekly schedule, and manual dispatch. Swift analysis uses a manual Xcode build so the database is built from the app target, while JavaScript/TypeScript analysis covers the Netlify/Astro site.
 
@@ -42,8 +42,8 @@ v1.0.0
 Create and push a release tag:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag -a v0.1.1 -m "pines v0.1.1 preview release"
+git push origin v0.1.1
 ```
 
 The release workflow validates the app, creates a source bundle, writes a SHA-256 checksum, and publishes a GitHub prerelease with generated release notes.
@@ -67,14 +67,14 @@ Do not publish an unsigned `.ipa`.
 
 Production distribution remains blocked until signed archive export, TestFlight/App Store upload, real-device TurboQuant acceptance, and final App Store privacy review are configured and passed. The current TurboQuant compatibility pair is non-green: focused local gates, exact-pin physical-device synthetic smoke, and a small 4K Qwen 3.5 0.8B real-model comparison pass, but the required acceptance matrix and imported product tuple remain incomplete. The latest Mac real-model baseline keeps dense K8/V4 as the compressed reference; K8/V3, K8/V2, and Sparse-V remain non-promoted until real-model benchmark/quality/fallback evidence and broader iOS evidence pass.
 
-## v0.1.0 Preview Readiness
+## v0.1.1 Preview Readiness
 
-`v0.1.0` is ready to cut as a source/developer-preview release once CI for the target commit is complete. The app and extension marketing versions are already `0.1.0`, release packaging emits only source artifacts plus SHA-256 checksums, and the release workflow keeps unsigned archive validation separate from production distribution. The release validation job has a two-hour timeout because hosted macOS platform setup, simulator validation, and archive builds can exceed one hour.
+`v0.1.1` is ready to cut as a source/developer-preview release once CI for the target commit is complete. The app and extension marketing versions are already `0.1.1`, release packaging emits source artifacts, a SHA-256 checksum, and a CycloneDX SBOM, and the release workflow keeps unsigned archive validation separate from production distribution. The release validation job has a 150-minute timeout because hosted macOS platform setup, bounded simulator retry, and archive builds can exceed two hours in a degraded runner.
 
 Before pushing the tag, verify:
 
 - `git status --short` is clean.
-- `git tag --list v0.1.0` is empty.
+- `git tag --list v0.1.1` is empty.
 - CI is complete and green for the commit to be tagged.
 - `bash scripts/ci/check-public-hygiene.sh`
 - `swift test --disable-automatic-resolution`
@@ -82,7 +82,7 @@ Before pushing the tag, verify:
 - `npm --prefix site ci && npm --prefix site audit --audit-level=low && npm --prefix site run build`
 - `bash scripts/ci/run-xcode-validation.sh all`
 - `bash scripts/ci/check-release-build-hygiene.sh`
-- `bash scripts/ci/package-release.sh v0.1.0`
+- `bash scripts/ci/package-release.sh v0.1.1`
 
 For TurboQuant-related release candidates, also verify that `docs/turboquant-implementation/compatibility-pair.json` is synchronized with `project.yml`, `Pines.xcodeproj`, the Xcode `Package.resolved`, and `MLXRuntimeBridge.turboQuantCompatibilityPairID`. A green compatibility pair requires native backend performance, real-model-inference performance parity or explicitly scoped capacity-mode status, current real-device app-host evidence, benchmark matrix coverage, lower-V/Sparse-V fallback evidence, and quality/memory/fallback gates; real-device profile evidence is still required before product compatibility labels can become `Verified` or `Certified`.
 

@@ -9,16 +9,22 @@ required_environment = {
 }
 
 workflow_jobs = {
-  ".github/workflows/ci.yml" => "xcode-project",
-  ".github/workflows/release.yml" => "validate",
+  ".github/workflows/ci.yml" => { job: "xcode-project", timeout: "120" },
+  ".github/workflows/release.yml" => { job: "validate", timeout: "150" },
 }
 
-workflow_jobs.each do |path, job|
+workflow_jobs.each do |path, contract|
+  job = contract.fetch(:job)
   workflow = File.read(path)
   match = workflow.match(/^  #{Regexp.escape(job)}:\n(?<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\z)/m)
   abort "#{path}: missing #{job} job" unless match
 
   body = match[:body]
+  timeout = contract.fetch(:timeout)
+  unless body.match?(/^    timeout-minutes:\s*#{Regexp.escape(timeout)}\s*$/)
+    abort "#{path}: #{job} must set timeout-minutes=#{timeout}"
+  end
+
   required_environment.each do |name, value|
     next if body.match?(/^      #{Regexp.escape(name)}:\s*#{Regexp.escape(value)}\s*$/)
 
