@@ -2,6 +2,7 @@
 
 required_environment = {
   "PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS" => "180",
+  "PINES_SIMULATOR_BOOT_TIMEOUT_SECONDS" => "600",
   "PINES_XCODE_TEST_TIMEOUT_SECONDS" => "720",
   "PINES_XCODE_TEST_ATTEMPTS" => "1",
   "PINES_XCODE_UI_SHARD_ATTEMPTS" => "2",
@@ -33,6 +34,13 @@ workflow_jobs.each do |path, contract|
 end
 
 validation_script = File.read("scripts/ci/run-xcode-validation.sh")
+bootstatus_timeout_calls = validation_script.scan(
+  /run_with_timeout "\$boot_timeout_seconds" xcrun simctl bootstatus/,
+).length
+unless bootstatus_timeout_calls == 2
+  abort "scripts/ci/run-xcode-validation.sh: both bootstatus calls must use the dedicated boot timeout"
+end
+
 artifact_smoke_shards = %w[
   testArtifactsLibraryAndDetail
   testArtifactsImageStudioConfiguration
