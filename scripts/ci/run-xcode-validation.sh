@@ -251,10 +251,12 @@ run_ui_tests() {
       local smoke_tests=(
         "PinesUITests/PinesUITests/testLaunchNavigateTabsCreateChatAndTypeDraft"
         "PinesUITests/PinesUITests/testAccessibilityTextSizeKeepsPrimarySurfacesReachable"
-        "PinesUITests/PinesUITests/testArtifactsLibraryAndImageStudio"
-        "PinesUITests/PinesUITests/testArtifactsVideoAndSpeechConfiguration"
-        # Keep the research journey split: accessibility snapshot latency can
+        # Keep Artifact journeys split: accessibility snapshot latency can
         # accumulate inside one long UI-test process even on a fresh clone.
+        "PinesUITests/PinesUITests/testArtifactsLibraryAndDetail"
+        "PinesUITests/PinesUITests/testArtifactsImageStudioConfiguration"
+        "PinesUITests/PinesUITests/testArtifactsVideoConfiguration"
+        "PinesUITests/PinesUITests/testArtifactsSpeechConfiguration"
         "PinesUITests/PinesUITests/testArtifactsResearchConfiguration"
         "PinesUITests/PinesUITests/testArtifactsResearchComposerFlow"
         "PinesUITests/PinesUITests/testArtifactsRunningResearch"

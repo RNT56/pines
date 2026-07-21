@@ -82,7 +82,7 @@ final class PinesUITests: XCTestCase {
         assertExists(app.buttons["Vault settings"], "Vault settings should remain reachable at accessibility text sizes.")
 
         openTab("Artifacts")
-        assertIdentifierVisible("pines.artifacts.library", "Artifact library should remain reachable at accessibility text sizes.")
+        assertArtifactsLibraryReady("Artifact library should remain reachable at accessibility text sizes.")
         assertVisibleText(containing: "Architectural study of a glass cabin", timeout: 10)
         captureScreenshot(named: "Artifacts - Accessibility XXXL Dark")
         openArtifactsDestination(menuItem: "Image", destinationIdentifier: "pines.artifacts.image-studio.canvas")
@@ -101,7 +101,7 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
-    func testArtifactsLibraryAndImageStudio() throws {
+    func testArtifactsLibraryAndDetail() throws {
         launchArtifactsFixture()
         assertVisibleText(containing: "Architectural study of a glass cabin", timeout: 10)
         assertVisibleText(containing: "Low-impact woodland materials", timeout: 10)
@@ -115,7 +115,11 @@ final class PinesUITests: XCTestCase {
         assertVisibleText(containing: "Architectural study of a glass cabin", timeout: 10)
         captureScreenshot(named: "Artifacts - Images")
         setArtifactScope("All")
+    }
 
+    @MainActor
+    func testArtifactsImageStudioConfiguration() throws {
+        launchArtifactsFixture()
         openArtifactsDestination(menuItem: "Image", destinationIdentifier: "pines.artifacts.image-studio.canvas")
         assertVisibleText(containing: "OpenAI Studio", timeout: 10)
         assertIdentifierVisible("pines.artifacts.image-studio.canvas", "The canvas-first Image Studio did not appear.")
@@ -134,7 +138,7 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
-    func testArtifactsVideoAndSpeechConfiguration() throws {
+    func testArtifactsVideoConfiguration() throws {
         launchArtifactsFixture()
 
         openArtifactsDestination(menuItem: "Video", destinationIdentifier: "pines.artifacts.create.prompt")
@@ -147,8 +151,11 @@ final class PinesUITests: XCTestCase {
         assertVisibleText(containing: "Configure the render", timeout: 5)
         captureScreenshot(named: "Artifacts - Video Settings")
         XCTAssertTrue(tapFirstExisting([app.buttons["Done"]], timeout: 5), "Video settings had no Done action.")
-        returnToArtifactsLibrary()
+    }
 
+    @MainActor
+    func testArtifactsSpeechConfiguration() throws {
+        launchArtifactsFixture()
         openArtifactsDestination(menuItem: "Speech", destinationIdentifier: "pines.artifacts.create.prompt")
         let speechSettings = app.buttons["pines.artifacts.create.configuration"]
         presentArtifactSettings(
@@ -159,7 +166,6 @@ final class PinesUITests: XCTestCase {
         assertVisibleText(containing: "Shape the voice", timeout: 5)
         captureScreenshot(named: "Artifacts - Speech Settings")
         XCTAssertTrue(tapFirstExisting([app.buttons["Done"]], timeout: 5), "Speech settings had no Done action.")
-        returnToArtifactsLibrary()
     }
 
     @MainActor
@@ -401,7 +407,7 @@ final class PinesUITests: XCTestCase {
         assertExists(app.buttons["Vault settings"], "Vault settings action was missing.")
 
         openTab("Artifacts")
-        assertIdentifierVisible("pines.artifacts.library", "The artifact library was missing.")
+        assertArtifactsLibraryReady("The artifact library was missing.")
         openArtifactsDestination(
             menuItem: "Image",
             destinationIdentifier: "pines.artifacts.image-studio.canvas",
@@ -441,15 +447,11 @@ final class PinesUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(
-            waitForAny([
-                app.tabBars.firstMatch,
-                app.staticTexts["Chats"],
-                app.descendants(matching: .any)["pines.screen.chats"],
-            ], timeout: 30),
-            "Pines did not reach the main Chats UI."
+            app.tabBars.firstMatch.waitForExistence(timeout: 30),
+            "Pines did not reach the main tab UI."
         )
         XCTAssertFalse(app.staticTexts["Pines Locked"].exists, "UI test launch should not restore a locked app state.")
-        let ready = app.descendants(matching: .any)["pines.ui-test.ready"]
+        let ready = app.otherElements["pines.ui-test.ready"]
         if !ready.waitForExistence(timeout: 30) {
             XCTFail("Pines did not finish UI test bootstrap with a ready local store.\n\n\(app.debugDescription)")
         }
@@ -458,28 +460,27 @@ final class PinesUITests: XCTestCase {
     @MainActor
     private func openTab(_ title: String) {
         closeTransientControlsIfNeeded()
-        if let identifier = screenIdentifier(for: title),
-           app.descendants(matching: .any)[identifier].exists {
+        guard let marker = selectedTabMarker(for: title) else {
+            XCTFail("Unknown tab: \(title)")
+            return
+        }
+        if marker.exists {
             return
         }
 
-        let labeledButtons = app.buttons
-            .matching(NSPredicate(format: "label == %@", title))
-            .allElementsBoundByIndex
-        XCTAssertTrue(tapFirstExisting([
-            app.tabBars.buttons[title],
-            app.buttons[title],
-        ] + labeledButtons, timeout: 10) || tapTabBarSlot(title), "Could not tap \(title) tab.")
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 10), "The main tab bar was unavailable.")
+        let button = tabBar.buttons[title]
+        XCTAssertTrue(
+            tapFirstExisting([button], timeout: 5) || tapTabBarSlot(title),
+            "Could not tap \(title) tab."
+        )
 
-        var screenMarkers = [app.staticTexts[title], app.navigationBars[title]]
-        if let identifier = screenIdentifier(for: title) {
-            screenMarkers.insert(app.descendants(matching: .any)[identifier], at: 0)
-        }
-        if !waitForAny(screenMarkers, timeout: 10) {
+        if !marker.waitForExistence(timeout: 10) {
             closeTransientControlsIfNeeded()
             _ = tapTabBarSlot(title)
         }
-        XCTAssertTrue(waitForAny(screenMarkers, timeout: 10), "\(title) screen did not become visible.")
+        XCTAssertTrue(marker.waitForExistence(timeout: 10), "\(title) tab did not become selected.")
     }
 
     @MainActor
@@ -634,9 +635,13 @@ final class PinesUITests: XCTestCase {
     private func launchArtifactsFixture() {
         configureLaunch(resetStore: true)
         app.launchEnvironment["PINES_UI_TEST_ARTIFACTS_FIXTURE"] = "1"
+        app.launchEnvironment["PINES_UI_TEST_INITIAL_TAB"] = "artifacts"
         launchAndWaitForMainUI()
-        openTab("Artifacts")
-        assertIdentifierVisible("pines.artifacts.library", "The populated Artifact library was missing.")
+        XCTAssertTrue(
+            selectedTabMarker(for: "Artifacts")?.waitForExistence(timeout: 10) == true,
+            "Artifacts was not the selected launch tab."
+        )
+        assertArtifactsLibraryReady("The populated Artifact library was missing.")
     }
 
     @MainActor
@@ -676,19 +681,20 @@ final class PinesUITests: XCTestCase {
         let close = app.buttons["pines.artifacts.sheet.close"]
         if close.waitForExistence(timeout: 5) {
             close.tap()
-            assertIdentifierVisible("pines.artifacts.library", "Artifact library did not reappear.")
+            XCTAssertTrue(waitForDisappearance(close, timeout: 10), "Artifact destination did not close.")
+            assertArtifactsLibraryReady("Artifact library did not reappear.")
             return
         }
 
-        let library = app.descendants(matching: .any)["pines.artifacts.library"]
-        if library.exists, library.isHittable {
+        if artifactsLibraryReadyMarker.exists {
             return
         }
 
         dismissKeyboardIfNeeded()
         XCTAssertTrue(close.waitForExistence(timeout: 5), "Artifact destination had no close action.")
         close.tap()
-        assertIdentifierVisible("pines.artifacts.library", "Artifact library did not reappear.")
+        XCTAssertTrue(waitForDisappearance(close, timeout: 10), "Artifact destination did not close.")
+        assertArtifactsLibraryReady("Artifact library did not reappear.")
     }
 
     @MainActor
@@ -716,7 +722,11 @@ final class PinesUITests: XCTestCase {
     private func closeArtifactDetail() {
         let closed = tapFirstExisting([app.buttons["pines.artifacts.sheet.close"]], timeout: 10)
         XCTAssertTrue(closed, "Artifact details had no close action.")
-        assertIdentifierVisible("pines.artifacts.library", "Artifact library did not remain visible after closing details.")
+        XCTAssertTrue(
+            waitForDisappearance(app.buttons["pines.artifacts.sheet.close"], timeout: 10),
+            "Artifact details did not close."
+        )
+        assertArtifactsLibraryReady("Artifact library did not remain visible after closing details.")
     }
 
     @MainActor
@@ -736,7 +746,7 @@ final class PinesUITests: XCTestCase {
         activity.tap()
 
         let run = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "Low-impact woodland materials")
+            NSPredicate(format: "identifier BEGINSWITH %@", "pines.artifacts.activity.research.")
         ).firstMatch
         XCTAssertTrue(run.waitForExistence(timeout: 5), "The active research thread was missing from running work.")
         run.tap()
@@ -862,6 +872,16 @@ final class PinesUITests: XCTestCase {
     }
 
     @MainActor
+    private var artifactsLibraryReadyMarker: XCUIElement {
+        app.scrollViews["pines.artifacts.library"]
+    }
+
+    @MainActor
+    private func assertArtifactsLibraryReady(_ message: String) {
+        XCTAssertTrue(artifactsLibraryReadyMarker.waitForExistence(timeout: 15), message)
+    }
+
+    @MainActor
     private func tapButtonOrSegment(_ title: String) {
         dismissKeyboardIfNeeded()
         XCTAssertTrue(tapFirstExisting([
@@ -917,9 +937,18 @@ final class PinesUITests: XCTestCase {
             if elements.contains(where: { $0.exists }) {
                 return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         }
         return elements.contains(where: { $0.exists })
+    }
+
+    @MainActor
+    private func waitForDisappearance(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: element
+        )
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 
     @MainActor
@@ -927,15 +956,17 @@ final class PinesUITests: XCTestCase {
         elements.first { $0.exists }
     }
 
-    private func screenIdentifier(for title: String) -> String? {
+    private func selectedTabMarker(for title: String) -> XCUIElement? {
+        let identifier: String
         switch title {
-        case "Chats": "pines.screen.chats"
-        case "Models": "pines.screen.models"
-        case "Vault": "pines.screen.vault"
-        case "Artifacts": "pines.screen.artifacts"
-        case "Settings": "pines.screen.settings"
-        default: nil
+        case "Chats": identifier = "chats"
+        case "Models": identifier = "models"
+        case "Vault": identifier = "vault"
+        case "Artifacts": identifier = "artifacts"
+        case "Settings": identifier = "settings"
+        default: return nil
         }
+        return app.otherElements["pines.ui-test.tab.\(identifier)"]
     }
 
     @MainActor

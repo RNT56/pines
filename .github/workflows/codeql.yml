@@ -49,8 +49,8 @@ jobs:
         run: bash scripts/ci/prepare-codeql-metal-tools.sh
 
       - name: Initialize CodeQL
-        # github/codeql-action v4.36.2
-        uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba
+        # github/codeql-action v4.37.1
+        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a
         with:
           languages: swift
           build-mode: manual
@@ -60,8 +60,8 @@ jobs:
         run: bash scripts/ci/run-xcode-validation.sh build-app
 
       - name: Analyze
-        # github/codeql-action v4.36.2
-        uses: github/codeql-action/analyze@9e0d7b8d25671d64c341c19c0152d693099fb5ba
+        # github/codeql-action v4.37.1
+        uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a
 
   javascript-typescript:
     name: CodeQL JavaScript
@@ -74,12 +74,12 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
       - name: Initialize CodeQL
-        # github/codeql-action v4.36.2
-        uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba
+        # github/codeql-action v4.37.1
+        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a
         with:
           languages: javascript-typescript
           queries: security-and-quality
 
       - name: Analyze
-        # github/codeql-action v4.36.2
-        uses: github/codeql-action/analyze@9e0d7b8d25671d64c341c19c0152d693099fb5ba
+        # github/codeql-action v4.37.1
+        uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a

@@ -447,6 +447,7 @@ private struct ArtifactsLibraryView: View {
                                 systemImage: "doc.text.magnifyingglass"
                             )
                         }
+                        .accessibilityIdentifier("pines.artifacts.activity.research.\(thread.id)")
                     }
 
                     ForEach(activeItems) { item in
@@ -458,6 +459,7 @@ private struct ArtifactsLibraryView: View {
                                 systemImage: item.contentKind.systemImage
                             )
                         }
+                        .accessibilityIdentifier("pines.artifacts.activity.artifact.\(item.id)")
                     }
                 }
             } label: {
