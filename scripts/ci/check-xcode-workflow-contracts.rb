@@ -31,3 +31,30 @@ workflow_jobs.each do |path, contract|
     abort "#{path}: #{job} must set #{name}=#{value}"
   end
 end
+
+validation_script = File.read("scripts/ci/run-xcode-validation.sh")
+artifact_smoke_shards = %w[
+  testArtifactsLibraryAndDetail
+  testArtifactsImageStudioConfiguration
+  testArtifactsVideoConfiguration
+  testArtifactsSpeechConfiguration
+  testArtifactsResearchConfiguration
+  testArtifactsResearchComposerFlow
+  testArtifactsRunningResearch
+]
+
+artifact_smoke_shards.each do |test_name|
+  expected = "PinesUITests/PinesUITests/#{test_name}"
+  count = validation_script.scan(expected).length
+  abort "scripts/ci/run-xcode-validation.sh: expected exactly one #{expected} smoke shard" unless count == 1
+end
+
+%w[
+  testArtifactsLibraryAndImageStudio
+  testArtifactsVideoAndSpeechConfiguration
+  testArtifactsResearchComposerAndRunningWork
+].each do |legacy_test_name|
+  next unless validation_script.include?(legacy_test_name)
+
+  abort "scripts/ci/run-xcode-validation.sh: combined Artifact smoke shard #{legacy_test_name} must stay split"
+end

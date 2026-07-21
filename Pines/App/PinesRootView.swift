@@ -51,6 +51,7 @@ struct PinesRootView: View {
         _settingsState = StateObject(wrappedValue: settingsState)
         _providerLifecycleState = StateObject(wrappedValue: providerLifecycleState)
         _workflowState = StateObject(wrappedValue: workflowState)
+        _selectedTab = State(initialValue: PinesTab.uiTestInitialSelection)
         _appModel = StateObject(
             wrappedValue: PinesAppModel(
                 chatState: chatState,
@@ -134,12 +135,22 @@ struct PinesRootView: View {
             #if DEBUG
             if isUITestBootstrapReady {
                 Text(".")
-                    .font(.system(size: 8))
+                    .font(.caption2)
                     .foregroundStyle(.clear)
                     .frame(width: 10, height: 10)
                     .accessibilityElement()
                     .accessibilityLabel("Pines UI test ready")
                     .accessibilityIdentifier("pines.ui-test.ready")
+            }
+
+            if isMainUIReady, PinesUITestLaunchConfiguration.isEnabled {
+                Text(".")
+                    .font(.caption2)
+                    .foregroundStyle(.clear)
+                    .frame(width: 10, height: 10)
+                    .accessibilityElement()
+                    .accessibilityLabel("Pines UI test selected tab: \(selectedTab.title)")
+                    .accessibilityIdentifier("pines.ui-test.tab.\(selectedTab.uiTestIdentifier)")
             }
             #endif
         }
@@ -1012,6 +1023,26 @@ private enum PinesTab: Hashable {
     case vault
     case artifacts
     case settings
+
+    static var uiTestInitialSelection: PinesTab {
+        switch PinesUITestLaunchConfiguration.initialTabIdentifier {
+        case "models": .models
+        case "vault": .vault
+        case "artifacts": .artifacts
+        case "settings": .settings
+        default: .chats
+        }
+    }
+
+    var uiTestIdentifier: String {
+        switch self {
+        case .chats: "chats"
+        case .models: "models"
+        case .vault: "vault"
+        case .artifacts: "artifacts"
+        case .settings: "settings"
+        }
+    }
 
     var title: String {
         switch self {

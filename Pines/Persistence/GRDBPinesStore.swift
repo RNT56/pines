@@ -3110,6 +3110,8 @@ actor GRDBPinesStore:
                     server.keychainAccount,
                     server.oauthAuthorizationURL?.absoluteString,
                     server.oauthTokenURL?.absoluteString,
+                    // OAuth client IDs, scopes, and resource indicators are public protocol metadata.
+                    // Access and refresh tokens remain install-bound Keychain secrets and never enter GRDB.
                     server.oauthClientID,
                     server.oauthScopes,
                     server.oauthResource,

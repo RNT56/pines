@@ -103,6 +103,18 @@ enum PinesUITestLaunchConfiguration {
         #endif
     }
 
+    static var initialTabIdentifier: String? {
+        #if DEBUG
+        guard isEnabled else { return nil }
+        let raw = ProcessInfo.processInfo.environment["PINES_UI_TEST_INITIAL_TAB"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return raw?.isEmpty == false ? raw : nil
+        #else
+        return nil
+        #endif
+    }
+
     static var storeConfiguration: LocalStoreConfiguration {
         guard isHarnessEnabled else { return .init() }
         return LocalStoreConfiguration(

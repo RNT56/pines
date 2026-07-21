@@ -36,4 +36,19 @@ if git grep -n -I 'PinesPrivate"' -- Pines Sources ':!Pines/Cloud/CloudKitSyncSe
   exit 1
 fi
 
+store_path="Pines/Persistence/GRDBPinesStore.swift"
+grep -Fq 'throw StoreSecurityError.sqlCipherUnavailable' "$store_path"
+grep -Fq 'PRAGMA cipher_version' "$store_path"
+grep -Fq 'PRAGMA cipher_memory_security = ON' "$store_path"
+
+if git grep -n -I -E 'access_token|refresh_token|oauth_client_secret|client_secret' -- \
+  Sources/PinesCore/Persistence/DatabaseSchema.swift \
+  "$store_path"; then
+  echo "OAuth secrets must never be persisted in the application database." >&2
+  exit 1
+fi
+
+grep -Fq 'secretStore.write(token.accessToken' Pines/MCP/MCPOAuthService.swift
+grep -Fq 'secretStore.write(refreshToken' Pines/MCP/MCPOAuthService.swift
+
 echo "Security boundary checks passed."
