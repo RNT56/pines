@@ -357,12 +357,13 @@ prepare_test_simulator() {
   fi
 
   echo "Preparing simulator $simulator_id for runtime tests..."
-  local timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
-  run_with_timeout "$timeout_seconds" xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
-  run_with_timeout "$timeout_seconds" xcrun simctl erase "$simulator_id"
-  run_with_timeout "$timeout_seconds" xcrun simctl boot "$simulator_id"
-  if ! run_with_timeout "$timeout_seconds" xcrun simctl bootstatus "$simulator_id" -b; then
-    echo "::error::Simulator $simulator_id did not finish booting within ${timeout_seconds}s." >&2
+  local operation_timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
+  local boot_timeout_seconds="${PINES_SIMULATOR_BOOT_TIMEOUT_SECONDS:-600}"
+  run_with_timeout "$operation_timeout_seconds" xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
+  run_with_timeout "$operation_timeout_seconds" xcrun simctl erase "$simulator_id"
+  run_with_timeout "$operation_timeout_seconds" xcrun simctl boot "$simulator_id"
+  if ! run_with_timeout "$boot_timeout_seconds" xcrun simctl bootstatus "$simulator_id" -b; then
+    echo "::error::Simulator $simulator_id did not finish booting within ${boot_timeout_seconds}s." >&2
     xcrun simctl diagnose -b --no-archive || true
     return 1
   fi
@@ -420,25 +421,26 @@ run_ui_test_clone_attempt() {
   local test="$2"
   local index="$3"
   local attempt="$4"
-  local timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
+  local operation_timeout_seconds="${PINES_SIMULATOR_OPERATION_TIMEOUT_SECONDS:-180}"
+  local boot_timeout_seconds="${PINES_SIMULATOR_BOOT_TIMEOUT_SECONDS:-600}"
   local clone_name
   clone_name="Pines-CI-UI-$$-$index-$attempt-$(date +%s)"
 
   echo "Cloning migrated simulator $base_simulator_id for ${test##*/} (attempt $attempt)..."
   ui_test_simulator_id=""
-  if ! ui_test_simulator_id="$(run_with_timeout "$timeout_seconds" \
+  if ! ui_test_simulator_id="$(run_with_timeout "$operation_timeout_seconds" \
     xcrun simctl clone "$base_simulator_id" "$clone_name")"; then
     echo "::warning::Unable to clone simulator $base_simulator_id for ${test##*/} attempt $attempt." >&2
     return 1
   fi
 
-  if ! run_with_timeout "$timeout_seconds" xcrun simctl boot "$ui_test_simulator_id"; then
-    echo "::warning::UI-test clone $ui_test_simulator_id did not boot within ${timeout_seconds}s." >&2
+  if ! run_with_timeout "$operation_timeout_seconds" xcrun simctl boot "$ui_test_simulator_id"; then
+    echo "::warning::UI-test clone $ui_test_simulator_id did not boot within ${operation_timeout_seconds}s." >&2
     cleanup_ui_test_simulator
     return 1
   fi
-  if ! run_with_timeout "$timeout_seconds" xcrun simctl bootstatus "$ui_test_simulator_id" -b; then
-    echo "::warning::UI-test clone $ui_test_simulator_id did not finish booting within ${timeout_seconds}s." >&2
+  if ! run_with_timeout "$boot_timeout_seconds" xcrun simctl bootstatus "$ui_test_simulator_id" -b; then
+    echo "::warning::UI-test clone $ui_test_simulator_id did not finish booting within ${boot_timeout_seconds}s." >&2
     xcrun simctl diagnose -b --no-archive || true
     cleanup_ui_test_simulator
     return 1
