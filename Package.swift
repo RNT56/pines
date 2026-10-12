@@ -18,7 +18,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/huggingface/swift-huggingface.git",
-            from: "0.9.0",
+            from: "1.0.0",
             traits: [.defaults, "Xet"]
         ),
         // EventSource 1.4.x enables AsyncHTTPClient traits that currently break Xcode's simulator build.
